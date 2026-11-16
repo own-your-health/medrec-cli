@@ -13,7 +13,7 @@
 //! Providers are found by profile, not by name: any CLI whose `info --json`
 //! lists `health-records/v1` is one.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::{BufReader, Read};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -162,6 +162,9 @@ pub struct Report {
     pub resources: u64,
     pub counts: BTreeMap<String, u64>,
     pub skipped: usize,
+    /// Types the source served only some of: it withheld the rest (a
+    /// `forbidden` skip naming the type, with no id or search).
+    pub withheld_types: Vec<String>,
     pub resources_written: usize,
     pub resources_unchanged: usize,
     pub records_added: usize,
@@ -435,6 +438,7 @@ pub fn run(
         resources: total,
         counts,
         skipped: skipped.len(),
+        withheld_types: withheld_types(&skipped),
         resources_written: written.written,
         resources_unchanged: written.unchanged,
         records_added: added,
@@ -444,6 +448,23 @@ pub fn run(
         documents_duplicate: docs_dup,
         stream_bytes,
     })
+}
+
+/// The types a source withheld some resources of (medical-common DESIGN
+/// §1.4): a `forbidden` skip with a `resource_type` and neither `id` nor
+/// `search`. The resources it did serve are in the stream.
+fn withheld_types(skipped: &[Skip]) -> Vec<String> {
+    let types: BTreeSet<&str> = skipped
+        .iter()
+        .filter(|k| {
+            k.code == pk_med_records::stream::skip::FORBIDDEN
+                && k.id.is_none()
+                && k.search.is_none()
+        })
+        .filter_map(|k| k.resource_type.as_deref())
+        .filter(|t| !t.is_empty())
+        .collect();
+    types.into_iter().map(str::to_string).collect()
 }
 
 /// Whose records: `--person`, or the person this patient was imported for
@@ -1315,6 +1336,32 @@ mod tests {
             who(&req("adult1", None, Some("Alex"))),
             Ok(("p_a".into(), vec![]))
         );
+    }
+
+    #[test]
+    fn a_forbidden_skip_naming_only_a_type_marks_it_withheld() {
+        use pk_med_records::stream::skip;
+        let skipped = [
+            Skip::resource(
+                "Condition",
+                "",
+                skip::FORBIDDEN,
+                "some categories were left out",
+            ),
+            Skip::resource("Condition", "", skip::FORBIDDEN, "another withheld line"),
+            Skip::resource("AllergyIntolerance", "", skip::FORBIDDEN, "left out"),
+            // One resource refused, a search refused, and other codes are
+            // not a withheld type.
+            Skip::resource("Observation", "obs-0009", skip::FORBIDDEN, "a 403"),
+            Skip::search("Procedure?category=x", skip::FORBIDDEN, "scope not granted"),
+            Skip::resource("Media", "", skip::UNSUPPORTED, "not offered"),
+            Skip::resource("", "", skip::FORBIDDEN, "no type"),
+        ];
+        assert_eq!(
+            withheld_types(&skipped),
+            ["AllergyIntolerance", "Condition"]
+        );
+        assert!(withheld_types(&[]).is_empty());
     }
 
     #[test]

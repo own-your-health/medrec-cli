@@ -883,3 +883,41 @@ fn a_scan_under_tmp_is_read_by_ocr() {
     assert_eq!(r["items"][0]["status"], "filed", "{r}");
     let _ = std::fs::remove_dir_all(Path::new(&e.root));
 }
+
+#[test]
+fn a_type_the_source_withheld_is_reported_as_possibly_incomplete() {
+    // A search answered with an issue saying it left results out: one
+    // `forbidden` skip per type, with neither id nor search.
+    let withheld = r#"{"resource_type":"Condition","reason":"some categories were left out","code":"forbidden"}"#;
+    let stream =
+        medrec::testdata::STREAM.replace("\"skipped\":[", &format!("\"skipped\":[{withheld},"));
+    assert_ne!(stream, medrec::testdata::STREAM);
+
+    let base = Env::new("withheld");
+    setup(&base);
+    let e = provider_env(&base, &stream);
+    let import = [
+        "import",
+        "--from",
+        "fakeprov",
+        "--patient",
+        "pat-0001",
+        "--person",
+        "Robin",
+    ];
+    let out = e.run(&import);
+    assert_eq!(out.status.code(), Some(0));
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("withheld some Condition resources, so those records may be incomplete"),
+        "{text}"
+    );
+    // The Condition it did serve is filed, and a re-import says the same.
+    let r = e.ok(&import);
+    assert_eq!(r["withheld_types"], serde_json::json!(["Condition"]), "{r}");
+    assert_eq!(
+        (r["skipped"].as_u64(), r["records_unchanged"].as_u64()),
+        (Some(2), Some(9))
+    );
+    let _ = std::fs::remove_dir_all(&e.root);
+}
