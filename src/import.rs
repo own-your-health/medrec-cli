@@ -207,16 +207,26 @@ struct Binary {
     bytes: Vec<u8>,
 }
 
-#[cfg_attr(test, derive(Default))]
-struct DocRef {
+/// A resource whose attachment is a Binary in the stream: a
+/// DocumentReference (`content[].attachment`), a DiagnosticReport
+/// (`presentedForm[]`) or a Media (`content`). The Binary is filed as a
+/// document with its date, title and type.
+#[derive(Default)]
+struct Owner {
+    resource_type: &'static str,
     id: String,
     version: Option<String>,
     last_updated: Option<String>,
+    /// A DocumentReference's type, or a DiagnosticReport's code (LOINC).
     type_code: Option<String>,
     type_text: Option<String>,
+    /// medrec's document type, when the resource says it outright (a
+    /// DiagnosticReport's lab or imaging category); otherwise read from
+    /// `type_code`.
+    doc_type: Option<&'static str>,
     date: Option<String>,
     title: Option<String>,
-    /// `content[].attachment.url`: how the stream ties a Binary to it.
+    /// The attachments' `url`s: how the stream ties a Binary to it.
     urls: Vec<String>,
 }
 
@@ -357,12 +367,12 @@ pub fn run(
         filed_by: filed_by(),
     };
 
-    let mut docrefs = Vec::new();
+    let mut owners = Vec::new();
     let (mut added, mut updated, mut unchanged) = (0, 0, 0);
     for r in &resources {
         let Ok(v) = r.value() else { continue };
-        if r.resource_type == "DocumentReference" {
-            docrefs.push(docref(&v));
+        if let Some(o) = owner(&r.resource_type, &v) {
+            owners.push(o);
         }
         let mut prov = base_prov.clone();
         prov.source_resource = source_resource(&v);
@@ -390,7 +400,7 @@ pub fn run(
         &header,
         &base_prov,
         binaries,
-        &docrefs,
+        &owners,
         &eob_docs,
         &written.paths,
     )?;
@@ -898,31 +908,95 @@ fn merge(index: &mut PersonIndex, rec: Record) -> Merge {
     Merge::Added
 }
 
-fn docref(v: &Value) -> DocRef {
-    let concept = v
-        .get("type")
-        .and_then(|t| normalize::codeable(t, &[normalize::LOINC]));
-    DocRef {
-        id: v.get("id").and_then(Value::as_str).unwrap_or("").into(),
-        version: normalize::path_str(v, "meta.versionId").map(str::to_string),
-        last_updated: normalize::path_str(v, "meta.lastUpdated").map(str::to_string),
-        type_code: concept.as_ref().and_then(|c| c.code.clone()),
-        type_text: concept.and_then(|c| c.display),
-        date: normalize::path_str(v, "date")
-            .or_else(|| normalize::path_str(v, "context.period.start"))
-            .map(|d| d.chars().take(10).collect()),
-        title: normalize::path_str(v, "description")
-            .or_else(|| normalize::path_str(v, "content.0.attachment.title"))
-            .map(str::to_string),
-        urls: v
-            .get("content")
+fn owner(resource_type: &str, v: &Value) -> Option<Owner> {
+    let date = |paths: &[&str]| {
+        paths
+            .iter()
+            .find_map(|p| normalize::path_str(v, p))
+            .map(|d| d.chars().take(10).collect())
+    };
+    let text = |p: &str| normalize::path_str(v, p).map(str::to_string);
+    let urls = |list: &str, url: &str| -> Vec<String> {
+        v.get(list)
             .and_then(Value::as_array)
             .into_iter()
             .flatten()
-            .filter_map(|c| normalize::path_str(c, "attachment.url"))
+            .filter_map(|c| normalize::path_str(c, url))
             .map(str::to_string)
-            .collect(),
+            .collect()
+    };
+    let resource_type = match resource_type {
+        "DocumentReference" => "DocumentReference",
+        "DiagnosticReport" => "DiagnosticReport",
+        "Media" => "Media",
+        _ => return None,
+    };
+    let mut o = Owner {
+        resource_type,
+        id: v.get("id").and_then(Value::as_str).unwrap_or("").into(),
+        version: text("meta.versionId"),
+        last_updated: text("meta.lastUpdated"),
+        ..Owner::default()
+    };
+    match resource_type {
+        "DocumentReference" => {
+            let concept = v
+                .get("type")
+                .and_then(|t| normalize::codeable(t, &[normalize::LOINC]));
+            o.type_code = concept.as_ref().and_then(|c| c.code.clone());
+            o.type_text = concept.and_then(|c| c.display);
+            o.date = date(&["date", "context.period.start"]);
+            o.title = text("description").or_else(|| text("content.0.attachment.title"));
+            o.urls = urls("content", "attachment.url");
+        }
+        "DiagnosticReport" => {
+            let concept = v
+                .get("code")
+                .and_then(|c| normalize::codeable(c, &[normalize::LOINC]));
+            o.type_code = concept.as_ref().and_then(|c| c.code.clone());
+            o.type_text = concept.and_then(|c| c.display);
+            o.doc_type = report_doc_type(v);
+            o.date = date(&["effectiveDateTime", "effectivePeriod.start", "issued"]);
+            o.title = text("code.text")
+                .or_else(|| o.type_text.clone())
+                .or_else(|| text("presentedForm.0.title"));
+            o.urls = urls("presentedForm", "url");
+        }
+        _ => {
+            o.date = date(&["createdDateTime", "createdPeriod.start", "issued"]);
+            o.title = text("content.title")
+                .or_else(|| text("modality.text"))
+                .or_else(|| text("type.text"));
+            o.urls = text("content.url").into_iter().collect();
+        }
     }
+    Some(o)
+}
+
+/// A DiagnosticReport's category (HL7 v2 table 0074) as medrec's document
+/// type: a lab report, or an imaging one.
+fn report_doc_type(v: &Value) -> Option<&'static str> {
+    const IMAGING: &[&str] = &[
+        "RAD", "CT", "MR", "NMR", "NMS", "US", "RUS", "VUS", "CUS", "OUS", "XRC",
+    ];
+    let codes = v
+        .get("category")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|c| c.get("coding").and_then(Value::as_array))
+        .flatten()
+        .filter_map(|c| c.get("code").and_then(Value::as_str));
+    for code in codes {
+        let code = code.to_ascii_uppercase();
+        if code == "LAB" {
+            return Some("lab_report");
+        }
+        if IMAGING.contains(&code.as_str()) {
+            return Some("imaging_report");
+        }
+    }
+    None
 }
 
 /// The id a reference to a `resource_type` names: relative (`Binary/<id>`)
@@ -937,13 +1011,20 @@ fn reference_id<'a>(reference: &'a str, resource_type: &str) -> Option<&'a str> 
     (ty == resource_type && !id.is_empty()).then_some(id)
 }
 
-/// The DocumentReference whose attachment is the Binary `binary`.
-fn docref_for<'a>(docrefs: &'a [DocRef], binary: &str) -> Option<&'a DocRef> {
-    docrefs.iter().find(|d| {
-        d.urls
+/// The resource whose attachment is the Binary `binary`: a
+/// DocumentReference before a DiagnosticReport or Media, since its type is a
+/// document's.
+fn owner_of<'a>(owners: &'a [Owner], binary: &str) -> Option<&'a Owner> {
+    let names = |o: &&Owner| {
+        o.urls
             .iter()
             .any(|u| reference_id(u, "Binary") == Some(binary))
-    })
+    };
+    owners
+        .iter()
+        .filter(|o| o.resource_type == "DocumentReference")
+        .find(names)
+        .or_else(|| owners.iter().find(names))
 }
 
 /// DocumentReference ids an ExplanationOfBenefit points at
@@ -983,7 +1064,7 @@ fn file_binaries(
     header: &Header,
     base: &Provenance,
     binaries: Vec<Binary>,
-    docrefs: &[DocRef],
+    owners: &[Owner],
     eob_docs: &HashMap<String, String>,
     raw_paths: &HashMap<(String, String), String>,
 ) -> Result<(usize, usize), CliError> {
@@ -1003,19 +1084,23 @@ fn file_binaries(
                 .as_deref()
                 .and_then(filetype::Kind::from_media_type)
         });
-        let dr = docref_for(docrefs, &b.id);
-        let claim = dr.and_then(|d| eob_docs.get(&d.id));
+        let dr = owner_of(owners, &b.id);
+        let claim = dr
+            .filter(|d| d.resource_type == "DocumentReference")
+            .and_then(|d| eob_docs.get(&d.id));
         let doc_type = if claim.is_some() {
             "eob".to_string()
         } else {
-            dr.and_then(|d| d.type_code.as_deref())
-                .and_then(|c| {
+            dr.and_then(|d| {
+                d.doc_type.map(str::to_string).or_else(|| {
+                    let c = d.type_code.as_deref()?;
                     classify::DOC_TYPES
                         .iter()
                         .find(|t| t.2 == Some(c))
                         .map(|t| t.0.to_string())
                 })
-                .unwrap_or_else(|| "other".into())
+            })
+            .unwrap_or_else(|| "other".into())
         };
         let date = dr
             .and_then(|d| d.date.clone())
@@ -1046,7 +1131,7 @@ fn file_binaries(
         let mut prov = base.clone();
         prov.source_resource = Some(match dr {
             Some(d) => SourceResource {
-                resource_type: "DocumentReference".into(),
+                resource_type: d.resource_type.into(),
                 id: d.id.clone(),
                 version_id: d.version.clone(),
                 last_updated: d.last_updated.clone(),
@@ -1261,14 +1346,15 @@ mod tests {
             assert_eq!(reference_id(&reference, ty), id, "{reference}");
         }
 
-        let doc = DocRef {
+        let doc = Owner {
+            resource_type: "DocumentReference",
             id: long.clone(),
             urls: vec![format!("https://fhir.example.org/R4/Binary/{long}")],
-            ..DocRef::default()
+            ..Owner::default()
         };
         let docs = [doc];
-        assert!(docref_for(&docs, &long).is_some());
-        assert!(docref_for(&docs, &long[..64]).is_none());
+        assert!(owner_of(&docs, &long).is_some());
+        assert!(owner_of(&docs, &long[..64]).is_none());
 
         let eob = RawResource::parse(&format!(
             r#"{{"resourceType":"ExplanationOfBenefit","id":"eob-1","supportingInfo":[{{"valueReference":{{"reference":"https://fhir.example.org/R4/DocumentReference/{long}"}}}}]}}"#
@@ -1362,6 +1448,76 @@ mod tests {
             ["AllergyIntolerance", "Condition"]
         );
         assert!(withheld_types(&[]).is_empty());
+    }
+
+    #[test]
+    fn a_report_or_media_gives_its_binary_a_date_title_and_type() {
+        let report = serde_json::json!({
+            "resourceType": "DiagnosticReport", "id": "rep-1",
+            "category": [{"coding": [{"system": "http://terminology.hl7.org/CodeSystem/v2-0074", "code": "LAB"}]}],
+            "code": {"coding": [{"system": "http://loinc.org", "code": "58410-2", "display": "CBC panel"}], "text": "CBC"},
+            "effectivePeriod": {"start": "2026-03-04T09:45:00Z"},
+            "presentedForm": [{"contentType": "application/pdf", "url": "Binary/bin-1"}]
+        });
+        let o = owner("DiagnosticReport", &report).unwrap();
+        assert_eq!(
+            (
+                o.doc_type,
+                o.date.as_deref(),
+                o.title.as_deref(),
+                o.type_code.as_deref()
+            ),
+            (
+                Some("lab_report"),
+                Some("2026-03-04"),
+                Some("CBC"),
+                Some("58410-2")
+            )
+        );
+        assert_eq!(o.urls, ["Binary/bin-1"]);
+        let imaging = serde_json::json!({
+            "resourceType": "DiagnosticReport", "id": "rep-2",
+            "category": [{"coding": [{"code": "rad"}]}]
+        });
+        assert_eq!(
+            owner("DiagnosticReport", &imaging).unwrap().doc_type,
+            Some("imaging_report")
+        );
+
+        let media = serde_json::json!({
+            "resourceType": "Media", "id": "med-1", "createdDateTime": "2026-03-01T08:00:00Z",
+            "modality": {"text": "Photo"},
+            "content": {"contentType": "image/png", "url": "https://fhir.example.org/R4/Binary/bin-2"}
+        });
+        let m = owner("Media", &media).unwrap();
+        assert_eq!(
+            (
+                m.resource_type,
+                m.doc_type,
+                m.date.as_deref(),
+                m.title.as_deref()
+            ),
+            ("Media", None, Some("2026-03-01"), Some("Photo"))
+        );
+        assert!(owner("Observation", &media).is_none());
+
+        // A Binary that a DocumentReference also names takes its type.
+        let doc = Owner {
+            resource_type: "DocumentReference",
+            id: "doc-1".into(),
+            urls: vec!["Binary/bin-1".into()],
+            ..Owner::default()
+        };
+        let owners = [o, m, doc];
+        assert_eq!(
+            owner_of(&owners, "bin-1").map(|o| o.resource_type),
+            Some("DocumentReference")
+        );
+        assert_eq!(
+            owner_of(&owners, "bin-2").map(|o| o.id.as_str()),
+            Some("med-1")
+        );
+        assert!(owner_of(&owners, "bin-3").is_none());
     }
 
     #[test]

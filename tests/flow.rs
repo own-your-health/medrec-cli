@@ -921,3 +921,93 @@ fn a_type_the_source_withheld_is_reported_as_possibly_incomplete() {
     );
     let _ = std::fs::remove_dir_all(&e.root);
 }
+
+#[test]
+fn a_reports_and_a_medias_binary_are_filed_with_their_date_and_title() {
+    use base64::Engine;
+    let b64 = |b: Vec<u8>| base64::engine::general_purpose::STANDARD.encode(b);
+    let report_pdf = b64(medrec::pdfgen::text_pdf(&["Example Health", "CBC report"]));
+    let media_pdf = b64(medrec::pdfgen::text_pdf(&[
+        "Example Health",
+        "Synthetic photo page",
+    ]));
+    let stream = medrec::testdata::STREAM
+        .replace(
+            "\"conclusion\":",
+            r#""category":[{"coding":[{"system":"http://terminology.hl7.org/CodeSystem/v2-0074","code":"LAB"}]}],"presentedForm":[{"contentType":"application/pdf","url":"Binary/bin-0003"}],"conclusion":"#,
+        )
+        .replace(
+            "{\"schema\":\"records-stream-end/v1\"",
+            &format!(
+                concat!(
+                    r#"{{"resourceType":"Binary","id":"bin-0003","contentType":"application/pdf","data":"{}"}}"#, "\n",
+                    r#"{{"resourceType":"Media","id":"med-0001","status":"completed","subject":{{"reference":"Patient/pat-0001"}},"createdDateTime":"2026-03-01T08:00:00Z","content":{{"contentType":"application/pdf","url":"Binary/bin-0004","title":"Synthetic photo"}}}}"#, "\n",
+                    r#"{{"resourceType":"Binary","id":"bin-0004","contentType":"application/pdf","data":"{}"}}"#, "\n",
+                    r#"{{"schema":"records-stream-end/v1""#
+                ),
+                report_pdf, media_pdf
+            ),
+        )
+        .replace("\"Binary\":2", "\"Binary\":4,\"Media\":1");
+    assert_eq!(
+        stream.lines().count(),
+        medrec::testdata::STREAM.lines().count() + 3
+    );
+
+    let base = Env::new("report-media");
+    setup(&base);
+    let e = provider_env(&base, &stream);
+    let r = e.ok(&[
+        "import",
+        "--from",
+        "fakeprov",
+        "--patient",
+        "pat-0001",
+        "--person",
+        "Robin",
+    ]);
+    assert_eq!(
+        (r["resources"].as_u64(), r["documents_added"].as_u64()),
+        (Some(17), Some(4)),
+        "{r}"
+    );
+
+    let labs = e.ok(&["documents", "list", "--type", "lab_report"]);
+    let labs = labs["items"].as_array().unwrap();
+    assert_eq!(labs.len(), 1);
+    assert_eq!(
+        (labs[0]["date"].as_str(), labs[0]["title"].as_str()),
+        (Some("2026-03-04"), Some("CBC"))
+    );
+    let other = e.ok(&["documents", "list", "--type", "other"]);
+    let media: Vec<&Value> = other["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|d| d["title"] == "Synthetic photo")
+        .collect();
+    assert_eq!(media.len(), 1, "{other}");
+    assert_eq!(media[0]["date"], "2026-03-01");
+
+    let index: Value = serde_json::from_str(
+        &std::fs::read_to_string(e.records().join("Robin Testperson/index.json")).unwrap(),
+    )
+    .unwrap();
+    let mut sources: Vec<&str> = index["documents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|d| d["provenance"]["source_resource"]["type"].as_str())
+        .collect();
+    sources.sort_unstable();
+    assert_eq!(
+        sources,
+        [
+            "DiagnosticReport",
+            "DocumentReference",
+            "DocumentReference",
+            "Media"
+        ]
+    );
+    let _ = std::fs::remove_dir_all(&e.root);
+}
