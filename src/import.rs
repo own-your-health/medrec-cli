@@ -213,7 +213,7 @@ struct Binary {
 /// document with its date, title and type.
 #[derive(Default)]
 struct Owner {
-    resource_type: &'static str,
+    kind: OwnerKind,
     id: String,
     version: Option<String>,
     last_updated: Option<String>,
@@ -228,6 +228,33 @@ struct Owner {
     title: Option<String>,
     /// The attachments' `url`s: how the stream ties a Binary to it.
     urls: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum OwnerKind {
+    #[default]
+    DocumentReference,
+    DiagnosticReport,
+    Media,
+}
+
+impl OwnerKind {
+    fn from_resource_type(t: &str) -> Option<Self> {
+        match t {
+            "DocumentReference" => Some(Self::DocumentReference),
+            "DiagnosticReport" => Some(Self::DiagnosticReport),
+            "Media" => Some(Self::Media),
+            _ => None,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::DocumentReference => "DocumentReference",
+            Self::DiagnosticReport => "DiagnosticReport",
+            Self::Media => "Media",
+        }
+    }
 }
 
 struct Streamed {
@@ -925,21 +952,16 @@ fn owner(resource_type: &str, v: &Value) -> Option<Owner> {
             .map(str::to_string)
             .collect()
     };
-    let resource_type = match resource_type {
-        "DocumentReference" => "DocumentReference",
-        "DiagnosticReport" => "DiagnosticReport",
-        "Media" => "Media",
-        _ => return None,
-    };
+    let kind = OwnerKind::from_resource_type(resource_type)?;
     let mut o = Owner {
-        resource_type,
+        kind,
         id: v.get("id").and_then(Value::as_str).unwrap_or("").into(),
         version: text("meta.versionId"),
         last_updated: text("meta.lastUpdated"),
         ..Owner::default()
     };
-    match resource_type {
-        "DocumentReference" => {
+    match kind {
+        OwnerKind::DocumentReference => {
             let concept = v
                 .get("type")
                 .and_then(|t| normalize::codeable(t, &[normalize::LOINC]));
@@ -949,7 +971,7 @@ fn owner(resource_type: &str, v: &Value) -> Option<Owner> {
             o.title = text("description").or_else(|| text("content.0.attachment.title"));
             o.urls = urls("content", "attachment.url");
         }
-        "DiagnosticReport" => {
+        OwnerKind::DiagnosticReport => {
             let concept = v
                 .get("code")
                 .and_then(|c| normalize::codeable(c, &[normalize::LOINC]));
@@ -962,7 +984,7 @@ fn owner(resource_type: &str, v: &Value) -> Option<Owner> {
                 .or_else(|| text("presentedForm.0.title"));
             o.urls = urls("presentedForm", "url");
         }
-        _ => {
+        OwnerKind::Media => {
             o.date = date(&["createdDateTime", "createdPeriod.start", "issued"]);
             o.title = text("content.title")
                 .or_else(|| text("modality.text"))
@@ -1022,7 +1044,7 @@ fn owner_of<'a>(owners: &'a [Owner], binary: &str) -> Option<&'a Owner> {
     };
     owners
         .iter()
-        .filter(|o| o.resource_type == "DocumentReference")
+        .filter(|o| o.kind == OwnerKind::DocumentReference)
         .find(names)
         .or_else(|| owners.iter().find(names))
 }
@@ -1086,7 +1108,7 @@ fn file_binaries(
         });
         let dr = owner_of(owners, &b.id);
         let claim = dr
-            .filter(|d| d.resource_type == "DocumentReference")
+            .filter(|d| d.kind == OwnerKind::DocumentReference)
             .and_then(|d| eob_docs.get(&d.id));
         let doc_type = if claim.is_some() {
             "eob".to_string()
@@ -1131,7 +1153,7 @@ fn file_binaries(
         let mut prov = base.clone();
         prov.source_resource = Some(match dr {
             Some(d) => SourceResource {
-                resource_type: d.resource_type.into(),
+                resource_type: d.kind.as_str().into(),
                 id: d.id.clone(),
                 version_id: d.version.clone(),
                 last_updated: d.last_updated.clone(),
@@ -1347,7 +1369,7 @@ mod tests {
         }
 
         let doc = Owner {
-            resource_type: "DocumentReference",
+            kind: OwnerKind::DocumentReference,
             id: long.clone(),
             urls: vec![format!("https://fhir.example.org/R4/Binary/{long}")],
             ..Owner::default()
@@ -1491,27 +1513,22 @@ mod tests {
         });
         let m = owner("Media", &media).unwrap();
         assert_eq!(
-            (
-                m.resource_type,
-                m.doc_type,
-                m.date.as_deref(),
-                m.title.as_deref()
-            ),
-            ("Media", None, Some("2026-03-01"), Some("Photo"))
+            (m.kind, m.doc_type, m.date.as_deref(), m.title.as_deref()),
+            (OwnerKind::Media, None, Some("2026-03-01"), Some("Photo"))
         );
         assert!(owner("Observation", &media).is_none());
 
         // A Binary that a DocumentReference also names takes its type.
         let doc = Owner {
-            resource_type: "DocumentReference",
+            kind: OwnerKind::DocumentReference,
             id: "doc-1".into(),
             urls: vec!["Binary/bin-1".into()],
             ..Owner::default()
         };
         let owners = [o, m, doc];
         assert_eq!(
-            owner_of(&owners, "bin-1").map(|o| o.resource_type),
-            Some("DocumentReference")
+            owner_of(&owners, "bin-1").map(|o| o.kind),
+            Some(OwnerKind::DocumentReference)
         );
         assert_eq!(
             owner_of(&owners, "bin-2").map(|o| o.id.as_str()),
