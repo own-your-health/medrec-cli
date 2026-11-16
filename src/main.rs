@@ -1026,6 +1026,13 @@ fn import_cmd(cli: &Cli, a: &ImportArgs, store: &ConfigStore) -> Result<(), CliE
             1 => println!("1 resource or search was skipped by the provider or as too large"),
             n => println!("{n} resources or searches were skipped by the provider or as too large"),
         }
+        if !r.withheld_types.is_empty() {
+            println!(
+                "{} withheld some {} resources, so those records may be incomplete",
+                r.organization,
+                r.withheld_types.join(", ")
+            );
+        }
     });
     Ok(())
 }

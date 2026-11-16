@@ -210,6 +210,13 @@ after an em dash, and otherwise `<cli> auth login [--org <org>]`), 4 becomes 4 (
 sent arguments the provider rejected), and 5 or anything else becomes 5
 (upstream).
 
+A skip's `code` is from an open set; medrec keeps every skip in the
+ImportRun. A `forbidden` skip with a `resource_type` and neither `id` nor
+`search` says the source withheld some resources of that type (a search
+answered with an issue saying it left results out); the ones it served are
+in the stream. `medrec import` lists those types as `withheld_types`, and
+says their records may be incomplete.
+
 The patient's birth date in the stream must match the person's in
 `household.json`, unless `--allow-birth-date-mismatch`. A source's first import needs
 `--person`; later imports find the person by the source's patient id or label,
