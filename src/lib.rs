@@ -32,6 +32,60 @@ pub fn write_private(path: &std::path::Path, bytes: &[u8]) -> Result<(), pk_cli_
         .map_err(|e| pk_cli_core::CliError::Other(format!("writing {}: {e}", path.display())))
 }
 
+/// `s` as a terminal shows it without being steered: no control characters
+/// (escape sequences, newlines), and none of the invisible format characters
+/// that reorder or hide text (bidi overrides and isolates, zero-width marks,
+/// line and paragraph separators, tag characters). For text a provider
+/// supplies and medrec prints.
+pub fn printable(s: &str) -> String {
+    s.chars().filter(|&c| !hidden(c)).collect()
+}
+
+fn hidden(c: char) -> bool {
+    c.is_control()
+        || matches!(
+            c,
+            '\u{00AD}'
+                | '\u{0600}'..='\u{0605}'
+                | '\u{061C}'
+                | '\u{06DD}'
+                | '\u{070F}'
+                | '\u{180E}'
+                | '\u{200B}'..='\u{200F}'
+                | '\u{2028}'..='\u{202E}'
+                | '\u{2060}'..='\u{2064}'
+                | '\u{2066}'..='\u{206F}'
+                | '\u{FEFF}'
+                | '\u{FFF9}'..='\u{FFFB}'
+                | '\u{E0000}'..='\u{E007F}'
+        )
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn printable_drops_what_can_steer_a_terminal() {
+        for (input, shown) in [
+            (
+                "Outside Records are not available",
+                "Outside Records are not available",
+            ),
+            ("a\u{1b}[2Jb\u{1b}]0;title\u{7}c", "a[2Jb]0;titlec"),
+            ("line\nbreak\r\ttab", "linebreaktab"),
+            ("abc\u{202E}fed\u{2066}x\u{2069}", "abcfedx"),
+            ("zero\u{200B}width\u{FEFF}\u{2028}", "zerowidth"),
+            ("tag\u{E0041}", "tag"),
+            (
+                "Cl\u{00ED}nica S\u{00E3}o Paulo",
+                "Cl\u{00ED}nica S\u{00E3}o Paulo",
+            ),
+            ("", ""),
+        ] {
+            assert_eq!(super::printable(input), shown, "{input:?}");
+        }
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod testutil {
     use std::path::PathBuf;

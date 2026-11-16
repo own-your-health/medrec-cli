@@ -1016,10 +1016,11 @@ fn import_cmd(cli: &Cli, a: &ImportArgs, store: &ConfigStore) -> Result<(), CliE
             allow_birth_date_mismatch: a.allow_birth_date_mismatch,
         },
     )?;
+    let organization = medrec::printable(&r.organization);
     output::emit(json, "import", to_value(&r), |_| {
         println!(
             "{} resources from {} for {}: {} records added, {} updated, {} unchanged; {} documents added",
-            r.resources, r.organization, r.person_name, r.records_added, r.records_updated, r.records_unchanged, r.documents_added
+            r.resources, organization, r.person_name, r.records_added, r.records_updated, r.records_unchanged, r.documents_added
         );
         // Withheld skips are listed below by reason rather than counted.
         let other = if r.withheld_skips > 0 { "other " } else { "" };
@@ -1034,15 +1035,13 @@ fn import_cmd(cli: &Cli, a: &ImportArgs, store: &ConfigStore) -> Result<(), CliE
         }
         if !r.withheld.is_empty() {
             println!(
-                "{} withheld some resources of these types, so their records may be incomplete:",
-                r.organization
+                "{organization} withheld some resources of these types, so their records may be incomplete:"
             );
             for w in &r.withheld {
-                let reason: String = w.reason.chars().filter(|c| !c.is_control()).collect();
-                let reason = if reason.is_empty() {
-                    "no reason given".into()
+                let reason = if w.reason.is_empty() {
+                    "no reason given"
                 } else {
-                    reason
+                    &w.reason
                 };
                 println!("  {}: {reason}", w.resource_types.join(", "));
             }

@@ -224,7 +224,9 @@ answered with an issue saying it left results out); the ones it served are
 in the stream. `medrec import` lists those types as `withheld_types`, and
 by the source's reason line as `withheld` (`[{reason, resource_types}]`);
 its human output gives each reason with its types, says their records may
-be incomplete, and counts only the other skips.
+be incomplete, and counts only the other skips. Both fields drop control
+characters and the invisible format characters that reorder or hide text
+(bidi overrides, zero-width marks).
 
 The patient's birth date in the stream must match the person's in
 `household.json`, unless `--allow-birth-date-mismatch`. A source's first import needs

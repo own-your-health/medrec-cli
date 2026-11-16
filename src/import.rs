@@ -164,6 +164,7 @@ pub struct Report {
     pub skipped: usize,
     /// Types the source served only some of: it withheld the rest (a
     /// `forbidden` skip naming the type, with no id or search).
+    /// [`printable`](crate::printable).
     pub withheld_types: Vec<String>,
     /// The same, by the reason line the source gave.
     pub withheld: Vec<Withheld>,
@@ -495,7 +496,8 @@ pub fn run(
 }
 
 /// Resources of these types the source withheld, for this reason (a line
-/// from the server, which carries no record content).
+/// from the server, which carries no record content). Both are
+/// [`printable`](crate::printable): the human output shows them as they are.
 #[derive(Debug, PartialEq, Serialize)]
 pub struct Withheld {
     pub reason: String,
@@ -514,8 +516,13 @@ fn withheld_type(k: &Skip) -> Option<&str> {
 }
 
 fn withheld_types(skipped: &[Skip]) -> Vec<String> {
-    let types: BTreeSet<&str> = skipped.iter().filter_map(withheld_type).collect();
-    types.into_iter().map(str::to_string).collect()
+    let types: BTreeSet<String> = skipped
+        .iter()
+        .filter_map(withheld_type)
+        .map(crate::printable)
+        .filter(|t| !t.is_empty())
+        .collect();
+    types.into_iter().collect()
 }
 
 /// The withheld types by reason, in the order the reasons first appear.
@@ -523,12 +530,17 @@ fn withheld(skipped: &[Skip]) -> Vec<Withheld> {
     let mut out: Vec<(String, BTreeSet<String>)> = Vec::new();
     for k in skipped {
         let Some(ty) = withheld_type(k) else { continue };
-        let reason = k.reason.trim();
+        let ty = crate::printable(ty);
+        if ty.is_empty() {
+            continue;
+        }
+        let reason = crate::printable(&k.reason);
+        let reason = reason.trim();
         match out.iter_mut().find(|(r, _)| r == reason) {
             Some((_, types)) => {
-                types.insert(ty.to_string());
+                types.insert(ty);
             }
-            None => out.push((reason.to_string(), BTreeSet::from([ty.to_string()]))),
+            None => out.push((reason.to_string(), BTreeSet::from([ty]))),
         }
     }
     out.into_iter()
@@ -837,14 +849,12 @@ fn stream_failure(
 
 /// A provider's exit code, read as the family contract defines it.
 pub fn provider_exit(cli: &str, code: Option<i32>, stderr: &str, org: Option<&str>) -> CliError {
-    let line: String = stderr
+    let line = stderr
         .lines()
         .rev()
         .find(|l| !l.trim().is_empty())
-        .unwrap_or("")
-        .chars()
-        .filter(|c| !c.is_control())
-        .collect();
+        .unwrap_or("");
+    let line = crate::printable(line);
     let line = line.trim();
     let line = line.strip_prefix("error: ").unwrap_or(line);
     let paren = |s: &str| {
