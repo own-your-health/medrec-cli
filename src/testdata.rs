@@ -177,7 +177,7 @@ pub fn write_provider(provider: &Path, stream: &str) -> PathBuf {
     write(
         &script,
         format!(
-            "#!/bin/sh\n# A fake health-records/v1 provider for medrec's tests.\ncase \"$1\" in\n  info) cat '{0}/fakeprov-info.json' ;;\n  records) cat '{0}/synthetic.ndjson'; exit \"${{FAKEPROV_EXIT:-0}}\" ;;\n  *) echo \"fakeprov: unknown command $1\" >&2; exit 2 ;;\nesac\n",
+            "#!/bin/sh\n# A fake health-records/v1 provider for medrec's tests.\ncase \"$1\" in\n  info) cat '{0}/fakeprov-info.json' ;;\n  records) cat '{0}/synthetic.ndjson'; [ -n \"$FAKEPROV_STDERR\" ] && printf '%s\\n' \"$FAKEPROV_STDERR\" >&2; exit \"${{FAKEPROV_EXIT:-0}}\" ;;\n  *) echo \"fakeprov: unknown command $1\" >&2; exit 2 ;;\nesac\n",
             provider.display()
         )
         .as_bytes(),

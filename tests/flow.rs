@@ -439,6 +439,25 @@ fn an_import_files_records_and_documents_and_is_idempotent() {
     assert!(
         String::from_utf8_lossy(&auth.stderr).contains("fakeprov auth login --org example-health")
     );
+    // A provider that names its own sign-in command: that one, once.
+    let own = "fakeprov auth login --org example-health --label robin";
+    let auth = e2.run_env(
+        &["import", "--from", "fakeprov", "--patient", "pat-0001"],
+        &[
+            ("FAKEPROV_EXIT", "3"),
+            (
+                "FAKEPROV_STDERR",
+                &format!("error: not signed in for this patient \u{2014} run `{own}`"),
+            ),
+        ],
+    );
+    assert_eq!(auth.status.code(), Some(3));
+    let stderr = String::from_utf8_lossy(&auth.stderr);
+    assert!(
+        stderr.contains(&format!("run `{own}`, then import again")),
+        "{stderr}"
+    );
+    assert_eq!(stderr.matches("auth login").count(), 1, "{stderr}");
     assert_eq!(
         std::fs::read_to_string(e.records().join("Robin Testperson/index.json")).unwrap(),
         before

@@ -204,8 +204,9 @@ profile. Its standard output is NDJSON:
 
 medrec writes nothing unless the trailer is present, says `complete: true`,
 its counts match the resources read, and the provider exits 0. The provider's
-exit code maps to medrec's: 3 becomes 3 (a sign-in is needed, and medrec
-names the `auth login` command), 4 becomes 4 (not found), 2 becomes 1 (medrec
+exit code maps to medrec's: 3 becomes 3 (a sign-in is needed; medrec names
+the provider's own `auth login` command when its error's remedy gives one,
+after an em dash, and otherwise `<cli> auth login [--org <org>]`), 4 becomes 4 (not found), 2 becomes 1 (medrec
 sent arguments the provider rejected), and 5 or anything else becomes 5
 (upstream).
 
