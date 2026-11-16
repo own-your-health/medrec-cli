@@ -744,25 +744,42 @@ fn stream_failure(
 
 /// A provider's exit code, read as the family contract defines it.
 pub fn provider_exit(cli: &str, code: Option<i32>, stderr: &str, org: Option<&str>) -> CliError {
-    let why = stderr
+    let line: String = stderr
         .lines()
         .rev()
         .find(|l| !l.trim().is_empty())
         .unwrap_or("")
-        .trim();
-    let why = if why.is_empty() {
-        String::new()
-    } else {
-        format!(" ({why})")
+        .chars()
+        .filter(|c| !c.is_control())
+        .collect();
+    let line = line.trim();
+    let line = line.strip_prefix("error: ").unwrap_or(line);
+    let paren = |s: &str| {
+        if s.is_empty() {
+            String::new()
+        } else {
+            format!(" ({s})")
+        }
     };
-    let login = match org {
-        Some(o) => format!("{cli} auth login --org {o}"),
-        None => format!("{cli} auth login"),
-    };
+    let why = paren(line);
     match code {
-        Some(3) => CliError::Auth(format!(
-            "{cli} needs a sign-in: run `{login}`, then import again{why}"
-        )),
+        Some(3) => {
+            // The provider's own sign-in command is more exact than medrec's
+            // guess (it may name a patient label too), so it replaces it, and
+            // the reason is shown without it.
+            let (reason, login) = match provider_login(cli, line) {
+                Some((reason, login)) => (reason, login),
+                None => (
+                    line,
+                    match org {
+                        Some(o) => format!("{cli} auth login --org {o}"),
+                        None => format!("{cli} auth login"),
+                    },
+                ),
+            };
+            CliError::Auth(format!("{cli} needs a sign-in{}", paren(reason)))
+                .with_remedy(format!("run `{login}`, then import again"))
+        }
         Some(4) => CliError::NotFound(format!("{cli} does not know that patient{why}")),
         Some(5) => CliError::Upstream(format!(
             "{cli}'s provider did not answer; try again later{why}"
@@ -775,6 +792,18 @@ pub fn provider_exit(cli: &str, code: Option<i32>, stderr: &str, org: Option<&st
             exit_text(other)
         )),
     }
+}
+
+/// A provider's sign-in remedy: the family prints an error's remedy after
+/// its message and an em dash (``not signed in — run `kp auth login --org o
+/// --label l` ``). The message, and the command when it is the provider's
+/// own `auth login`.
+fn provider_login<'a>(cli: &str, line: &'a str) -> Option<(&'a str, String)> {
+    let (reason, remedy) = line.rsplit_once(" \u{2014} ")?;
+    let command = remedy.split('`').nth(1)?.trim();
+    let login = format!("{cli} auth login");
+    let rest = command.strip_prefix(&login)?;
+    (rest.is_empty() || rest.starts_with(' ')).then(|| (reason.trim(), command.to_string()))
 }
 
 fn exit_text(code: Option<i32>) -> String {
@@ -1290,9 +1319,44 @@ mod tests {
 
     #[test]
     fn exit_codes_map_to_the_family_contract() {
-        assert!(
-            matches!(provider_exit("x", Some(3), "", Some("o")), CliError::Auth(m) if m.contains("x auth login --org o"))
+        let e = provider_exit("x", Some(3), "", Some("o"));
+        assert!(e.is_auth());
+        assert_eq!(
+            e.remedy(),
+            Some("run `x auth login --org o`, then import again")
         );
+
+        // The provider's own sign-in command replaces medrec's guess, once.
+        let e = provider_exit(
+            "kp",
+            Some(3),
+            "warming up\nerror: not signed in to this organization for this patient \u{2014} run `kp auth login --org sandbox --label adult1`\n",
+            Some("sandbox"),
+        );
+        assert_eq!(e.exit_code(), 3);
+        assert_eq!(
+            e.to_string(),
+            "kp needs a sign-in (not signed in to this organization for this patient) \u{2014} \
+             run `kp auth login --org sandbox --label adult1`, then import again"
+        );
+        assert_eq!(e.to_string().matches("auth login").count(), 1);
+        // A remedy that is not this provider's sign-in: medrec's own, and
+        // the provider's line kept whole.
+        for line in [
+            "error: no session \u{2014} run `kp setup`",
+            "error: no session \u{2014} run `mychart auth login --org o`",
+            "error: no session \u{2014} run `kp auth logins`",
+            "error: no session",
+        ] {
+            let e = provider_exit("kp", Some(3), line, None);
+            assert_eq!(
+                e.remedy(),
+                Some("run `kp auth login`, then import again"),
+                "{line}"
+            );
+            assert!(e.to_string().contains(&line["error: ".len()..]), "{line}");
+        }
+
         assert!(matches!(
             provider_exit("x", Some(4), "", None),
             CliError::NotFound(_)
