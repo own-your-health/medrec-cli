@@ -888,7 +888,14 @@ fn a_scan_under_tmp_is_read_by_ocr() {
 fn a_type_the_source_withheld_is_reported_as_possibly_incomplete() {
     // A search answered with an issue saying it left results out: one
     // `forbidden` skip per type, with neither id nor search.
-    let withheld = r#"{"resource_type":"Condition","reason":"some categories were left out","code":"forbidden"}"#;
+    let withheld = concat!(
+        r#"{"resource_type":"Condition","reason":"some categories were left out","code":"forbidden"},"#,
+        r#"{"resource_type":"Observation","reason":"some categories were left out","code":"forbidden"},"#,
+        // A reason and a type carrying escape sequences and a newline, and
+        // a reason that is only whitespace.
+        r#"{"resource_type":"Proc\u001b]0;x\u0007edure","reason":"\u001b[2Jcleared\nscreen\u202e","code":"forbidden"},"#,
+        r#"{"resource_type":"Immunization","reason":"  ","code":"forbidden"}"#
+    );
     let stream =
         medrec::testdata::STREAM.replace("\"skipped\":[", &format!("\"skipped\":[{withheld},"));
     assert_ne!(stream, medrec::testdata::STREAM);
@@ -909,15 +916,39 @@ fn a_type_the_source_withheld_is_reported_as_possibly_incomplete() {
     assert_eq!(out.status.code(), Some(0));
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(
-        text.contains("withheld some Condition resources, so those records may be incomplete"),
+        text.contains("1 other resource or search was skipped")
+            && text.contains(concat!(
+                "withheld some resources of these types, so their records may be incomplete:\n",
+                "  Condition, Observation: some categories were left out\n",
+                "  Proc]0;xedure: [2Jclearedscreen\n",
+                "  Immunization: no reason given\n"
+            )),
         "{text}"
+    );
+    assert!(
+        !text
+            .chars()
+            .any(|c| c.is_control() && c != '\n' || c == '\u{202e}'),
+        "{text:?}"
     );
     // The Condition it did serve is filed, and a re-import says the same.
     let r = e.ok(&import);
-    assert_eq!(r["withheld_types"], serde_json::json!(["Condition"]), "{r}");
+    assert_eq!(
+        r["withheld_types"],
+        serde_json::json!(["Condition", "Immunization", "Observation", "Proc]0;xedure"]),
+        "{r}"
+    );
+    assert_eq!(
+        r["withheld"],
+        serde_json::json!([
+            {"reason": "some categories were left out", "resource_types": ["Condition", "Observation"]},
+            {"reason": "[2Jclearedscreen", "resource_types": ["Proc]0;xedure"]},
+            {"reason": "", "resource_types": ["Immunization"]}
+        ])
+    );
     assert_eq!(
         (r["skipped"].as_u64(), r["records_unchanged"].as_u64()),
-        (Some(2), Some(9))
+        (Some(5), Some(9))
     );
     let _ = std::fs::remove_dir_all(&e.root);
 }

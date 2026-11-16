@@ -163,8 +163,14 @@ pub struct Report {
     pub counts: BTreeMap<String, u64>,
     pub skipped: usize,
     /// Types the source served only some of: it withheld the rest (a
-    /// `forbidden` skip naming the type, with no id or search).
+    /// `forbidden` skip naming the type, with no id or search). Each type is
+    /// passed through [`printable`](crate::printable).
     pub withheld_types: Vec<String>,
+    /// The same, by the reason line the source gave.
+    pub withheld: Vec<Withheld>,
+    /// How many of `skipped` say so, for the human output.
+    #[serde(skip)]
+    pub withheld_skips: usize,
     pub resources_written: usize,
     pub resources_unchanged: usize,
     pub records_added: usize,
@@ -476,6 +482,8 @@ pub fn run(
         counts,
         skipped: skipped.len(),
         withheld_types: withheld_types(&skipped),
+        withheld: withheld(&skipped),
+        withheld_skips: skipped.iter().filter_map(withheld_type).count(),
         resources_written: written.written,
         resources_unchanged: written.unchanged,
         records_added: added,
@@ -487,21 +495,60 @@ pub fn run(
     })
 }
 
-/// The types a source withheld some resources of (medical-common DESIGN
-/// §1.4): a `forbidden` skip with a `resource_type` and neither `id` nor
+/// Resources of these types the source withheld, for this reason (a line
+/// from the server, which carries no record content). Both are
+/// [`printable`](crate::printable): the human output shows them as they are.
+#[derive(Debug, PartialEq, Serialize)]
+pub struct Withheld {
+    pub reason: String,
+    pub resource_types: Vec<String>,
+}
+
+/// A skip saying the source withheld some resources of a type (medical-common
+/// DESIGN §1.4): `forbidden`, with a `resource_type` and neither `id` nor
 /// `search`. The resources it did serve are in the stream.
+fn withheld_type(k: &Skip) -> Option<&str> {
+    let withheld =
+        k.code == pk_med_records::stream::skip::FORBIDDEN && k.id.is_none() && k.search.is_none();
+    k.resource_type
+        .as_deref()
+        .filter(|t| withheld && !t.is_empty())
+}
+
 fn withheld_types(skipped: &[Skip]) -> Vec<String> {
-    let types: BTreeSet<&str> = skipped
+    let types: BTreeSet<String> = skipped
         .iter()
-        .filter(|k| {
-            k.code == pk_med_records::stream::skip::FORBIDDEN
-                && k.id.is_none()
-                && k.search.is_none()
-        })
-        .filter_map(|k| k.resource_type.as_deref())
+        .filter_map(withheld_type)
+        .map(crate::printable)
         .filter(|t| !t.is_empty())
         .collect();
-    types.into_iter().map(str::to_string).collect()
+    types.into_iter().collect()
+}
+
+/// The withheld types by reason, in the order the reasons first appear.
+fn withheld(skipped: &[Skip]) -> Vec<Withheld> {
+    let mut out: Vec<(String, BTreeSet<String>)> = Vec::new();
+    for k in skipped {
+        let Some(ty) = withheld_type(k) else { continue };
+        let ty = crate::printable(ty);
+        if ty.is_empty() {
+            continue;
+        }
+        let reason = crate::printable(&k.reason);
+        let reason = reason.trim();
+        match out.iter_mut().find(|(r, _)| r == reason) {
+            Some((_, types)) => {
+                types.insert(ty);
+            }
+            None => out.push((reason.to_string(), BTreeSet::from([ty]))),
+        }
+    }
+    out.into_iter()
+        .map(|(reason, types)| Withheld {
+            reason,
+            resource_types: types.into_iter().collect(),
+        })
+        .collect()
 }
 
 /// Whose records: `--person`, or the person this patient was imported for
@@ -802,14 +849,12 @@ fn stream_failure(
 
 /// A provider's exit code, read as the family contract defines it.
 pub fn provider_exit(cli: &str, code: Option<i32>, stderr: &str, org: Option<&str>) -> CliError {
-    let line: String = stderr
+    let line = stderr
         .lines()
         .rev()
         .find(|l| !l.trim().is_empty())
-        .unwrap_or("")
-        .chars()
-        .filter(|c| !c.is_control())
-        .collect();
+        .unwrap_or("");
+    let line = crate::printable(line);
     let line = line.trim();
     let line = line.strip_prefix("error: ").unwrap_or(line);
     let paren = |s: &str| {
@@ -1470,6 +1515,35 @@ mod tests {
             ["AllergyIntolerance", "Condition"]
         );
         assert!(withheld_types(&[]).is_empty());
+        assert_eq!(
+            withheld(&skipped),
+            [
+                Withheld {
+                    reason: "some categories were left out".into(),
+                    resource_types: vec!["Condition".into()],
+                },
+                Withheld {
+                    reason: "another withheld line".into(),
+                    resource_types: vec!["Condition".into()],
+                },
+                Withheld {
+                    reason: "left out".into(),
+                    resource_types: vec!["AllergyIntolerance".into()],
+                },
+            ]
+        );
+        let same = [
+            Skip::resource("Observation", "", skip::FORBIDDEN, "outside records "),
+            Skip::resource("Condition", "", skip::FORBIDDEN, "outside records"),
+            Skip::resource("Condition", "", skip::FORBIDDEN, "outside records"),
+        ];
+        assert_eq!(
+            withheld(&same),
+            [Withheld {
+                reason: "outside records".into(),
+                resource_types: vec!["Condition".into(), "Observation".into()],
+            }]
+        );
     }
 
     #[test]
