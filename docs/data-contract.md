@@ -211,4 +211,5 @@ sent arguments the provider rejected), and 5 or anything else becomes 5
 
 The patient's birth date in the stream must match the person's in
 `household.json`, unless `--allow-birth-date-mismatch`. A source's first import needs
-`--person`; later imports find the person by the source's patient id.
+`--person`; later imports find the person by the source's patient id or label,
+as described above.
