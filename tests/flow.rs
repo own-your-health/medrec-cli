@@ -654,6 +654,89 @@ fn a_local_folder_is_owner_only_and_lists_take_a_limit() {
 }
 
 #[test]
+fn ids_past_64_characters_and_absolute_references_are_imported() {
+    // Epic's unconstrained FHIR ids run past FHIR R4's 64 characters.
+    let doc = "D0c-".repeat(50);
+    let bin = "B1n.".repeat(50);
+    let base_url = "https://fhir.example.org/api/FHIR/R4";
+    let stream = medrec::testdata::STREAM
+        .replace(
+            "\"DocumentReference/doc-0002\"",
+            &format!("\"{base_url}/DocumentReference/{doc}/_history/1\""),
+        )
+        .replace(
+            "\"Binary/bin-0002\"",
+            &format!("\"{base_url}/Binary/{bin}\""),
+        )
+        .replace("doc-0002", &doc)
+        .replace("bin-0002", &bin);
+    assert_eq!(stream.matches(&format!("{base_url}/")).count(), 2);
+
+    let base = Env::new("long-ids");
+    setup(&base);
+    let e = provider_env(&base, &stream);
+    let import = [
+        "import",
+        "--from",
+        "fakeprov",
+        "--patient",
+        "pat-0001",
+        "--person",
+        "Robin",
+    ];
+    let r = e.ok(&import);
+    assert_eq!(
+        (
+            r["resources"].as_u64(),
+            r["records_added"].as_u64(),
+            r["documents_added"].as_u64(),
+            r["skipped"].as_u64()
+        ),
+        (Some(14), Some(9), Some(2), Some(1)),
+        "{r}"
+    );
+    // The EOB's document is found through its absolute, versioned reference.
+    assert_eq!(
+        e.records()
+            .join("Robin Testperson/Claims/2026")
+            .read_dir()
+            .unwrap()
+            .count(),
+        1
+    );
+    let raw = e
+        .records()
+        .join("Robin Testperson/Records/fakeprov-example-health/DocumentReference");
+    let names: Vec<String> = raw
+        .read_dir()
+        .unwrap()
+        .map(|d| d.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(names.len(), 2, "{names:?}");
+    assert!(names.iter().all(|n| n.len() <= 64), "{names:?}");
+    assert!(names.iter().any(|n| n.starts_with("id-")), "{names:?}");
+
+    let again = e.ok(&import);
+    assert_eq!(
+        (
+            again["resources_written"].as_u64(),
+            again["documents_added"].as_u64()
+        ),
+        (Some(0), Some(0)),
+        "{again}"
+    );
+    let v = e.ok(&["verify", "--deep"]);
+    assert_eq!(v["ok"], 11, "{v}");
+    assert!(
+        [&v["missing"], &v["changed"], &v["unindexed"]]
+            .iter()
+            .all(|a| a.as_array().is_some_and(|a| a.is_empty())),
+        "{v}"
+    );
+    let _ = std::fs::remove_dir_all(Path::new(&e.root));
+}
+
+#[test]
 fn the_birth_date_checks_have_their_own_flag() {
     let base = Env::new("birth");
     setup(&base);

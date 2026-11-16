@@ -36,6 +36,10 @@ _review/                      documents intake could not file, and review.json
   a filed document can be traced to what was received.
 - A study folder without a date is `undated_…`. A DICOM file whose series or
   instance number is missing is named by its SOPInstanceUID.
+- A raw resource's `<id>` is its FHIR id when that is at most 64 of
+  `A-Z a-z 0-9 - .` and does not start with `.`. Any other id, such as one of
+  Epic's unconstrained ids (up to 256 characters), is named
+  `id-<first 32 hex of the id's SHA-256>`, the same on every import.
 - A raw resource that changed at its source is written as the new
   `<id>.json`. The previous version stays beside it as
   `<id>~<first 8 hex of its MD5>.json`.

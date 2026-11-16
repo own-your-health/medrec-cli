@@ -204,6 +204,7 @@ struct Binary {
     bytes: Vec<u8>,
 }
 
+#[cfg_attr(test, derive(Default))]
 struct DocRef {
     id: String,
     version: Option<String>,
@@ -543,8 +544,10 @@ pub fn source_slug(cli: &str, org: &str) -> String {
     }
 }
 
-/// A FHIR id as a file name: ids are `[A-Za-z0-9.-]{1,64}`; anything else
-/// is named by its hash.
+/// A FHIR id as a file name. FHIR R4 caps ids at 64 of `[A-Za-z0-9.-]`, but
+/// Epic's unconstrained ids (its default) run longer, up to pk-med-fhir's
+/// `MAX_ID_LEN` of 256. A safe name of at most 64 characters is kept as it
+/// is; anything else is named by its hash, the same on every run.
 fn id_file(id: &str) -> String {
     let ok = !id.is_empty()
         && id.len() <= 64
@@ -824,15 +827,24 @@ fn docref(v: &Value) -> DocRef {
     }
 }
 
-/// The DocumentReference whose attachment is `Binary/<id>` (relative or
-/// absolute URL).
+/// The id a reference to a `resource_type` names: relative (`Binary/<id>`)
+/// or absolute (`https://…/Binary/<id>`), with or without
+/// `/_history/<version>`. The id's length is not checked: ids past FHIR's
+/// 64 characters are read like any other.
+fn reference_id<'a>(reference: &'a str, resource_type: &str) -> Option<&'a str> {
+    let r = reference.trim_end_matches('/');
+    let r = r.rfind("/_history/").map_or(r, |i| &r[..i]);
+    let (head, id) = r.rsplit_once('/')?;
+    let ty = head.rsplit_once('/').map_or(head, |(_, ty)| ty);
+    (ty == resource_type && !id.is_empty()).then_some(id)
+}
+
+/// The DocumentReference whose attachment is the Binary `binary`.
 fn docref_for<'a>(docrefs: &'a [DocRef], binary: &str) -> Option<&'a DocRef> {
-    let tail = format!("Binary/{binary}");
     docrefs.iter().find(|d| {
-        d.urls.iter().any(|u| {
-            let u = u.trim_end_matches('/');
-            u == tail || u.ends_with(&format!("/{tail}"))
-        })
+        d.urls
+            .iter()
+            .any(|u| reference_id(u, "Binary") == Some(binary))
     })
 }
 
@@ -853,7 +865,7 @@ fn eob_document_links(resources: &[RawResource]) -> HashMap<String, String> {
             .flatten()
         {
             if let Some(reference) = normalize::path_str(info, "valueReference.reference") {
-                if let Some(id) = reference.strip_prefix("DocumentReference/") {
+                if let Some(id) = reference_id(reference, "DocumentReference") {
                     out.insert(id.to_string(), r.id.clone());
                 }
             }
@@ -1098,10 +1110,68 @@ mod tests {
         assert_eq!(id_file("abc-1.2"), "abc-1.2");
         assert!(id_file("../etc").starts_with("id-"));
         assert!(id_file(".hidden").starts_with("id-"));
+        let at_64 = "e".repeat(64);
+        assert_eq!(id_file(&at_64), at_64);
+        // Epic's unconstrained ids: past 64, named by a hash that is stable
+        // and tells apart ids sharing their first 64 characters.
+        let long = format!("{at_64}A1b2-C3d4.");
+        let longer = "A1b2-C3d4.".repeat(25) + "e".repeat(6).as_str();
+        assert_eq!(longer.len(), 256);
+        assert_eq!(id_file(&long), "id-bf3866791d016212a22ac6d16da5b553");
+        assert_ne!(id_file(&long), id_file(&format!("{at_64}x")));
+        assert!(id_file(&longer).starts_with("id-"));
         assert_eq!(
             source_slug("mychart", "example-health"),
             "mychart-example-health"
         );
+    }
+
+    #[test]
+    fn references_are_read_relative_absolute_and_versioned_at_any_id_length() {
+        let long = "A1b2-C3d4.".repeat(25) + "e".repeat(6).as_str();
+        for (reference, ty, id) in [
+            ("Binary/bin-1".to_string(), "Binary", Some("bin-1")),
+            ("Binary/bin-1/".into(), "Binary", Some("bin-1")),
+            (
+                "https://fhir.example.org/api/FHIR/R4/Binary/bin-1".into(),
+                "Binary",
+                Some("bin-1"),
+            ),
+            ("Binary/bin-1/_history/3".into(), "Binary", Some("bin-1")),
+            (
+                format!("DocumentReference/{long}"),
+                "DocumentReference",
+                Some(long.as_str()),
+            ),
+            (
+                format!("https://fhir.example.org/R4/DocumentReference/{long}/_history/1"),
+                "DocumentReference",
+                Some(long.as_str()),
+            ),
+            ("DocumentReference/doc-1".into(), "Binary", None),
+            ("NotBinary/bin-1".into(), "Binary", None),
+            ("Binary/".into(), "Binary", None),
+            ("Binary".into(), "Binary", None),
+            ("#bin-1".into(), "Binary", None),
+        ] {
+            assert_eq!(reference_id(&reference, ty), id, "{reference}");
+        }
+
+        let doc = DocRef {
+            id: long.clone(),
+            urls: vec![format!("https://fhir.example.org/R4/Binary/{long}")],
+            ..DocRef::default()
+        };
+        let docs = [doc];
+        assert!(docref_for(&docs, &long).is_some());
+        assert!(docref_for(&docs, &long[..64]).is_none());
+
+        let eob = RawResource::parse(&format!(
+            r#"{{"resourceType":"ExplanationOfBenefit","id":"eob-1","supportingInfo":[{{"valueReference":{{"reference":"https://fhir.example.org/R4/DocumentReference/{long}"}}}}]}}"#
+        ))
+        .unwrap();
+        let links = eob_document_links(&[eob]);
+        assert_eq!(links.get(&long).map(String::as_str), Some("eob-1"));
     }
 
     #[test]
