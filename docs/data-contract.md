@@ -89,7 +89,7 @@ _review/                      documents intake could not file, and review.json
   "sources": [{
     "id": "s_…", "kind": "fhir", "person": "p_…", "cli": "mychart",
     "organization": "example-health", "organization_name": "Example Health",
-    "fhir_base": "…", "patient_id": "pat-0001", "last_pull": "…"
+    "fhir_base": "…", "patient_id": "pat-0001", "patient_label": "…", "last_pull": "…"
   }]
 }
 ```
@@ -182,6 +182,13 @@ read back as edited.
 
 `medrec import --from <cli> --patient <id> [--org <org>] [--since <date>]`
 runs `<cli> records export --patient <id> --ndjson [--org …] [--since …]`.
+`<id>` is whatever the provider's `--patient` takes: the patient's FHIR id,
+or a label the provider gave the patient. The first import of a patient
+names whose records they are with `--person`. A later import without it
+files under the same person when `<id>` matches a source's `patient_id`, or
+otherwise its `patient_label` (the stream header's `patient.label`), from
+the same CLI and `--org`. It is refused when that matches more than one
+person, or when the stream's `patient.id` is not one that source recorded.
 A provider is any CLI whose `info --json` lists the `health-records/v1`
 profile. Its standard output is NDJSON:
 
@@ -204,4 +211,5 @@ sent arguments the provider rejected), and 5 or anything else becomes 5
 
 The patient's birth date in the stream must match the person's in
 `household.json`, unless `--allow-birth-date-mismatch`. A source's first import needs
-`--person`; later imports find the person by the source's patient id.
+`--person`; later imports find the person by the source's patient id or label,
+as described above.

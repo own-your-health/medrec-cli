@@ -1,13 +1,12 @@
 [package]
 name = "medrec-cli"
 description = "A household's medical records in a plain Drive folder: people, intake of scans and files with local OCR, imaging studies, provider and insurer imports, timelines, search and notes."
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 # pk-cli-drive needs 1.89 (`File::lock`).
 rust-version = "1.89"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/piekstra/medrec-cli"
-homepage = "https://github.com/piekstra/medrec-cli"
 authors = ["piekstra"]
 publish = false
 
