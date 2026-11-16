@@ -1021,11 +1021,9 @@ fn import_cmd(cli: &Cli, a: &ImportArgs, store: &ConfigStore) -> Result<(), CliE
             "{} resources from {} for {}: {} records added, {} updated, {} unchanged; {} documents added",
             r.resources, r.organization, r.person_name, r.records_added, r.records_updated, r.records_unchanged, r.documents_added
         );
-        // One withheld skip per type and reason line (medical-common DESIGN
-        // §1.4); they are listed below rather than counted.
-        let withheld: usize = r.withheld.iter().map(|w| w.resource_types.len()).sum();
-        let other = if withheld > 0 { "other " } else { "" };
-        match r.skipped.saturating_sub(withheld) {
+        // Withheld skips are listed below by reason rather than counted.
+        let other = if r.withheld_skips > 0 { "other " } else { "" };
+        match r.skipped - r.withheld_skips {
             0 => {}
             1 => {
                 println!("1 {other}resource or search was skipped by the provider or as too large")

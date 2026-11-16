@@ -167,6 +167,9 @@ pub struct Report {
     pub withheld_types: Vec<String>,
     /// The same, by the reason line the source gave.
     pub withheld: Vec<Withheld>,
+    /// How many of `skipped` say so, for the human output.
+    #[serde(skip)]
+    pub withheld_skips: usize,
     pub resources_written: usize,
     pub resources_unchanged: usize,
     pub records_added: usize,
@@ -442,6 +445,7 @@ pub fn run(
         skipped: skipped.len(),
         withheld_types: withheld_types(&skipped),
         withheld: withheld(&skipped),
+        withheld_skips: skipped.iter().filter_map(withheld_type).count(),
         resources_written: written.written,
         resources_unchanged: written.unchanged,
         records_added: added,
