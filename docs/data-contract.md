@@ -104,7 +104,8 @@ are fields only: medrec reads and writes nothing in Huishouden.
 One per person: `{schema, person, rev, documents, records, studies,
 imports}`.
 
-**Document**, a filed file (FHIR `DocumentReference` and `Binary`):
+**Document**, a filed file (a FHIR `Binary`, with the `DocumentReference`,
+`DiagnosticReport` or `Media` that names it):
 `id`, `path`, `sha256` (its identity), `md5` (Drive's hash, for `verify`
 without a download), `size`, `media_type`, `pages`, `original_name`, `title`,
 `doc_type`, `loinc`, `date` (of service), `organization`, `filed_at`,
@@ -196,8 +197,14 @@ profile. Its standard output is NDJSON:
    "organization": {id, name, fhir_base, vendor}, "patient": {id,
    organization, label, relationship}, "since", "pulled_at", "fhir_version",
    "method"}`.
-2. One FHIR R4 resource per line. A `Binary` follows the `DocumentReference`
-   that names it.
+2. One FHIR R4 resource per line. A `Binary` follows the resource that names
+   it: a `DocumentReference` (`content[].attachment.url`), a
+   `DiagnosticReport` (`presentedForm[].url`) or a `Media` (`content.url`).
+   medrec files the Binary as a document with that resource's date, title
+   and type, preferring a DocumentReference that names it too. A
+   DiagnosticReport's `LAB` category makes a `lab_report`, an imaging one
+   (`RAD`, `CT`, `MR`, `US`, …) an `imaging_report`; a Media's Binary is
+   `other`. The document's provenance names that resource.
 3. A trailer: `{"schema": "records-stream-end/v1", "complete", "counts":
    {<type>: n}, "skipped": [{resource_type, id, search, reason, code}],
    "finished_at", "error"}`.
