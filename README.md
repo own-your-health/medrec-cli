@@ -59,6 +59,7 @@ medrec images open <id>                         # a private copy, opened in Weas
 
 medrec providers list                           # provider CLIs on PATH
 medrec import --from mychart --patient <id> --person Robin
+medrec import --from mychart --patient <id>     # later: the FHIR id or mychart's label
 
 medrec timeline --person Robin --since 2026-01-01
 medrec search hemoglobin

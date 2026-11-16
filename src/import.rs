@@ -232,7 +232,8 @@ pub fn run(
     req: &Request,
 ) -> Result<Report, CliError> {
     let mut household = folder.household()?;
-    let person = resolve_person(&household, req)?.clone();
+    let (person, known_patients) = resolve_person(&household, req)?;
+    let person = person.clone();
     let max_binary = cfg.max_file_bytes();
 
     let mut cmd = Bounded::new(&provider.path)
@@ -287,6 +288,16 @@ pub fn run(
         binaries,
         skipped: skipped_large,
     } = streamed;
+
+    // A re-import without --person files under whoever this patient was
+    // filed under before, so the stream must be about a patient filed there.
+    if !known_patients.is_empty() && !known_patients.contains(&header.patient.id) {
+        return Err(CliError::Usage(format!(
+            "{} returned records for a patient medrec has not imported as `{}` before; name \
+             whose records they are with --person",
+            req.from, req.patient
+        )));
+    }
 
     // A stream about someone else must not land in this person's records.
     let source_birth = resources
@@ -435,28 +446,65 @@ pub fn run(
     })
 }
 
-fn resolve_person<'a>(h: &'a Household, req: &Request) -> Result<&'a Person, CliError> {
+/// Whose records: `--person`, or the person this patient was imported for
+/// before. `--patient` is whatever the provider takes: the patient's FHIR id,
+/// or the provider's own label for them, which its stream header carries.
+/// Without `--person`, also the patient ids those imports recorded, one of
+/// which the stream must be about.
+fn resolve_person<'a>(
+    h: &'a Household,
+    req: &Request,
+) -> Result<(&'a Person, Vec<String>), CliError> {
     if let Some(q) = &req.person {
-        return people::resolve(h, q);
+        return Ok((people::resolve(h, q)?, Vec::new()));
     }
-    let pid = h
+    let from_here = |s: &&Source| {
+        s.cli.as_deref() == Some(req.from.as_str())
+            && (req.org.is_none() || s.organization == req.org)
+    };
+    let patient = Some(req.patient.as_str());
+    let mut matched: Vec<&Source> = h
         .sources
         .iter()
-        .find(|s| {
-            s.cli.as_deref() == Some(req.from.as_str())
-                && s.patient_id.as_deref() == Some(req.patient.as_str())
-                && (req.org.is_none() || s.organization == req.org)
-        })
-        .map(|s| s.person.clone())
-        .ok_or_else(|| {
-            CliError::Usage(format!(
-                "medrec has not imported patient `{}` from {} before; name whose records they are \
-                 with --person",
-                req.patient, req.from
-            ))
-        })?;
-    h.person(&pid)
-        .ok_or_else(|| CliError::Other(format!("source points at unknown person {pid}")))
+        .filter(from_here)
+        .filter(|s| s.patient_id.as_deref() == patient)
+        .collect();
+    if matched.is_empty() {
+        matched = h
+            .sources
+            .iter()
+            .filter(from_here)
+            .filter(|s| s.patient_label.as_deref() == patient)
+            .collect();
+    }
+    let Some(first) = matched.first() else {
+        return Err(CliError::Usage(format!(
+            "medrec has not imported patient `{}` from {} before; name whose records they are \
+             with --person",
+            req.patient, req.from
+        )));
+    };
+    if matched.iter().any(|s| s.person != first.person) {
+        return Err(CliError::Usage(format!(
+            "patient `{}` from {} was imported for more than one person; name whose records \
+             they are with --person{}",
+            req.patient,
+            req.from,
+            if req.org.is_none() {
+                ", or the organization with --org"
+            } else {
+                ""
+            }
+        )));
+    }
+    let person = h.person(&first.person).ok_or_else(|| {
+        CliError::Other(format!("source points at unknown person {}", first.person))
+    })?;
+    let known = matched
+        .iter()
+        .filter_map(|s| s.patient_id.clone())
+        .collect();
+    Ok((person, known))
 }
 
 fn read_stream<R: std::io::BufRead>(
@@ -1029,7 +1077,12 @@ fn record_source(h: &mut Household, pid: &str, cli: &str, header: &Header, porta
             && s.patient_id.as_deref() == Some(header.patient.id.as_str())
             && s.organization.as_deref() == Some(header.organization.id.as_str())
     }) {
-        Some(s) => s.last_pull = Some(header.pulled_at.clone()),
+        Some(s) => {
+            s.last_pull = Some(header.pulled_at.clone());
+            if header.patient.label.is_some() {
+                s.patient_label = header.patient.label.clone();
+            }
+        }
         None => h.sources.push(Source {
             id: ids::new("s"),
             kind: if portal { "portal" } else { "fhir" }.into(),
@@ -1039,6 +1092,7 @@ fn record_source(h: &mut Household, pid: &str, cli: &str, header: &Header, porta
             organization_name: Some(header.organization.name.clone()),
             fhir_base: Some(base.clone()),
             patient_id: Some(header.patient.id.clone()),
+            patient_label: header.patient.label.clone(),
             last_pull: Some(header.pulled_at.clone()),
         }),
     }
@@ -1172,6 +1226,66 @@ mod tests {
         .unwrap();
         let links = eob_document_links(&[eob]);
         assert_eq!(links.get(&long).map(String::as_str), Some("eob-1"));
+    }
+
+    #[test]
+    fn a_reimport_finds_the_patient_by_id_or_by_the_providers_label() {
+        let h: Household = serde_json::from_value(serde_json::json!({
+            "schema": "medrec-household/v1", "format": 1, "folder_id": "f_1", "rev": 1,
+            "created_at": "2026-01-01T00:00:00Z",
+            "people": [
+                {"id": "p_a", "name": "Alex Testperson", "folder": "Alex Testperson",
+                 "created_at": "2026-01-01T00:00:00Z"},
+                {"id": "p_b", "name": "Robin Testperson", "folder": "Robin Testperson",
+                 "created_at": "2026-01-01T00:00:00Z"}
+            ],
+            "sources": [
+                {"id": "s_1", "kind": "portal", "person": "p_a", "cli": "mychart",
+                 "organization": "example-health", "patient_id": "eSelf1", "patient_label": "adult1"},
+                {"id": "s_2", "kind": "portal", "person": "p_b", "cli": "mychart",
+                 "organization": "example-clinic", "patient_id": "eSelf2", "patient_label": "adult1"},
+                {"id": "s_3", "kind": "fhir", "person": "p_b", "cli": "fakeprov",
+                 "organization": "example-health", "patient_id": "adult1"}
+            ]
+        }))
+        .unwrap();
+        let req = |patient: &str, org: Option<&str>, person: Option<&str>| Request {
+            from: "mychart".into(),
+            patient: patient.into(),
+            person: person.map(str::to_string),
+            since: None,
+            org: org.map(str::to_string),
+            allow_birth_date_mismatch: false,
+        };
+        let who = |r: &Request| {
+            resolve_person(&h, r)
+                .map(|(p, known)| (p.id.clone(), known))
+                .map_err(|e| e.to_string())
+        };
+
+        assert_eq!(
+            who(&req("eSelf1", None, None)),
+            Ok(("p_a".into(), vec!["eSelf1".into()]))
+        );
+        assert_eq!(
+            who(&req("adult1", Some("example-clinic"), None)),
+            Ok(("p_b".into(), vec!["eSelf2".into()]))
+        );
+        // One label at two organizations, for two people: refused.
+        let both = who(&req("adult1", None, None)).unwrap_err();
+        assert!(
+            both.contains("more than one person") && both.contains("--org"),
+            "{both}"
+        );
+        // Another provider's patient id is not this one's.
+        assert!(who(&req("nobody", None, None))
+            .unwrap_err()
+            .contains("has not imported"));
+        // --person decides, and leaves the stream's patient unchecked.
+        assert_eq!(
+            who(&req("adult1", None, Some("Alex"))),
+            Ok(("p_a".into(), vec![]))
+        );
     }
 
     #[test]

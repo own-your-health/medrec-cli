@@ -654,6 +654,65 @@ fn a_local_folder_is_owner_only_and_lists_take_a_limit() {
 }
 
 #[test]
+fn a_reimport_names_the_patient_by_the_providers_label() {
+    let base = Env::new("label");
+    setup(&base);
+    let e = provider_env(&base, medrec::testdata::STREAM);
+    let first = [
+        "import",
+        "--from",
+        "fakeprov",
+        "--patient",
+        "pat-0001",
+        "--person",
+        "Robin",
+    ];
+    assert_eq!(e.ok(&first)["records_added"], 9);
+    // The synthetic header labels its patient "Robin Testperson".
+    let by_label = [
+        "import",
+        "--from",
+        "fakeprov",
+        "--patient",
+        "Robin Testperson",
+    ];
+    let again = e.ok(&by_label);
+    assert_eq!(
+        (
+            again["records_unchanged"].as_u64(),
+            again["resources_written"].as_u64()
+        ),
+        (Some(9), Some(0)),
+        "{again}"
+    );
+    // The label now answering with another patient's records: refused, and
+    // nothing written.
+    let other = medrec::testdata::STREAM.replacen(
+        "\"patient\":{\"id\":\"pat-0001\"",
+        "\"patient\":{\"id\":\"pat-0002\"",
+        1,
+    );
+    assert_ne!(other, medrec::testdata::STREAM);
+    let before = std::fs::read_to_string(e.records().join("household.json")).unwrap();
+    let e2 = provider_env(&base, &other);
+    let out = e2.run(&[
+        "--json",
+        "import",
+        "--from",
+        "fakeprov",
+        "--patient",
+        "Robin Testperson",
+    ]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("has not imported as"));
+    assert_eq!(
+        std::fs::read_to_string(e.records().join("household.json")).unwrap(),
+        before
+    );
+    let _ = std::fs::remove_dir_all(Path::new(&e.root));
+}
+
+#[test]
 fn ids_past_64_characters_and_absolute_references_are_imported() {
     // Epic's unconstrained FHIR ids run past FHIR R4's 64 characters.
     let doc = "D0c-".repeat(50);

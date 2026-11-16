@@ -145,6 +145,10 @@ pub struct Source {
     pub fhir_base: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub patient_id: Option<String>,
+    /// The provider's own name for the patient (the stream header's
+    /// `patient.label`), which its `--patient` also takes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub patient_label: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_pull: Option<String>,
 }
