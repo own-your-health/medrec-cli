@@ -215,7 +215,9 @@ ImportRun. A `forbidden` skip with a `resource_type` and neither `id` nor
 `search` says the source withheld some resources of that type (a search
 answered with an issue saying it left results out); the ones it served are
 in the stream. `medrec import` lists those types as `withheld_types`, and
-says their records may be incomplete.
+by the source's reason line as `withheld` (`[{reason, resource_types}]`);
+its human output gives each reason with its types, says their records may
+be incomplete, and counts only the other skips.
 
 The patient's birth date in the stream must match the person's in
 `household.json`, unless `--allow-birth-date-mismatch`. A source's first import needs
