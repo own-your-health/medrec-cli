@@ -1117,8 +1117,7 @@ mod tests {
         let long = format!("{at_64}A1b2-C3d4.");
         let longer = "A1b2-C3d4.".repeat(25) + "e".repeat(6).as_str();
         assert_eq!(longer.len(), 256);
-        assert_eq!(id_file(&long), id_file(&long));
-        assert!(id_file(&long).starts_with("id-") && id_file(&long).len() < 64);
+        assert_eq!(id_file(&long), "id-bf3866791d016212a22ac6d16da5b553");
         assert_ne!(id_file(&long), id_file(&format!("{at_64}x")));
         assert!(id_file(&longer).starts_with("id-"));
         assert_eq!(
