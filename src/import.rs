@@ -163,8 +163,8 @@ pub struct Report {
     pub counts: BTreeMap<String, u64>,
     pub skipped: usize,
     /// Types the source served only some of: it withheld the rest (a
-    /// `forbidden` skip naming the type, with no id or search).
-    /// [`printable`](crate::printable).
+    /// `forbidden` skip naming the type, with no id or search). Each type is
+    /// passed through [`printable`](crate::printable).
     pub withheld_types: Vec<String>,
     /// The same, by the reason line the source gave.
     pub withheld: Vec<Withheld>,
