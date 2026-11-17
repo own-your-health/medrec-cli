@@ -93,6 +93,7 @@ medrec images open <id>                         # a private copy, opened in Weas
 medrec providers list                           # provider CLIs on PATH
 medrec import --from mychart --from-profile adult1 --patient <id> --person Robin
 medrec import --from mychart --from-profile adult1 --patient <id>   # later: the FHIR id or label
+medrec import --from uhc --from-files ~/Downloads/statements --patient <id>   # downloaded files
 
 medrec timeline --person Robin --since 2026-01-01
 medrec search hemoglobin
@@ -119,6 +120,18 @@ in but lists no `login-profiles` capability in its `info --json` predates
 profiles and is refused; one whose info says no login is needed takes no
 `--from-profile`. medrec writes no provider profile name into the records
 folder.
+
+`--from-files <DIR>` imports a provider's downloaded files (statements, an
+export the portal offered) instead of signing in. medrec passes the
+directory to its export as `--files`, with no `--profile` and with the
+provider's `<PREFIX>_PROFILE` left out of its environment, so one import
+reads one source. It is for a provider whose `info --json` lists the
+`records-files` capability, and it cannot be combined with
+`--from-profile`. From files a provider gives no patient labels, so
+`--patient` is the id `<cli> patients list --files <DIR>` lists. The same
+records read through the login and from files carry the same organization
+and patient id, so they file under one source and the second import of
+them is unchanged.
 
 ### Settings
 

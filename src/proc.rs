@@ -33,6 +33,7 @@ pub struct Bounded {
     program: OsString,
     args: Vec<OsString>,
     env: Vec<(OsString, OsString)>,
+    unset: Vec<OsString>,
     timeout: Duration,
     max_stdout: usize,
 }
@@ -51,6 +52,7 @@ impl Bounded {
             program: program.as_ref().to_owned(),
             args: Vec::new(),
             env: Vec::new(),
+            unset: Vec::new(),
             timeout: Duration::from_secs(60),
             max_stdout: 16 * 1024 * 1024,
         }
@@ -74,6 +76,12 @@ impl Bounded {
     pub fn env(mut self, k: impl AsRef<OsStr>, v: impl AsRef<OsStr>) -> Self {
         self.env
             .push((k.as_ref().to_owned(), v.as_ref().to_owned()));
+        self
+    }
+
+    /// Leave `k` out of the child's environment.
+    pub fn env_remove(mut self, k: impl AsRef<OsStr>) -> Self {
+        self.unset.push(k.as_ref().to_owned());
         self
     }
 
@@ -101,6 +109,9 @@ impl Bounded {
             if k.to_string_lossy().starts_with("MEDREC_") {
                 cmd.env_remove(&k);
             }
+        }
+        for k in &self.unset {
+            cmd.env_remove(k);
         }
         for (k, v) in &self.env {
             cmd.env(k, v);
@@ -468,6 +479,18 @@ mod tests {
             .run()
             .unwrap();
         assert_eq!(r.stdout, b"[]\n");
+    }
+
+    #[test]
+    fn a_removed_variable_does_not_reach_the_child() {
+        std::env::set_var("PROC_TEST_REMOVED", "x");
+        std::env::set_var("PROC_TEST_KEPT", "y");
+        let r = Bounded::new("/bin/sh")
+            .args(["-c", "echo \"[$PROC_TEST_REMOVED][$PROC_TEST_KEPT]\""])
+            .env_remove("PROC_TEST_REMOVED")
+            .run()
+            .unwrap();
+        assert_eq!(r.stdout, b"[][y]\n");
     }
 
     #[test]

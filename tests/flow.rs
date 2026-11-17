@@ -1372,3 +1372,95 @@ fn a_reimport_under_another_name_for_the_organization_finds_the_person() {
     assert!(!args.exists(), "the export ran");
     let _ = std::fs::remove_dir_all(&e.root);
 }
+
+#[test]
+fn an_import_from_downloaded_files_runs_with_files_and_no_profile() {
+    let base = Env::new("import-files");
+    setup(&base);
+    let e = provider_env(&base, medrec::testdata::STREAM);
+    let statements = e.root.join("statements");
+    std::fs::create_dir_all(&statements).unwrap();
+    let dir = statements.to_str().unwrap();
+    // The provider's own profile variable is set, as it may be in a shell.
+    let files = [("FAKEPROV_INFO", "files"), ("FAKEPROV_PROFILE", "adult1")];
+    let import = |extra: &[&str], env: &[(&str, &str)]| {
+        let mut a = vec![
+            "import",
+            "--from",
+            "fakeprov",
+            "--patient",
+            "pat-0001",
+            "--person",
+            "Robin",
+        ];
+        a.extend_from_slice(extra);
+        said(&e.run_env(&a, env))
+    };
+    let read =
+        |f: &str| std::fs::read_to_string(e.root.join("provider").join(f)).unwrap_or_default();
+
+    // One source per import: refused as the arguments are parsed.
+    let (code, text) = import(&["--from-files", dir, "--from-profile", "adult1"], &files);
+    assert_eq!(code, Some(2), "{text}");
+    assert!(text.contains("cannot be used with"), "{text}");
+    assert_eq!(read("export-args"), "");
+    // A provider that reads no downloaded files is refused before its export.
+    let (code, text) = import(&["--from-files", dir], &[]);
+    assert_eq!(code, Some(2), "{text}");
+    assert!(text.contains("reads no downloaded files"), "{text}");
+    assert_eq!(read("export-args"), "");
+    // So is a directory that is not there.
+    let missing = e.root.join("nowhere");
+    let (code, text) = import(&["--from-files", missing.to_str().unwrap()], &files);
+    assert_eq!(code, Some(2), "{text}");
+    assert_eq!(read("export-args"), "");
+    // Neither source: the refusal names both.
+    let (code, text) = import(&[], &files);
+    assert_eq!(code, Some(2), "{text}");
+    assert!(
+        text.contains("--from-files <DIR>") && text.contains("adult1, adult2"),
+        "{text}"
+    );
+
+    // The files go to the export as --files, with no profile in its
+    // arguments or its environment.
+    let (code, text) = import(&["--from-files", dir], &files);
+    assert_eq!(code, Some(0), "{text}");
+    let args = read("export-args");
+    let absolute = std::fs::canonicalize(&statements).unwrap();
+    assert!(
+        args.contains(&format!("--files {}", absolute.display())),
+        "{args}"
+    );
+    assert!(!args.contains("--profile"), "{args}");
+    assert_eq!(read("export-env").trim(), "profile= files=");
+    // The same records through the login are unchanged, and the files
+    // variable stays out of a login export's environment.
+    let out = e.run_env(
+        &[
+            "--json",
+            "import",
+            "--from",
+            "fakeprov",
+            "--from-profile",
+            "adult1",
+            "--patient",
+            "pat-0001",
+        ],
+        &[("FAKEPROV_FILES", dir)],
+    );
+    let (code, text) = said(&out);
+    assert_eq!(code, Some(0), "{text}");
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["records_unchanged"], 9);
+    assert_eq!(read("export-env").trim(), "profile= files=");
+    e.ok(&["config", "set", "providers", "fakeprov"]);
+    let out = e.run_env(&["--json", "providers", "list"], &files);
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(v["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|p| p["cli"] == "fakeprov" && p["records_files"] == true));
+    let _ = std::fs::remove_dir_all(&e.root);
+}
