@@ -371,16 +371,17 @@ fn config_round_trips() {
             .code(),
         Some(2)
     );
-    assert!(run(&[
+    let set = json_of(&run(&[
+        "--json",
         "--profile",
         "home",
         "config",
         "set",
         "folder",
-        "gdrive:Medical Records"
-    ])
-    .status
-    .success());
+        "gdrive:Medical Records",
+    ]));
+    assert_eq!(set["profile"], "home");
+    assert_eq!(set["folder"], "gdrive:Medical Records");
     let v = json_of(&run(&["--json", "config", "show"]));
     assert_eq!(v["viewer"], "none");
     assert!(v.get("folder").is_none(), "{v}");

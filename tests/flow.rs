@@ -1261,6 +1261,20 @@ fn profiles_keep_records_folders_apart_and_the_old_folder_moves_into_one() {
     assert!(text.contains("medrec profiles migrate <NAME>"), "{text}");
     let v = e.ok(&["profiles", "migrate", "home"]);
     assert_eq!(v["status"], "migrated");
+    // The file as it was is kept, for a medrec from before profiles.
+    let backup = std::path::PathBuf::from(v["backup"].as_str().unwrap());
+    assert_eq!(
+        backup,
+        e.root.join("config/medrec/config.json.pre-profiles")
+    );
+    let was: Value = serde_json::from_str(&std::fs::read_to_string(&backup).unwrap()).unwrap();
+    assert_eq!(was, old);
+    // With a profile named, config show gives its settings where they were.
+    let shown = e.ok(&["config", "show"]);
+    assert_eq!(
+        (&shown["profile"], &shown["folder"]),
+        (&"home".into(), &e.records().to_str().unwrap().into())
+    );
     assert_eq!(
         e.ok(&["people", "list"])["items"].as_array().unwrap().len(),
         2

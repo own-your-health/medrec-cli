@@ -1415,8 +1415,13 @@ fn config_cmd(cli: &Cli, cmd: &ConfigCmd, store: &ConfigStore) -> Result<(), Cli
             );
         }
         ConfigCmd::Show => {
-            let cfg = Config::load(store)?;
-            output::emit_one(json, "config", to_value(&cfg));
+            let mut cfg = Config::load(store)?;
+            let named = cli.profile.is_some()
+                || std::env::var(medrec::config::PROFILE_ENV).is_ok_and(|v| !v.is_empty());
+            if named {
+                cfg.select(cli.profile.as_deref())?;
+            }
+            output::emit_one(json, "config", config_view(&cfg));
         }
         ConfigCmd::Set { key, value } => {
             let mut cfg = config_for(cli, store, key)?;
@@ -1448,8 +1453,26 @@ fn save_config(store: &ConfigStore, mut cfg: Config, json: bool) -> Result<(), C
         cfg.keep_active()?;
     }
     store.save(&cfg)?;
-    output::emit_one(json, "config", to_value(&cfg));
+    output::emit_one(json, "config", config_view(&cfg));
     Ok(())
+}
+
+/// `config show|set|unset`'s document: the file (this machine's settings,
+/// and `profiles.<NAME>` for each profile's), and with a profile selected,
+/// `profile` and that profile's `folder`, `mount`, `inbox` and `me` at the
+/// top, where they were before profiles.
+fn config_view(cfg: &Config) -> Value {
+    let mut v = to_value(cfg);
+    if let (Some(name), Some(top)) = (&cfg.profile, v.as_object_mut()) {
+        for key in medrec::config::PROFILE_KEYS {
+            top.remove(*key);
+        }
+        if let Value::Object(active) = to_value(&cfg.active) {
+            top.extend(active);
+        }
+        top.insert("profile".into(), json!(name));
+    }
+    v
 }
 
 fn profiles_cmd(cli: &Cli, cmd: &ProfilesCmd, store: &ConfigStore) -> Result<(), CliError> {
@@ -1535,28 +1558,31 @@ fn profiles_cmd(cli: &Cli, cmd: &ProfilesCmd, store: &ConfigStore) -> Result<(),
         }
         ProfilesCmd::Migrate { name } => {
             let moved = cfg.migrate(name)?;
+            let mut v = json!({ "name": name, "status": "nothing-to-migrate" });
             if moved {
+                // medrec before 0.2.0 reads no profiles and would save its
+                // own settings over them, so the file as it was is kept.
+                let path = store.path()?;
+                let backup = path.with_file_name("config.json.pre-profiles");
+                if !backup.exists() {
+                    std::fs::copy(&path, &backup).map_err(|e| {
+                        CliError::Other(format!("keeping {}: {e}", backup.display()))
+                    })?;
+                }
                 store.save(&cfg)?;
+                v["status"] = json!("migrated");
+                v["backup"] = json!(backup.display().to_string());
             }
-            let status = if moved {
-                "migrated"
-            } else {
-                "nothing-to-migrate"
-            };
-            output::emit(
-                json,
-                "profile",
-                json!({ "name": name, "status": status }),
-                |_| {
-                    if moved {
-                        println!("moved this machine's records folder into profile {name}")
-                    } else {
-                        println!(
-                            "nothing to move: this machine kept no records folder before profiles"
-                        )
-                    }
-                },
-            );
+            output::emit(json, "profile", v, |v| {
+                if moved {
+                    println!(
+                        "moved this machine's records folder into profile {name}; the file as it was is {}",
+                        v["backup"].as_str().unwrap_or("")
+                    )
+                } else {
+                    println!("nothing to move: this machine kept no records folder before profiles")
+                }
+            });
         }
     }
     Ok(())

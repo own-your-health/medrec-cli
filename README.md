@@ -67,6 +67,16 @@ medrec profiles migrate <NAME>                  # the folder this machine used b
 (its top-level `folder`, `mount`, `inbox` and `me`) into the profile, adding
 it when it is new. It is local: no network.
 
+Upgrading to 0.2.0: run `medrec profiles migrate <NAME>` once. It keeps the
+file as it was beside it, as `config.json.pre-profiles`. medrec before 0.2.0
+reads no profiles, and a `config set` or `init` from it would save its own
+settings over them, so after migrating, a downgrade starts by copying that
+file back over `config.json`. `config show --json` prints the file: this
+machine's settings at the top and each profile's under `profiles.<NAME>`.
+With a profile named, it and `config set|unset` of a profile key also give
+`profile` and that profile's `folder`, `mount`, `inbox` and `me` at the
+top, where they were before 0.2.0.
+
 ## Use
 
 ```sh
