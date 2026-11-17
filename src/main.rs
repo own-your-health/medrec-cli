@@ -310,8 +310,8 @@ struct ImportArgs {
     #[arg(long)]
     from: String,
     /// Which of the provider's logins to import through: one of
-    /// `<cli> profiles list`. Required for a provider that signs in, and
-    /// never taken from the environment.
+    /// `<cli> profiles list`. Required for a provider that signs in, unless
+    /// `--from-files` is given; never taken from the environment.
     #[arg(long, value_name = "NAME", value_parser = profile_name)]
     from_profile: Option<ProfileName>,
     /// Import the provider's downloaded files in DIR instead of signing in:

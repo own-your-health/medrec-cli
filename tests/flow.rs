@@ -1399,9 +1399,11 @@ fn an_import_from_downloaded_files_runs_with_files_and_no_profile() {
     let read =
         |f: &str| std::fs::read_to_string(e.root.join("provider").join(f)).unwrap_or_default();
 
-    // One source per import.
+    // One source per import: refused as the arguments are parsed.
     let (code, text) = import(&["--from-files", dir, "--from-profile", "adult1"], &files);
     assert_eq!(code, Some(2), "{text}");
+    assert!(text.contains("cannot be used with"), "{text}");
+    assert_eq!(read("export-args"), "");
     // A provider that reads no downloaded files is refused before its export.
     let (code, text) = import(&["--from-files", dir], &[]);
     assert_eq!(code, Some(2), "{text}");
@@ -1431,18 +1433,27 @@ fn an_import_from_downloaded_files_runs_with_files_and_no_profile() {
         "{args}"
     );
     assert!(!args.contains("--profile"), "{args}");
-    assert_eq!(read("export-env").trim(), "");
-    // The same records through the login are unchanged.
-    let v = e.ok(&[
-        "import",
-        "--from",
-        "fakeprov",
-        "--from-profile",
-        "adult1",
-        "--patient",
-        "pat-0001",
-    ]);
+    assert_eq!(read("export-env").trim(), "profile= files=");
+    // The same records through the login are unchanged, and the files
+    // variable stays out of a login export's environment.
+    let out = e.run_env(
+        &[
+            "--json",
+            "import",
+            "--from",
+            "fakeprov",
+            "--from-profile",
+            "adult1",
+            "--patient",
+            "pat-0001",
+        ],
+        &[("FAKEPROV_FILES", dir)],
+    );
+    let (code, text) = said(&out);
+    assert_eq!(code, Some(0), "{text}");
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(v["records_unchanged"], 9);
+    assert_eq!(read("export-env").trim(), "profile= files=");
     e.ok(&["config", "set", "providers", "fakeprov"]);
     let out = e.run_env(&["--json", "providers", "list"], &files);
     let v: Value = serde_json::from_slice(&out.stdout).unwrap();

@@ -187,7 +187,7 @@ pub fn write_dicom(dicom: &Path) {
 /// and `adult2`; an export that signs in without one of them is exit 2, as a
 /// provider's is, and `--files <DIR>` (with `files`) needs a directory and
 /// no `--profile`. It writes the export's arguments to `export-args`, and
-/// the `FAKEPROV_PROFILE` it saw to `export-env`.
+/// the `FAKEPROV_PROFILE` and `FAKEPROV_FILES` it saw to `export-env`.
 pub fn write_provider(provider: &Path, stream: &str) -> PathBuf {
     std::fs::create_dir_all(provider).unwrap();
     std::fs::write(provider.join("synthetic.ndjson"), stream).unwrap();
@@ -223,7 +223,7 @@ case "$1" in
   profiles) cat "$d/fakeprov-profiles.json" ;;
   records)
     printf '%s\n' "$*" > "$d/export-args"
-    printf '%s\n' "${{FAKEPROV_PROFILE:-}}" > "$d/export-env"
+    printf 'profile=%s files=%s\n' "${{FAKEPROV_PROFILE:-}}" "${{FAKEPROV_FILES:-}}" > "$d/export-env"
     profile=''; files=''; prev=''
     for a in "$@"; do
       [ "$prev" = --profile ] && profile="$a"

@@ -482,6 +482,18 @@ mod tests {
     }
 
     #[test]
+    fn a_removed_variable_does_not_reach_the_child() {
+        std::env::set_var("PROC_TEST_REMOVED", "x");
+        std::env::set_var("PROC_TEST_KEPT", "y");
+        let r = Bounded::new("/bin/sh")
+            .args(["-c", "echo \"[$PROC_TEST_REMOVED][$PROC_TEST_KEPT]\""])
+            .env_remove("PROC_TEST_REMOVED")
+            .run()
+            .unwrap();
+        assert_eq!(r.stdout, b"[][y]\n");
+    }
+
+    #[test]
     fn a_missing_program_is_a_usage_error() {
         let err = Bounded::new("medrec-no-such-tool").run().unwrap_err();
         assert_eq!(err.exit_code(), 2);
