@@ -341,8 +341,7 @@ pub fn run(
     req: &Request,
 ) -> Result<Report, CliError> {
     let mut household = folder.household()?;
-    let (person, known_patients) = resolve_person(&household, req)?;
-    let person = person.clone();
+    let who = who(&household, req)?;
     let max_binary = cfg.max_file_bytes();
 
     let mut cmd = Bounded::new(&provider.path)
@@ -400,6 +399,10 @@ pub fn run(
         binaries,
         skipped: skipped_large,
     } = streamed;
+    let (person, known_patients) = match who {
+        Who::Known(person, known) => (*person, known),
+        Who::ByStream(elsewhere) => by_stream(&household, &elsewhere, &header, req)?,
+    };
 
     // A re-import without --person files under whoever this patient was
     // filed under before, so the stream must be about a patient filed there.
@@ -617,6 +620,91 @@ fn withheld(skipped: &[Skip]) -> Vec<Withheld> {
         .collect()
 }
 
+/// Whose records, as far as the request says before the export runs.
+enum Who {
+    /// The person, and without `--person` the patient ids filed for them.
+    Known(Box<Person>, Vec<String>),
+    /// `--org` names no organization this patient was imported from, but the
+    /// CLI did import them from another: possibly the same one under a name
+    /// the provider also accepts (`--org sandbox` for its id). The stream
+    /// header's organization and patient ids, which a source is filed under,
+    /// decide among these.
+    ByStream(Vec<Source>),
+}
+
+fn who(h: &Household, req: &Request) -> Result<Who, CliError> {
+    if req.person.is_none() && req.org.is_some() && matching(h, req, true).is_empty() {
+        let elsewhere: Vec<Source> = matching(h, req, false).into_iter().cloned().collect();
+        if !elsewhere.is_empty() {
+            return Ok(Who::ByStream(elsewhere));
+        }
+    }
+    let (person, known) = resolve_person(h, req)?;
+    Ok(Who::Known(Box::new(person.clone()), known))
+}
+
+/// [`Who::ByStream`], once the stream's header is read: the source filed
+/// under its organization and patient ids. Nothing is written yet, so a
+/// refusal leaves the folder as it was.
+fn by_stream(
+    h: &Household,
+    elsewhere: &[Source],
+    header: &Header,
+    req: &Request,
+) -> Result<(Person, Vec<String>), CliError> {
+    let hits: Vec<&Source> = elsewhere
+        .iter()
+        .filter(|s| {
+            s.organization.as_deref() == Some(header.organization.id.as_str())
+                && s.patient_id.as_deref() == Some(header.patient.id.as_str())
+        })
+        .collect();
+    let Some(first) = hits.first() else {
+        return Err(CliError::Usage(format!(
+            "medrec has not imported patient `{}` from {} at `{}` before; name whose records \
+             they are with --person. Nothing was written.",
+            req.patient,
+            req.from,
+            crate::printable(&header.organization.id)
+        )));
+    };
+    if hits.iter().any(|s| s.person != first.person) {
+        return Err(CliError::Usage(format!(
+            "patient `{}` from {} was imported for more than one person; name whose records \
+             they are with --person. Nothing was written.",
+            req.patient, req.from
+        )));
+    }
+    let person = h.person(&first.person).ok_or_else(|| {
+        CliError::Other(format!("source points at unknown person {}", first.person))
+    })?;
+    Ok((person.clone(), vec![header.patient.id.clone()]))
+}
+
+/// The sources this CLI filed `--patient` under: by patient id, else by
+/// label; under `--org` when `by_org` and it is given.
+fn matching<'a>(h: &'a Household, req: &Request, by_org: bool) -> Vec<&'a Source> {
+    let from_here = |s: &&Source| {
+        s.cli.as_deref() == Some(req.from.as_str())
+            && (!by_org || req.org.is_none() || s.organization == req.org)
+    };
+    let patient = Some(req.patient.as_str());
+    let by_id: Vec<&Source> = h
+        .sources
+        .iter()
+        .filter(from_here)
+        .filter(|s| s.patient_id.as_deref() == patient)
+        .collect();
+    if !by_id.is_empty() {
+        return by_id;
+    }
+    h.sources
+        .iter()
+        .filter(from_here)
+        .filter(|s| s.patient_label.as_deref() == patient)
+        .collect()
+}
+
 /// Whose records: `--person`, or the person this patient was imported for
 /// before. `--patient` is whatever the provider takes: the patient's FHIR id,
 /// or the provider's own label for them, which its stream header carries.
@@ -629,25 +717,7 @@ fn resolve_person<'a>(
     if let Some(q) = &req.person {
         return Ok((people::resolve(h, q)?, Vec::new()));
     }
-    let from_here = |s: &&Source| {
-        s.cli.as_deref() == Some(req.from.as_str())
-            && (req.org.is_none() || s.organization == req.org)
-    };
-    let patient = Some(req.patient.as_str());
-    let mut matched: Vec<&Source> = h
-        .sources
-        .iter()
-        .filter(from_here)
-        .filter(|s| s.patient_id.as_deref() == patient)
-        .collect();
-    if matched.is_empty() {
-        matched = h
-            .sources
-            .iter()
-            .filter(from_here)
-            .filter(|s| s.patient_label.as_deref() == patient)
-            .collect();
-    }
+    let matched = matching(h, req, true);
     let Some(first) = matched.first() else {
         return Err(CliError::Usage(format!(
             "medrec has not imported patient `{}` from {} before; name whose records they are \
@@ -1556,6 +1626,30 @@ mod tests {
             who(&req("adult1", None, Some("Alex"))),
             Ok(("p_a".into(), vec![]))
         );
+
+        // An --org no source was filed under, for a patient filed under
+        // another (a name the provider also accepts): the stream decides.
+        let alias = req("eSelf1", Some("health"), None);
+        let Ok(Who::ByStream(elsewhere)) = super::who(&h, &alias) else {
+            panic!("an unknown --org for a known patient waits for the stream")
+        };
+        let header = |org: &str, patient: &str| -> Header {
+            let line = crate::testdata::STREAM.lines().next().unwrap();
+            let mut v: Value = serde_json::from_str(line).unwrap();
+            v["organization"]["id"] = org.into();
+            v["patient"]["id"] = patient.into();
+            serde_json::from_value(v).unwrap()
+        };
+        let picked = by_stream(&h, &elsewhere, &header("example-health", "eSelf1"), &alias)
+            .map(|(p, known)| (p.id, known));
+        assert_eq!(picked.unwrap(), ("p_a".into(), vec!["eSelf1".into()]));
+        // The stream's organization or patient is not one filed: refused.
+        for (org, patient) in [("example-clinic", "eSelf1"), ("example-health", "eSelf9")] {
+            let e = by_stream(&h, &elsewhere, &header(org, patient), &alias).unwrap_err();
+            assert!(e.to_string().contains("Nothing was written"), "{e}");
+        }
+        // A patient never filed from this CLI still fails before the export.
+        assert!(super::who(&h, &req("nobody", Some("health"), None)).is_err());
     }
 
     #[test]

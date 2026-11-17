@@ -12,7 +12,7 @@ each place, and what medrec does and does not do with them.
 | `~/.config/rclone/rclone.conf` | rclone's OAuth token for that Google account | Anyone who can read the file |
 | `~/.cache/medrec/` (or `$XDG_CACHE_HOME/medrec`) | The read cache (`household.json`, `index.json`, `text.json` and files read recently) and opened copies (`open/`, removed after 12 hours) | This Mac's user; mode 0700 directories and 0600 files |
 | A private temporary directory per command | A document or study being staged before upload | This Mac's user; removed when the command ends |
-| `~/.config/medrec/config.json` | Each profile's records folder location and settings, and this machine's settings; no secret. `config.json.pre-profiles` beside it is the file as it was before `profiles migrate` | This Mac's user |
+| `~/.config/medrec/config.json` | Each profile's records folder location and settings, and this machine's settings; no secret. Written owner-only (0600). `config.json.pre-profiles` beside it, also 0600, is the file as it was before `profiles migrate` | This Mac's user |
 | A records folder or backup on a local disk (`init <dir>`, `backup --to <dir>`) | Everything the Drive folder holds | This Mac's user: medrec creates its folders 0700 and its files 0600, and `medrec doctor` warns when anything under the records folder can be read by other users |
 | A study exported with `images export` | That study's DICOM files | This Mac's user; 0700 folders and 0600 files |
 
