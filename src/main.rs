@@ -1458,21 +1458,11 @@ fn save_config(store: &ConfigStore, mut cfg: Config, json: bool) -> Result<(), C
 }
 
 /// Copy `from` to `to`, readable by this user only: the config names
-/// records folders and a person id.
+/// records folders and a person id. A failed write leaves no partial copy.
 fn keep_owner_only(from: &std::path::Path, to: &std::path::Path) -> Result<(), CliError> {
-    use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
-    let fail = |e: std::io::Error| CliError::Other(format!("keeping {}: {e}", to.display()));
-    let body = std::fs::read(from).map_err(fail)?;
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(to)
-        .map_err(fail)?;
-    file.write_all(&body)
-        .and_then(|_| file.sync_all())
-        .map_err(fail)
+    let body = std::fs::read(from)
+        .map_err(|e| CliError::Other(format!("reading {}: {e}", from.display())))?;
+    medrec::write_private(to, &body)
 }
 
 /// `config show|set|unset`'s document: the file (this machine's settings,
