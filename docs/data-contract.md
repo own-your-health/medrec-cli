@@ -195,7 +195,11 @@ also reads downloaded files lists `records-files` (medical-common DESIGN
 directory made absolute) and no `--profile`, with `<PREFIX>_PROFILE`
 removed from its environment, as `--from-profile` removes `<PREFIX>_FILES`.
 `--from-files` for a provider without the capability, or for a path that is
-not a directory, is exit 2 before the export runs. The provider's
+not a directory, is exit 2 before the export runs. From files the
+provider lists no patient labels, so `<id>` is the `PatientContext.id` of
+`<cli> patients list --files <dir>`; a provider with both sources gives a
+patient the same `organization` and `patient.id` on each, so both file
+under one source. The provider's
 profile name is never written into the records folder: a source is the CLI,
 the organization and the patient, whichever login read it.
 `<id>` is whatever the provider's `--patient` takes: the patient's FHIR id,

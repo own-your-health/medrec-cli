@@ -32,10 +32,7 @@ use md5::Md5;
 use pk_cli_config::profile::{ProfileList, ProfileName};
 use pk_cli_core::CliError;
 use pk_med_records::LOGIN_PROFILES;
-
-/// The capability of a provider whose `records export --files <DIR>` reads
-/// downloaded files instead of a login (medical-common DESIGN §1.1).
-pub const RECORDS_FILES: &str = "records-files";
+pub use pk_med_records::RECORDS_FILES;
 use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};

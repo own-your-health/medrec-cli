@@ -127,8 +127,11 @@ directory to its export as `--files`, with no `--profile` and with the
 provider's `<PREFIX>_PROFILE` left out of its environment, so one import
 reads one source. It is for a provider whose `info --json` lists the
 `records-files` capability, and it cannot be combined with
-`--from-profile`. The same records read through the login and from files
-carry the same ids, so the second import of them is unchanged.
+`--from-profile`. From files a provider gives no patient labels, so
+`--patient` is the id `<cli> patients list --files <DIR>` lists. The same
+records read through the login and from files carry the same organization
+and patient id, so they file under one source and the second import of
+them is unchanged.
 
 ### Settings
 
