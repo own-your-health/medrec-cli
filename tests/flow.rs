@@ -21,7 +21,9 @@ impl Env {
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         let path = std::env::var("PATH").unwrap_or_default();
-        Env { root, path }
+        let e = Env { root, path };
+        e.ok(&["profiles", "add", "home"]);
+        e
     }
 
     fn run(&self, args: &[&str]) -> Output {
@@ -34,6 +36,7 @@ impl Env {
             .env("XDG_CACHE_HOME", self.root.join("cache"))
             .env("HOME", &self.root)
             .env("PATH", &self.path)
+            .env("MEDREC_PROFILE", "home")
             .env_remove("NO_COLOR");
         for (k, v) in env {
             c.env(k, v);
@@ -318,9 +321,17 @@ fn an_import_files_records_and_documents_and_is_idempotent() {
 
     // Whose records: required the first time, and the birth date must agree.
     assert_eq!(
-        e.run(&["import", "--from", "fakeprov", "--patient", "pat-0001"])
-            .status
-            .code(),
+        e.run(&[
+            "import",
+            "--from",
+            "fakeprov",
+            "--from-profile",
+            "adult1",
+            "--patient",
+            "pat-0001"
+        ])
+        .status
+        .code(),
         Some(2)
     );
     assert_eq!(
@@ -328,6 +339,8 @@ fn an_import_files_records_and_documents_and_is_idempotent() {
             "import",
             "--from",
             "fakeprov",
+            "--from-profile",
+            "adult1",
             "--patient",
             "pat-0001",
             "--person",
@@ -341,6 +354,8 @@ fn an_import_files_records_and_documents_and_is_idempotent() {
         "import",
         "--from",
         "fakeprov",
+        "--from-profile",
+        "adult1",
         "--patient",
         "pat-0001",
         "--person",
@@ -367,7 +382,15 @@ fn an_import_files_records_and_documents_and_is_idempotent() {
             == 1
     );
 
-    let again = e.ok(&["import", "--from", "fakeprov", "--patient", "pat-0001"]);
+    let again = e.ok(&[
+        "import",
+        "--from",
+        "fakeprov",
+        "--from-profile",
+        "adult1",
+        "--patient",
+        "pat-0001",
+    ]);
     assert_eq!(
         (
             again["records_unchanged"].as_u64(),
@@ -385,7 +408,15 @@ fn an_import_files_records_and_documents_and_is_idempotent() {
             "\"id\":\"obs-0001\",\"meta\":{\"versionId\":\"2\"",
         );
     let e2 = provider_env(&base, &changed);
-    let upd = e2.ok(&["import", "--from", "fakeprov", "--patient", "pat-0001"]);
+    let upd = e2.ok(&[
+        "import",
+        "--from",
+        "fakeprov",
+        "--from-profile",
+        "adult1",
+        "--patient",
+        "pat-0001",
+    ]);
     assert_eq!(
         (
             upd["records_updated"].as_u64(),
@@ -408,9 +439,17 @@ fn an_import_files_records_and_documents_and_is_idempotent() {
     let e3 = provider_env(&base, &cut);
     let before = std::fs::read_to_string(e.records().join("Robin Testperson/index.json")).unwrap();
     assert_eq!(
-        e3.run(&["import", "--from", "fakeprov", "--patient", "pat-0001"])
-            .status
-            .code(),
+        e3.run(&[
+            "import",
+            "--from",
+            "fakeprov",
+            "--from-profile",
+            "adult1",
+            "--patient",
+            "pat-0001"
+        ])
+        .status
+        .code(),
         Some(5)
     );
     // A trailer that says the export was not complete: refused too.
@@ -418,9 +457,17 @@ fn an_import_files_records_and_documents_and_is_idempotent() {
     assert_ne!(partial, changed);
     let e4 = provider_env(&base, &partial);
     assert_eq!(
-        e4.run(&["import", "--from", "fakeprov", "--patient", "pat-0001"])
-            .status
-            .code(),
+        e4.run(&[
+            "import",
+            "--from",
+            "fakeprov",
+            "--from-profile",
+            "adult1",
+            "--patient",
+            "pat-0001"
+        ])
+        .status
+        .code(),
         Some(5)
     );
     let auth = e2.run_env(
@@ -428,6 +475,8 @@ fn an_import_files_records_and_documents_and_is_idempotent() {
             "import",
             "--from",
             "fakeprov",
+            "--from-profile",
+            "adult1",
             "--patient",
             "pat-0001",
             "--org",
@@ -442,7 +491,15 @@ fn an_import_files_records_and_documents_and_is_idempotent() {
     // A provider that names its own sign-in command: that one, once.
     let own = "fakeprov auth login --org example-health --label robin";
     let auth = e2.run_env(
-        &["import", "--from", "fakeprov", "--patient", "pat-0001"],
+        &[
+            "import",
+            "--from",
+            "fakeprov",
+            "--from-profile",
+            "adult1",
+            "--patient",
+            "pat-0001",
+        ],
         &[
             ("FAKEPROV_EXIT", "3"),
             (
@@ -681,6 +738,8 @@ fn a_reimport_names_the_patient_by_the_providers_label() {
         "import",
         "--from",
         "fakeprov",
+        "--from-profile",
+        "adult1",
         "--patient",
         "pat-0001",
         "--person",
@@ -692,6 +751,8 @@ fn a_reimport_names_the_patient_by_the_providers_label() {
         "import",
         "--from",
         "fakeprov",
+        "--from-profile",
+        "adult1",
         "--patient",
         "Robin Testperson",
     ];
@@ -719,6 +780,8 @@ fn a_reimport_names_the_patient_by_the_providers_label() {
         "import",
         "--from",
         "fakeprov",
+        "--from-profile",
+        "adult1",
         "--patient",
         "Robin Testperson",
     ]);
@@ -757,6 +820,8 @@ fn ids_past_64_characters_and_absolute_references_are_imported() {
         "import",
         "--from",
         "fakeprov",
+        "--from-profile",
+        "adult1",
         "--patient",
         "pat-0001",
         "--person",
@@ -833,6 +898,8 @@ fn the_birth_date_checks_have_their_own_flag() {
         "import",
         "--from",
         "fakeprov",
+        "--from-profile",
+        "adult1",
         "--patient",
         "pat-0001",
         "--person",
@@ -907,6 +974,8 @@ fn a_type_the_source_withheld_is_reported_as_possibly_incomplete() {
         "import",
         "--from",
         "fakeprov",
+        "--from-profile",
+        "adult1",
         "--patient",
         "pat-0001",
         "--person",
@@ -992,6 +1061,8 @@ fn a_reports_and_a_medias_binary_are_filed_with_their_date_and_title() {
         "import",
         "--from",
         "fakeprov",
+        "--from-profile",
+        "adult1",
         "--patient",
         "pat-0001",
         "--person",
@@ -1040,5 +1111,202 @@ fn a_reports_and_a_medias_binary_are_filed_with_their_date_and_title() {
             "Media"
         ]
     );
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
+/// `medrec <args>` output, stdout and stderr together, and its exit code.
+fn said(out: &Output) -> (Option<i32>, String) {
+    (
+        out.status.code(),
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        ),
+    )
+}
+
+#[test]
+fn an_import_runs_through_the_providers_profile() {
+    let base = Env::new("import-profile");
+    setup(&base);
+    let e = provider_env(&base, medrec::testdata::STREAM);
+    let import = |extra: &[&str], env: &[(&str, &str)]| {
+        let mut a = vec![
+            "import",
+            "--from",
+            "fakeprov",
+            "--patient",
+            "pat-0001",
+            "--person",
+            "Robin",
+        ];
+        a.extend_from_slice(extra);
+        said(&e.run_env(&a, env))
+    };
+    let args = || std::fs::read_to_string(e.root.join("provider/export-args")).unwrap_or_default();
+
+    // No --from-profile: exit 2 listing the provider's profiles, before the
+    // export runs.
+    let (code, text) = import(&[], &[]);
+    assert_eq!(code, Some(2), "{text}");
+    assert!(text.contains("--from-profile <NAME>"), "{text}");
+    assert!(
+        text.contains("fakeprov's profiles: adult1, adult2"),
+        "{text}"
+    );
+    assert_eq!(args(), "");
+    // A name that is not a profile name is refused as clap parses it.
+    assert_eq!(import(&["--from-profile", "Adult1"], &[]).0, Some(2));
+    // The provider refuses a profile it does not have.
+    let (code, text) = import(&["--from-profile", "adult3"], &[]);
+    assert_eq!(code, Some(2), "{text}");
+    assert!(text.contains("adult1, adult2"), "{text}");
+
+    // The named profile goes to the export as --profile.
+    let v = e.ok(&[
+        "import",
+        "--from",
+        "fakeprov",
+        "--from-profile",
+        "adult2",
+        "--patient",
+        "pat-0001",
+        "--person",
+        "Robin",
+    ]);
+    assert_eq!(v["records_added"], 9);
+    assert!(args().contains("--profile adult2"), "{}", args());
+    // The provider's profile name stays in this machine's config: none of
+    // it reaches the records folder.
+    let mut stack = vec![e.records()];
+    while let Some(d) = stack.pop() {
+        for entry in std::fs::read_dir(&d).unwrap() {
+            let p = entry.unwrap().path();
+            if p.is_dir() {
+                stack.push(p);
+            } else if let Ok(t) = std::fs::read_to_string(&p) {
+                assert!(!t.contains("adult2"), "{}", p.display());
+            }
+        }
+    }
+
+    // A provider that signs in without listing login-profiles predates them:
+    // refused rather than run unprofiled.
+    let (code, text) = import(
+        &["--from-profile", "adult1"],
+        &[("FAKEPROV_INFO", "unprofiled")],
+    );
+    assert_eq!(code, Some(2), "{text}");
+    assert!(text.contains("predates login profiles"), "{text}");
+    let list = e.ok(&["config", "set", "providers", "fakeprov"]);
+    assert!(list.is_object());
+    let out = e.run_env(
+        &["--json", "providers", "list"],
+        &[("FAKEPROV_INFO", "unprofiled")],
+    );
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    let row = v["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["cli"] == "fakeprov")
+        .unwrap()
+        .clone();
+    assert_eq!(
+        (&row["status"], &row["login_profiles"]),
+        (&"outdated".into(), &false.into())
+    );
+
+    // One that needs no login takes no profile, and gets none.
+    let no_login = [("FAKEPROV_INFO", "no-login")];
+    assert_eq!(import(&["--from-profile", "adult1"], &no_login).0, Some(2));
+    let (code, text) = import(&[], &no_login);
+    assert_eq!(code, Some(0), "{text}");
+    assert!(!args().contains("--profile"), "{}", args());
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
+#[test]
+fn profiles_keep_records_folders_apart_and_the_old_folder_moves_into_one() {
+    let e = Env::new("profiles");
+    setup(&e);
+    let second = e.root.join("second");
+    e.ok(&["profiles", "add", "away"]);
+    let away = [("MEDREC_PROFILE", "away")];
+    let out = e.run_env(&["--json", "init", second.to_str().unwrap()], &away);
+    assert!(out.status.success(), "{}", said(&out).1);
+    let out = e.run_env(&["--json", "people", "list"], &away);
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["items"].as_array().unwrap().len(), 0);
+    assert_eq!(
+        e.ok(&["people", "list"])["items"].as_array().unwrap().len(),
+        2
+    );
+    // --profile wins over the environment.
+    let out = e.run_env(&["--json", "--profile", "home", "people", "list"], &away);
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["items"].as_array().unwrap().len(), 2);
+    // Without either, nothing runs.
+    let (code, text) = said(&e.run_env(&["people", "list"], &[("MEDREC_PROFILE", "")]));
+    assert_eq!(code, Some(2), "{text}");
+    assert!(text.contains("configured: away, home"), "{text}");
+
+    // A config from before profiles: one top-level records folder.
+    let config = e.root.join("config/medrec/config.json");
+    let old = serde_json::json!({ "folder": e.records().to_str().unwrap(), "viewer": "none" });
+    std::fs::write(&config, old.to_string()).unwrap();
+    let (code, text) = said(&e.run_env(&["people", "list"], &[("MEDREC_PROFILE", "")]));
+    assert_eq!(code, Some(2), "{text}");
+    assert!(text.contains("medrec profiles migrate <NAME>"), "{text}");
+    let v = e.ok(&["profiles", "migrate", "home"]);
+    assert_eq!(v["status"], "migrated");
+    // The file as it was is kept, for a medrec from before profiles.
+    let backup = std::path::PathBuf::from(v["backup"].as_str().unwrap());
+    assert_eq!(
+        backup,
+        e.root.join("config/medrec/config.json.pre-profiles")
+    );
+    let was: Value = serde_json::from_str(&std::fs::read_to_string(&backup).unwrap()).unwrap();
+    assert_eq!(was, old);
+    // With a profile named, config show gives its settings where they were.
+    let shown = e.ok(&["config", "show"]);
+    assert_eq!(
+        (&shown["profile"], &shown["folder"]),
+        (&"home".into(), &e.records().to_str().unwrap().into())
+    );
+    assert_eq!(
+        e.ok(&["people", "list"])["items"].as_array().unwrap().len(),
+        2
+    );
+    let kept: Value = serde_json::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
+    assert!(kept.get("folder").is_none(), "{kept}");
+    assert_eq!(kept["viewer"], "none");
+    assert_eq!(
+        kept["profiles"]["home"]["folder"],
+        e.records().to_str().unwrap()
+    );
+    assert_eq!(
+        e.ok(&["profiles", "migrate", "home"])["status"],
+        "nothing-to-migrate"
+    );
+    // Migrating into a profile with another records folder is refused.
+    std::fs::write(
+        &config,
+        serde_json::json!({
+            "folder": second.to_str().unwrap(),
+            "profiles": { "home": { "folder": e.records().to_str().unwrap() } }
+        })
+        .to_string(),
+    )
+    .unwrap();
+    assert_eq!(
+        e.run(&["profiles", "migrate", "home"]).status.code(),
+        Some(2)
+    );
+    // Removing a profile leaves its records folder as it is.
+    e.ok(&["profiles", "migrate", "away"]);
+    e.ok(&["profiles", "remove", "away", "--force"]);
+    assert!(second.join("household.json").exists());
     let _ = std::fs::remove_dir_all(&e.root);
 }

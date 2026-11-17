@@ -34,6 +34,8 @@ copy a study.
 
 ```sh
 rclone config                                   # a Drive remote, e.g. `gdrive`
+medrec profiles add home                        # one profile per records folder
+export MEDREC_PROFILE=home                      # or --profile home on each command
 medrec init "gdrive:Medical Records"            # creates the folder layout
 medrec people add "Alex Example" --birth-date 1990-01-01 --adult
 medrec people add "Robin Example" --birth-date 2020-02-02 --guardian Alex
@@ -43,6 +45,37 @@ medrec doctor                                   # FileVault, rclone, free space,
 `init` adopts an existing medrec folder, and refuses a folder that holds
 other files unless given `--allow-other-files`. The folder's layout and every file format
 are in [docs/data-contract.md](docs/data-contract.md).
+
+### Profiles
+
+A records folder is a login (its rclone remote), so it belongs to a profile,
+named by the household and kept in this machine's config only. Every command
+that reaches a records folder needs `--profile <NAME>`, or `MEDREC_PROFILE`;
+there is no default, and a lone profile is never picked: without one the
+command is exit 2 and lists the configured profiles. `profiles`, `providers
+list`, `config path|show`, a machine setting's `config set|unset`, `cache
+clear`, `auth status`, `info`, `completions` and `self-update` take none.
+
+```sh
+medrec profiles list                            # profile-list/v1, with each records folder
+medrec profiles add <NAME>
+medrec profiles remove <NAME>                   # this machine's settings only; the folder stays
+medrec profiles migrate <NAME>                  # the folder this machine used before profiles
+```
+
+`profiles migrate` moves the records folder a config kept before profiles
+(its top-level `folder`, `mount`, `inbox` and `me`) into the profile, adding
+it when it is new. It is local: no network.
+
+Upgrading to 0.2.0: run `medrec profiles migrate <NAME>` once. It keeps the
+file as it was beside it, as `config.json.pre-profiles`. medrec before 0.2.0
+reads no profiles, and a `config set` or `init` from it would save its own
+settings over them, so after migrating, a downgrade starts by copying that
+file back over `config.json`. `config show --json` prints the file: this
+machine's settings at the top and each profile's under `profiles.<NAME>`.
+With a profile named, it and `config set|unset` of a profile key also give
+`profile` and that profile's `folder`, `mount`, `inbox` and `me` at the
+top, where they were before 0.2.0.
 
 ## Use
 
@@ -58,8 +91,8 @@ medrec images list
 medrec images open <id>                         # a private copy, opened in Weasis
 
 medrec providers list                           # provider CLIs on PATH
-medrec import --from mychart --patient <id> --person Robin
-medrec import --from mychart --patient <id>     # later: the FHIR id or mychart's label
+medrec import --from mychart --from-profile adult1 --patient <id> --person Robin
+medrec import --from mychart --from-profile adult1 --patient <id>   # later: the FHIR id or label
 
 medrec timeline --person Robin --since 2026-01-01
 medrec search hemoglobin
@@ -78,13 +111,24 @@ by default, and `search` stops at 50 hits. Exit codes: 0 ok, 1 a check
 failed, 2 usage, 3 a provider needs a sign-in, 4 not found, 5 upstream, 6
 confirmation required.
 
+`--from-profile` names the provider's own login profile (one of `<cli>
+profiles list`), which medrec passes to its export as `--profile`. It is
+required for a provider that signs in, and never read from the environment,
+so medrec's environment never picks a provider login. A provider that signs
+in but lists no `login-profiles` capability in its `info --json` predates
+profiles and is refused; one whose info says no login is needed takes no
+`--from-profile`. medrec writes no provider profile name into the records
+folder.
+
 ### Settings
 
-`medrec config set <key> <value>`, kept in `~/.config/medrec/config.json`:
+`medrec config set <key> <value>`, kept in `~/.config/medrec/config.json`.
+The first four are the profile's, so they take `--profile`; the rest are
+this machine's:
 
 | Key | What it sets | Default |
 |---|---|---|
-| `folder` | the records folder, `<remote>:<path>` or a local directory | set by `init` |
+| `folder` | the profile's records folder, `<remote>:<path>` or a local directory | set by `init` |
 | `mount` | where Drive for desktop mounts the folder, for `doctor` to compare | none |
 | `inbox` | the inbox `--inbox` drains | `inbox/` in the folder |
 | `me` | the person id who writes notes on this machine | none |

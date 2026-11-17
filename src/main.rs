@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use clap_complete::Shell;
 use pk_cli_auth::AuthStatus;
+use pk_cli_config::profile::ProfileName;
 use pk_cli_config::ConfigStore;
 use pk_cli_core::info::{AuthInfo, CliInfo};
 use pk_cli_core::{confirm, output, CliError, CommonArgs};
@@ -15,7 +16,7 @@ use pk_cli_selfupdate::{SelfUpdateArgs, Updater};
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use medrec::config::{Config, KEYS};
+use medrec::config::{Config, FolderSettings, KEYS};
 use medrec::folder::{Access, Folder};
 use medrec::intake::{self, Given};
 use medrec::store::{Location, BIN};
@@ -32,13 +33,20 @@ const REPO: &str = "piekstra/medrec-cli";
 struct Cli {
     #[command(flatten)]
     common: CommonArgs,
+    /// The profile, one per records folder (env MEDREC_PROFILE). Required
+    /// by every command that reaches a records folder; there is no default.
+    #[arg(long, global = true, value_name = "NAME", value_parser = profile_name_text)]
+    profile: Option<String>,
     #[command(subcommand)]
     command: Command,
 }
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    /// Set up a records folder (or adopt one) and make it this machine's.
+    /// The profiles on this machine, one per records folder.
+    #[command(subcommand)]
+    Profiles(ProfilesCmd),
+    /// Set up a records folder (or adopt one) as the profile's.
     Init(InitArgs),
     /// The people whose records these are.
     #[command(subcommand)]
@@ -102,6 +110,33 @@ enum Command {
     /// opened documents and studies
     #[command(subcommand)]
     Cache(CacheCmd),
+}
+
+#[derive(Subcommand, Debug)]
+enum ProfilesCmd {
+    /// The configured profiles (profile-list/v1).
+    List,
+    /// Add a profile; `medrec --profile <NAME> init <LOCATION>` then gives
+    /// it its records folder.
+    Add {
+        #[arg(value_parser = profile_name)]
+        name: ProfileName,
+    },
+    /// Remove a profile from this machine. Its records folder and the files
+    /// in it are left as they are.
+    Remove {
+        #[arg(value_parser = profile_name)]
+        name: ProfileName,
+        /// Do not ask.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Move the records folder this machine used before profiles into a
+    /// profile, adding it when it is new. Local only.
+    Migrate {
+        #[arg(value_parser = profile_name)]
+        name: ProfileName,
+    },
 }
 
 #[derive(Args, Debug)]
@@ -274,6 +309,11 @@ struct ImportArgs {
     /// The provider CLI (`mychart`, `kp`, `uhc`, ...).
     #[arg(long)]
     from: String,
+    /// Which of the provider's logins to import through: one of
+    /// `<cli> profiles list`. Required for a provider that signs in, and
+    /// never taken from the environment.
+    #[arg(long, value_name = "NAME", value_parser = profile_name)]
+    from_profile: Option<ProfileName>,
     /// The patient (or member) id at that provider.
     #[arg(long)]
     patient: String,
@@ -552,19 +592,37 @@ fn note(cli: &Cli, msg: &str) {
     }
 }
 
-fn load(store: &ConfigStore) -> Result<Config, CliError> {
-    Config::load(store)
+/// This machine's settings, with the profile the command names
+/// (`--profile`, else `MEDREC_PROFILE`) selected: every command that reaches
+/// a records folder loads through this.
+fn load(store: &ConfigStore, cli: &Cli) -> Result<Config, CliError> {
+    let mut cfg = Config::load(store)?;
+    cfg.select(cli.profile.as_deref())?;
+    Ok(cfg)
+}
+
+/// `--profile`, checked as clap parses it and kept as text for
+/// [`Config::select`].
+fn profile_name_text(s: &str) -> Result<String, String> {
+    profile_name(s).map(|n| n.to_string())
+}
+
+/// A profile name, checked as clap parses it.
+fn profile_name(s: &str) -> Result<ProfileName, String> {
+    ProfileName::parse(s).map_err(|e| e.to_string())
 }
 
 fn run(cli: &Cli) -> Result<(), CliError> {
     let json = cli.common.json;
     let store = ConfigStore::new(BIN);
     match &cli.command {
+        Command::Profiles(cmd) => profiles_cmd(cli, cmd, &store),
         Command::Init(a) => {
-            let mut cfg = load(&store)?;
+            let mut cfg = load(&store, cli)?;
             let loc = Location::parse(&a.location);
             let budget = cfg.rclone_budget();
             let r = maint::init(&mut cfg, &loc, a.allow_other_files, budget)?;
+            cfg.keep_active()?;
             store.save(&cfg)?;
             output::emit(json, "init", to_value(&r), |v| {
                 println!(
@@ -583,7 +641,7 @@ fn run(cli: &Cli) -> Result<(), CliError> {
         Command::Review(cmd) => review_cmd(cli, cmd, &store),
         Command::Import(a) => import_cmd(cli, a, &store),
         Command::Providers(ProvidersCmd::List) => {
-            let cfg = load(&store)?;
+            let cfg = Config::load(&store)?;
             let rows = import::providers(&cfg);
             let v = items(&rows);
             output::emit(json, "provider-list", v, |v| {
@@ -592,7 +650,7 @@ fn run(cli: &Cli) -> Result<(), CliError> {
             Ok(())
         }
         Command::Timeline(a) => {
-            let (f, h) = read(&store)?;
+            let (f, h) = read(&store, cli)?;
             let rows = views::timeline(&f, &h, a.person.as_deref(), &a.range.range(), &a.kinds)?;
             output::emit(json, "timeline", items(a.list.take(&rows)), |v| {
                 table(
@@ -603,7 +661,7 @@ fn run(cli: &Cli) -> Result<(), CliError> {
             Ok(())
         }
         Command::Search(a) => {
-            let (f, h) = read(&store)?;
+            let (f, h) = read(&store, cli)?;
             let q = a.query.join(" ");
             let rows = views::search(
                 &f,
@@ -630,7 +688,7 @@ fn run(cli: &Cli) -> Result<(), CliError> {
         Command::Note(cmd) => note_cmd(cli, cmd, &store),
         Command::Images(cmd) => images_cmd(cli, cmd, &store),
         Command::Doctor => {
-            let cfg = load(&store)?;
+            let cfg = load(&store, cli)?;
             let checks = maint::doctor(&cfg);
             let failed = checks.iter().filter(|c| c.status == "fail").count();
             output::emit(
@@ -650,7 +708,7 @@ fn run(cli: &Cli) -> Result<(), CliError> {
             Ok(())
         }
         Command::Verify(a) => {
-            let cfg = load(&store)?;
+            let cfg = load(&store, cli)?;
             let f = Folder::open(&cfg, Access::Read)?;
             let r = maint::verify(&f, a.deep)?;
             let clean = r.clean();
@@ -675,7 +733,7 @@ fn run(cli: &Cli) -> Result<(), CliError> {
             Ok(())
         }
         Command::Backup(a) => {
-            let cfg = load(&store)?;
+            let cfg = load(&store, cli)?;
             let f = Folder::open(&cfg, Access::Read)?;
             let r = maint::backup(&f, &Location::parse(&a.to), cfg.rclone_budget())?;
             let clean = r.mismatched.is_empty();
@@ -719,7 +777,8 @@ fn run(cli: &Cli) -> Result<(), CliError> {
                     method: "none".into(),
                     login_hint: None,
                 },
-                &[],
+                // Its records-folder commands take --profile.
+                &[pk_med_records::LOGIN_PROFILES],
             );
             output::json(&to_value(&info));
             Ok(())
@@ -741,10 +800,14 @@ fn run(cli: &Cli) -> Result<(), CliError> {
             revalidate_listing,
             remote_spec,
         }) => {
-            let cfg = load(&store)?;
+            let cfg = match remote_spec {
+                Some(_) => Config::load(&store)?,
+                None => load(&store, cli)?,
+            };
             let spec = match (remote_spec, cfg.folder_location()) {
                 (Some(s), _) => s.clone(),
                 (None, Ok(Location::Remote(s))) => s,
+                (None, Err(e)) => return Err(e),
                 _ => {
                     return Err(CliError::Usage(
                         "the records folder is not an rclone remote, so it has no read cache"
@@ -773,8 +836,8 @@ fn run(cli: &Cli) -> Result<(), CliError> {
     }
 }
 
-fn read(store: &ConfigStore) -> Result<(Folder, medrec::model::Household), CliError> {
-    let cfg = load(store)?;
+fn read(store: &ConfigStore, cli: &Cli) -> Result<(Folder, medrec::model::Household), CliError> {
+    let cfg = load(store, cli)?;
     let f = Folder::open(&cfg, Access::Read)?;
     let h = f.household()?;
     Ok((f, h))
@@ -784,7 +847,7 @@ fn people_cmd(cli: &Cli, cmd: &PeopleCmd, store: &ConfigStore) -> Result<(), Cli
     let json = cli.common.json;
     match cmd {
         PeopleCmd::Add(a) => {
-            let cfg = load(store)?;
+            let cfg = load(store, cli)?;
             let f = Folder::open(&cfg, Access::Write)?;
             let p = people::add(
                 &f,
@@ -810,21 +873,21 @@ fn people_cmd(cli: &Cli, cmd: &PeopleCmd, store: &ConfigStore) -> Result<(), Cli
             Ok(())
         }
         PeopleCmd::List { list } => {
-            let (_, h) = read(store)?;
+            let (_, h) = read(store, cli)?;
             output::emit(json, "person-list", items(list.take(&h.people)), |v| {
                 table(v, &["id", "name", "birth_date", "adult", "folder"])
             });
             Ok(())
         }
         PeopleCmd::Show { person } => {
-            let cfg = load(store)?;
+            let cfg = load(store, cli)?;
             let f = Folder::open(&cfg, Access::Read)?;
             let d = people::show(&f, person)?;
             output::emit_one(json, "person", to_value(&d));
             Ok(())
         }
         PeopleCmd::Edit(a) => {
-            let cfg = load(store)?;
+            let cfg = load(store, cli)?;
             let f = Folder::open(&cfg, Access::Write)?;
             let p = people::edit(
                 &f,
@@ -876,7 +939,7 @@ fn intake_cmd(cli: &Cli, a: &IntakeArgs, store: &ConfigStore) -> Result<(), CliE
     // Arguments first: a bad --type or --date never costs a folder read.
     let given = given(&a.given, a.classified_by.clone());
     intake::validate_given(&given)?;
-    let cfg = load(store)?;
+    let cfg = load(store, cli)?;
     let inbox = if a.inbox {
         Some(cfg.inbox_location()?)
     } else {
@@ -933,7 +996,7 @@ fn intake_cmd(cli: &Cli, a: &IntakeArgs, store: &ConfigStore) -> Result<(), CliE
 
 fn review_cmd(cli: &Cli, cmd: &ReviewCmd, store: &ConfigStore) -> Result<(), CliError> {
     let json = cli.common.json;
-    let cfg = load(store)?;
+    let cfg = load(store, cli)?;
     match cmd {
         ReviewCmd::List { list } => {
             let f = Folder::open(&cfg, Access::Read)?;
@@ -987,7 +1050,7 @@ fn import_cmd(cli: &Cli, a: &ImportArgs, store: &ConfigStore) -> Result<(), CliE
     if let Some(s) = &a.since {
         pk_cli_core::dates::parse_iso(s)?;
     }
-    let cfg = load(store)?;
+    let cfg = load(store, cli)?;
     let provider = import::probe(&a.from);
     if !provider.usable() {
         return Err(CliError::Usage(format!(
@@ -1001,6 +1064,17 @@ fn import_cmd(cli: &Cli, a: &ImportArgs, store: &ConfigStore) -> Result<(), CliE
                 .unwrap_or_default()
         )));
     }
+    let from_profile = match (provider.login_profiles, &a.from_profile) {
+        (true, Some(p)) => Some(p.clone()),
+        (true, None) => return Err(import::missing_profile(&provider)),
+        (false, Some(_)) => {
+            return Err(CliError::Usage(format!(
+                "`{}` needs no login, so it takes no --from-profile",
+                a.from
+            )))
+        }
+        (false, None) => None,
+    };
     let f = Folder::open(&cfg, Access::Write)?;
     note(cli, &format!("importing from {} ...", a.from));
     let r = import::run(
@@ -1009,6 +1083,7 @@ fn import_cmd(cli: &Cli, a: &ImportArgs, store: &ConfigStore) -> Result<(), CliE
         &provider,
         &import::Request {
             from: a.from.clone(),
+            from_profile,
             patient: a.patient.clone(),
             person: a.person.clone(),
             since: a.since.clone(),
@@ -1057,7 +1132,7 @@ fn records_cmd(
     kinds: &[&str],
     record: &str,
 ) -> Result<(), CliError> {
-    let (f, h) = read(store)?;
+    let (f, h) = read(store, cli)?;
     let rows = views::records(
         &f,
         &h,
@@ -1107,7 +1182,7 @@ fn documents_cmd(cli: &Cli, cmd: &DocumentsCmd, store: &ConfigStore) -> Result<(
             range,
             list,
         } => {
-            let (f, h) = read(store)?;
+            let (f, h) = read(store, cli)?;
             let rows = views::documents(
                 &f,
                 &h,
@@ -1130,7 +1205,7 @@ fn documents_cmd(cli: &Cli, cmd: &DocumentsCmd, store: &ConfigStore) -> Result<(
             });
         }
         DocumentsCmd::Open { id, no_launch } => {
-            let (f, h) = read(store)?;
+            let (f, h) = read(store, cli)?;
             let (_, d) = views::find_document(&f, &h, id)?;
             let path = private_copy(&f, &d.path, &d.id)?;
             let launched = !*no_launch && launch(&view::Viewer::for_documents(None), &path)?;
@@ -1154,7 +1229,7 @@ fn launch(viewer: &view::Viewer, path: &std::path::Path) -> Result<bool, CliErro
 
 fn note_cmd(cli: &Cli, cmd: &NoteCmd, store: &ConfigStore) -> Result<(), CliError> {
     let json = cli.common.json;
-    let cfg = load(store)?;
+    let cfg = load(store, cli)?;
     match cmd {
         NoteCmd::Add {
             person,
@@ -1177,6 +1252,7 @@ fn note_cmd(cli: &Cli, cmd: &NoteCmd, store: &ConfigStore) -> Result<(), CliErro
             let h = f.household()?;
             let p = people::resolve(&h, person)?.clone();
             let author = cfg
+                .active
                 .me
                 .as_deref()
                 .and_then(|m| h.person(m))
@@ -1216,7 +1292,7 @@ fn note_cmd(cli: &Cli, cmd: &NoteCmd, store: &ConfigStore) -> Result<(), CliErro
 
 fn images_cmd(cli: &Cli, cmd: &ImagesCmd, store: &ConfigStore) -> Result<(), CliError> {
     let json = cli.common.json;
-    let cfg = load(store)?;
+    let cfg = load(store, cli)?;
     match cmd {
         ImagesCmd::Intake {
             path,
@@ -1339,22 +1415,175 @@ fn config_cmd(cli: &Cli, cmd: &ConfigCmd, store: &ConfigStore) -> Result<(), Cli
             );
         }
         ConfigCmd::Show => {
-            let cfg = load(store)?;
-            output::emit_one(json, "config", to_value(&cfg));
+            let mut cfg = Config::load(store)?;
+            let named = cli.profile.is_some()
+                || std::env::var(medrec::config::PROFILE_ENV).is_ok_and(|v| !v.is_empty());
+            if named {
+                cfg.select(cli.profile.as_deref())?;
+            }
+            output::emit_one(json, "config", config_view(&cfg));
         }
         ConfigCmd::Set { key, value } => {
-            let mut cfg = load(store)?;
+            let mut cfg = config_for(cli, store, key)?;
             cfg.set(key, value)?;
-            store.save(&cfg)?;
-            output::emit_one(json, "config", to_value(&cfg));
+            save_config(store, cfg, json)?;
         }
         ConfigCmd::Unset { key } => {
-            let mut cfg = load(store)?;
+            let mut cfg = config_for(cli, store, key)?;
             cfg.unset(key)?;
-            store.save(&cfg)?;
-            output::emit_one(json, "config", to_value(&cfg));
+            save_config(store, cfg, json)?;
         }
     }
     let _ = KEYS;
+    Ok(())
+}
+
+/// The settings `config set|unset <key>` changes: a profile's key needs the
+/// profile, this machine's does not.
+fn config_for(cli: &Cli, store: &ConfigStore, key: &str) -> Result<Config, CliError> {
+    if Config::is_profile_key(key) {
+        load(store, cli)
+    } else {
+        Config::load(store)
+    }
+}
+
+fn save_config(store: &ConfigStore, mut cfg: Config, json: bool) -> Result<(), CliError> {
+    if cfg.profile.is_some() {
+        cfg.keep_active()?;
+    }
+    store.save(&cfg)?;
+    output::emit_one(json, "config", config_view(&cfg));
+    Ok(())
+}
+
+/// `config show|set|unset`'s document: the file (this machine's settings,
+/// and `profiles.<NAME>` for each profile's), and with a profile selected,
+/// `profile` and that profile's `folder`, `mount`, `inbox` and `me` at the
+/// top, where they were before profiles.
+fn config_view(cfg: &Config) -> Value {
+    let mut v = to_value(cfg);
+    if let (Some(name), Some(top)) = (&cfg.profile, v.as_object_mut()) {
+        for key in medrec::config::PROFILE_KEYS {
+            top.remove(*key);
+        }
+        if let Value::Object(active) = to_value(&cfg.active) {
+            top.extend(active);
+        }
+        top.insert("profile".into(), json!(name));
+    }
+    v
+}
+
+fn profiles_cmd(cli: &Cli, cmd: &ProfilesCmd, store: &ConfigStore) -> Result<(), CliError> {
+    let json = cli.common.json;
+    let mut cfg = Config::load(store)?;
+    match cmd {
+        ProfilesCmd::List => {
+            let mut v = to_value(&cfg.profiles.list());
+            // profile-list/v1 plus each profile's records folder, optional.
+            if let Some(rows) = v["profiles"].as_array_mut() {
+                for row in rows {
+                    let folder = row["name"]
+                        .as_str()
+                        .and_then(|n| ProfileName::parse(n).ok())
+                        .and_then(|n| cfg.profiles.settings::<FolderSettings>(&n).ok())
+                        .and_then(|s| s.folder);
+                    if let Some(folder) = folder {
+                        row["folder"] = json!(folder);
+                    }
+                }
+            }
+            if json {
+                output::json(&v);
+            } else if cfg.profiles.is_empty() {
+                eprintln!("no profiles; add one with `{BIN} profiles add <NAME>`");
+                if !cfg.unprofiled.is_empty() {
+                    eprintln!(
+                        "this machine has a records folder from before profiles; move it into \
+                         one with `{BIN} profiles migrate <NAME>`"
+                    );
+                }
+            } else {
+                for row in v["profiles"].as_array().into_iter().flatten() {
+                    let name = row["name"].as_str().unwrap_or("");
+                    match row["folder"].as_str() {
+                        Some(folder) => println!("{name}\t{folder}"),
+                        None => println!("{name}\t(no records folder yet)"),
+                    }
+                }
+            }
+        }
+        ProfilesCmd::Add { name } => {
+            let added = cfg.profiles.add(name.clone());
+            if added {
+                store.save(&cfg)?;
+            }
+            let status = if added { "added" } else { "exists" };
+            output::emit(
+                json,
+                "profile",
+                json!({ "name": name, "status": status }),
+                |_| {
+                    if added {
+                        println!("added profile {name}; give it a records folder with `{BIN} --profile {name} init <remote:path|dir>`")
+                    } else {
+                        println!("profile {name} already exists")
+                    }
+                },
+            );
+        }
+        ProfilesCmd::Remove { name, force } => {
+            if !cfg.profiles.contains(name) {
+                return Err(cfg
+                    .select_from(Some(name.as_str()), None)
+                    .err()
+                    .unwrap_or_else(|| CliError::Usage(format!("no profile `{name}`"))));
+            }
+            confirm::gate(
+                &cli.common,
+                *force,
+                &format!(
+                    "Remove profile {name} from this machine? Its records folder is left as it is."
+                ),
+            )?;
+            cfg.profiles.remove(name);
+            store.save(&cfg)?;
+            output::emit(
+                json,
+                "profile",
+                json!({ "name": name, "status": "removed" }),
+                |_| println!("removed profile {name}; its records folder is unchanged"),
+            );
+        }
+        ProfilesCmd::Migrate { name } => {
+            let moved = cfg.migrate(name)?;
+            let mut v = json!({ "name": name, "status": "nothing-to-migrate" });
+            if moved {
+                // medrec before 0.2.0 reads no profiles and would save its
+                // own settings over them, so the file as it was is kept.
+                let path = store.path()?;
+                let backup = path.with_file_name("config.json.pre-profiles");
+                if !backup.exists() {
+                    std::fs::copy(&path, &backup).map_err(|e| {
+                        CliError::Other(format!("keeping {}: {e}", backup.display()))
+                    })?;
+                }
+                store.save(&cfg)?;
+                v["status"] = json!("migrated");
+                v["backup"] = json!(backup.display().to_string());
+            }
+            output::emit(json, "profile", v, |v| {
+                if moved {
+                    println!(
+                        "moved this machine's records folder into profile {name}; the file as it was is {}",
+                        v["backup"].as_str().unwrap_or("")
+                    )
+                } else {
+                    println!("nothing to move: this machine kept no records folder before profiles")
+                }
+            });
+        }
+    }
     Ok(())
 }

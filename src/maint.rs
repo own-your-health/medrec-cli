@@ -61,7 +61,7 @@ pub fn init(
             (folder::create(&st)?, "created")
         }
     };
-    cfg.folder = Some(location.display());
+    cfg.active.folder = Some(location.display());
     Ok(Init {
         folder: location.display(),
         folder_id: h.folder_id,
@@ -137,7 +137,7 @@ pub fn doctor(cfg: &Config) -> Vec<Check> {
         Err(e) => out.push(check("folder", "fail", e.to_string())),
         Ok(loc) => folder_checks(cfg, &loc, rclone.is_some(), &mut out),
     }
-    if let Some(m) = &cfg.mount {
+    if let Some(m) = &cfg.active.mount {
         out.push(mount_check(cfg, m));
     }
     for (prog, args, why) in [

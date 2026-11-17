@@ -181,8 +181,17 @@ read back as edited.
 
 ## Import input: `records-stream/v1`
 
-`medrec import --from <cli> --patient <id> [--org <org>] [--since <date>]`
-runs `<cli> records export --patient <id> --ndjson [--org …] [--since …]`.
+`medrec import --from <cli> [--from-profile <name>] --patient <id> [--org <org>] [--since <date>]`
+runs `<cli> records export --patient <id> --ndjson [--org …] [--since …]
+[--profile <name>]`. A provider that signs in lists `login-profiles` in its
+`info --json` `capabilities` (`cli-info/v1`); its export then needs
+`--from-profile`, passed as `--profile`, and without it medrec is exit 2
+listing the provider's profiles from `<cli> profiles list --json`
+(`profile-list/v1`). A provider that signs in without listing it predates
+login profiles and is refused (`providers list` shows it `outdated`); one
+whose info has `auth.required: false` takes no profile. The provider's
+profile name is never written into the records folder: a source is the CLI,
+the organization and the patient, whichever login read it.
 `<id>` is whatever the provider's `--patient` takes: the patient's FHIR id,
 or a label the provider gave the patient. The first import of a patient
 names whose records they are with `--person`. A later import without it
@@ -213,9 +222,10 @@ medrec writes nothing unless the trailer is present, says `complete: true`,
 its counts match the resources read, and the provider exits 0. The provider's
 exit code maps to medrec's: 3 becomes 3 (a sign-in is needed; medrec names
 the provider's own `auth login` command when its error's remedy gives one,
-after an em dash, and otherwise `<cli> auth login [--org <org>]`), 4 becomes 4 (not found), 2 becomes 1 (medrec
-sent arguments the provider rejected), and 5 or anything else becomes 5
-(upstream).
+after an em dash, and otherwise `<cli> auth login [--org <org>]`), 4 becomes 4 (not found), 2 becomes 2 (the
+provider refused the arguments, most of which are the caller's: an unknown
+profile, patient or organization; its message is shown), and 5 or anything
+else becomes 5 (upstream).
 
 A skip's `code` is from an open set; medrec keeps every skip in the
 ImportRun. A `forbidden` skip with a `resource_type` and neither `id` nor

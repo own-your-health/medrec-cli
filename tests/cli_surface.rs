@@ -18,8 +18,33 @@ fn medrec() -> Command {
     c.env("XDG_CONFIG_HOME", dir.join("config"))
         .env("XDG_CACHE_HOME", dir.join("cache"))
         .env("HOME", &dir)
+        .env_remove("MEDREC_PROFILE")
         .env_remove("NO_COLOR");
     c
+}
+
+/// A run with its own config holding one profile, `home`, and no records
+/// folder.
+fn with_profile() -> impl Fn(&[&str]) -> std::process::Output {
+    static SEQ: AtomicU32 = AtomicU32::new(0);
+    let dir = std::env::temp_dir().join(format!(
+        "medrec-surface-p-{}-{}",
+        std::process::id(),
+        SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let run = move |args: &[&str]| {
+        let mut c = Command::cargo_bin("medrec").unwrap();
+        c.env("XDG_CONFIG_HOME", dir.join("config"))
+            .env("XDG_CACHE_HOME", dir.join("cache"))
+            .env("HOME", &dir)
+            .env_remove("MEDREC_PROFILE")
+            .env_remove("NO_COLOR");
+        c.args(args).output().unwrap()
+    };
+    assert!(run(&["profiles", "add", "home"]).status.success());
+    run
 }
 
 fn json_of(out: &std::process::Output) -> Value {
@@ -35,6 +60,11 @@ fn json_of(out: &std::process::Output) -> Value {
 fn every_command_renders_its_help() {
     let commands: &[&[&str]] = &[
         &[],
+        &["profiles"],
+        &["profiles", "list"],
+        &["profiles", "add"],
+        &["profiles", "remove"],
+        &["profiles", "migrate"],
         &["init"],
         &["people"],
         &["people", "add"],
@@ -94,6 +124,12 @@ fn info_says_no_credential_is_needed() {
     assert_eq!(v["schema"], "cli-info/v1");
     assert_eq!(v["name"], "medrec");
     assert_eq!(v["auth"]["required"], false);
+    // Its records-folder commands take --profile.
+    assert!(v["capabilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|c| c == "login-profiles"));
     let out = medrec()
         .args(["auth", "status", "--json"])
         .output()
@@ -207,23 +243,100 @@ fn bad_arguments_exit_2_before_anything_is_read() {
 }
 
 #[test]
-fn without_a_records_folder_commands_say_how_to_set_one_up() {
+fn without_a_profile_commands_say_how_to_add_one() {
     let out = medrec()
         .args(["--json", "people", "list"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
-    let v = json_of(&out);
-    let text = v.to_string();
-    assert!(text.contains("medrec init"), "{text}");
+    let text = json_of(&out).to_string();
+    assert!(text.contains("--profile <NAME>"), "{text}");
+    assert!(text.contains("medrec profiles add <NAME>"), "{text}");
+}
+
+#[test]
+fn a_profile_is_named_by_flag_or_environment_and_never_picked() {
+    let run = with_profile();
+    // One profile configured, and still not picked for the caller.
+    let out = run(&["--json", "people", "list"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(json_of(&out).to_string().contains("configured: home"));
+    let out = run(&["--json", "--profile", "away", "people", "list"]);
+    assert_eq!(out.status.code(), Some(2));
+    let text = json_of(&out).to_string();
+    assert!(
+        text.contains("no profile `away`") && text.contains("configured: home"),
+        "{text}"
+    );
+    // A profile without a records folder says how to give it one.
+    let out = run(&["--json", "--profile", "home", "people", "list"]);
+    assert_eq!(out.status.code(), Some(2));
+    let text = json_of(&out).to_string();
+    assert!(text.contains("medrec --profile home init"), "{text}");
+    let out = medrec()
+        .args(["--json", "--profile", "Home", "people", "list"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    medrec().args(["profiles", "add", "-x"]).assert().code(2);
+    medrec().args(["profiles", "add", "a b"]).assert().code(2);
+}
+
+#[test]
+fn profiles_are_listed_added_and_removed() {
+    let run = with_profile();
+    let v = json_of(&run(&["--json", "profiles", "list"]));
+    assert_eq!(v["schema"], "profile-list/v1");
+    assert_eq!(v["profiles"][0]["name"], "home");
+    assert!(v["profiles"][0].get("folder").is_none());
+    let v = json_of(&run(&["--json", "profiles", "add", "home"]));
+    assert_eq!(v["status"], "exists");
+    let v = json_of(&run(&["--json", "profiles", "add", "away"]));
+    assert_eq!(
+        (&v["schema"], &v["status"]),
+        (&"profile/v1".into(), &"added".into())
+    );
+    let v = json_of(&run(&["--json", "profiles", "list"]));
+    let names: Vec<&str> = v["profiles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["away", "home"]);
+    // Removing asks; without a terminal it needs --force.
+    assert_eq!(
+        run(&["--json", "profiles", "remove", "away"]).status.code(),
+        Some(6)
+    );
+    let v = json_of(&run(&["--json", "profiles", "remove", "away", "--force"]));
+    assert_eq!(v["status"], "removed");
+    assert_eq!(
+        run(&["--json", "profiles", "remove", "away", "--force"])
+            .status
+            .code(),
+        Some(2)
+    );
+    let empty = json_of(
+        &medrec()
+            .args(["--json", "profiles", "list"])
+            .output()
+            .unwrap(),
+    );
+    assert_eq!(empty["profiles"].as_array().unwrap().len(), 0);
 }
 
 #[test]
 fn a_mutation_needs_force_without_a_terminal() {
-    let out = medrec()
-        .args(["--json", "review", "drop", "q_aaaaaaaaaaaaaaaaaaaa"])
-        .output()
-        .unwrap();
+    let run = with_profile();
+    let out = run(&[
+        "--json",
+        "--profile",
+        "home",
+        "review",
+        "drop",
+        "q_aaaaaaaaaaaaaaaaaaaa",
+    ]);
     assert_eq!(out.status.code(), Some(6));
     json_of(&out);
 }
@@ -244,16 +357,37 @@ fn config_round_trips() {
     let run = |args: &[&str]| {
         let mut c = Command::cargo_bin("medrec").unwrap();
         c.env("XDG_CONFIG_HOME", dir.join("config"))
-            .env("XDG_CACHE_HOME", dir.join("cache"));
+            .env("XDG_CACHE_HOME", dir.join("cache"))
+            .env_remove("MEDREC_PROFILE");
         c.args(args).output().unwrap()
     };
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(run(&["profiles", "add", "home"]).status.success());
     assert!(run(&["config", "set", "viewer", "none"]).status.success());
-    assert!(run(&["config", "set", "folder", "gdrive:Medical Records"])
-        .status
-        .success());
+    // A records folder is a profile's.
+    assert_eq!(
+        run(&["config", "set", "folder", "gdrive:Medical Records"])
+            .status
+            .code(),
+        Some(2)
+    );
+    let set = json_of(&run(&[
+        "--json",
+        "--profile",
+        "home",
+        "config",
+        "set",
+        "folder",
+        "gdrive:Medical Records",
+    ]));
+    assert_eq!(set["profile"], "home");
+    assert_eq!(set["folder"], "gdrive:Medical Records");
     let v = json_of(&run(&["--json", "config", "show"]));
     assert_eq!(v["viewer"], "none");
-    assert_eq!(v["folder"], "gdrive:Medical Records");
+    assert!(v.get("folder").is_none(), "{v}");
+    assert_eq!(v["profiles"]["home"]["folder"], "gdrive:Medical Records");
+    let v = json_of(&run(&["--json", "profiles", "list"]));
+    assert_eq!(v["profiles"][0]["folder"], "gdrive:Medical Records");
     assert!(run(&["config", "unset", "viewer"]).status.success());
     let v = json_of(&run(&["--json", "config", "show"]));
     assert!(v.get("viewer").is_none());
