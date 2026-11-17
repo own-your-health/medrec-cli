@@ -1269,6 +1269,14 @@ fn profiles_keep_records_folders_apart_and_the_old_folder_moves_into_one() {
     );
     let was: Value = serde_json::from_str(&std::fs::read_to_string(&backup).unwrap()).unwrap();
     assert_eq!(was, old);
+    {
+        use std::os::unix::fs::PermissionsExt;
+        // Both name records folders and a person id: owner-only.
+        for f in [&backup, &config] {
+            let mode = std::fs::metadata(f).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "{}", f.display());
+        }
+    }
     // With a profile named, config show gives its settings where they were.
     let shown = e.ok(&["config", "show"]);
     assert_eq!(
@@ -1308,5 +1316,59 @@ fn profiles_keep_records_folders_apart_and_the_old_folder_moves_into_one() {
     e.ok(&["profiles", "migrate", "away"]);
     e.ok(&["profiles", "remove", "away", "--force"]);
     assert!(second.join("household.json").exists());
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
+#[test]
+fn a_reimport_under_another_name_for_the_organization_finds_the_person() {
+    let base = Env::new("import-alias");
+    setup(&base);
+    let e = provider_env(&base, medrec::testdata::STREAM);
+    let import = |extra: &[&str]| {
+        let mut a = vec![
+            "import",
+            "--from",
+            "fakeprov",
+            "--from-profile",
+            "adult1",
+            "--patient",
+            "pat-0001",
+        ];
+        a.extend_from_slice(extra);
+        said(&e.run(&a))
+    };
+    let args = e.root.join("provider/export-args");
+    // The provider takes `--org health` for its organization `example-health`.
+    let (code, text) = import(&["--org", "health", "--person", "Robin"]);
+    assert_eq!(code, Some(0), "{text}");
+    for org in ["health", "example-health"] {
+        let v = e.ok(&[
+            "import",
+            "--from",
+            "fakeprov",
+            "--from-profile",
+            "adult1",
+            "--patient",
+            "pat-0001",
+            "--org",
+            org,
+        ]);
+        assert_eq!(v["records_unchanged"], 9, "--org {org}");
+    }
+    // A patient never imported from this CLI is refused before the export runs.
+    std::fs::remove_file(&args).unwrap();
+    let out = e.run(&[
+        "import",
+        "--from",
+        "fakeprov",
+        "--from-profile",
+        "adult1",
+        "--patient",
+        "pat-0009",
+        "--org",
+        "health",
+    ]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(!args.exists(), "the export ran");
     let _ = std::fs::remove_dir_all(&e.root);
 }

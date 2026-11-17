@@ -1457,6 +1457,14 @@ fn save_config(store: &ConfigStore, mut cfg: Config, json: bool) -> Result<(), C
     Ok(())
 }
 
+/// Copy `from` to `to`, readable by this user only: the config names
+/// records folders and a person id. A failed write leaves no partial copy.
+fn keep_owner_only(from: &std::path::Path, to: &std::path::Path) -> Result<(), CliError> {
+    let body = std::fs::read(from)
+        .map_err(|e| CliError::Other(format!("reading {}: {e}", from.display())))?;
+    medrec::write_private(to, &body)
+}
+
 /// `config show|set|unset`'s document: the file (this machine's settings,
 /// and `profiles.<NAME>` for each profile's), and with a profile selected,
 /// `profile` and that profile's `folder`, `mount`, `inbox` and `me` at the
@@ -1565,9 +1573,7 @@ fn profiles_cmd(cli: &Cli, cmd: &ProfilesCmd, store: &ConfigStore) -> Result<(),
                 let path = store.path()?;
                 let backup = path.with_file_name("config.json.pre-profiles");
                 if !backup.exists() {
-                    std::fs::copy(&path, &backup).map_err(|e| {
-                        CliError::Other(format!("keeping {}: {e}", backup.display()))
-                    })?;
+                    keep_owner_only(&path, &backup)?;
                 }
                 store.save(&cfg)?;
                 v["status"] = json!("migrated");

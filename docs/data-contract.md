@@ -199,6 +199,13 @@ files under the same person when `<id>` matches a source's `patient_id`, or
 otherwise its `patient_label` (the stream header's `patient.label`), from
 the same CLI and `--org`. It is refused when that matches more than one
 person, or when the stream's `patient.id` is not one that source recorded.
+When `--org` matches no organization this patient was filed under from that
+CLI, but they were filed under another (a name the provider also accepts
+for its organization, such as a short alias), the person is found after the
+export by the stream header's `organization.id` and `patient.id`, which a
+source is filed under; nothing is written when no source or more than one
+person matches. A patient never imported from that CLI is refused before
+the export runs.
 A provider is any CLI whose `info --json` lists the `health-records/v1`
 profile. Its standard output is NDJSON:
 
