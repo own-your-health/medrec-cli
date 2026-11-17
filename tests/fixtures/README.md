@@ -12,8 +12,9 @@ real record, document, study or provider response.
 - `stream/fakeprov-info.json` is the `info --json` of `fakeprov`, the fake
   `health-records/v1` provider that `medrec::testdata::write_provider` writes.
   It lists the `login-profiles` capability. `fakeprov-info-unprofiled.json` is
-  the same from before login profiles, and `fakeprov-info-no-login.json` one
-  that needs no login. `fakeprov-profiles.json` is its `profiles list --json`
+  the same from before login profiles, `fakeprov-info-no-login.json` one
+  that needs no login, and `fakeprov-info-files.json` one that also reads
+  downloaded files (`records-files`). `fakeprov-profiles.json` is its `profiles list --json`
   (`profile-list/v1`: `adult1`, `adult2`).
 
 The scans, DICOM studies and the fake provider script are generated at test

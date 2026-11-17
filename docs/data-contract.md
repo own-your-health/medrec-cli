@@ -181,15 +181,21 @@ read back as edited.
 
 ## Import input: `records-stream/v1`
 
-`medrec import --from <cli> [--from-profile <name>] --patient <id> [--org <org>] [--since <date>]`
+`medrec import --from <cli> [--from-profile <name> | --from-files <dir>] --patient <id> [--org <org>] [--since <date>]`
 runs `<cli> records export --patient <id> --ndjson [--org …] [--since …]
-[--profile <name>]`. A provider that signs in lists `login-profiles` in its
+[--profile <name> | --files <dir>]`. A provider that signs in lists `login-profiles` in its
 `info --json` `capabilities` (`cli-info/v1`); its export then needs
 `--from-profile`, passed as `--profile`, and without it medrec is exit 2
 listing the provider's profiles from `<cli> profiles list --json`
 (`profile-list/v1`). A provider that signs in without listing it predates
 login profiles and is refused (`providers list` shows it `outdated`); one
-whose info has `auth.required: false` takes no profile. The provider's
+whose info has `auth.required: false` takes no profile. A provider that
+also reads downloaded files lists `records-files` (medical-common DESIGN
+§1.1); `--from-files <dir>` then runs its export with `--files <dir>` (the
+directory made absolute) and no `--profile`, with `<PREFIX>_PROFILE`
+removed from its environment, as `--from-profile` removes `<PREFIX>_FILES`.
+`--from-files` for a provider without the capability, or for a path that is
+not a directory, is exit 2 before the export runs. The provider's
 profile name is never written into the records folder: a source is the CLI,
 the organization and the patient, whichever login read it.
 `<id>` is whatever the provider's `--patient` takes: the patient's FHIR id,

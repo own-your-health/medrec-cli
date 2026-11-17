@@ -27,6 +27,9 @@ pub const PROVIDER_INFO: &str = include_str!("../tests/fixtures/stream/fakeprov-
 /// `login-profiles`.
 pub const PROVIDER_INFO_UNPROFILED: &str =
     include_str!("../tests/fixtures/stream/fakeprov-info-unprofiled.json");
+/// The same that also reads downloaded files (`records-files`).
+pub const PROVIDER_INFO_FILES: &str =
+    include_str!("../tests/fixtures/stream/fakeprov-info-files.json");
 /// The same for a provider that needs no login.
 pub const PROVIDER_INFO_NO_LOGIN: &str =
     include_str!("../tests/fixtures/stream/fakeprov-info-no-login.json");
@@ -179,10 +182,12 @@ pub fn write_dicom(dicom: &Path) {
 /// A fake `health-records/v1` provider, `fakeprov`, that prints `stream`
 /// for `records export`. Returns the directory to put on `PATH`.
 ///
-/// Its `info` is `FAKEPROV_INFO` (`unprofiled` or `no-login`, else the
-/// current one, which lists `login-profiles`). Its profiles are `adult1` and
-/// `adult2`; with the current info an export without one of them is exit 2,
-/// as a provider's is. It writes the export's arguments to `export-args`.
+/// Its `info` is `FAKEPROV_INFO` (`unprofiled`, `no-login` or `files`, else
+/// the current one, which lists `login-profiles`). Its profiles are `adult1`
+/// and `adult2`; an export that signs in without one of them is exit 2, as a
+/// provider's is, and `--files <DIR>` (with `files`) needs a directory and
+/// no `--profile`. It writes the export's arguments to `export-args`, and
+/// the `FAKEPROV_PROFILE` it saw to `export-env`.
 pub fn write_provider(provider: &Path, stream: &str) -> PathBuf {
     std::fs::create_dir_all(provider).unwrap();
     std::fs::write(provider.join("synthetic.ndjson"), stream).unwrap();
@@ -197,6 +202,11 @@ pub fn write_provider(provider: &Path, stream: &str) -> PathBuf {
         PROVIDER_INFO_NO_LOGIN,
     )
     .unwrap();
+    std::fs::write(
+        provider.join("fakeprov-info-files.json"),
+        PROVIDER_INFO_FILES,
+    )
+    .unwrap();
     std::fs::write(provider.join("fakeprov-profiles.json"), PROVIDER_PROFILES).unwrap();
     let script = provider.join("fakeprov");
     write(
@@ -207,24 +217,31 @@ pub fn write_provider(provider: &Path, stream: &str) -> PathBuf {
 d='{0}'
 case "$1" in
   info) case "$FAKEPROV_INFO" in
-      unprofiled|no-login) cat "$d/fakeprov-info-$FAKEPROV_INFO.json" ;;
+      unprofiled|no-login|files) cat "$d/fakeprov-info-$FAKEPROV_INFO.json" ;;
       *) cat "$d/fakeprov-info.json" ;;
     esac ;;
   profiles) cat "$d/fakeprov-profiles.json" ;;
   records)
-    printf '%s
-' "$*" > "$d/export-args"
-    profile=''; prev=''
-    for a in "$@"; do [ "$prev" = --profile ] && profile="$a"; prev="$a"; done
-    if [ -z "$FAKEPROV_INFO" ]; then
+    printf '%s\n' "$*" > "$d/export-args"
+    printf '%s\n' "${{FAKEPROV_PROFILE:-}}" > "$d/export-env"
+    profile=''; files=''; prev=''
+    for a in "$@"; do
+      [ "$prev" = --profile ] && profile="$a"
+      [ "$prev" = --files ] && files="$a"
+      prev="$a"
+    done
+    if [ -n "$files" ]; then
+      [ "$FAKEPROV_INFO" = files ] || {{ echo "fakeprov: unexpected argument --files" >&2; exit 2; }}
+      [ -z "$profile" ] || {{ echo "fakeprov: --files and --profile are exclusive" >&2; exit 2; }}
+      [ -d "$files" ] || {{ echo "fakeprov: no directory $files" >&2; exit 2; }}
+    elif [ -z "$FAKEPROV_INFO" ] || [ "$FAKEPROV_INFO" = files ]; then
       case "$profile" in
         adult1|adult2) ;;
         *) echo "fakeprov: this command needs a profile; configured: adult1, adult2" >&2; exit 2 ;;
       esac
     fi
     cat "$d/synthetic.ndjson"
-    [ -n "$FAKEPROV_STDERR" ] && printf '%s
-' "$FAKEPROV_STDERR" >&2
+    [ -n "$FAKEPROV_STDERR" ] && printf '%s\n' "$FAKEPROV_STDERR" >&2
     exit "${{FAKEPROV_EXIT:-0}}" ;;
   *) echo "fakeprov: unknown command $1" >&2; exit 2 ;;
 esac

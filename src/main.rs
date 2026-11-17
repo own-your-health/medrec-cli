@@ -314,6 +314,11 @@ struct ImportArgs {
     /// never taken from the environment.
     #[arg(long, value_name = "NAME", value_parser = profile_name)]
     from_profile: Option<ProfileName>,
+    /// Import the provider's downloaded files in DIR instead of signing in:
+    /// passed as its export's `--files`, for a provider that lists
+    /// `records-files`.
+    #[arg(long, value_name = "DIR", conflicts_with = "from_profile")]
+    from_files: Option<PathBuf>,
     /// The patient (or member) id at that provider.
     #[arg(long)]
     patient: String,
@@ -1050,6 +1055,21 @@ fn import_cmd(cli: &Cli, a: &ImportArgs, store: &ConfigStore) -> Result<(), CliE
     if let Some(s) = &a.since {
         pk_cli_core::dates::parse_iso(s)?;
     }
+    // Absolute, so the provider reads the same directory and never takes a
+    // path that starts with `-` for a flag.
+    let from_files = match &a.from_files {
+        Some(dir) if dir.is_dir() => Some(
+            std::fs::canonicalize(dir)
+                .map_err(|e| CliError::Usage(format!("--from-files `{}`: {e}", dir.display())))?,
+        ),
+        Some(dir) => {
+            return Err(CliError::Usage(format!(
+                "--from-files `{}` is not a directory",
+                dir.display()
+            )))
+        }
+        None => None,
+    };
     let cfg = load(store, cli)?;
     let provider = import::probe(&a.from);
     if !provider.usable() {
@@ -1064,7 +1084,15 @@ fn import_cmd(cli: &Cli, a: &ImportArgs, store: &ConfigStore) -> Result<(), CliE
                 .unwrap_or_default()
         )));
     }
+    if from_files.is_some() && !provider.records_files {
+        return Err(CliError::Usage(format!(
+            "`{}` reads no downloaded files (its info lists no `{}`)",
+            a.from,
+            import::RECORDS_FILES
+        )));
+    }
     let from_profile = match (provider.login_profiles, &a.from_profile) {
+        _ if from_files.is_some() => None,
         (true, Some(p)) => Some(p.clone()),
         (true, None) => return Err(import::missing_profile(&provider)),
         (false, Some(_)) => {
@@ -1084,6 +1112,7 @@ fn import_cmd(cli: &Cli, a: &ImportArgs, store: &ConfigStore) -> Result<(), CliE
         &import::Request {
             from: a.from.clone(),
             from_profile,
+            files: from_files,
             patient: a.patient.clone(),
             person: a.person.clone(),
             since: a.since.clone(),

@@ -18,7 +18,9 @@
 //! `--from-profile` names as the export's `--profile`, and refuses a provider
 //! that signs in without listing it (one from before profiles) rather than
 //! run it unprofiled. A provider whose info says no login is needed takes
-//! none.
+//! none. One that also reads downloaded files lists `records-files`, and
+//! `--from-files <DIR>` runs its export on them with `--files <DIR>` instead
+//! of a login, with its `<PREFIX>_PROFILE` left out of its environment.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::{BufReader, Read};
@@ -30,6 +32,10 @@ use md5::Md5;
 use pk_cli_config::profile::{ProfileList, ProfileName};
 use pk_cli_core::CliError;
 use pk_med_records::LOGIN_PROFILES;
+
+/// The capability of a provider whose `records export --files <DIR>` reads
+/// downloaded files instead of a login (medical-common DESIGN §1.1).
+pub const RECORDS_FILES: &str = "records-files";
 use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -64,6 +70,8 @@ pub struct Provider {
     pub profiles: Vec<String>,
     /// Its export signs in through a login profile (`--from-profile`).
     pub login_profiles: bool,
+    /// Its export also reads downloaded files (`--from-files`).
+    pub records_files: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
 }
@@ -84,6 +92,7 @@ pub fn probe(cli: &str) -> Provider {
         version: None,
         profiles: Vec::new(),
         login_profiles: false,
+        records_files: false,
         note: None,
     };
     let Some(path) = which(cli) else {
@@ -132,10 +141,13 @@ pub fn probe(cli: &str) -> Provider {
                 .collect()
         })
         .unwrap_or_default();
-    p.login_profiles = v
-        .get("capabilities")
-        .and_then(Value::as_array)
-        .is_some_and(|a| a.iter().any(|c| c.as_str() == Some(LOGIN_PROFILES)));
+    let has = |capability: &str| {
+        v.get("capabilities")
+            .and_then(Value::as_array)
+            .is_some_and(|a| a.iter().any(|c| c.as_str() == Some(capability)))
+    };
+    p.login_profiles = has(LOGIN_PROFILES);
+    p.records_files = has(RECORDS_FILES);
     let signs_in = v
         .pointer("/auth/required")
         .and_then(Value::as_bool)
@@ -155,12 +167,30 @@ pub fn probe(cli: &str) -> Provider {
     p
 }
 
+/// A family CLI's environment prefix: its name in upper case, `-` as `_`.
+fn env_prefix(cli: &str) -> String {
+    cli.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_uppercase()
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
 /// The exit 2 for an import that names no `--from-profile` from a provider
 /// that needs one, listing the provider's profiles (`<cli> profiles list
 /// --json`, profile-list/v1: a local read, no sign-in).
 pub fn missing_profile(provider: &Provider) -> CliError {
     let cli = &provider.cli;
-    let lead = format!("importing from `{cli}` needs its profile: `--from-profile <NAME>`");
+    let files = if provider.records_files {
+        ", or its downloaded files: `--from-files <DIR>`"
+    } else {
+        ""
+    };
+    let lead = format!("importing from `{cli}` needs its profile: `--from-profile <NAME>`{files}");
     let listed = Bounded::new(&provider.path)
         .args(["profiles", "list", "--json"])
         .timeout(INFO_TIMEOUT)
@@ -205,6 +235,8 @@ pub struct Request {
     pub from: String,
     /// The provider's login profile, passed to its export as `--profile`.
     pub from_profile: Option<ProfileName>,
+    /// Downloaded files to read instead of a login, passed as `--files`.
+    pub files: Option<PathBuf>,
     pub patient: String,
     pub person: Option<String>,
     pub since: Option<String>,
@@ -360,8 +392,18 @@ pub fn run(
     if let Some(o) = &req.org {
         cmd = cmd.args(["--org", o.as_str()]);
     }
-    if let Some(p) = &req.from_profile {
-        cmd = cmd.args(["--profile", p.as_str()]);
+    // One source per export: the variable for the other one stays out of
+    // the provider's environment.
+    let prefix = env_prefix(&req.from);
+    if let Some(dir) = &req.files {
+        cmd = cmd
+            .arg("--files")
+            .arg(dir)
+            .env_remove(format!("{prefix}_PROFILE"));
+    } else if let Some(p) = &req.from_profile {
+        cmd = cmd
+            .args(["--profile", p.as_str()])
+            .env_remove(format!("{prefix}_FILES"));
     }
     let mut child = cmd.stream()?;
     let mut tee = Tee {
@@ -1461,6 +1503,12 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_providers_environment_prefix_is_its_name_in_upper_case() {
+        assert_eq!(env_prefix("uhc"), "UHC");
+        assert_eq!(env_prefix("my-chart"), "MY_CHART");
+    }
+
+    #[test]
     fn a_binary_over_max_file_mb_is_skipped_and_not_kept() {
         let mut r = RecordsReader::new(crate::testdata::STREAM.as_bytes());
         let all = read_stream(&mut r, u64::MAX).unwrap();
@@ -1591,6 +1639,7 @@ mod tests {
         let req = |patient: &str, org: Option<&str>, person: Option<&str>| Request {
             from: "mychart".into(),
             from_profile: None,
+            files: None,
             patient: patient.into(),
             person: person.map(str::to_string),
             since: None,

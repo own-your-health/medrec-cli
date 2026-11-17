@@ -1,0 +1,17 @@
+{
+  "schema": "cli-info/v1",
+  "name": "fakeprov",
+  "version": "0.0.2",
+  "repository": "https://example.org/fakeprov",
+  "auth": {
+    "required": true,
+    "method": "oauth"
+  },
+  "capabilities": [
+    "login-profiles",
+    "records-files"
+  ],
+  "profiles": [
+    "health-records/v1"
+  ]
+}
