@@ -23,8 +23,10 @@ session is a third-party service.
   output.
 - Develop and dogfood on synthetic data only:
   `cargo run --example synth -- "$TMPDIR/medrec-dog"` writes scans, DICOM
-  discs and a fake provider (`fakeprov`). Point a config at it with
-  `XDG_CONFIG_HOME` and `XDG_CACHE_HOME` in that directory.
+  discs and a fake provider (`fakeprov`, with login profiles `adult1` and
+  `adult2`). Point a config at it with `XDG_CONFIG_HOME` and
+  `XDG_CACHE_HOME` in that directory, and give it a profile of its own
+  (`medrec profiles add dog`, then `MEDREC_PROFILE=dog`).
 - A check against real data reports counts, statuses and exit codes only,
   or is left to the user in their own terminal.
 - No MCP server, and no registration in `cli-mcp` (the family-cli shipping
@@ -48,7 +50,8 @@ quick-xml, lopdf), and so are local tools (poppler, tesseract, bsdtar).
 
 | File | What it owns |
 |---|---|
-| `src/main.rs` | The clap tree, output and exit codes |
+| `src/main.rs` | The clap tree, output and exit codes, and the `profiles` commands |
+| `src/config.rs` | This machine's settings, and the profiles that hold each records folder's (cli-common's `pk_cli_config::profile`) |
 | `src/store.rs` | The records folder's backend: an rclone remote behind the read cache, or a local directory |
 | `src/folder.rs` | The folder layout, file naming, read-back writes, the lock and `rev` checks |
 | `src/model.rs` | Every JSON format in the folder |

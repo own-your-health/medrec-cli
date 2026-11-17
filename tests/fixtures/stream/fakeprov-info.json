@@ -7,6 +7,9 @@
     "required": true,
     "method": "oauth"
   },
+  "capabilities": [
+    "login-profiles"
+  ],
   "profiles": [
     "health-records/v1"
   ]

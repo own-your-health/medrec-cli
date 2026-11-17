@@ -23,6 +23,15 @@ use crate::pdfgen::text_pdf;
 pub const STREAM: &str = include_str!("../tests/fixtures/stream/synthetic.ndjson");
 /// The fake provider's `info --json`.
 pub const PROVIDER_INFO: &str = include_str!("../tests/fixtures/stream/fakeprov-info.json");
+/// The same from before login profiles: it signs in, but lists no
+/// `login-profiles`.
+pub const PROVIDER_INFO_UNPROFILED: &str =
+    include_str!("../tests/fixtures/stream/fakeprov-info-unprofiled.json");
+/// The same for a provider that needs no login.
+pub const PROVIDER_INFO_NO_LOGIN: &str =
+    include_str!("../tests/fixtures/stream/fakeprov-info-no-login.json");
+/// The fake provider's `profiles list --json`: `adult1` and `adult2`.
+pub const PROVIDER_PROFILES: &str = include_str!("../tests/fixtures/stream/fakeprov-profiles.json");
 
 pub fn write(path: &Path, bytes: &[u8]) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -169,15 +178,57 @@ pub fn write_dicom(dicom: &Path) {
 
 /// A fake `health-records/v1` provider, `fakeprov`, that prints `stream`
 /// for `records export`. Returns the directory to put on `PATH`.
+///
+/// Its `info` is `FAKEPROV_INFO` (`unprofiled` or `no-login`, else the
+/// current one, which lists `login-profiles`). Its profiles are `adult1` and
+/// `adult2`; with the current info an export without one of them is exit 2,
+/// as a provider's is. It writes the export's arguments to `export-args`.
 pub fn write_provider(provider: &Path, stream: &str) -> PathBuf {
     std::fs::create_dir_all(provider).unwrap();
     std::fs::write(provider.join("synthetic.ndjson"), stream).unwrap();
     std::fs::write(provider.join("fakeprov-info.json"), PROVIDER_INFO).unwrap();
+    std::fs::write(
+        provider.join("fakeprov-info-unprofiled.json"),
+        PROVIDER_INFO_UNPROFILED,
+    )
+    .unwrap();
+    std::fs::write(
+        provider.join("fakeprov-info-no-login.json"),
+        PROVIDER_INFO_NO_LOGIN,
+    )
+    .unwrap();
+    std::fs::write(provider.join("fakeprov-profiles.json"), PROVIDER_PROFILES).unwrap();
     let script = provider.join("fakeprov");
     write(
         &script,
         format!(
-            "#!/bin/sh\n# A fake health-records/v1 provider for medrec's tests.\ncase \"$1\" in\n  info) cat '{0}/fakeprov-info.json' ;;\n  records) cat '{0}/synthetic.ndjson'; [ -n \"$FAKEPROV_STDERR\" ] && printf '%s\\n' \"$FAKEPROV_STDERR\" >&2; exit \"${{FAKEPROV_EXIT:-0}}\" ;;\n  *) echo \"fakeprov: unknown command $1\" >&2; exit 2 ;;\nesac\n",
+            r#"#!/bin/sh
+# A fake health-records/v1 provider for medrec's tests.
+d='{0}'
+case "$1" in
+  info) case "$FAKEPROV_INFO" in
+      unprofiled|no-login) cat "$d/fakeprov-info-$FAKEPROV_INFO.json" ;;
+      *) cat "$d/fakeprov-info.json" ;;
+    esac ;;
+  profiles) cat "$d/fakeprov-profiles.json" ;;
+  records)
+    printf '%s
+' "$*" > "$d/export-args"
+    profile=''; prev=''
+    for a in "$@"; do [ "$prev" = --profile ] && profile="$a"; prev="$a"; done
+    if [ -z "$FAKEPROV_INFO" ]; then
+      case "$profile" in
+        adult1|adult2) ;;
+        *) echo "fakeprov: this command needs a profile; configured: adult1, adult2" >&2; exit 2 ;;
+      esac
+    fi
+    cat "$d/synthetic.ndjson"
+    [ -n "$FAKEPROV_STDERR" ] && printf '%s
+' "$FAKEPROV_STDERR" >&2
+    exit "${{FAKEPROV_EXIT:-0}}" ;;
+  *) echo "fakeprov: unknown command $1" >&2; exit 2 ;;
+esac
+"#,
             provider.display()
         )
         .as_bytes(),

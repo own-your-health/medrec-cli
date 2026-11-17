@@ -12,6 +12,13 @@
 //!
 //! Providers are found by profile, not by name: any CLI whose `info --json`
 //! lists `health-records/v1` is one.
+//!
+//! A provider that signs in keeps one login profile per account and lists
+//! `login-profiles` in its `info --json` capabilities; medrec passes the one
+//! `--from-profile` names as the export's `--profile`, and refuses a provider
+//! that signs in without listing it (one from before profiles) rather than
+//! run it unprofiled. A provider whose info says no login is needed takes
+//! none.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::{BufReader, Read};
@@ -20,7 +27,9 @@ use std::time::Duration;
 
 use base64::Engine;
 use md5::Md5;
+use pk_cli_config::profile::{ProfileList, ProfileName};
 use pk_cli_core::CliError;
+use pk_med_records::LOGIN_PROFILES;
 use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -53,6 +62,8 @@ pub struct Provider {
     pub version: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub profiles: Vec<String>,
+    /// Its export signs in through a login profile (`--from-profile`).
+    pub login_profiles: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
 }
@@ -72,6 +83,7 @@ pub fn probe(cli: &str) -> Provider {
         status: "not-installed".into(),
         version: None,
         profiles: Vec::new(),
+        login_profiles: false,
         note: None,
     };
     let Some(path) = which(cli) else {
@@ -120,13 +132,62 @@ pub fn probe(cli: &str) -> Provider {
                 .collect()
         })
         .unwrap_or_default();
-    p.status = if p.profiles.iter().any(|x| x == stream::PROFILE) {
-        "ok".into()
-    } else {
+    p.login_profiles = v
+        .get("capabilities")
+        .and_then(Value::as_array)
+        .is_some_and(|a| a.iter().any(|c| c.as_str() == Some(LOGIN_PROFILES)));
+    let signs_in = v
+        .pointer("/auth/required")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    p.status = if !p.profiles.iter().any(|x| x == stream::PROFILE) {
         p.note = Some(format!("does not declare {}", stream::PROFILE));
         "not-a-provider".into()
+    } else if signs_in && !p.login_profiles {
+        p.note = Some(format!(
+            "it signs in but predates login profiles (its info lists no `{LOGIN_PROFILES}`); \
+             upgrade it"
+        ));
+        "outdated".into()
+    } else {
+        "ok".into()
     };
     p
+}
+
+/// The exit 2 for an import that names no `--from-profile` from a provider
+/// that needs one, listing the provider's profiles (`<cli> profiles list
+/// --json`, profile-list/v1: a local read, no sign-in).
+pub fn missing_profile(provider: &Provider) -> CliError {
+    let cli = &provider.cli;
+    let lead = format!("importing from `{cli}` needs its profile: `--from-profile <NAME>`");
+    let listed = Bounded::new(&provider.path)
+        .args(["profiles", "list", "--json"])
+        .timeout(INFO_TIMEOUT)
+        .max_stdout(1024 * 1024)
+        .run()
+        .ok()
+        .filter(|r| r.code == Some(0))
+        .and_then(|r| serde_json::from_slice::<ProfileList>(&r.stdout).ok())
+        .filter(|l| l.schema == ProfileList::SCHEMA);
+    let Some(list) = listed else {
+        return CliError::Usage(format!(
+            "{lead}; `{cli} profiles list --json` did not list its profiles"
+        ));
+    };
+    let names: Vec<String> = list
+        .profiles
+        .iter()
+        .filter_map(|p| ProfileName::parse(&p.name).ok())
+        .map(|n| n.to_string())
+        .collect();
+    if names.is_empty() {
+        CliError::Usage(format!("{lead}; `{cli}` has no profile configured")).with_remedy(format!(
+            "add one with `{cli} profiles add <NAME>` and sign in"
+        ))
+    } else {
+        CliError::Usage(format!("{lead}; {cli}'s profiles: {}", names.join(", ")))
+    }
 }
 
 /// Every provider medrec knows of: the known names and the configured ones.
@@ -142,6 +203,8 @@ pub fn providers(cfg: &Config) -> Vec<Provider> {
 
 pub struct Request {
     pub from: String,
+    /// The provider's login profile, passed to its export as `--profile`.
+    pub from_profile: Option<ProfileName>,
     pub patient: String,
     pub person: Option<String>,
     pub since: Option<String>,
@@ -297,6 +360,9 @@ pub fn run(
     }
     if let Some(o) = &req.org {
         cmd = cmd.args(["--org", o.as_str()]);
+    }
+    if let Some(p) = &req.from_profile {
+        cmd = cmd.args(["--profile", p.as_str()]);
     }
     let mut child = cmd.stream()?;
     let mut tee = Tee {
@@ -887,9 +953,9 @@ pub fn provider_exit(cli: &str, code: Option<i32>, stderr: &str, org: Option<&st
         Some(5) => CliError::Upstream(format!(
             "{cli}'s provider did not answer; try again later{why}"
         )),
-        Some(2) => CliError::Other(format!(
-            "{cli} rejected the export arguments medrec sent{why}"
-        )),
+        // What medrec passes on is mostly the caller's: the profile, the
+        // patient, the organization, the date.
+        Some(2) => CliError::Usage(format!("{cli} refused the export's arguments{why}")),
         other => CliError::Upstream(format!(
             "{cli} exited {}{why}; nothing was written",
             exit_text(other)
@@ -1454,6 +1520,7 @@ mod tests {
         .unwrap();
         let req = |patient: &str, org: Option<&str>, person: Option<&str>| Request {
             from: "mychart".into(),
+            from_profile: None,
             patient: patient.into(),
             person: person.map(str::to_string),
             since: None,
