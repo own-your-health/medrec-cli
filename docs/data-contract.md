@@ -167,7 +167,9 @@ resource's, until its remaining source is imported again.
 
 A record is the same source resource when its `fhir_base`, `cli`,
 `organization_id`, resource type and id all match. A resource with no id
-is never the same resource as another; it joins a record only by key.
+is never the same resource as another; it joins a record only by key, and
+on that record, a provenance of its type from its source with no id is its
+own, so serving it again is unchanged and a correction is written in place.
 
 **ImagingStudy**: `id`, `study_uid`, `path`, `date`, `modalities`,
 `body_part`, `description`, `facility`, `accession`, `referring`, `series`

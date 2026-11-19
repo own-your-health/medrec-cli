@@ -1189,23 +1189,33 @@ enum Merge {
 /// the type-and-date key before 0.2.6 splits on its next import.
 fn merge(index: &mut PersonIndex, rec: Record) -> Merge {
     let incoming = rec.provenance[0].clone();
-    // An id is unique only on its own server: the source is part of it. A
-    // resource with no id is the same resource as nothing; it joins a
-    // record only by key.
+    let incoming_type = incoming.source_resource.as_ref().map(|s| &s.resource_type);
     let incoming_id = incoming
         .source_resource
         .as_ref()
         .filter(|s| !s.id.is_empty())
         .map(|s| (&s.resource_type, &s.id));
-    let same_resource = |p: &Provenance| {
-        incoming_id.is_some()
-            && p.source.fhir_base == incoming.source.fhir_base
+    // An id is unique only on its own server: the source is part of it.
+    let same_source = |p: &Provenance| {
+        p.source.fhir_base == incoming.source.fhir_base
             && p.source.cli == incoming.source.cli
             && p.source.organization_id == incoming.source.organization_id
+    };
+    let same_resource = |p: &Provenance| {
+        incoming_id.is_some()
+            && same_source(p)
             && p.source_resource
                 .as_ref()
                 .map(|s| (&s.resource_type, &s.id))
                 == incoming_id
+    };
+    // A resource with no id is known only by its key: on the record its key
+    // names, a provenance of its type from its source with no id is its own.
+    let same_idless = |p: &Provenance| {
+        incoming_id.is_none()
+            && same_source(p)
+            && p.source_resource.as_ref().map(|s| &s.resource_type) == incoming_type
+            && p.source_resource.as_ref().is_none_or(|s| s.id.is_empty())
     };
     let last_updated = |p: &Provenance| {
         p.source_resource
@@ -1227,30 +1237,7 @@ fn merge(index: &mut PersonIndex, rec: Record) -> Merge {
         .find(|r| r.provenance.iter().any(same_resource))
         .filter(|r| r.key == rec.key || r.provenance.iter().all(same_resource))
     {
-        let changed = existing.key != rec.key
-            || existing.fields != rec.fields
-            || existing.display != rec.display
-            || existing.status != rec.status
-            || existing.code != rec.code
-            || existing.date != rec.date;
-        let version_changed = existing
-            .provenance
-            .iter()
-            .find(|p| same_resource(p))
-            .map(|p| p.source_resource != incoming.source_resource)
-            .unwrap_or(true);
-        if !changed && !version_changed {
-            return Merge::Unchanged;
-        }
-        existing.fields = rec.fields;
-        existing.display = rec.display;
-        existing.status = rec.status;
-        existing.code = rec.code;
-        existing.date = rec.date;
-        existing.key = rec.key;
-        existing.provenance.retain(|p| !same_resource(p));
-        existing.provenance.push(incoming);
-        return Merge::Updated;
+        return rewrite(existing, rec, incoming.clone(), &same_resource);
     }
     if let Some(shared) = index
         .records
@@ -1260,11 +1247,48 @@ fn merge(index: &mut PersonIndex, rec: Record) -> Merge {
         shared.provenance.retain(|p| !same_resource(p));
     }
     if let Some(existing) = index.records.iter_mut().find(|r| r.key == rec.key) {
+        if existing.provenance.iter().any(same_idless) {
+            return rewrite(existing, rec, incoming.clone(), &same_idless);
+        }
         existing.provenance.push(incoming);
         return Merge::Updated;
     }
     index.records.push(rec);
     Merge::Added
+}
+
+/// Write `rec` over the record `existing`, whose provenance `mine` picks
+/// out is this resource's own: unchanged when nothing differs.
+fn rewrite(
+    existing: &mut Record,
+    rec: Record,
+    incoming: Provenance,
+    mine: &dyn Fn(&Provenance) -> bool,
+) -> Merge {
+    let changed = existing.key != rec.key
+        || existing.fields != rec.fields
+        || existing.display != rec.display
+        || existing.status != rec.status
+        || existing.code != rec.code
+        || existing.date != rec.date;
+    let version_changed = existing
+        .provenance
+        .iter()
+        .find(|p| mine(p))
+        .map(|p| p.source_resource != incoming.source_resource)
+        .unwrap_or(true);
+    if !changed && !version_changed {
+        return Merge::Unchanged;
+    }
+    existing.fields = rec.fields;
+    existing.display = rec.display;
+    existing.status = rec.status;
+    existing.code = rec.code;
+    existing.date = rec.date;
+    existing.key = rec.key;
+    existing.provenance.retain(|p| !mine(p));
+    existing.provenance.push(incoming);
+    Merge::Updated
 }
 
 fn owner(resource_type: &str, v: &Value) -> Option<Owner> {
@@ -1752,6 +1776,46 @@ mod tests {
     }
 
     #[test]
+    fn a_resource_with_no_id_is_rewritten_in_place_by_its_key() {
+        let mut obs: Value = crate::testdata::STREAM
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .find(|v| v["resourceType"] == "Observation")
+            .unwrap();
+        obs.as_object_mut().unwrap().remove("id");
+        let (_, mut prov) = eob_from("", 0.0);
+        prov.source_resource = Some(SourceResource {
+            resource_type: "Observation".into(),
+            id: String::new(),
+            version_id: None,
+            last_updated: None,
+        });
+        let mut index = PersonIndex::new("p_test");
+        assert!(matches!(
+            merge(&mut index, normalize::record(&obs, prov.clone()).unwrap()),
+            Merge::Added
+        ));
+        // Served again: one provenance, unchanged.
+        assert!(matches!(
+            merge(&mut index, normalize::record(&obs, prov.clone()).unwrap()),
+            Merge::Unchanged
+        ));
+        assert_eq!(index.records[0].provenance.len(), 1);
+        // Corrected at the source, under the same code and date: rewritten.
+        obs["valueQuantity"]["value"] = serde_json::json!(13.4);
+        assert!(matches!(
+            merge(&mut index, normalize::record(&obs, prov).unwrap()),
+            Merge::Updated
+        ));
+        assert_eq!(index.records.len(), 1);
+        assert_eq!(index.records[0].provenance.len(), 1);
+        assert_eq!(
+            index.records[0].fields["value"]["value"],
+            serde_json::json!(13.4)
+        );
+    }
+
+    #[test]
     fn a_claim_folded_under_the_old_key_splits_on_its_next_import() {
         let (a, pa) = eob_from("eob-a", 32.5);
         let (b, pb) = eob_from("eob-b", 7.0);
@@ -1814,9 +1878,10 @@ mod tests {
         ));
         assert!(matches!(
             merge(&mut index, normalize::record(&d, pd).unwrap()),
-            Merge::Updated
+            Merge::Unchanged
         ));
         assert_eq!(index.records.len(), 4);
+        assert_eq!(index.records[2].provenance.len(), 1);
         let paid: Vec<&Value> = index.records[2..]
             .iter()
             .map(|r| &r.fields["payment"]["amount"])
