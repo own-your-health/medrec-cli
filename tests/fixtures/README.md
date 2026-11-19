@@ -14,7 +14,11 @@ real record, document, study or provider response.
   It lists the `login-profiles` capability. `fakeprov-info-unprofiled.json` is
   the same from before login profiles, `fakeprov-info-no-login.json` one
   that needs no login, and `fakeprov-info-files.json` one that also reads
-  downloaded files (`records-files`). `fakeprov-profiles.json` is its `profiles list --json`
+  downloaded files (`records-files`).
+- `stream/summary.xml` is a synthetic clinical summary, shaped like one a
+  portal renders on each export: `{{RENDERING}}` (its timestamp and document
+  id) changes the bytes and not the text, and `{{FINDING}}` changes the
+  text. `testdata::stream_with_summary` serves it as `doc-0001`'s Binary. `fakeprov-profiles.json` is its `profiles list --json`
   (`profile-list/v1`: `adult1`, `adult2`).
 
 The scans, DICOM studies and the fake provider script are generated at test

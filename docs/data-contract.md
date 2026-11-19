@@ -230,7 +230,17 @@ profile. Its standard output is NDJSON:
    and type, preferring a DocumentReference that names it too. A
    DiagnosticReport's `LAB` category makes a `lab_report`, an imaging one
    (`RAD`, `CT`, `MR`, `US`, …) an `imaging_report`; a Media's Binary is
-   `other`. The document's provenance names that resource.
+   `other`. The document's provenance names that resource. A Binary with
+   the bytes of a document already filed is a duplicate
+   (`documents_duplicate`). One with other bytes is that document rendered
+   again (`documents_unchanged`, and the copy filed before stays) when it
+   comes from the same CLI and organization, through the same resource and
+   raw Binary, in the same media type. The resource's `meta.versionId` and
+   `lastUpdated`, where both imports have them, must also be the same, and
+   the text at least 0.95 similar (MinHash): a portal that generates a
+   summary on each export changes only its timestamp and ids. Otherwise it
+   is filed as a new document, so an amended one is kept, as is one with no
+   text to compare.
 3. A trailer: `{"schema": "records-stream-end/v1", "complete", "counts":
    {<type>: n}, "skipped": [{resource_type, id, search, reason, code}],
    "finished_at", "error"}`.

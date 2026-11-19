@@ -270,6 +270,9 @@ pub struct Report {
     pub records_unchanged: usize,
     pub documents_added: usize,
     pub documents_duplicate: usize,
+    /// Documents the source served again with other bytes but the same text
+    /// (a rendering it makes on each export): the one filed before stays.
+    pub documents_unchanged: usize,
     pub stream_bytes: u64,
 }
 
@@ -531,7 +534,7 @@ pub fn run(
     }
     let eob_docs = eob_document_links(&resources);
 
-    let (docs_added, docs_dup) = file_binaries(
+    let filed = file_binaries(
         folder,
         cfg,
         &household,
@@ -569,7 +572,7 @@ pub fn run(
         records_unchanged: unchanged,
         resources_written: written.written,
         resources_unchanged: written.unchanged,
-        documents_added: docs_added,
+        documents_added: filed.added,
     });
     folder.save_index(&person, &mut index)?;
     folder.save_text(&person, &texts)?;
@@ -597,8 +600,9 @@ pub fn run(
         records_added: added,
         records_updated: updated,
         records_unchanged: unchanged,
-        documents_added: docs_added,
-        documents_duplicate: docs_dup,
+        documents_added: filed.added,
+        documents_duplicate: filed.duplicate,
+        documents_unchanged: filed.unchanged,
         stream_bytes,
     })
 }
@@ -1309,16 +1313,16 @@ fn file_binaries(
     owners: &[Owner],
     eob_docs: &HashMap<String, String>,
     raw_paths: &HashMap<(String, String), String>,
-) -> Result<(usize, usize), CliError> {
+) -> Result<Filed, CliError> {
+    let mut filed = Filed::default();
     if binaries.is_empty() {
-        return Ok((0, 0));
+        return Ok(filed);
     }
     let ctx = intake::Context::new(cfg, household);
-    let (mut added, mut dup) = (0, 0);
     for b in binaries {
         let sha = hash::sha256_hex(&b.bytes);
         if index.documents.iter().any(|d| d.sha256 == sha) {
-            dup += 1;
+            filed.duplicate += 1;
             continue;
         }
         let kind = filetype::sniff(&b.bytes).or_else(|| {
@@ -1327,6 +1331,27 @@ fn file_binaries(
                 .and_then(filetype::Kind::from_media_type)
         });
         let dr = owner_of(owners, &b.id);
+        let resource = match dr {
+            Some(d) => SourceResource {
+                resource_type: d.kind.as_str().into(),
+                id: d.id.clone(),
+                version_id: d.version.clone(),
+                last_updated: d.last_updated.clone(),
+            },
+            None => SourceResource {
+                resource_type: "Binary".into(),
+                id: b.id.clone(),
+                version_id: None,
+                last_updated: None,
+            },
+        };
+        let raw_path = raw_paths
+            .get(&("Binary".to_string(), b.id.clone()))
+            .cloned();
+        let media_type = kind
+            .map(|k| k.media_type().to_string())
+            .or_else(|| b.content_type.clone())
+            .unwrap_or_else(|| "application/octet-stream".into());
         let claim = dr
             .filter(|d| d.kind == OwnerKind::DocumentReference)
             .and_then(|d| eob_docs.get(&d.id));
@@ -1360,42 +1385,28 @@ fn file_binaries(
         let scratch = pk_cli_drive::private_temp_dir("medrec-doc")?;
         let local = scratch.path().join(format!("doc.{ext}"));
         crate::write_private(&local, &b.bytes)?;
+        let extracted = match kind {
+            Some(k) => text::extract(&ctx.tools, k, &local, &ctx.opts),
+            None => text::Extracted::default(),
+        };
+        let signature = intake::dupes::signature(&extracted.text);
+        let mut prov = base.clone();
+        prov.source_resource = Some(resource);
+        prov.raw_path = raw_path;
+        if rendered_again(index, &prov, &media_type, &signature) {
+            filed.unchanged += 1;
+            continue;
+        }
         let md5 = {
             let mut h = Md5::new();
             h.update(&b.bytes);
             hash::hex(&h.finalize())
         };
         let path = folder.put_new_file(&local, &dir, &name, &md5)?;
-        let extracted = match kind {
-            Some(k) => text::extract(&ctx.tools, k, &local, &ctx.opts),
-            None => text::Extracted::default(),
-        };
-        let mut prov = base.clone();
-        prov.source_resource = Some(match dr {
-            Some(d) => SourceResource {
-                resource_type: d.kind.as_str().into(),
-                id: d.id.clone(),
-                version_id: d.version.clone(),
-                last_updated: d.last_updated.clone(),
-            },
-            None => SourceResource {
-                resource_type: "Binary".into(),
-                id: b.id.clone(),
-                version_id: None,
-                last_updated: None,
-            },
-        });
-        prov.raw_path = raw_paths
-            .get(&("Binary".to_string(), b.id.clone()))
-            .cloned();
         let id = ids::new("d");
         if !extracted.text.is_empty() {
             texts.texts.insert(id.clone(), extracted.text.clone());
         }
-        let media_type = kind
-            .map(|k| k.media_type().to_string())
-            .or_else(|| b.content_type.clone())
-            .unwrap_or_else(|| "application/octet-stream".into());
         index.documents.push(Document {
             id: id.clone(),
             path,
@@ -1418,7 +1429,7 @@ fn file_binaries(
             },
             text: Some(intake::text_info(&extracted)),
             near_duplicates: Vec::new(),
-            minhash: intake::dupes::signature(&extracted.text),
+            minhash: signature,
             classification: None,
             provenance: prov,
         });
@@ -1437,9 +1448,60 @@ fn file_binaries(
                 }
             }
         }
-        added += 1;
+        filed.added += 1;
     }
-    Ok((added, dup))
+    Ok(filed)
+}
+
+/// What [`file_binaries`] did with a stream's documents.
+#[derive(Debug, Default)]
+struct Filed {
+    added: usize,
+    /// The same bytes as a document already filed.
+    duplicate: usize,
+    /// A rendering of a document already filed: see [`rendered_again`].
+    unchanged: usize,
+}
+
+/// The text similarity at which a source document served with other bytes
+/// is the same document rendered again rather than an amended one. A
+/// summary a portal generates on each export differs only in markup a text
+/// reading leaves out (its timestamp and ids) and scores 1.0.
+const SAME_TEXT: f32 = 0.95;
+
+/// Whether a document from `prov` is one already filed, rendered again:
+/// the same CLI and organization, the same source resource and raw Binary,
+/// the same media type, no version that says it changed, and the same text.
+/// Without text to compare, or with a version that differs, it is filed as
+/// a new document, so an amended one is never lost.
+fn rendered_again(
+    index: &PersonIndex,
+    prov: &Provenance,
+    media_type: &str,
+    signature: &[u32],
+) -> bool {
+    let Some(ours) = &prov.source_resource else {
+        return false;
+    };
+    if signature.is_empty() {
+        return false;
+    }
+    let differs =
+        |a: &Option<String>, b: &Option<String>| matches!((a, b), (Some(a), Some(b)) if a != b);
+    index.documents.iter().any(|d| {
+        let Some(theirs) = &d.provenance.source_resource else {
+            return false;
+        };
+        d.provenance.source.cli == prov.source.cli
+            && d.provenance.source.organization_id == prov.source.organization_id
+            && theirs.resource_type == ours.resource_type
+            && theirs.id == ours.id
+            && d.provenance.raw_path == prov.raw_path
+            && d.media_type == media_type
+            && !differs(&theirs.version_id, &ours.version_id)
+            && !differs(&theirs.last_updated, &ours.last_updated)
+            && intake::dupes::similarity(&d.minhash, signature) >= SAME_TEXT
+    })
 }
 
 fn record_source(h: &mut Household, pid: &str, cli: &str, header: &Header, portal: bool) {

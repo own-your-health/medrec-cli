@@ -1464,3 +1464,70 @@ fn an_import_from_downloaded_files_runs_with_files_and_no_profile() {
         .any(|p| p["cli"] == "fakeprov" && p["records_files"] == true));
     let _ = std::fs::remove_dir_all(&e.root);
 }
+
+#[test]
+fn a_document_rendered_again_on_a_later_export_is_not_filed_twice() {
+    let base = Env::new("rendered-again");
+    setup(&base);
+    let finding = "Hemoglobin and the other routine blood tests were within the expected range.";
+    let serve =
+        |stream: &str| medrec::testdata::write_provider(&base.root.join("provider"), stream);
+    let e = provider_env(
+        &base,
+        &medrec::testdata::stream_with_summary("rendering-a", finding, "1"),
+    );
+    let import = |person: bool| {
+        let mut a = vec![
+            "import",
+            "--from",
+            "fakeprov",
+            "--from-profile",
+            "adult1",
+            "--patient",
+            "pat-0001",
+        ];
+        if person {
+            a.extend_from_slice(&["--person", "Robin"]);
+        }
+        e.ok(&a)
+    };
+    let docs = |v: &Value| {
+        (
+            v["documents_added"].as_u64().unwrap(),
+            v["documents_duplicate"].as_u64().unwrap(),
+            v["documents_unchanged"].as_u64().unwrap(),
+        )
+    };
+    assert_eq!(docs(&import(true)), (2, 0, 0));
+
+    // The next export renders the summary again: a new timestamp and id,
+    // other bytes, the same text. The copy filed before stays the only one.
+    serve(&medrec::testdata::stream_with_summary(
+        "rendering-b",
+        finding,
+        "1",
+    ));
+    assert_eq!(docs(&import(false)), (0, 1, 1));
+
+    // The same text under a new version of the document is a new version.
+    serve(&medrec::testdata::stream_with_summary(
+        "rendering-c",
+        finding,
+        "2",
+    ));
+    assert_eq!(docs(&import(false)), (1, 1, 0));
+
+    // An amended summary, at the same version, says something else: filed.
+    serve(&medrec::testdata::stream_with_summary(
+        "rendering-d",
+        "Hemoglobin was low on this visit and the clinic asked for a repeat test next month.",
+        "2",
+    ));
+    assert_eq!(docs(&import(false)), (1, 1, 0));
+
+    let listed = e.ok(&["documents", "list"]);
+    assert_eq!(listed["items"].as_array().unwrap().len(), 4);
+    let v = e.ok(&["verify"]);
+    assert!(v["missing"].as_array().unwrap().is_empty(), "{v}");
+    let _ = std::fs::remove_dir_all(&e.root);
+}

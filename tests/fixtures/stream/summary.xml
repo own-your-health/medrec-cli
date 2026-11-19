@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A synthetic clinical summary, shaped like one a portal renders on each
+     export: the effectiveTime and the document id change on every rendering;
+     the text does not. -->
+<ClinicalDocument xmlns="urn:hl7-org:v3">
+  <id root="2.25.0" extension="{{RENDERING}}"/>
+  <code code="34133-9" displayName="Summary of episode note"/>
+  <title>Visit summary for a synthetic test patient</title>
+  <effectiveTime value="{{RENDERING}}"/>
+  <component>
+    <section>
+      <title>Reason for visit</title>
+      <text>Routine follow up visit for a synthetic test patient with no real history.</text>
+    </section>
+    <section>
+      <title>Results</title>
+      <text>{{FINDING}}</text>
+    </section>
+    <section>
+      <title>Plan</title>
+      <text>Return in twelve months for the next routine visit and repeat the same tests.</text>
+    </section>
+  </component>
+</ClinicalDocument>
