@@ -997,27 +997,51 @@ fn write_raw(
         .into_iter()
         .map(|h| (h.rel, h.md5))
         .collect();
-    // A refresh moves the held copy to `<id>~refresh-<md5>.json` while the
-    // new one uploads, and removes it after. One still here is from a
-    // refresh cut short: it goes, or back in place if the copy it was making
-    // room for never arrived.
+    // A refresh moves the held copy to `<id>~refresh-<tag>.json`, `<tag>`
+    // being the start of the new copy's MD5, while that uploads, and removes
+    // it after. One still here is from a refresh cut short. It goes when the
+    // current copy is the one it made room for. Otherwise it goes back in
+    // place, and a current copy that is not that one (an upload that did not
+    // read back) is kept beside it as an earlier version.
     let leftovers: Vec<String> = existing
         .keys()
         .filter(|k| k.contains(REFRESHING))
         .cloned()
         .collect();
     for left in leftovers {
-        let current = format!("{}.json", &left[..left.find(REFRESHING).unwrap_or(0)]);
+        let Some(at) = left.find(REFRESHING) else {
+            continue;
+        };
+        let stem = &left[..at];
+        let tag = left[at + REFRESHING.len()..].trim_end_matches(".json");
+        let current = format!("{stem}.json");
         let md5 = existing.remove(&left).flatten();
-        match existing.entry(current) {
-            std::collections::hash_map::Entry::Occupied(_) => {
+        match existing.get(&current).cloned() {
+            Some(Some(m)) if !tag.is_empty() && m.starts_with(tag) => {
                 folder.store.delete(&left)?;
+                continue;
             }
-            std::collections::hash_map::Entry::Vacant(v) => {
-                folder.store.move_no_clobber(&left, v.key())?;
-                v.insert(md5);
+            Some(unverified) => {
+                let sub = stem
+                    .strip_prefix(&format!("{source_dir}/"))
+                    .unwrap_or(stem)
+                    .to_string();
+                if let Some(kept) = move_aside(
+                    folder,
+                    &existing,
+                    source_dir,
+                    &sub,
+                    &current,
+                    unverified.clone(),
+                )? {
+                    existing.insert(kept, unverified);
+                }
+                existing.remove(&current);
             }
+            None => {}
         }
+        folder.store.move_no_clobber(&left, &current)?;
+        existing.insert(current, md5);
     }
     let staging = pk_cli_drive::private_temp_dir("medrec-import")?;
     let mut paths = HashMap::new();
@@ -1189,9 +1213,9 @@ fn write_raw(
 const REFRESHING: &str = "~refresh-";
 
 /// Move the current copy at `rel` aside before a new one is uploaded
-/// (uploads never replace a file), as an earlier version. When those bytes
-/// are already kept, from an earlier change back and forth, the copy at
-/// `rel` is removed instead.
+/// (uploads never replace a file), as an earlier version, and return where
+/// it went. When those bytes are already kept, from an earlier change back
+/// and forth, the copy at `rel` is removed instead.
 fn move_aside(
     folder: &Folder,
     existing: &HashMap<String, Option<String>>,
@@ -1199,7 +1223,7 @@ fn move_aside(
     sub: &str,
     rel: &str,
     old: Option<String>,
-) -> Result<(), CliError> {
+) -> Result<Option<String>, CliError> {
     let tag = old
         .as_deref()
         .and_then(|m| m.get(..8))
@@ -1209,10 +1233,13 @@ fn move_aside(
     let mut n = 2;
     loop {
         match existing.get(&kept) {
-            None => return folder.store.move_no_clobber(rel, &kept),
+            None => {
+                folder.store.move_no_clobber(rel, &kept)?;
+                return Ok(Some(kept));
+            }
             Some(k) if old.is_some() && *k == old => {
                 folder.store.delete(rel)?;
-                return Ok(());
+                return Ok(None);
             }
             Some(_) => {
                 kept = format!("{source_dir}/{sub}~{tag}-{n}.json");
