@@ -113,7 +113,8 @@ without a download), `size`, `media_type`, `pages`, `original_name`, `title`,
 `text` (`{chars, engines, ocr_pages, note}`), `near_duplicates`
 (`[{document, similarity}]`), `minhash`, `renderings` (`[{sha256, size,
 fetched_at}]`: each distinct rendering later imports served of it with the
-same text, once; served again byte for byte, it is a duplicate),
+same text, and those of a copy folded in by `documents merge`, once; served
+again byte for byte, it is a duplicate),
 `classification` (what was detected, with scores and evidence), and
 `provenance`. An imported document's `provenance.raw_path` names its
 Binary's raw file, which holds the latest rendering the source served;
@@ -237,8 +238,8 @@ profile. Its standard output is NDJSON:
    DiagnosticReport's `LAB` category makes a `lab_report`, an imaging one
    (`RAD`, `CT`, `MR`, `US`, …) an `imaging_report`; a Media's Binary is
    `other`. The document's provenance names that resource. A Binary with
-   the bytes of a document already filed is a duplicate
-   (`documents_duplicate`). One with other bytes is that document rendered
+   the bytes of a document already filed, or of a rendering already noted
+   on one, is a duplicate (`documents_duplicate`). One with other bytes is that document rendered
    again (`documents_unchanged`; nothing is filed, and the rendering's
    `sha256`, `size` and `fetched_at` go on the kept document's
    `renderings`) when the latest document filed from the same CLI and
@@ -249,6 +250,8 @@ profile. Its standard output is NDJSON:
    markup a text reading leaves out (its timestamp and ids). Any other
    difference, one digit included, files a new document, as does a
    document with no text.
+   `medrec documents merge <copy> --into <id>` folds a copy filed before
+   that rule (0.2.3) into the document it renders, by the same rule.
 3. A trailer: `{"schema": "records-stream-end/v1", "complete", "counts":
    {<type>: n}, "skipped": [{resource_type, id, search, reason, code}],
    "finished_at", "error"}`.

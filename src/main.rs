@@ -453,6 +453,20 @@ enum DocumentsCmd {
         #[arg(long)]
         no_launch: bool,
     },
+    /// Fold a document filed twice into the one it renders again: the same
+    /// source document and Binary, exactly the same text. Its file is
+    /// removed (on Drive, to the trash) and its hash kept on the other's
+    /// `renderings`.
+    Merge {
+        /// The copy to fold in.
+        duplicate: String,
+        /// The document to keep.
+        #[arg(long, value_name = "ID")]
+        into: String,
+        /// Merge without asking.
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -1250,6 +1264,36 @@ fn documents_cmd(cli: &Cli, cmd: &DocumentsCmd, store: &ConfigStore) -> Result<(
                 json!({ "document": d.id, "path": path.display().to_string(), "launched": launched }),
                 |v| println!("{}", v["path"].as_str().unwrap_or("")),
             );
+        }
+        DocumentsCmd::Merge {
+            duplicate,
+            into,
+            force,
+        } => {
+            let cfg = load(store, cli)?;
+            let f = Folder::open(&cfg, Access::Write)?;
+            let h = f.household()?;
+            // Every refusal before the prompt: it only asks about a merge
+            // that will go ahead.
+            let plan = medrec::documents::plan(&f, &h, duplicate, into)?;
+            confirm::gate(
+                &cli.common,
+                *force,
+                &format!("Merge document {duplicate} into {into} and remove its file?"),
+            )?;
+            let m = medrec::documents::apply(&f, plan)?;
+            output::emit(json, "document-merge", to_value(&m), |_| {
+                println!(
+                    "merged {} into {}{}",
+                    m.merged,
+                    m.document,
+                    if m.file_removed {
+                        "; its file was removed"
+                    } else {
+                        "; its file was already gone"
+                    }
+                )
+            });
         }
     }
     Ok(())

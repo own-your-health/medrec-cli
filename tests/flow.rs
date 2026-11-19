@@ -1545,3 +1545,149 @@ fn a_document_rendered_again_on_a_later_export_is_not_filed_twice() {
     assert!(v["missing"].as_array().unwrap().is_empty(), "{v}");
     let _ = std::fs::remove_dir_all(&e.root);
 }
+
+#[test]
+fn a_document_filed_twice_merges_into_the_one_it_renders_again() {
+    let base = Env::new("merge");
+    setup(&base);
+    let finding = "Hemoglobin was 13.1 and the other routine blood tests were in range.";
+    let e = provider_env(
+        &base,
+        &medrec::testdata::stream_with_summary("rendering-a", finding, "1"),
+    );
+    e.ok(&[
+        "import",
+        "--from",
+        "fakeprov",
+        "--from-profile",
+        "adult1",
+        "--patient",
+        "pat-0001",
+        "--person",
+        "Robin",
+    ]);
+    // The person's folder, and the summary filed for it.
+    let folder = std::fs::read_dir(e.records())
+        .unwrap()
+        .map(|d| d.unwrap().path())
+        .find(|p| {
+            p.join("index.json").is_file() && {
+                let v: Value =
+                    serde_json::from_str(&std::fs::read_to_string(p.join("index.json")).unwrap())
+                        .unwrap();
+                !v["documents"].as_array().unwrap().is_empty()
+            }
+        })
+        .unwrap();
+    let read = |f: &str| -> Value {
+        serde_json::from_str(&std::fs::read_to_string(folder.join(f)).unwrap()).unwrap()
+    };
+    let mut index = read("index.json");
+    let mut text = read("text.json");
+    let docs = index["documents"].as_array().unwrap().clone();
+    let summary = docs
+        .iter()
+        .find(|d| d["media_type"] == "application/xml")
+        .unwrap()
+        .clone();
+    let pdf = docs
+        .iter()
+        .find(|d| d["media_type"] == "application/pdf")
+        .unwrap()
+        .clone();
+    let kept = summary["id"].as_str().unwrap().to_string();
+
+    // A copy as an import before 0.2.3 filed it: the summary rendered
+    // again, other bytes and the same text, named by a record.
+    let original = std::fs::read(e.records().join(summary["path"].as_str().unwrap())).unwrap();
+    let mut bytes = original.clone();
+    bytes.extend_from_slice(b"\n<!-- rendering-b -->\n");
+    let copy_path = summary["path"].as_str().unwrap().replace(".xml", "-2.xml");
+    std::fs::write(e.records().join(&copy_path), &bytes).unwrap();
+    let mut copy = summary.clone();
+    copy["id"] = "d_copy0001".into();
+    copy["path"] = copy_path.clone().into();
+    copy["sha256"] = medrec::hash::sha256_hex(&bytes).into();
+    copy["md5"] = medrec::hash::md5_hex(&bytes).into();
+    copy["size"] = (bytes.len() as u64).into();
+    copy["provenance"]["fetched_at"] = "2026-03-06T09:00:00Z".into();
+    index["documents"].as_array_mut().unwrap().push(copy);
+    index["records"][0]["documents"] = serde_json::json!(["d_copy0001"]);
+    // A study whose report it is.
+    index["studies"] = serde_json::json!([{
+        "id": "s_study0001",
+        "study_uid": "2.25.1",
+        "path": "Imaging/none",
+        "series": [],
+        "instances": 0,
+        "size": 0,
+        "report": "d_copy0001",
+        "filed_at": "2026-03-06T09:00:00Z",
+        "provenance": []
+    }]);
+    text["texts"]["d_copy0001"] = text["texts"][&kept].clone();
+    std::fs::write(folder.join("index.json"), index.to_string()).unwrap();
+    std::fs::write(folder.join("text.json"), text.to_string()).unwrap();
+    e.ok(&[
+        "note",
+        "add",
+        "Robin",
+        "About the copy",
+        "--about",
+        "d_copy0001",
+    ]);
+
+    // Refusals come before the prompt: with no terminal and no --force, a
+    // merge that would be refused is that refusal, not exit 6.
+    let (code, said_) = said(&e.run(&[
+        "--json",
+        "documents",
+        "merge",
+        pdf["id"].as_str().unwrap(),
+        "--into",
+        &kept,
+    ]));
+    assert_eq!(code, Some(2), "{said_}");
+    assert!(said_.contains("is not a rendering of"), "{said_}");
+    let (code, said_) = said(&e.run(&["documents", "merge", &kept, "--into", &kept]));
+    assert_eq!(code, Some(2), "{said_}");
+    let (code, said_) = said(&e.run(&["documents", "merge", "d_nope0001", "--into", &kept]));
+    assert_eq!(code, Some(4), "{said_}");
+    assert!(
+        said_.contains("`d_nope0001`") && !said_.contains(&format!("`{kept}`")),
+        "{said_}"
+    );
+    // A merge that would go ahead asks, and with no terminal it is exit 6.
+    let gate = e.run(&["documents", "merge", "d_copy0001", "--into", &kept]);
+    assert_eq!(gate.status.code(), Some(6));
+
+    let m = e.ok(&[
+        "documents",
+        "merge",
+        "d_copy0001",
+        "--into",
+        &kept,
+        "--force",
+    ]);
+    assert_eq!(m["document"], kept.as_str());
+    assert_eq!(m["file_removed"], true);
+    assert_eq!(m["references_moved"], 3);
+    assert!(!e.records().join(&copy_path).exists());
+    let index = read("index.json");
+    let docs = index["documents"].as_array().unwrap();
+    assert!(docs.iter().all(|d| d["id"] != "d_copy0001"));
+    let kept_doc = docs.iter().find(|d| d["id"] == kept.as_str()).unwrap();
+    assert_eq!(
+        kept_doc["renderings"][0]["sha256"],
+        medrec::hash::sha256_hex(&bytes)
+    );
+    assert_eq!(index["records"][0]["documents"], serde_json::json!([kept]));
+    assert_eq!(index["studies"][0]["report"], kept.as_str());
+    assert!(read("text.json")["texts"].get("d_copy0001").is_none());
+    let notes = e.ok(&["note", "list"]);
+    assert_eq!(notes["items"][0]["about"], serde_json::json!([kept]));
+    let v = e.ok(&["verify"]);
+    assert!(v["missing"].as_array().unwrap().is_empty(), "{v}");
+    assert!(v["unindexed"].as_array().unwrap().is_empty(), "{v}");
+    let _ = std::fs::remove_dir_all(&e.root);
+}
