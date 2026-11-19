@@ -281,7 +281,11 @@ profile. Its standard output is NDJSON:
    "organization": {id, name, fhir_base, vendor}, "patient": {id,
    organization, label, relationship}, "since", "pulled_at", "fhir_version",
    "method"}`.
-2. One FHIR R4 resource per line. A `Binary` follows the resource that names
+2. One FHIR resource per line, R4, or STU3 where the header's
+   `fhir_version` says so; medrec reads both shapes (0.2.8 and later: a
+   status as a plain code, `assertedDate`, `Immunization.date` and
+   `notGiven`, `requester.agent`, a single `DiagnosticReport.category`), and
+   an empty string as an absent value. A `Binary` follows the resource that names
    it: a `DocumentReference` (`content[].attachment.url`), a
    `DiagnosticReport` (`presentedForm[].url`) or a `Media` (`content.url`).
    medrec files the Binary as a document with that resource's date, title
