@@ -289,6 +289,20 @@ profile. Its standard output is NDJSON:
    document with no text.
    `medrec documents merge <copy> --into <id>` folds a copy filed before
    that rule (0.2.3) into the document it renders, by the same rule.
+
+   A resource served in an older version than the one filed is kept and
+   changes nothing (0.2.7 and later). Older means its `meta.lastUpdated` is
+   an earlier instant than the filed version's, compared across zones and
+   precisions; a date alone is that day at `00:00:00Z` (medical-common
+   DESIGN §1.4). Its record stays as filed, and the import counts it
+   `records_older`. Its raw file goes beside the current one as
+   `<id>~<md5>.json`, and the current file stays. A document filed from an
+   older Binary names that file as its `raw_path`. When either version has
+   no `lastUpdated`, or the time cannot be read, the later import wins, as
+   before. `lastUpdated` measures when content was current, not how
+   complete it is. When one source serves a resource in two shapes (a
+   portal page and a downloaded statement), the later one is kept even if
+   it carries less. The other stays in the raw layer.
 3. A trailer: `{"schema": "records-stream-end/v1", "complete", "counts":
    {<type>: n}, "skipped": [{resource_type, id, search, reason, code}],
    "finished_at", "error"}`.

@@ -53,7 +53,7 @@ use crate::proc::{which, Bounded};
 use crate::stream::{self, Header, Item, RawResource, RecordsReader, Skip};
 
 /// Provider CLIs medrec looks for without being told.
-pub const KNOWN_PROVIDERS: &[&str] = &["mychart", "kp", "athena", "uhc"];
+pub const KNOWN_PROVIDERS: &[&str] = &["mychart", "kp", "athena", "uhc", "oneblood"];
 const INFO_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, Serialize)]
@@ -269,6 +269,9 @@ pub struct Report {
     pub records_added: usize,
     pub records_updated: usize,
     pub records_unchanged: usize,
+    /// Versions of records older (`meta.lastUpdated`) than the ones filed,
+    /// which stayed.
+    pub records_older: usize,
     pub documents_added: usize,
     pub documents_duplicate: usize,
     /// Documents the source served again with other bytes but the same text
@@ -495,7 +498,7 @@ pub fn run(
     let source = source_slug(&header.source.cli, &header.organization.id);
     let source_dir = folder::records_dir(&person, &source);
     let mut index = folder.index(&person)?;
-    let written = write_raw(folder, &source_dir, &resources)?;
+    let written = write_raw(folder, &source_dir, &resources, &filed_versions(&index))?;
 
     let mut texts = folder.text(&person)?;
     let imported_at = now_rfc3339();
@@ -525,7 +528,7 @@ pub fn run(
     };
 
     let mut owners = Vec::new();
-    let (mut added, mut updated, mut unchanged) = (0, 0, 0);
+    let (mut added, mut updated, mut unchanged, mut older) = (0, 0, 0, 0);
     for r in &resources {
         let Ok(v) = r.value() else { continue };
         if let Some(o) = owner(&r.resource_type, &v) {
@@ -542,6 +545,7 @@ pub fn run(
                 Merge::Added => added += 1,
                 Merge::Updated => updated += 1,
                 Merge::Unchanged => unchanged += 1,
+                Merge::Older => older += 1,
             }
         }
     }
@@ -583,6 +587,7 @@ pub fn run(
         records_added: added,
         records_updated: updated,
         records_unchanged: unchanged,
+        records_older: older,
         resources_written: written.written,
         resources_unchanged: written.unchanged,
         documents_added: filed.added,
@@ -613,6 +618,7 @@ pub fn run(
         records_added: added,
         records_updated: updated,
         records_unchanged: unchanged,
+        records_older: older,
         documents_added: filed.added,
         documents_duplicate: filed.duplicate,
         documents_unchanged: filed.unchanged,
@@ -917,10 +923,28 @@ struct Written {
 /// Write each resource verbatim under `source_dir`, skipping those already
 /// there byte for byte and keeping the previous version of those that
 /// changed. One upload for the lot, then every file's MD5 checked.
+/// Each raw file the index's records and documents were filed from, with the
+/// `meta.lastUpdated` of the version filed.
+fn filed_versions(index: &PersonIndex) -> HashMap<String, String> {
+    index
+        .records
+        .iter()
+        .flat_map(|r| r.provenance.iter())
+        .chain(index.documents.iter().map(|d| &d.provenance))
+        .filter_map(|p| {
+            Some((
+                p.raw_path.clone()?,
+                p.source_resource.as_ref()?.last_updated.clone()?,
+            ))
+        })
+        .collect()
+}
+
 fn write_raw(
     folder: &Folder,
     source_dir: &str,
     resources: &[RawResource],
+    filed: &HashMap<String, String>,
 ) -> Result<Written, CliError> {
     let existing: HashMap<String, Option<String>> = folder
         .store
@@ -945,6 +969,41 @@ fn write_raw(
         let md5 = hash::md5_hex(body.as_bytes());
         let rel = format!("{source_dir}/{sub}.json");
         paths.insert((r.resource_type.clone(), r.id.clone()), rel.clone());
+        let served = r
+            .value()
+            .ok()
+            .and_then(|v| normalize::path_str(&v, "meta.lastUpdated").map(str::to_string));
+        if matches!(existing.get(&rel), Some(old) if old.as_deref() != Some(md5.as_str()))
+            && crate::when::earlier(served.as_deref(), filed.get(&rel).map(String::as_str))
+        {
+            // Older than the version filed: it goes beside it under its own
+            // hash, and the current one stays.
+            let mut tag = md5[..8].to_string();
+            let mut aside = format!("{source_dir}/{sub}~{tag}.json");
+            match existing.get(&aside) {
+                Some(Some(m)) if *m == md5 => {
+                    unchanged += 1;
+                    continue;
+                }
+                Some(_) => {
+                    tag = md5.clone();
+                    aside = format!("{source_dir}/{sub}~{tag}.json");
+                    if existing.contains_key(&aside) {
+                        unchanged += 1;
+                        continue;
+                    }
+                }
+                None => {}
+            }
+            paths.insert((r.resource_type.clone(), r.id.clone()), aside.clone());
+            let local = staging.path().join(format!("{sub}~{tag}.json"));
+            if let Some(parent) = local.parent() {
+                crate::store::private_dirs(parent)?;
+            }
+            crate::write_private(&local, body.as_bytes())?;
+            staged.push((aside, md5));
+            continue;
+        }
         match existing.get(&rel) {
             Some(Some(old)) if *old == md5 => {
                 unchanged += 1;
@@ -1119,6 +1178,8 @@ enum Merge {
     Added,
     Updated,
     Unchanged,
+    /// A version older than the one filed, which stays.
+    Older,
 }
 
 /// The same source resource updates its record; the same fact from another
@@ -1146,6 +1207,20 @@ fn merge(index: &mut PersonIndex, rec: Record) -> Merge {
                 .map(|s| (&s.resource_type, &s.id))
                 == incoming_id
     };
+    let last_updated = |p: &Provenance| {
+        p.source_resource
+            .as_ref()
+            .and_then(|s| s.last_updated.clone())
+    };
+    let filed_version = index
+        .records
+        .iter()
+        .flat_map(|r| r.provenance.iter())
+        .find(|p| same_resource(p))
+        .and_then(last_updated);
+    if crate::when::earlier(last_updated(&incoming).as_deref(), filed_version.as_deref()) {
+        return Merge::Older;
+    }
     if let Some(existing) = index
         .records
         .iter_mut()

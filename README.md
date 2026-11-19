@@ -139,7 +139,10 @@ An import files a document once. When a source serves it again with other
 bytes and exactly the same text (a summary a portal generates on each
 export, with a new timestamp and id), nothing is filed: the import counts it
 `documents_unchanged` and notes the rendering on the document it renders.
-Any change in the text files a new document. Copies filed before 0.2.3 fold
+Any change in the text files a new document. A resource served in an older
+version than the one filed, by `meta.lastUpdated`, changes nothing: the
+import counts it `records_older` and keeps that version in the raw layer
+beside the current one. Copies filed before 0.2.3 fold
 into the one they render with `medrec documents merge <copy> --into <id>`.
 It refuses (exit 2, or 4 for an id that is not filed) unless they are that
 one document by the same rule, and only then asks (`--force` to skip). It

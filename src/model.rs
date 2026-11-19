@@ -420,6 +420,9 @@ pub struct ImportRun {
     pub records_added: usize,
     pub records_updated: usize,
     pub records_unchanged: usize,
+    /// Versions older than the one filed, which stayed (0.2.7 and later).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub records_older: usize,
     pub resources_written: usize,
     pub resources_unchanged: usize,
     pub documents_added: usize,
@@ -494,4 +497,8 @@ pub fn now_rfc3339() -> String {
 
 pub fn today() -> String {
     pk_cli_core::dates::fmt_iso(pk_cli_core::dates::today_local())
+}
+
+fn is_zero(n: &usize) -> bool {
+    *n == 0
 }

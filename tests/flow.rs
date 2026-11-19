@@ -1580,6 +1580,115 @@ fn an_import_from_downloaded_files_runs_with_files_and_no_profile() {
     let _ = std::fs::remove_dir_all(&e.root);
 }
 
+/// The synthetic stream with its Observation at `value`, as of `updated`.
+fn with_observation(value: f64, updated: &str) -> String {
+    medrec::testdata::STREAM
+        .lines()
+        .map(|l| {
+            let mut v: Value = serde_json::from_str(l).unwrap();
+            if v["resourceType"] == "Observation" {
+                v["valueQuantity"]["value"] = serde_json::json!(value);
+                v["meta"]["lastUpdated"] = serde_json::json!(updated);
+            }
+            format!("{}\n", serde_json::to_string(&v).unwrap())
+        })
+        .collect()
+}
+
+#[test]
+fn an_older_version_does_not_replace_the_one_filed() {
+    let base = Env::new("import-older");
+    setup(&base);
+    let e = provider_env(&base, &with_observation(13.0, "2026-03-06T11:00:00Z"));
+    let serve = |value: f64, updated: &str| {
+        std::fs::write(
+            e.root.join("provider").join("synthetic.ndjson"),
+            with_observation(value, updated),
+        )
+        .unwrap()
+    };
+    let import = || {
+        e.ok(&[
+            "import",
+            "--from",
+            "fakeprov",
+            "--from-profile",
+            "adult1",
+            "--patient",
+            "pat-0001",
+            "--person",
+            "Robin",
+        ])
+    };
+    let value = || {
+        let r = e.ok(&["results", "--code", "718-7"]);
+        r["items"][0]["detail"].as_str().unwrap_or("").to_string()
+    };
+    let raw = || -> Vec<String> {
+        let dir = e
+            .records()
+            .join("Robin Testperson/Records/fakeprov-example-health/Observation");
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .map(|d| d.file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    };
+    import();
+    assert!(value().starts_with("13"), "{}", value());
+    assert_eq!(raw(), ["obs-0001.json"]);
+
+    // An export from before it, in another zone, changes nothing filed; its
+    // version goes beside the current one.
+    serve(11.0, "2026-03-01T09:00:00-05:00");
+    let r = import();
+    assert_eq!(r["records_older"], 1, "{r}");
+    assert_eq!(r["records_updated"], 0, "{r}");
+    assert!(value().starts_with("13"), "{}", value());
+    let files = raw();
+    assert_eq!(files.len(), 2, "{files:?}");
+    assert_eq!(files[0], "obs-0001.json");
+    let current = std::fs::read_to_string(
+        e.records()
+            .join("Robin Testperson/Records/fakeprov-example-health/Observation/obs-0001.json"),
+    )
+    .unwrap();
+    assert!(current.contains("2026-03-06T11:00:00Z"), "{current}");
+    // Served again, it is already kept.
+    let r = import();
+    assert_eq!(r["records_older"], 1, "{r}");
+    assert_eq!(raw().len(), 2);
+
+    // A later version replaces it.
+    serve(14.0, "2026-03-07T11:00:00Z");
+    let r = import();
+    assert_eq!(r["records_updated"], 1, "{r}");
+    assert_eq!(r["records_older"], 0, "{r}");
+    assert!(value().starts_with("14"), "{}", value());
+    assert_eq!(raw().len(), 3);
+    // Without a lastUpdated on the version served, the last import wins.
+    let undated: String = with_observation(15.0, "x")
+        .lines()
+        .map(|l| {
+            let mut v: Value = serde_json::from_str(l).unwrap();
+            if v["resourceType"] == "Observation" {
+                v["meta"].as_object_mut().unwrap().remove("lastUpdated");
+            }
+            format!("{}\n", serde_json::to_string(&v).unwrap())
+        })
+        .collect();
+    std::fs::write(e.root.join("provider").join("synthetic.ndjson"), undated).unwrap();
+    let r = import();
+    assert_eq!(r["records_updated"], 1, "{r}");
+    assert!(value().starts_with("15"), "{}", value());
+    let v = e.ok(&["verify"]);
+    assert_eq!(v["missing"].as_array().unwrap().len(), 0, "{v}");
+    assert_eq!(v["changed"].as_array().unwrap().len(), 0, "{v}");
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
 #[test]
 fn a_document_rendered_again_on_a_later_export_is_not_filed_twice() {
     let base = Env::new("rendered-again");

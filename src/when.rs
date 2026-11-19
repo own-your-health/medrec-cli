@@ -92,9 +92,15 @@ mod tests {
         assert_eq!(instant("2026-03-10T16:30:00+02:00"), Some(t));
         assert_eq!(instant("2026-03-10T14:30Z"), Some(t));
         assert_eq!(instant("2026-03-10T14:30:00.25Z"), Some((t.0, 250_000_000)));
-        assert!(earlier(Some("2026-03-10T14:30:00Z"), Some("2026-03-10T14:30:00.5Z")));
+        assert!(earlier(
+            Some("2026-03-10T14:30:00Z"),
+            Some("2026-03-10T14:30:00.5Z")
+        ));
         assert!(earlier(Some("2026-03-10"), Some("2026-03-10T00:00:01Z")));
-        assert!(!earlier(Some("2026-03-10T14:30:00Z"), Some("2026-03-10T09:30:00-05:00")));
+        assert!(!earlier(
+            Some("2026-03-10T14:30:00Z"),
+            Some("2026-03-10T09:30:00-05:00")
+        ));
         assert!(!earlier(None, Some("2026-03-10")));
         assert!(!earlier(Some("2026-03-10"), Some("not a time")));
         for bad in [
