@@ -318,9 +318,14 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
         }
         _ => {}
     }
-    let display = code
-        .as_ref()
-        .and_then(|c| c.display.clone())
+    // A pharmacy claim is named for what was filled, not "Pharmacy".
+    let filled = (rt == "ExplanationOfBenefit"
+        && code.as_ref().and_then(|c| c.code.as_deref()) == Some("pharmacy"))
+    .then(|| path(r, "item.0.productOrService").and_then(|c| codeable(c, &[RXNORM, NDC])))
+    .flatten()
+    .and_then(|c| c.display);
+    let display = filled
+        .or_else(|| code.as_ref().and_then(|c| c.display.clone()))
         .or_else(|| match rt {
             "MedicationRequest" | "MedicationStatement" | "MedicationDispense" => {
                 path_str(r, "medicationReference.display").map(str::to_string)
@@ -337,15 +342,25 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
     let date = when
         .as_deref()
         .map(|w| w.chars().take(10).collect::<String>());
-    // A fill is its own fact: keyed apart from a prescription or a
-    // statement of the same drug that day, so it never folds into one and
-    // loses its quantity and pharmacy.
-    let key_kind = if rt == "MedicationDispense" {
-        "medication-dispense"
-    } else {
-        kind
+    let key = match rt {
+        // A fill is its own fact: keyed apart from a prescription or a
+        // statement of the same drug that day, so it never folds into one
+        // and loses its quantity and pharmacy.
+        "MedicationDispense" => merge_key(
+            "medication-dispense",
+            code.as_ref(),
+            &display,
+            date.as_deref(),
+        ),
+        // A claim is one claim: two of a type on a day (two fills, two
+        // visits) stay two, keyed by the claim's identifier, else its id.
+        "ExplanationOfBenefit" => format!(
+            "claim|{}|{}",
+            claim_identity(r),
+            date.as_deref().unwrap_or("")
+        ),
+        _ => merge_key(kind, code.as_ref(), &display, date.as_deref()),
     };
-    let key = merge_key(key_kind, code.as_ref(), &display, date.as_deref());
     Some(Record {
         id: crate::ids::new("r"),
         kind: kind.into(),
@@ -490,6 +505,18 @@ fn money(m: Option<&Value>) -> Option<Value> {
     Some(
         json!({ "amount": text, "currency": m.get("currency").and_then(Value::as_str).unwrap_or("USD") }),
     )
+}
+
+/// What names one claim: its first identifier (`system|value`), else its
+/// resource id.
+fn claim_identity(r: &Value) -> String {
+    match (
+        path_str(r, "identifier.0.system"),
+        path_str(r, "identifier.0.value"),
+    ) {
+        (s, Some(v)) => format!("{}|{v}", s.unwrap_or("")),
+        _ => format!("id|{}", path_str(r, "id").unwrap_or("")),
+    }
 }
 
 /// A `Quantity` as `{value, unit}`, the unit falling back to its code.
@@ -722,6 +749,23 @@ mod tests {
         assert_eq!(item["service"]["code"], "00000-0001-01");
         assert_eq!(item["quantity"], json!({"value": 30, "unit": "TAB"}));
         assert_eq!(f["payment"]["amount"], "32.5");
+        // Named for the fill.
+        assert_eq!(rec.display, "Synthetic tablet 10 mg, bottle of 30");
+
+        // Two claims of a type on one day are two records; the same claim
+        // from another source, by its identifier, is one.
+        let mut other = r.clone();
+        other["id"] = json!("eob-rx-0002");
+        assert_ne!(record(&other, prov()).unwrap().key, rec.key);
+        let mut numbered = r.clone();
+        numbered["identifier"] =
+            json!([{"system": "https://payer.example.org/claim", "value": "CLAIM-0001"}]);
+        let mut again = numbered.clone();
+        again["id"] = json!("eob-rx-9999");
+        assert_eq!(
+            record(&numbered, prov()).unwrap().key,
+            record(&again, prov()).unwrap().key
+        );
     }
 
     #[test]

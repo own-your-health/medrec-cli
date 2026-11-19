@@ -141,7 +141,13 @@ and `dosage`. Its `key` starts `medication-dispense`, so a fill never folds
 into a prescription of the same drug on the same day. A pharmacy `claim`
 (an ExplanationOfBenefit of type pharmacy) also has `days_supply`,
 `refill_number`, `refills_authorized` and `brand_generic`, from its
-`supportingInfo`. Each of its `items` has a `quantity`.
+`supportingInfo`. Each of its `items` has a `quantity`. It is named for
+what was filled (its first item's product).
+
+A `claim`'s `key` is `claim|<identity>|<date>`, where the identity is the
+claim's first identifier (`system|value`), else `id|<resource id>`. Two
+claims of one type on one day stay two records, and the same claim served
+again under its identifier stays one.
 
 **ImagingStudy**: `id`, `study_uid`, `path`, `date`, `modalities`,
 `body_part`, `description`, `facility`, `accession`, `referring`, `series`
