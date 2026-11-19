@@ -89,12 +89,17 @@ pub fn merge(
     index.documents.remove(dup_at);
     for d in index.documents.iter_mut() {
         if d.id == into {
-            d.renderings.push(Rendering {
+            let copy = Rendering {
                 sha256: dup.sha256.clone(),
                 size: dup.size,
                 fetched_at: dup.provenance.fetched_at.clone(),
-            });
-            d.renderings.extend(dup.renderings.iter().cloned());
+            };
+            // Each distinct rendering once.
+            for r in std::iter::once(copy).chain(dup.renderings.iter().cloned()) {
+                if r.sha256 != d.sha256 && !d.renderings.iter().any(|k| k.sha256 == r.sha256) {
+                    d.renderings.push(r);
+                }
+            }
         }
         d.near_duplicates.retain(|n| n.document != duplicate);
     }
