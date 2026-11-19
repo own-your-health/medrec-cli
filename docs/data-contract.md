@@ -132,6 +132,17 @@ fact from two sources is one record), `date`, `code` (`{system, code,
 display}`), `display`, `status`, `fields` (kind-specific, with FHIR element
 names), `documents` (linked document ids) and `provenance` (one per source).
 
+A `medication` comes from a MedicationRequest (`source: request`), a
+MedicationStatement (`statement`) or a MedicationDispense (`dispense`, a
+fill). A fill is dated when it was handed over, else when it was prepared;
+it is coded by RxNorm, else NDC. Its fields are `quantity` (`{value,
+unit}`), `days_supply`, `pharmacy`, `type` (first fill or refill), `ndc`
+and `dosage`. Its `key` starts `medication-dispense`, so a fill never folds
+into a prescription of the same drug on the same day. A pharmacy `claim`
+(an ExplanationOfBenefit of type pharmacy) also has `days_supply`,
+`refill_number`, `refills_authorized` and `brand_generic`, from its
+`supportingInfo`. Each of its `items` has a `quantity`.
+
 **ImagingStudy**: `id`, `study_uid`, `path`, `date`, `modalities`,
 `body_part`, `description`, `facility`, `accession`, `referring`, `series`
 (`[{uid, number, modality, description, instances: {SOPInstanceUID: file}}]`),
