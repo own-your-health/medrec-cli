@@ -139,11 +139,13 @@ An import files a document once. When a source serves it again with other
 bytes and exactly the same text (a summary a portal generates on each
 export, with a new timestamp and id), nothing is filed: the import counts it
 `documents_unchanged` and notes the rendering on the document it renders.
-Any change in the text files a new document. Another version of a resource
-replaces the one filed only when it is later by medical-common's rule
-(`meta.lastUpdated`, or the read time of an undated FHIR API read). An older
-one changes nothing: the import counts it `records_older` and keeps that
-version in the raw layer beside the current one. Copies filed before 0.2.3 fold
+Any change in the text files a new document. A version of a resource is
+filed by medical-common's rule: one that differs only in `meta.lastUpdated`
+is the same version and adds no file; another one replaces the version
+filed only when it is later (`meta.lastUpdated`, or the read time of an
+undated FHIR API read). An older one changes nothing: the import counts it
+`records_older` and keeps that version in the raw layer beside the current
+one. Copies filed before 0.2.3 fold
 into the one they render with `medrec documents merge <copy> --into <id>`.
 It refuses (exit 2, or 4 for an id that is not filed) unless they are that
 one document by the same rule, and only then asks (`--force` to skip). It

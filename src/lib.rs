@@ -24,6 +24,7 @@ pub mod store;
 pub mod stream;
 #[doc(hidden)]
 pub mod testdata;
+pub mod version;
 pub mod view;
 pub mod views;
 

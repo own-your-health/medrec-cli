@@ -39,10 +39,15 @@ _review/                      documents intake could not file, and review.json
 - A raw resource's `<id>` is its FHIR id when that is at most 64 of
   `A-Z a-z 0-9 - .` and does not start with `.`. Any other id, such as one of
   Epic's unconstrained ids (up to 256 characters), is named
-  `id-<first 32 hex of the id's SHA-256>`, the same on every import.
+  `id-<first 32 hex of the id's SHA-256>`, the same on every import. A
+  resource with no id is `noid-<first 32 hex of its content's SHA-256>`
+  (0.2.7 and later), its content being the resource without
+  `meta.lastUpdated`, so no two share a file and one stamped again keeps
+  its own.
 - A raw resource that changed at its source is written as the new
   `<id>.json`. The previous version stays beside it as
-  `<id>~<first 8 hex of its MD5>.json`.
+  `<id>~<first 8 hex of its MD5>.json`. Which version is current is the
+  import's rule (Import, below).
 
 ## Rules
 
@@ -154,8 +159,10 @@ A fill and a claim are each one event, so their `key` names the event:
 identity is the resource's first identifier (`system|value`). Without one,
 it is `id|<fhir_base>|<cli>|<organization>|<resource id>`, since an id is
 unique only on the source that issued it. Without an id either, it is
-`sha256|<hash of the resource>`, so such a resource whose content changes
-is a new record, and its earlier version stays beside it. So two fills of a drug, or two claims of
+`sha256|<hash of its content>`, the resource without `meta.lastUpdated`
+(0.2.7 and later), so such a resource whose content changes is a new
+record, its earlier version staying beside it, and one only stamped again
+is not. So two fills of a drug, or two claims of
 a type, on one day stay two records, and a fill never folds into a
 prescription. The same event from two sources is one record only when both
 send the same identifier. Without one, it is two records, one per source.
@@ -167,9 +174,13 @@ resource's, until its remaining source is imported again.
 
 A record is the same source resource when its `fhir_base`, `cli`,
 `organization_id`, resource type and id all match. A resource with no id
-is never the same resource as another; it joins a record only by key, and
-on that record, a provenance of its type from its source with no id is its
-own, so serving it again is unchanged and a correction is written in place.
+is never the same resource as another; it joins a record only by key. On
+that record, the provenances of its type from its source with no id belong
+to the resources like it, in the order the source serves them in one
+import. The first one served writes the record's fields, as the first of
+two resources with ids that share a key does, and each later one takes the
+next of those provenances, or adds one. So serving them again is unchanged,
+and a correction to the first is written in place.
 
 **ImagingStudy**: `id`, `study_uid`, `path`, `date`, `modalities`,
 `body_part`, `description`, `facility`, `accession`, `referring`, `series`
@@ -185,7 +196,8 @@ unchanged and written counts.
 
 **Provenance** (the `provenance/v1` fields of medical-common's
 `pk-med-records`): `source` (`{kind, cli, cli_version, organization_id,
-fhir_base}`), `method` (`fhir-api`, `portal`, `scan`, `file`, `media`,
+fhir_base}`; an import's `kind` is `fhir` for a FHIR API read and the
+stream's `method` otherwise), `method` (`fhir-api`, `portal`, `scan`, `file`, `media`,
 `manual`), `source_resource` (`{type, id, version_id, last_updated}`),
 `fetched_at`, `filed_at`, `raw_path` (the verbatim file), `classified_by`
 (`medrec`, `organize-scans`, `hand`), `derived_from`, `filed_by` (`medrec
@@ -284,30 +296,37 @@ profile. Its standard output is NDJSON:
    `renderings`) when the latest document filed from the same CLI and
    organization, through the same resource and Binary (`raw_path`), in the
    same media type, has exactly its text, whitespace aside, and no
-   `meta.versionId` or `lastUpdated` that differs where both imports have
-   one. A portal that generates a summary on each export changes only
+   `meta.versionId` that differs where both imports have one (a
+   `lastUpdated` alone does not make another version; 0.2.7 and later). A portal that generates a summary on each export changes only
    markup a text reading leaves out (its timestamp and ids). Any other
    difference, one digit included, files a new document, as does a
    document with no text.
    `medrec documents merge <copy> --into <id>` folds a copy filed before
    that rule (0.2.3) into the document it renders, by the same rule.
 
-   Another version of a resource already filed replaces it only when it is
-   later, by medical-common's rule (`Provenance::supersedes`, DESIGN §1.4;
-   0.2.7 and later). A version's time is its `meta.lastUpdated`. For a FHIR
-   API read (`method` `fhir-api`) the server left undated, it is when the
-   source was read (`pulled_at`). Otherwise it is unknown. A known time
-   replaces a known one only when it is a later instant. An unknown one
-   never replaces a known one. Anything replaces a version whose time is
-   unknown. A version that is not later is kept and changes nothing: its
-   record stays as filed, the import counts it `records_older`, and its raw
-   file goes beside the current one as `<id>~<md5>.json`. (A Binary keeps
-   the rendering rule above; the newest one is its current raw file.) The same version
-   served again (same id, `versionId` and `lastUpdated`) is normalized
-   again as before. Read again unchanged, it moves its `fetched_at` on, so
-   a version dated between the two reads is older than the second.
-   `lastUpdated` measures when content was current, not how complete it
-   is. The raw layer keeps every version either way.
+   Each resource served is filed over the version held at its raw path by
+   medical-common's rule (`pk_med_records::version::decide`, DESIGN §1.4;
+   0.2.7 and later). A version's content is the resource without
+   `meta.lastUpdated`. Its time is its `meta.lastUpdated`, or for a FHIR API
+   read (`method` `fhir-api`) the server left undated, when the source was
+   read (`pulled_at`); otherwise it is unknown. A time is later only when
+   it is a later instant, or when the held one is unknown.
+
+   | Content | Later | Filing | The import |
+   |---|---|---|---|
+   | same | no | unchanged | changes nothing |
+   | same | yes | refreshed | overwrites the raw file in place, and moves the record's provenance on (`refreshed_by`: the incoming `source_resource` and `fetched_at`, the held `filed_at`, `raw_path` and `classified_by`); no version is added |
+   | other | yes | replaces | writes it as current, keeps the held one beside it, and writes its record |
+   | other | no | older | keeps it beside the current one as `<id>~<md5>.json`; its record stays as filed, and the import counts it `records_older` |
+
+   So a site read again that stamps each resource with its read time adds no
+   file, and a version dated between two reads is older than the second. A
+   raw file no record was filed from (a Binary, a Practitioner) has no time
+   in the index, so other content replaces it; a Binary keeps the rendering
+   rule above. A record is normalized again from each version filed, so a
+   later medrec's reading applies on the next import. `lastUpdated`
+   measures when content was current, not how complete it is. The raw
+   layer keeps every version either way.
 3. A trailer: `{"schema": "records-stream-end/v1", "complete", "counts":
    {<type>: n}, "skipped": [{resource_type, id, search, reason, code}],
    "finished_at", "error"}`.

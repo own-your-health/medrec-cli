@@ -1695,6 +1695,125 @@ fn an_older_version_does_not_replace_the_one_filed() {
     assert_eq!(import()["records_older"], 1);
     assert!(value().starts_with("15"), "{}", value());
 
+    // Stamped again on a later read, the same content is the same version:
+    // its copy is overwritten in place, and no version is added.
+    let files = raw().len();
+    serve(15.0, Some("2026-03-22T12:00:00Z"), "2026-03-22T12:00:00Z");
+    let r = import();
+    assert_eq!(r["records_updated"], 0, "{r}");
+    assert_eq!(r["records_older"], 0, "{r}");
+    assert_eq!(r["resources_written"], 1, "{r}");
+    assert_eq!(raw().len(), files);
+    assert!(current().contains("2026-03-22T12:00:00Z"));
+    // An earlier stamp on the same content changes nothing.
+    serve(15.0, Some("2026-03-21T12:00:00Z"), "2026-03-23T12:00:00Z");
+    let r = import();
+    assert_eq!(r["resources_written"], 0, "{r}");
+    assert_eq!(r["records_older"], 0, "{r}");
+    assert!(current().contains("2026-03-22T12:00:00Z"));
+    // Other content dated before the stamp now held is older.
+    serve(17.0, Some("2026-03-22T06:00:00Z"), "2026-03-24T12:00:00Z");
+    assert_eq!(import()["records_older"], 1);
+    assert!(value().starts_with("15"), "{}", value());
+    assert_eq!(raw().len(), files + 1);
+
+    let v = e.ok(&["verify"]);
+    assert_eq!(v["missing"].as_array().unwrap().len(), 0, "{v}");
+    assert_eq!(v["changed"].as_array().unwrap().len(), 0, "{v}");
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
+/// The synthetic stream with its Observation served with no id, beside a
+/// second one with no id, both last updated at `updated`.
+fn with_observations_without_ids(updated: &str) -> String {
+    let mut out = String::new();
+    for l in medrec::testdata::STREAM.lines() {
+        let mut v: Value = serde_json::from_str(l).unwrap();
+        if v["schema"] == "records-stream-end/v1" {
+            v["counts"]["Observation"] = serde_json::json!(2);
+        }
+        if v["resourceType"] == "Observation" {
+            v.as_object_mut().unwrap().remove("id");
+            v["meta"]["lastUpdated"] = serde_json::json!(updated);
+            let mut other = v.clone();
+            other["code"]["coding"][0]["code"] = serde_json::json!("4544-3");
+            other["code"]["text"] = serde_json::json!("Hematocrit");
+            other["valueQuantity"]["value"] = serde_json::json!(40.0);
+            out.push_str(&format!("{}\n", serde_json::to_string(&v).unwrap()));
+            out.push_str(&format!("{}\n", serde_json::to_string(&other).unwrap()));
+            continue;
+        }
+        out.push_str(&format!("{}\n", serde_json::to_string(&v).unwrap()));
+    }
+    out
+}
+
+#[test]
+fn resources_with_no_id_are_filed_apart_and_kept_when_stamped_again() {
+    let base = Env::new("import-noid");
+    setup(&base);
+    let e = provider_env(
+        &base,
+        &with_observations_without_ids("2026-03-05T11:00:00Z"),
+    );
+    let import = || {
+        e.ok(&[
+            "import",
+            "--from",
+            "fakeprov",
+            "--from-profile",
+            "adult1",
+            "--patient",
+            "pat-0001",
+            "--person",
+            "Robin",
+        ])
+    };
+    let dir = e
+        .records()
+        .join("Robin Testperson/Records/fakeprov-example-health/Observation");
+    let files = || {
+        let mut names: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|d| d.file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    };
+    let first = import();
+    let names = files();
+    assert_eq!(names.len(), 2, "{names:?}");
+    assert!(names.iter().all(|n| n.starts_with("noid-")), "{names:?}");
+    let results = e.ok(&["results"]);
+    let readings = results["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|r| r["kind"] == "result")
+        .count();
+    assert_eq!(readings, 2, "{results}");
+
+    // Served again, then stamped again on a later read: the same two files,
+    // and no record changes.
+    let again = import();
+    assert_eq!(again["resources_written"], 0, "{again}");
+    assert_eq!(again["records_added"], 0, "{again}");
+    std::fs::write(
+        e.root.join("provider").join("synthetic.ndjson"),
+        with_observations_without_ids("2026-03-09T11:00:00Z"),
+    )
+    .unwrap();
+    let stamped = import();
+    assert_eq!(stamped["resources_written"], 2, "{stamped}");
+    assert_eq!(stamped["records_added"], 0, "{stamped}");
+    assert_eq!(stamped["records_updated"], 0, "{stamped}");
+    assert_eq!(files(), names);
+    assert_eq!(
+        stamped["records_unchanged"], first["records_added"],
+        "{stamped}"
+    );
+
     let v = e.ok(&["verify"]);
     assert_eq!(v["missing"].as_array().unwrap().len(), 0, "{v}");
     assert_eq!(v["changed"].as_array().unwrap().len(), 0, "{v}");

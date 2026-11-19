@@ -22,7 +22,7 @@
 //! `--from-files <DIR>` runs its export on them with `--files <DIR>` instead
 //! of a login, with its `<PREFIX>_PROFILE` left out of its environment.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io::{BufReader, Read};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -31,8 +31,8 @@ use base64::Engine;
 use md5::Md5;
 use pk_cli_config::profile::{ProfileList, ProfileName};
 use pk_cli_core::CliError;
+use pk_med_records::LOGIN_PROFILES;
 pub use pk_med_records::RECORDS_FILES;
-use pk_med_records::{Timestamp, LOGIN_PROFILES};
 use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -51,9 +51,12 @@ use crate::normalize;
 use crate::people;
 use crate::proc::{which, Bounded};
 use crate::stream::{self, Header, Item, RawResource, RecordsReader, Skip};
+use crate::version::{self, Filing};
 
 /// Provider CLIs medrec looks for without being told.
-pub const KNOWN_PROVIDERS: &[&str] = &["mychart", "kp", "athena", "uhc", "oneblood", "labcorp"];
+pub const KNOWN_PROVIDERS: &[&str] = &[
+    "mychart", "kp", "athena", "uhc", "oneblood", "labcorp", "icanotes",
+];
 const INFO_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, Serialize)]
@@ -500,10 +503,9 @@ pub fn run(
     let mut index = folder.index(&person)?;
     let mut texts = folder.text(&person)?;
     let imported_at = now_rfc3339();
-    let portal = header.method.as_deref() == Some("portal");
     let base_prov = Provenance {
         source: ProvenanceSource {
-            kind: if portal { "portal" } else { "fhir" }.into(),
+            kind: source_kind(&header).into(),
             cli: Some(header.source.cli.clone()),
             cli_version: Some(header.source.version.clone()),
             organization_id: Some(header.organization.id.clone()),
@@ -534,6 +536,7 @@ pub fn run(
 
     let mut owners = Vec::new();
     let (mut added, mut updated, mut unchanged, mut older) = (0, 0, 0, 0);
+    let mut idless = HashMap::new();
     for r in &resources {
         let Ok(v) = r.value() else { continue };
         if let Some(o) = owner(&r.resource_type, &v) {
@@ -541,12 +544,14 @@ pub fn run(
         }
         let mut prov = base_prov.clone();
         prov.source_resource = source_resource(&v);
-        prov.raw_path = written
-            .paths
-            .get(&(r.resource_type.clone(), r.id.clone()))
-            .cloned();
+        let sub = raw_sub(r);
+        prov.raw_path = written.paths.get(&sub).cloned();
+        let filing = written
+            .filings
+            .get(&format!("{source_dir}/{sub}.json"))
+            .copied();
         if let Some(rec) = normalize::record(&v, prov) {
-            match merge(&mut index, rec) {
+            match merge(&mut index, rec, filing, &mut idless) {
                 Merge::Added => added += 1,
                 Merge::Updated => updated += 1,
                 Merge::Unchanged => unchanged += 1,
@@ -600,7 +605,7 @@ pub fn run(
     folder.save_index(&person, &mut index)?;
     folder.save_text(&person, &texts)?;
 
-    record_source(&mut household, &person.id, &req.from, &header, portal);
+    record_source(&mut household, &person.id, &req.from, &header);
     folder.save_household(&mut household)?;
 
     Ok(Report {
@@ -919,15 +924,31 @@ fn id_file(id: &str) -> String {
 }
 
 struct Written {
-    /// (resource type, id) → path in the records folder.
-    paths: HashMap<(String, String), String>,
+    /// Where each resource went in the records folder, by [`raw_sub`].
+    paths: HashMap<String, String>,
+    /// How the version served for each raw file already held was filed
+    /// over it, by the file's path; a file not there before has none.
+    filings: HashMap<String, Filing>,
     written: usize,
     unchanged: usize,
 }
 
-/// Write each resource verbatim under `source_dir`, skipping those already
-/// there byte for byte and keeping the previous version of those that
-/// changed. One upload for the lot, then every file's MD5 checked.
+/// A resource's raw file under its source, without `.json`: its type and
+/// id, or for a resource with no id, its type and its content's digest, so
+/// two of them never share a file and one stamped again keeps its own.
+fn raw_sub(r: &RawResource) -> String {
+    if r.id.is_empty() {
+        let digest = version::content_digest(r);
+        format!("{}/noid-{}", r.resource_type, &digest[..32])
+    } else {
+        id_sub(&r.resource_type, &r.id)
+    }
+}
+
+fn id_sub(resource_type: &str, id: &str) -> String {
+    format!("{resource_type}/{}", id_file(id))
+}
+
 /// The provenance of the version each raw file the index's records were
 /// filed from. Records only: a document's provenance names the resource
 /// that describes it, not the Binary its `raw_path` is.
@@ -940,6 +961,12 @@ fn filed_versions(index: &PersonIndex) -> HashMap<String, Provenance> {
         .collect()
 }
 
+/// Write each resource verbatim under `source_dir`, filing it over the
+/// version there by medical-common's rule ([`version::decide`]): the same
+/// content is left alone or, read later, overwritten in place; other content
+/// that is later becomes current, the held version kept beside it; other
+/// content that is not later goes beside the current one. One upload for the
+/// lot, then every file's MD5 checked.
 fn write_raw(
     folder: &Folder,
     source_dir: &str,
@@ -955,87 +982,126 @@ fn write_raw(
         .collect();
     let staging = pk_cli_drive::private_temp_dir("medrec-import")?;
     let mut paths = HashMap::new();
+    let mut filings = HashMap::new();
     let mut staged: Vec<(String, String)> = Vec::new();
+    // Held copies moved aside only to be overwritten: removed once the
+    // upload reads back.
+    let mut overwritten: Vec<String> = Vec::new();
     let mut unchanged = 0;
     let mut latest: HashMap<String, usize> = HashMap::new();
     for (i, r) in resources.iter().enumerate() {
         // A stream carries each resource once; if it repeats one, the last
         // copy wins.
-        latest.insert(format!("{}/{}", r.resource_type, id_file(&r.id)), i);
+        latest.insert(raw_sub(r), i);
     }
-    for (sub, i) in &latest {
-        let r = &resources[*i];
-        let mut body = r.raw.clone();
-        body.push('\n');
-        let md5 = hash::md5_hex(body.as_bytes());
-        let rel = format!("{source_dir}/{sub}.json");
-        paths.insert((r.resource_type.clone(), r.id.clone()), rel.clone());
-        let mut served = base.clone();
-        served.source_resource = r.value().ok().as_ref().and_then(source_resource);
-        let older = filed.get(&rel).is_some_and(|held| {
-            held.source_resource != served.source_resource && !served.supersedes(held)
-        });
-        if matches!(existing.get(&rel), Some(old) if old.as_deref() != Some(md5.as_str())) && older
-        {
-            // Older than the version filed: it goes beside it under its own
-            // hash, and the current one stays.
-            let mut tag = md5[..8].to_string();
-            let mut aside = format!("{source_dir}/{sub}~{tag}.json");
-            match existing.get(&aside) {
-                Some(Some(m)) if *m == md5 => {
-                    unchanged += 1;
-                    continue;
-                }
-                Some(_) => {
-                    tag = md5.clone();
-                    aside = format!("{source_dir}/{sub}~{tag}.json");
-                    if existing.contains_key(&aside) {
-                        unchanged += 1;
-                        continue;
-                    }
-                }
-                None => {}
+    let mut planned: Vec<(String, usize, String, String, String)> = latest
+        .into_iter()
+        .map(|(sub, i)| {
+            let mut body = resources[i].raw.clone();
+            body.push('\n');
+            let md5 = hash::md5_hex(body.as_bytes());
+            let rel = format!("{source_dir}/{sub}.json");
+            (sub, i, rel, body, md5)
+        })
+        .collect();
+    planned.sort();
+    // The held copies whose bytes differ are read to compare content: one
+    // copy of each type's folder that has any.
+    let held_dir = pk_cli_drive::private_temp_dir("medrec-held")?;
+    let mut fetched: HashSet<String> = HashSet::new();
+    for (_, i, rel, _, md5) in &planned {
+        if matches!(existing.get(rel), Some(old) if old.as_deref() != Some(md5.as_str())) {
+            let ty = &resources[*i].resource_type;
+            if fetched.insert(ty.clone()) {
+                folder
+                    .store
+                    .fetch_tree(&format!("{source_dir}/{ty}"), &held_dir.path().join(ty))?;
             }
-            paths.insert((r.resource_type.clone(), r.id.clone()), aside.clone());
-            let local = staging.path().join(format!("{sub}~{tag}.json"));
-            if let Some(parent) = local.parent() {
-                crate::store::private_dirs(parent)?;
-            }
-            crate::write_private(&local, body.as_bytes())?;
-            staged.push((aside, md5));
-            continue;
         }
-        match existing.get(&rel) {
-            Some(Some(old)) if *old == md5 => {
+    }
+    for (sub, i, rel, body, md5) in planned {
+        let r = &resources[i];
+        paths.insert(sub.clone(), rel.clone());
+        let value = r.value().ok();
+        let mut served = base.clone();
+        served.source_resource = value.as_ref().and_then(source_resource);
+        let held_md5 = existing.get(&rel);
+        let same_bytes = held_md5.is_some_and(|m| m.as_deref() == Some(md5.as_str()));
+        let filing = match held_md5 {
+            None => None,
+            Some(_) => {
+                let held: Option<RawResource> = if same_bytes {
+                    Some(r.clone())
+                } else {
+                    std::fs::read_to_string(held_dir.path().join(format!("{sub}.json")))
+                        .ok()
+                        .and_then(|t| RawResource::parse(t.trim_end()).ok())
+                };
+                // A file no record was filed from (a Binary, a Practitioner)
+                // has no time in the index: unknown, so other content
+                // replaces it.
+                let held_prov = filed.get(&rel).cloned().unwrap_or_else(|| {
+                    let mut p = base.clone();
+                    p.source_resource = None;
+                    p.fetched_at = None;
+                    p
+                });
+                Some(match &held {
+                    Some(h) => version::decide(h, &held_prov, r, &served),
+                    // Unreadable: other content.
+                    None if served.supersedes(&held_prov) => Filing::Replaces,
+                    None => Filing::Older,
+                })
+            }
+        };
+        if let Some(f) = filing {
+            filings.insert(rel.clone(), f);
+        }
+        match filing {
+            Some(Filing::Unchanged) => {
                 unchanged += 1;
                 continue;
             }
-            Some(old) => {
-                // The current version moves aside before the new one is
-                // uploaded (uploads never replace a file). When that version
-                // is already kept, from an earlier change back and forth,
-                // the copy at `rel` goes: its bytes are in the kept file.
-                let tag = old
-                    .as_deref()
-                    .and_then(|m| m.get(..8))
-                    .unwrap_or("prev")
-                    .to_string();
-                let mut kept = format!("{source_dir}/{sub}~{tag}.json");
-                let mut n = 2;
-                loop {
-                    match existing.get(&kept) {
-                        None => {
-                            folder.store.move_no_clobber(&rel, &kept)?;
-                            break;
+            // The same bytes read later: only the provenance moves on.
+            Some(Filing::Refreshed) if same_bytes => {
+                unchanged += 1;
+                continue;
+            }
+            Some(Filing::Older) => {
+                // It goes beside the current version under its own hash.
+                let mut tag = md5[..8].to_string();
+                let mut aside = format!("{source_dir}/{sub}~{tag}.json");
+                match existing.get(&aside) {
+                    Some(Some(m)) if *m == md5 => {
+                        paths.insert(sub, aside);
+                        unchanged += 1;
+                        continue;
+                    }
+                    Some(_) => {
+                        tag = md5.clone();
+                        aside = format!("{source_dir}/{sub}~{tag}.json");
+                        if existing.contains_key(&aside) {
+                            paths.insert(sub, aside);
+                            unchanged += 1;
+                            continue;
                         }
-                        Some(k) if old.is_some() && k == old => {
-                            folder.store.delete(&rel)?;
-                            break;
-                        }
-                        Some(_) => {
-                            kept = format!("{source_dir}/{sub}~{tag}-{n}.json");
-                            n += 1;
-                        }
+                    }
+                    None => {}
+                }
+                paths.insert(sub.clone(), aside.clone());
+                let local = staging.path().join(format!("{sub}~{tag}.json"));
+                if let Some(parent) = local.parent() {
+                    crate::store::private_dirs(parent)?;
+                }
+                crate::write_private(&local, body.as_bytes())?;
+                staged.push((aside, md5));
+                continue;
+            }
+            Some(f @ (Filing::Refreshed | Filing::Replaces)) => {
+                let old = held_md5.cloned().flatten();
+                if let Some(kept) = move_aside(folder, &existing, source_dir, &sub, &rel, old)? {
+                    if f == Filing::Refreshed {
+                        overwritten.push(kept);
                     }
                 }
             }
@@ -1068,11 +1134,52 @@ fn write_raw(
             }
         }
     }
+    for kept in &overwritten {
+        folder.store.delete(kept)?;
+    }
     Ok(Written {
         paths,
+        filings,
         written: staged.len(),
         unchanged,
     })
+}
+
+/// Move the current copy at `rel` aside before a new one is uploaded
+/// (uploads never replace a file). Returns the path it moved to, or `None`
+/// when those bytes were already kept, from an earlier change back and
+/// forth, and the copy at `rel` was removed instead.
+fn move_aside(
+    folder: &Folder,
+    existing: &HashMap<String, Option<String>>,
+    source_dir: &str,
+    sub: &str,
+    rel: &str,
+    old: Option<String>,
+) -> Result<Option<String>, CliError> {
+    let tag = old
+        .as_deref()
+        .and_then(|m| m.get(..8))
+        .unwrap_or("prev")
+        .to_string();
+    let mut kept = format!("{source_dir}/{sub}~{tag}.json");
+    let mut n = 2;
+    loop {
+        match existing.get(&kept) {
+            None => {
+                folder.store.move_no_clobber(rel, &kept)?;
+                return Ok(Some(kept));
+            }
+            Some(k) if old.is_some() && *k == old => {
+                folder.store.delete(rel)?;
+                return Ok(None);
+            }
+            Some(_) => {
+                kept = format!("{source_dir}/{sub}~{tag}-{n}.json");
+                n += 1;
+            }
+        }
+    }
 }
 
 fn stream_failure(
@@ -1175,6 +1282,7 @@ fn source_resource(r: &Value) -> Option<SourceResource> {
     })
 }
 
+#[derive(Debug)]
 enum Merge {
     Added,
     Updated,
@@ -1183,19 +1291,33 @@ enum Merge {
     Older,
 }
 
+/// File `rec`, normalized from one resource, into `index`. `filing` is how
+/// the raw layer filed the version it came from over the one it held
+/// ([`write_raw`]), `None` when it held none. `idless`
+/// counts, for this import, the resources with no id filed under each type
+/// and key.
+///
 /// The same source resource updates its record; the same fact from another
 /// source joins it with a second provenance; anything else is new. A record
 /// that holds other resources too, whose key this resource no longer
 /// shares, lets this one go to a record of its own: a claim folded under
 /// the type-and-date key before 0.2.6 splits on its next import.
-fn merge(index: &mut PersonIndex, rec: Record) -> Merge {
+fn merge(
+    index: &mut PersonIndex,
+    rec: Record,
+    filing: Option<Filing>,
+    idless: &mut HashMap<String, usize>,
+) -> Merge {
     let incoming = rec.provenance[0].clone();
-    let incoming_type = incoming.source_resource.as_ref().map(|s| &s.resource_type);
+    let incoming_type = incoming
+        .source_resource
+        .as_ref()
+        .map(|s| s.resource_type.clone());
     let incoming_id = incoming
         .source_resource
         .as_ref()
         .filter(|s| !s.id.is_empty())
-        .map(|s| (&s.resource_type, &s.id));
+        .map(|s| (s.resource_type.clone(), s.id.clone()));
     // An id is unique only on its own server: the source is part of it.
     let same_source = |p: &Provenance| {
         p.source.fhir_base == incoming.source.fhir_base
@@ -1207,85 +1329,130 @@ fn merge(index: &mut PersonIndex, rec: Record) -> Merge {
             && same_source(p)
             && p.source_resource
                 .as_ref()
-                .map(|s| (&s.resource_type, &s.id))
+                .map(|s| (s.resource_type.clone(), s.id.clone()))
                 == incoming_id
     };
     // A resource with no id is known only by its key: on the record its key
-    // names, a provenance of its type from its source with no id is its own.
+    // names, the provenances of its type from its source with no id are
+    // those of the resources like it, in the order the source serves them.
     let same_idless = |p: &Provenance| {
         incoming_id.is_none()
             && same_source(p)
-            && p.source_resource.as_ref().map(|s| &s.resource_type) == incoming_type
+            && p.source_resource.as_ref().map(|s| s.resource_type.clone()) == incoming_type
             && p.source_resource.as_ref().is_none_or(|s| s.id.is_empty())
     };
-    // Another version of a resource replaces the one held only when it is
-    // later by medical-common's rule (DESIGN §1.4); the same version is
-    // normalized again.
-    if let Some(held) = index
-        .records
+    if filing == Some(Filing::Older)
+        && index.records.iter().any(|r| {
+            r.provenance
+                .iter()
+                .any(|p| same_resource(p) || (r.key == rec.key && same_idless(p)))
+        })
+    {
+        return Merge::Older;
+    }
+    if incoming_id.is_some() {
+        if let Some(existing) = index
+            .records
+            .iter_mut()
+            .find(|r| r.provenance.iter().any(same_resource))
+            .filter(|r| r.key == rec.key || r.provenance.iter().all(same_resource))
+        {
+            let at = existing.provenance.iter().position(same_resource);
+            return rewrite(existing, rec, incoming, at, filing);
+        }
+        if let Some(shared) = index
+            .records
+            .iter_mut()
+            .find(|r| r.provenance.iter().any(same_resource))
+        {
+            shared.provenance.retain(|p| !same_resource(p));
+        }
+        if let Some(existing) = index.records.iter_mut().find(|r| r.key == rec.key) {
+            existing.provenance.push(incoming);
+            return Merge::Updated;
+        }
+        index.records.push(rec);
+        return Merge::Added;
+    }
+    let slot = idless
+        .entry(format!(
+            "{}|{}",
+            incoming_type.clone().unwrap_or_default(),
+            rec.key
+        ))
+        .or_default();
+    let n = *slot;
+    *slot += 1;
+    let Some(existing) = index.records.iter_mut().find(|r| r.key == rec.key) else {
+        index.records.push(rec);
+        return Merge::Added;
+    };
+    let own = existing
+        .provenance
         .iter()
-        .flat_map(|r| r.provenance.iter())
-        .find(|p| same_resource(p))
-    {
-        if held.source_resource != incoming.source_resource && !incoming.supersedes(held) {
-            return Merge::Older;
+        .enumerate()
+        .filter(|(_, p)| same_idless(p))
+        .nth(n)
+        .map(|(i, _)| i);
+    match own {
+        // The first one served writes the record, as a resource with an id
+        // that shares another's key keeps the first one's fields.
+        Some(i) if n == 0 => rewrite(existing, rec, incoming, Some(i), filing),
+        Some(i) => match filing {
+            Some(Filing::Unchanged) => Merge::Unchanged,
+            Some(Filing::Refreshed) => {
+                existing.provenance[i] = existing.provenance[i].refreshed_by(&incoming);
+                Merge::Unchanged
+            }
+            _ if existing.provenance[i] == incoming => Merge::Unchanged,
+            _ => {
+                existing.provenance[i] = incoming;
+                Merge::Updated
+            }
+        },
+        None => {
+            existing.provenance.push(incoming);
+            Merge::Updated
         }
     }
-    if let Some(existing) = index
-        .records
-        .iter_mut()
-        .find(|r| r.provenance.iter().any(same_resource))
-        .filter(|r| r.key == rec.key || r.provenance.iter().all(same_resource))
-    {
-        return rewrite(existing, rec, incoming.clone(), &same_resource);
-    }
-    if let Some(shared) = index
-        .records
-        .iter_mut()
-        .find(|r| r.provenance.iter().any(same_resource))
-    {
-        shared.provenance.retain(|p| !same_resource(p));
-    }
-    if let Some(existing) = index.records.iter_mut().find(|r| r.key == rec.key) {
-        if existing.provenance.iter().any(same_idless) {
-            return rewrite(existing, rec, incoming.clone(), &same_idless);
-        }
-        existing.provenance.push(incoming);
-        return Merge::Updated;
-    }
-    index.records.push(rec);
-    Merge::Added
 }
 
-/// Write `rec` over the record `existing`, whose provenance `mine` picks
-/// out is this resource's own: unchanged when nothing differs.
+/// Whether two records say the same thing.
+fn same_content(a: &Record, b: &Record) -> bool {
+    a.key == b.key
+        && a.fields == b.fields
+        && a.display == b.display
+        && a.status == b.status
+        && a.code == b.code
+        && a.date == b.date
+}
+
+/// Write `rec` over the record `existing`, whose provenance at `at` is this
+/// resource's own. A version filed new or in place of the held one takes
+/// that provenance's place; one read again refreshes it
+/// (`Provenance::refreshed_by`, which keeps how it was filed). A record that
+/// says the same thing from the same version is unchanged.
 fn rewrite(
     existing: &mut Record,
     rec: Record,
     incoming: Provenance,
-    mine: &dyn Fn(&Provenance) -> bool,
+    at: Option<usize>,
+    filing: Option<Filing>,
 ) -> Merge {
-    let changed = existing.key != rec.key
-        || existing.fields != rec.fields
-        || existing.display != rec.display
-        || existing.status != rec.status
-        || existing.code != rec.code
-        || existing.date != rec.date;
-    let version_changed = existing
-        .provenance
-        .iter()
-        .find(|p| mine(p))
-        .map(|p| p.source_resource != incoming.source_resource)
-        .unwrap_or(true);
-    if !changed && !version_changed {
-        // An unchanged read moves the version's read time on, so a version
-        // dated between two reads of this one still counts as older.
-        if let Some(p) = existing.provenance.iter_mut().find(|p| mine(p)) {
-            let read = |p: &Provenance| p.fetched_at.as_deref().and_then(Timestamp::parse);
-            if read(&incoming) > read(p) {
-                p.fetched_at = incoming.fetched_at;
-            }
+    let changed = !same_content(existing, &rec);
+    let new_version = matches!(filing, None | Some(Filing::Replaces))
+        && at.is_none_or(|i| existing.provenance[i] != incoming);
+    match (filing, at) {
+        (Some(Filing::Refreshed), Some(i)) => {
+            existing.provenance[i] = existing.provenance[i].refreshed_by(&incoming)
         }
+        (None | Some(Filing::Replaces), Some(i)) => existing.provenance[i] = incoming,
+        (None | Some(Filing::Refreshed | Filing::Replaces), None) => {
+            existing.provenance.push(incoming)
+        }
+        _ => {}
+    }
+    if !changed && !new_version {
         return Merge::Unchanged;
     }
     existing.fields = rec.fields;
@@ -1294,8 +1461,6 @@ fn rewrite(
     existing.code = rec.code;
     existing.date = rec.date;
     existing.key = rec.key;
-    existing.provenance.retain(|p| !mine(p));
-    existing.provenance.push(incoming);
     Merge::Updated
 }
 
@@ -1452,7 +1617,7 @@ fn file_binaries(
     binaries: Vec<Binary>,
     owners: &[Owner],
     eob_docs: &HashMap<String, String>,
-    raw_paths: &HashMap<(String, String), String>,
+    raw_paths: &HashMap<String, String>,
 ) -> Result<Filed, CliError> {
     let mut filed = Filed::default();
     if binaries.is_empty() {
@@ -1491,9 +1656,7 @@ fn file_binaries(
                 last_updated: None,
             },
         };
-        let raw_path = raw_paths
-            .get(&("Binary".to_string(), b.id.clone()))
-            .cloned();
+        let raw_path = raw_paths.get(&id_sub("Binary", &b.id)).cloned();
         let media_type = kind
             .map(|k| k.media_type().to_string())
             .or_else(|| b.content_type.clone())
@@ -1674,11 +1837,9 @@ pub fn not_a_rendering_of(
     else {
         return Some("it names no source resource");
     };
-    let differs =
-        |a: &Option<String>, b: &Option<String>| matches!((a, b), (Some(a), Some(b)) if a != b);
-    if differs(&theirs.version_id, &ours.version_id)
-        || differs(&theirs.last_updated, &ours.last_updated)
-    {
+    // A `lastUpdated` alone does not make another version (DESIGN §1.4):
+    // a re-read stamps it again, and the text decides below.
+    if matches!((&theirs.version_id, &ours.version_id), (Some(a), Some(b)) if a != b) {
         return Some("its source resource is another version");
     }
     let text = normalized(text);
@@ -1696,7 +1857,16 @@ fn normalized(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn record_source(h: &mut Household, pid: &str, cli: &str, header: &Header, portal: bool) {
+/// A source's kind, as medical-common names it: `fhir` for a FHIR API read,
+/// else the stream's method (`portal`, `file`).
+fn source_kind(header: &Header) -> &str {
+    match header.method.as_deref() {
+        None | Some("fhir-api") => "fhir",
+        Some(m) => m,
+    }
+}
+
+fn record_source(h: &mut Household, pid: &str, cli: &str, header: &Header) {
     let base = header
         .organization
         .fhir_base
@@ -1716,7 +1886,7 @@ fn record_source(h: &mut Household, pid: &str, cli: &str, header: &Header, porta
         }
         None => h.sources.push(Source {
             id: ids::new("s"),
-            kind: if portal { "portal" } else { "fhir" }.into(),
+            kind: source_kind(header).into(),
             person: pid.into(),
             cli: Some(cli.into()),
             organization: Some(header.organization.id.clone()),
@@ -1752,6 +1922,33 @@ fn record_source(h: &mut Household, pid: &str, cli: &str, header: &Header, porta
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `merge` as one import of one resource files it: new when no record
+    /// holds its resource, unchanged when one holds this provenance, else
+    /// replacing the version held.
+    fn merge_once(index: &mut PersonIndex, rec: Record) -> Merge {
+        let p = &rec.provenance[0];
+        let resource = |q: &Provenance| {
+            q.source == p.source
+                && q.source_resource
+                    .as_ref()
+                    .map(|s| (&s.resource_type, &s.id))
+                    == p.source_resource
+                        .as_ref()
+                        .map(|s| (&s.resource_type, &s.id))
+        };
+        let held = index
+            .records
+            .iter()
+            .flat_map(|r| r.provenance.iter())
+            .find(|q| resource(q));
+        let filing = match held {
+            None => None,
+            Some(q) if q == p => Some(Filing::Unchanged),
+            Some(_) => Some(Filing::Replaces),
+        };
+        merge(index, rec, filing, &mut HashMap::new())
+    }
 
     fn eob_from(id: &str, paid: f64) -> (Value, Provenance) {
         let mut r: Value =
@@ -1800,19 +1997,19 @@ mod tests {
         });
         let mut index = PersonIndex::new("p_test");
         assert!(matches!(
-            merge(&mut index, normalize::record(&obs, prov.clone()).unwrap()),
+            merge_once(&mut index, normalize::record(&obs, prov.clone()).unwrap()),
             Merge::Added
         ));
         // Served again: one provenance, unchanged.
         assert!(matches!(
-            merge(&mut index, normalize::record(&obs, prov.clone()).unwrap()),
+            merge_once(&mut index, normalize::record(&obs, prov.clone()).unwrap()),
             Merge::Unchanged
         ));
         assert_eq!(index.records[0].provenance.len(), 1);
         // Corrected at the source, under the same code and date: rewritten.
         obs["valueQuantity"]["value"] = serde_json::json!(13.4);
         assert!(matches!(
-            merge(&mut index, normalize::record(&obs, prov).unwrap()),
+            merge_once(&mut index, normalize::record(&obs, prov).unwrap()),
             Merge::Updated
         ));
         assert_eq!(index.records.len(), 1);
@@ -1820,6 +2017,58 @@ mod tests {
         assert_eq!(
             index.records[0].fields["value"]["value"],
             serde_json::json!(13.4)
+        );
+    }
+
+    #[test]
+    fn two_resources_with_no_id_under_one_key_share_a_record_stably() {
+        let mut a: Value = crate::testdata::STREAM
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .find(|v| v["resourceType"] == "Observation")
+            .unwrap();
+        a.as_object_mut().unwrap().remove("id");
+        // Two readings of one test on one day.
+        let mut b = a.clone();
+        b["valueQuantity"]["value"] = serde_json::json!(13.9);
+        let (_, mut prov) = eob_from("", 0.0);
+        prov.source_resource = Some(SourceResource {
+            resource_type: "Observation".into(),
+            id: String::new(),
+            version_id: None,
+            last_updated: None,
+        });
+        let mut index = PersonIndex::new("p_test");
+        let mut import = |filing: Option<Filing>| -> Vec<Merge> {
+            let mut idless = HashMap::new();
+            [&a, &b]
+                .iter()
+                .map(|v| {
+                    let rec = normalize::record(v, prov.clone()).unwrap();
+                    merge(&mut index, rec, filing, &mut idless)
+                })
+                .collect()
+        };
+        let first = import(None);
+        assert!(
+            matches!(first[..], [Merge::Added, Merge::Updated]),
+            "{first:?}"
+        );
+        // Served again, each takes its own provenance back: nothing changes.
+        for _ in 0..2 {
+            let again = import(Some(Filing::Unchanged));
+            assert!(
+                matches!(again[..], [Merge::Unchanged, Merge::Unchanged]),
+                "{again:?}"
+            );
+        }
+        assert_eq!(index.records.len(), 1);
+        assert_eq!(index.records[0].provenance.len(), 2);
+        // The record keeps the first one's value, as with two resources
+        // with ids that share a key.
+        assert_eq!(
+            index.records[0].fields["value"]["value"],
+            serde_json::json!(12.5)
         );
     }
 
@@ -1837,11 +2086,11 @@ mod tests {
         index.records.push(folded);
 
         assert!(matches!(
-            merge(&mut index, normalize::record(&a, pa.clone()).unwrap()),
+            merge_once(&mut index, normalize::record(&a, pa.clone()).unwrap()),
             Merge::Added
         ));
         assert!(matches!(
-            merge(&mut index, normalize::record(&b, pb.clone()).unwrap()),
+            merge_once(&mut index, normalize::record(&b, pb.clone()).unwrap()),
             Merge::Updated
         ));
         assert_eq!(index.records.len(), 2);
@@ -1860,11 +2109,11 @@ mod tests {
         }
         // Imported again, both are unchanged.
         assert!(matches!(
-            merge(&mut index, normalize::record(&a, pa).unwrap()),
+            merge_once(&mut index, normalize::record(&a, pa).unwrap()),
             Merge::Unchanged
         ));
         assert!(matches!(
-            merge(&mut index, normalize::record(&b, pb).unwrap()),
+            merge_once(&mut index, normalize::record(&b, pb).unwrap()),
             Merge::Unchanged
         ));
 
@@ -1877,15 +2126,15 @@ mod tests {
             p.source_resource.as_mut().unwrap().id = String::new();
         }
         assert!(matches!(
-            merge(&mut index, normalize::record(&d, pd.clone()).unwrap()),
+            merge_once(&mut index, normalize::record(&d, pd.clone()).unwrap()),
             Merge::Added
         ));
         assert!(matches!(
-            merge(&mut index, normalize::record(&e, pe).unwrap()),
+            merge_once(&mut index, normalize::record(&e, pe).unwrap()),
             Merge::Added
         ));
         assert!(matches!(
-            merge(&mut index, normalize::record(&d, pd).unwrap()),
+            merge_once(&mut index, normalize::record(&d, pd).unwrap()),
             Merge::Unchanged
         ));
         assert_eq!(index.records.len(), 4);
@@ -1900,7 +2149,7 @@ mod tests {
         let (c, mut pc) = eob_from("eob-a", 1.0);
         pc.source.cli = Some("otherrx".into());
         assert!(matches!(
-            merge(&mut index, normalize::record(&c, pc).unwrap()),
+            merge_once(&mut index, normalize::record(&c, pc).unwrap()),
             Merge::Added
         ));
         assert_eq!(index.records.len(), 5);

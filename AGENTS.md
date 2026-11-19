@@ -9,7 +9,7 @@ It files scans, documents, imaging studies and provider records into one
 plain records folder ([docs/data-contract.md](docs/data-contract.md)) and
 answers questions over them. It conforms to `piekstra-cli/1`
 (`~/Dev/cli-common/DESIGN.md`) with `info.auth.required = false`: it holds no
-credentials. Provider CLIs (mychart, kp, athena, uhc, oneblood, labcorp) fetch records; medrec
+credentials. Provider CLIs (mychart, kp, athena, uhc, oneblood, labcorp, icanotes) fetch records; medrec
 files them.
 
 ## Invariant 1: never read a real record
