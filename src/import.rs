@@ -544,6 +544,7 @@ pub fn run(
             .collect(),
         claimed: HashSet::new(),
     };
+    let prescribers = prescribers(&resources, &index, &base_prov);
     for r in &resources {
         let Ok(v) = r.value() else { continue };
         if let Some(o) = owner(&r.resource_type, &v) {
@@ -557,7 +558,16 @@ pub fn run(
             .filings
             .get(&format!("{source_dir}/{sub}.json"))
             .copied();
-        if let Some(rec) = normalize::record(&v, prov) {
+        if let Some(mut rec) = normalize::record(&v, prov) {
+            if r.resource_type == "MedicationDispense" && !rec.fields.contains_key("prescriber") {
+                let named = normalize::path_str(&v, "authorizingPrescription.0.reference")
+                    .and_then(request_id)
+                    .and_then(|id| prescribers.get(id));
+                if let Some(name) = named {
+                    rec.fields
+                        .insert("prescriber".into(), serde_json::json!(name));
+                }
+            }
             match merge(&mut index, rec, filing, &mut idless) {
                 Merge::Added => added += 1,
                 Merge::Updated => updated += 1,
@@ -1466,6 +1476,53 @@ fn merge(
     }
 }
 
+/// Each MedicationRequest's prescriber from this source, by id: those in
+/// the stream, then those filed from it before. A fill names its
+/// prescription as `MedicationRequest/<id>` (medical-common DESIGN §2.1).
+fn prescribers(
+    resources: &[RawResource],
+    index: &PersonIndex,
+    base: &Provenance,
+) -> HashMap<String, String> {
+    let mut out: HashMap<String, String> = HashMap::new();
+    for r in index.records.iter() {
+        let Some(name) = r.fields.get("prescriber").and_then(Value::as_str) else {
+            continue;
+        };
+        for p in &r.provenance {
+            let Some(s) = p.source_resource.as_ref() else {
+                continue;
+            };
+            if s.resource_type == "MedicationRequest"
+                && p.source.cli == base.source.cli
+                && p.source.organization_id == base.source.organization_id
+                && p.source.fhir_base == base.source.fhir_base
+            {
+                out.insert(s.id.clone(), name.to_string());
+            }
+        }
+    }
+    for r in resources
+        .iter()
+        .filter(|r| r.resource_type == "MedicationRequest")
+    {
+        let Ok(v) = r.value() else { continue };
+        let name = normalize::path_str(&v, "requester.display")
+            .or_else(|| normalize::path_str(&v, "requester.agent.display"));
+        if let Some(name) = name {
+            out.insert(r.id.clone(), name.to_string());
+        }
+    }
+    out
+}
+
+/// The id in a reference to a MedicationRequest (`MedicationRequest/<id>`,
+/// relative or absolute, with or without `/_history/<v>`).
+fn request_id(reference: &str) -> Option<&str> {
+    let rest = reference.rsplit_once("MedicationRequest/")?.1;
+    rest.split('/').next().filter(|id| !id.is_empty())
+}
+
 /// What one import knows of its resources with no id: the raw files they
 /// were filed to, and which id-less provenances on records they have taken.
 #[derive(Default)]
@@ -2075,6 +2132,22 @@ mod tests {
             index.records[0].fields["value"]["value"],
             serde_json::json!(13.4)
         );
+    }
+
+    #[test]
+    fn a_prescription_reference_names_its_request() {
+        for (reference, id) in [
+            ("MedicationRequest/mr-1", Some("mr-1")),
+            (
+                "https://fhir.example.org/r4/MedicationRequest/mr-1",
+                Some("mr-1"),
+            ),
+            ("MedicationRequest/mr-1/_history/2", Some("mr-1")),
+            ("#rx-1", None),
+            ("MedicationRequest/", None),
+        ] {
+            assert_eq!(request_id(reference), id, "{reference}");
+        }
     }
 
     #[test]
