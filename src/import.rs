@@ -1482,13 +1482,12 @@ struct Filed {
 }
 
 /// The document a document from `prov` renders again, if it does: the
-/// latest one filed from the same CLI and organization, through the same
-/// source resource and Binary (its raw path), in the same media type, with
-/// no version that says it changed and exactly the same text, whitespace
-/// aside. A portal that generates a summary on each export changes only
-/// markup a text reading leaves out (its timestamp and ids). Any other
-/// difference, a version that differs, or no text to compare files it as a
-/// new document, so an amended one is never lost.
+/// latest one filed through the same source document
+/// ([`same_source_document`]), when it is that one rendered again
+/// ([`not_a_rendering_of`]). A portal that generates a summary on each
+/// export changes only markup a text reading leaves out (its timestamp and
+/// ids). Any other difference, a version that differs, or no text to
+/// compare files it as a new document, so an amended one is never lost.
 fn rendered_again(
     index: &PersonIndex,
     texts: &PersonText,
@@ -1496,30 +1495,66 @@ fn rendered_again(
     media_type: &str,
     text: &str,
 ) -> Option<usize> {
-    let ours = prov.source_resource.as_ref()?;
-    let text = normalized(text);
-    if text.is_empty() {
-        return None;
+    let (i, latest) = index
+        .documents
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, d)| same_source_document(d, prov, media_type))?;
+    let filed = texts.texts.get(&latest.id).map(String::as_str);
+    not_a_rendering_of(latest, filed, prov, media_type, text)
+        .is_none()
+        .then_some(i)
+}
+
+/// Whether `filed` came through the same source document as one from
+/// `prov` in `media_type`: the same CLI and organization, the same source
+/// resource and Binary (its raw path), the same media type.
+pub fn same_source_document(filed: &Document, prov: &Provenance, media_type: &str) -> bool {
+    filed.provenance.source.cli == prov.source.cli
+        && filed.provenance.source.organization_id == prov.source.organization_id
+        && filed.provenance.raw_path == prov.raw_path
+        && filed.media_type == media_type
+        && match (&filed.provenance.source_resource, &prov.source_resource) {
+            (Some(a), Some(b)) => a.resource_type == b.resource_type && a.id == b.id,
+            _ => false,
+        }
+}
+
+/// Why a document from `prov`, in `media_type`, reading `text`, is not
+/// `filed` (whose text is `filed_text`) rendered again; `None` when it is:
+/// the same source document, no `meta.versionId` or `lastUpdated` that
+/// differs where both have one, and exactly the same text, whitespace
+/// aside.
+pub fn not_a_rendering_of(
+    filed: &Document,
+    filed_text: Option<&str>,
+    prov: &Provenance,
+    media_type: &str,
+    text: &str,
+) -> Option<&'static str> {
+    if !same_source_document(filed, prov, media_type) {
+        return Some("it did not come through the same source document, Binary and media type");
     }
-    let (i, latest) = index.documents.iter().enumerate().rev().find(|(_, d)| {
-        d.provenance.source.cli == prov.source.cli
-            && d.provenance.source.organization_id == prov.source.organization_id
-            && d.provenance.raw_path == prov.raw_path
-            && d.media_type == media_type
-            && d.provenance.source_resource.as_ref().is_some_and(|theirs| {
-                theirs.resource_type == ours.resource_type && theirs.id == ours.id
-            })
-    })?;
-    let theirs = latest.provenance.source_resource.as_ref()?;
+    let (Some(theirs), Some(ours)) = (&filed.provenance.source_resource, &prov.source_resource)
+    else {
+        return Some("it names no source resource");
+    };
     let differs =
         |a: &Option<String>, b: &Option<String>| matches!((a, b), (Some(a), Some(b)) if a != b);
     if differs(&theirs.version_id, &ours.version_id)
         || differs(&theirs.last_updated, &ours.last_updated)
     {
-        return None;
+        return Some("its source resource is another version");
     }
-    let filed = texts.texts.get(&latest.id).map(|t| normalized(t))?;
-    (filed == text).then_some(i)
+    let text = normalized(text);
+    if text.is_empty() || filed_text.is_none_or(|t| normalized(t).is_empty()) {
+        return Some("it has no text to compare");
+    }
+    if filed_text.map(normalized).as_deref() != Some(text.as_str()) {
+        return Some("its text differs");
+    }
+    None
 }
 
 /// `s` with each run of whitespace as one space, trimmed.

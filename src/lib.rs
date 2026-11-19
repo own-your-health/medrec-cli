@@ -4,6 +4,7 @@
 
 pub mod config;
 pub mod dicom;
+pub mod documents;
 pub mod folder;
 pub mod hash;
 pub mod ids;
