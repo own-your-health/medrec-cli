@@ -55,7 +55,7 @@ use crate::version::{self, Filing};
 
 /// Provider CLIs medrec looks for without being told.
 pub const KNOWN_PROVIDERS: &[&str] = &[
-    "mychart", "kp", "athena", "uhc", "oneblood", "labcorp", "icanotes",
+    "mychart", "kp", "athena", "uhc", "oneblood", "labcorp", "icanotes", "caremark",
 ];
 const INFO_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -544,6 +544,7 @@ pub fn run(
             .collect(),
         claimed: HashSet::new(),
     };
+    let mut prescribers = stream_prescribers(&resources);
     for r in &resources {
         let Ok(v) = r.value() else { continue };
         if let Some(o) = owner(&r.resource_type, &v) {
@@ -557,7 +558,30 @@ pub fn run(
             .filings
             .get(&format!("{source_dir}/{sub}.json"))
             .copied();
-        if let Some(rec) = normalize::record(&v, prov) {
+        if let Some(mut rec) = normalize::record(&v, prov) {
+            let prescription = (r.resource_type == "MedicationDispense"
+                && !rec.fields.contains_key("prescriber"))
+            .then(|| normalize::path_str(&v, "authorizingPrescription.0.reference"))
+            .flatten()
+            .and_then(request_id);
+            if let Some(id) = prescription {
+                if !prescribers.contains_key(id) {
+                    // Filed by an earlier import: its own raw file, under
+                    // this source.
+                    let rel = format!("{source_dir}/{}.json", id_sub("MedicationRequest", id));
+                    let named = folder
+                        .store
+                        .read_text(&rel)?
+                        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+                        .as_ref()
+                        .and_then(requester);
+                    prescribers.insert(id.to_string(), named);
+                }
+                if let Some(Some(name)) = prescribers.get(id) {
+                    rec.fields
+                        .insert("prescriber".into(), serde_json::json!(name));
+                }
+            }
             match merge(&mut index, rec, filing, &mut idless) {
                 Merge::Added => added += 1,
                 Merge::Updated => updated += 1,
@@ -1415,6 +1439,13 @@ fn merge(
             .filter(|r| r.key == rec.key || r.provenance.iter().all(same_resource))
         {
             let at = existing.provenance.iter().position(same_resource);
+            // The first resource from this source on the record writes its
+            // fields; another from it that shares the key keeps only its own
+            // provenance, so the two do not write over each other.
+            let owner = existing.provenance.iter().position(same_source);
+            if let Some(i) = at.filter(|&i| Some(i) != owner) {
+                return refresh_provenance(existing, i, incoming, filing);
+            }
             return rewrite(existing, rec, incoming, at, filing);
         }
         if let Some(shared) = index
@@ -1472,18 +1503,7 @@ fn merge(
             if mine.first() == Some(&i) {
                 return rewrite(existing, rec, incoming, Some(i), filing);
             }
-            match filing {
-                Some(Filing::Unchanged) => Merge::Unchanged,
-                Some(Filing::Refreshed) => {
-                    existing.provenance[i] = existing.provenance[i].refreshed_by(&incoming);
-                    Merge::Unchanged
-                }
-                _ if existing.provenance[i] == incoming => Merge::Unchanged,
-                _ => {
-                    existing.provenance[i] = incoming;
-                    Merge::Updated
-                }
-            }
+            refresh_provenance(existing, i, incoming, filing)
         }
         None => {
             idless.claimed.insert((key, existing.provenance.len()));
@@ -1493,12 +1513,60 @@ fn merge(
     }
 }
 
+/// Each MedicationRequest's prescriber in the stream, by id. A fill names
+/// its prescription as `MedicationRequest/<id>` (medical-common DESIGN
+/// §2.1); one filed by an earlier import is read from its own raw file.
+fn stream_prescribers(resources: &[RawResource]) -> HashMap<String, Option<String>> {
+    resources
+        .iter()
+        .filter(|r| r.resource_type == "MedicationRequest")
+        .filter_map(|r| Some((r.id.clone(), requester(&r.value().ok()?))))
+        .collect()
+}
+
+/// A MedicationRequest's prescriber: `requester.display` (R4), or
+/// `requester.agent.display` (STU3).
+fn requester(v: &Value) -> Option<String> {
+    normalize::path_str(v, "requester.display")
+        .or_else(|| normalize::path_str(v, "requester.agent.display"))
+        .map(str::to_string)
+}
+
+/// The id in a reference to a MedicationRequest (`MedicationRequest/<id>`,
+/// relative or absolute, with or without `/_history/<v>`).
+fn request_id(reference: &str) -> Option<&str> {
+    let rest = reference.rsplit_once("MedicationRequest/")?.1;
+    rest.split('/').next().filter(|id| !id.is_empty())
+}
+
 /// What one import knows of its resources with no id: the raw files they
 /// were filed to, and which id-less provenances on records they have taken.
 #[derive(Default)]
 struct Idless {
     incoming: HashSet<String>,
     claimed: HashSet<(String, usize)>,
+}
+
+/// Put `incoming` in place of the record's provenance at `i`, leaving its
+/// fields to the resource that writes them.
+fn refresh_provenance(
+    existing: &mut Record,
+    i: usize,
+    incoming: Provenance,
+    filing: Option<Filing>,
+) -> Merge {
+    match filing {
+        Some(Filing::Unchanged) => Merge::Unchanged,
+        Some(Filing::Refreshed) => {
+            existing.provenance[i] = existing.provenance[i].refreshed_by(&incoming);
+            Merge::Unchanged
+        }
+        _ if existing.provenance[i] == incoming => Merge::Unchanged,
+        _ => {
+            existing.provenance[i] = incoming;
+            Merge::Updated
+        }
+    }
 }
 
 /// Whether two records say the same thing.
@@ -2102,6 +2170,80 @@ mod tests {
             index.records[0].fields["value"]["value"],
             serde_json::json!(13.4)
         );
+    }
+
+    #[test]
+    fn a_prescription_reference_names_its_request() {
+        for (reference, id) in [
+            ("MedicationRequest/mr-1", Some("mr-1")),
+            (
+                "https://fhir.example.org/r4/MedicationRequest/mr-1",
+                Some("mr-1"),
+            ),
+            ("MedicationRequest/mr-1/_history/2", Some("mr-1")),
+            ("#rx-1", None),
+            ("MedicationRequest/", None),
+        ] {
+            assert_eq!(request_id(reference), id, "{reference}");
+        }
+    }
+
+    #[test]
+    fn two_resources_from_one_source_under_one_key_share_a_record_stably() {
+        let a: Value = crate::testdata::STREAM
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .find(|v| v["resourceType"] == "Observation")
+            .unwrap();
+        // A second reading of the same test on the same day.
+        let mut b = a.clone();
+        b["id"] = serde_json::json!("obs-0002");
+        b["valueQuantity"]["value"] = serde_json::json!(13.9);
+        let (_, base) = eob_from("", 0.0);
+        let filed = |v: &Value| {
+            let mut p = base.clone();
+            p.source_resource = source_resource(v);
+            normalize::record(v, p).unwrap()
+        };
+        let mut index = PersonIndex::new("p_test");
+        let mut import = |order: [&Value; 2], filing: Option<Filing>| -> Vec<Merge> {
+            let mut idless = Idless::default();
+            order
+                .iter()
+                .map(|v| merge(&mut index, filed(v), filing, &mut idless))
+                .collect()
+        };
+        let first = import([&a, &b], None);
+        assert!(
+            matches!(first[..], [Merge::Added, Merge::Updated]),
+            "{first:?}"
+        );
+        for order in [[&a, &b], [&b, &a], [&a, &b]] {
+            let again = import(order, Some(Filing::Unchanged));
+            assert!(
+                matches!(again[..], [Merge::Unchanged, Merge::Unchanged]),
+                "{again:?}"
+            );
+        }
+        assert_eq!(index.records.len(), 1);
+        assert_eq!(index.records[0].provenance.len(), 2);
+        assert_eq!(
+            index.records[0].fields["value"]["value"],
+            serde_json::json!(12.5)
+        );
+    }
+
+    #[test]
+    fn an_empty_null_or_absent_id_is_no_id() {
+        for line in [
+            r#"{"resourceType":"Patient","id":"","name":[{"family":"Testperson"}]}"#,
+            r#"{"resourceType":"CareTeam","id":null,"status":"active"}"#,
+            r#"{"resourceType":"CareTeam","status":"active"}"#,
+        ] {
+            let r = RawResource::parse(line).unwrap();
+            assert!(r.id.is_empty(), "{line}");
+            assert!(raw_sub(&r).contains("/noid-"), "{line}");
+        }
     }
 
     #[test]

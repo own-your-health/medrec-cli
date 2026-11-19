@@ -1846,6 +1846,84 @@ fn resources_with_no_id_are_filed_apart_and_kept_when_stamped_again() {
     let _ = std::fs::remove_dir_all(&e.root);
 }
 
+/// The synthetic stream with the synthetic fill, and with its prescription,
+/// the MedicationRequest as `mr-0001` written by an `Example Prescriber`,
+/// or without it.
+fn with_fill(prescription: bool) -> String {
+    let fill: Value =
+        serde_json::from_str(include_str!("fixtures/fhir/medication-dispense.json")).unwrap();
+    let mut out = String::new();
+    for l in medrec::testdata::STREAM.lines() {
+        let mut v: Value = serde_json::from_str(l).unwrap();
+        if v["schema"] == "records-stream-end/v1" {
+            v["counts"]["MedicationDispense"] = serde_json::json!(1);
+            if !prescription {
+                v["counts"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("MedicationRequest");
+            }
+            out.push_str(&format!("{}\n", serde_json::to_string(&fill).unwrap()));
+        }
+        if v["resourceType"] == "MedicationRequest" {
+            if !prescription {
+                continue;
+            }
+            v["id"] = serde_json::json!("mr-0001");
+            v["requester"] = serde_json::json!({"display": "Example Prescriber"});
+        }
+        out.push_str(&format!("{}\n", serde_json::to_string(&v).unwrap()));
+    }
+    out
+}
+
+#[test]
+fn a_fill_names_the_prescriber_of_the_prescription_it_points_at() {
+    let base = Env::new("import-prescriber");
+    setup(&base);
+    let e = provider_env(&base, &with_fill(true));
+    let import = || {
+        e.ok(&[
+            "import",
+            "--from",
+            "fakeprov",
+            "--from-profile",
+            "adult1",
+            "--patient",
+            "pat-0001",
+            "--person",
+            "Robin",
+        ])
+    };
+    let fill = || {
+        let meds = e.ok(&["meds"]);
+        meds["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["fields"]["source"] == "dispense")
+            .cloned()
+            .unwrap_or_else(|| panic!("{meds}"))
+    };
+    import();
+    assert_eq!(fill()["fields"]["prescriber"], "Example Prescriber");
+    // Imported again, it is the same fill.
+    let again = import();
+    assert_eq!(again["records_updated"], 0, "{again}");
+    assert_eq!(fill()["fields"]["prescriber"], "Example Prescriber");
+    // A later stream with the fill and not its prescription: the request
+    // filed before still names the prescriber.
+    std::fs::write(
+        e.root.join("provider").join("synthetic.ndjson"),
+        with_fill(false),
+    )
+    .unwrap();
+    let partial = import();
+    assert_eq!(partial["records_updated"], 0, "{partial}");
+    assert_eq!(fill()["fields"]["prescriber"], "Example Prescriber");
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
 #[test]
 fn a_document_rendered_again_on_a_later_export_is_not_filed_twice() {
     let base = Env::new("rendered-again");

@@ -22,7 +22,7 @@ _review/                      documents intake could not file, and review.json
   Imaging/<YYYY-MM-DD>_<modality>_<body part>_<facility>/
     S<series:03>/<instance:05>.dcm   DICOM files exactly as received
     study.json                       the study's summary (medrec-study/v1)
-  Records/<source>/<ResourceType>/<id>.json   FHIR R4 resources, verbatim
+  Records/<source>/<ResourceType>/<id>.json   FHIR resources (R4 or STU3), verbatim
 ```
 
 - `<Person>` is the person's name when they were added (`Robin Example`). It
@@ -153,8 +153,12 @@ A `medication` comes from a MedicationRequest (`source: request`), a
 MedicationStatement (`statement`) or a MedicationDispense (`dispense`, a
 fill). A fill is dated when it was handed over, else when it was prepared;
 it is coded by RxNorm, else NDC. Its fields are `quantity` (`{value,
-unit}`), `days_supply`, `pharmacy`, `type` (first fill or refill), `ndc`
-and `dosage`. A pharmacy `claim`
+unit}`), `days_supply`, `pharmacy`, `type` (first fill or refill), `ndc`,
+`dosage`, and `prescriber` (0.2.8 and later): the `requester` of the
+MedicationRequest its `authorizingPrescription` points at, either one
+contained in the fill (`#<id>`) or one the same source serves
+(`MedicationRequest/<id>`: in the same stream, or else its own raw file
+under the source, filed by an earlier import). A pharmacy `claim`
 (an ExplanationOfBenefit of type pharmacy) also has `days_supply`,
 `refill_number`, `refills_authorized` and `brand_generic`, from its
 `supportingInfo`. Each of its `items` has a `quantity`. It is named for
@@ -179,7 +183,13 @@ left behind keeps the fields last written to it, which may be the departed
 resource's, until its remaining source is imported again.
 
 A record is the same source resource when its `fhir_base`, `cli`,
-`organization_id`, resource type and id all match. A resource with no id
+`organization_id`, resource type and id all match. Two resources from one
+source that share a key (two readings of one test on one day, a condition
+entered twice) are one record: the first of them on the record writes its
+fields, and the other keeps only its own provenance, whatever order the
+source serves them in (0.2.8 and later; before, each import's later one
+wrote over the first). Both stay in the raw layer, and the record names
+both. A resource with no id
 is never the same resource as another; it joins a record only by key. On
 that record, the provenances of its type from its source with no id belong
 to the resources like it: each takes the one naming its raw file
@@ -292,7 +302,12 @@ profile. Its standard output is NDJSON:
    "organization": {id, name, fhir_base, vendor}, "patient": {id,
    organization, label, relationship}, "since", "pulled_at", "fhir_version",
    "method"}`.
-2. One FHIR R4 resource per line. A `Binary` follows the resource that names
+2. One FHIR resource per line, R4, or STU3 where the header's
+   `fhir_version` says so; medrec reads both shapes (0.2.8 and later: a
+   status as a plain code, `assertedDate`, `Immunization.date`, `notGiven`
+   and `practitioner[].actor` (the performer), `requester.agent`, a single
+   `DiagnosticReport.category`), and
+   an empty string as an absent value. A `Binary` follows the resource that names
    it: a `DocumentReference` (`content[].attachment.url`), a
    `DiagnosticReport` (`presentedForm[].url`) or a `Media` (`content.url`).
    medrec files the Binary as a document with that resource's date, title

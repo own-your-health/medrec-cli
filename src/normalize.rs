@@ -37,7 +37,12 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
         "Condition" => (
             "condition",
             &[ICD10, SNOMED],
-            &["onsetDateTime", "onsetPeriod.start", "recordedDate"],
+            &[
+                "onsetDateTime",
+                "onsetPeriod.start",
+                "recordedDate",
+                "assertedDate",
+            ],
         ),
         "MedicationRequest" => ("medication", &[RXNORM], &["authoredOn"]),
         "MedicationDispense" => (
@@ -53,9 +58,9 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
         "AllergyIntolerance" => (
             "allergy",
             &[SNOMED, RXNORM],
-            &["onsetDateTime", "recordedDate"],
+            &["onsetDateTime", "recordedDate", "assertedDate"],
         ),
-        "Immunization" => ("immunization", &[CVX], &["occurrenceDateTime"]),
+        "Immunization" => ("immunization", &[CVX], &["occurrenceDateTime", "date"]),
         "Procedure" => (
             "procedure",
             &[SNOMED],
@@ -85,10 +90,9 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
         fields.insert("when".into(), json!(w));
     }
     let status = match rt {
-        "Condition" | "AllergyIntolerance" => r
-            .get("clinicalStatus")
-            .and_then(|c| codeable(c, &[]))
-            .and_then(|c| c.code),
+        "Condition" | "AllergyIntolerance" => r.get("clinicalStatus").and_then(status_code),
+        // STU3 marks a refusal with `notGiven` (R4: `status: not-done`).
+        "Immunization" if r.get("notGiven") == Some(&json!(true)) => Some("not-done".into()),
         _ => path_str(r, "status").map(str::to_string),
     };
     match rt {
@@ -140,7 +144,7 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
             put(
                 &mut fields,
                 "category",
-                first(r, "category").map(concept_text),
+                first_or_one(r, "category").map(concept_text),
             );
             put(
                 &mut fields,
@@ -155,7 +159,7 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
             put(
                 &mut fields,
                 "verification_status",
-                r.get("verificationStatus").map(concept_text),
+                r.get("verificationStatus").map(code_or_concept_text),
             );
             put(
                 &mut fields,
@@ -170,7 +174,11 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
                 "dosage",
                 path_str(r, "dosageInstruction.0.text"),
             );
-            put_str(&mut fields, "prescriber", path_str(r, "requester.display"));
+            put_str(
+                &mut fields,
+                "prescriber",
+                path_str(r, "requester.display").or_else(|| path_str(r, "requester.agent.display")),
+            );
             put_str(&mut fields, "intent", path_str(r, "intent"));
             put(&mut fields, "source", Some(json!("request")));
         }
@@ -198,6 +206,7 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
             );
             put(&mut fields, "type", r.get("type").map(concept_text));
             put(&mut fields, "ndc", ndc(r.get("medicationCodeableConcept")));
+            put_str(&mut fields, "prescriber", contained_prescriber(r));
             put(&mut fields, "source", Some(json!("dispense")));
         }
         "AllergyIntolerance" => {
@@ -226,7 +235,8 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
             put_str(
                 &mut fields,
                 "performer",
-                path_str(r, "performer.0.actor.display"),
+                path_str(r, "performer.0.actor.display")
+                    .or_else(|| path_str(r, "practitioner.0.actor.display")),
             );
         }
         "Procedure" => {
@@ -633,6 +643,42 @@ fn first<'a>(r: &'a Value, key: &str) -> Option<&'a Value> {
     r.get(key).and_then(Value::as_array).and_then(|a| a.first())
 }
 
+/// The first of an array, or a single value where STU3 has one
+/// (`DiagnosticReport.category`).
+fn first_or_one<'a>(r: &'a Value, key: &str) -> Option<&'a Value> {
+    match r.get(key) {
+        Some(Value::Array(a)) => a.first(),
+        other => other,
+    }
+}
+
+/// A fill's prescriber: the `requester` of the contained MedicationRequest
+/// its `authorizingPrescription` points at (medical-common DESIGN).
+fn contained_prescriber(r: &Value) -> Option<&str> {
+    let id = path_str(r, "authorizingPrescription.0.reference")?.strip_prefix('#')?;
+    let request = r.get("contained")?.as_array()?.iter().find(|c| {
+        c.get("resourceType").and_then(Value::as_str) == Some("MedicationRequest")
+            && c.get("id").and_then(Value::as_str) == Some(id)
+    })?;
+    path_str(request, "requester.display").or_else(|| path_str(request, "requester.agent.display"))
+}
+
+/// A status served as a CodeableConcept (R4) or a plain code (STU3).
+fn status_code(c: &Value) -> Option<String> {
+    match c {
+        Value::String(s) if !s.is_empty() => Some(s.clone()),
+        _ => codeable(c, &[]).and_then(|c| c.code),
+    }
+}
+
+/// [`concept_text`], or a plain code as it is (STU3).
+fn code_or_concept_text(c: &Value) -> Value {
+    match c {
+        Value::String(s) if !s.is_empty() => json!(s),
+        _ => concept_text(c),
+    }
+}
+
 /// `a.b.0.c` into a resource.
 pub fn path<'a>(r: &'a Value, p: &str) -> Option<&'a Value> {
     p.split('.')
@@ -642,8 +688,10 @@ pub fn path<'a>(r: &'a Value, p: &str) -> Option<&'a Value> {
         })
 }
 
+/// The string at `p`. An empty one is absent: FHIR allows no empty strings,
+/// and some servers send them for missing values.
 pub fn path_str<'a>(r: &'a Value, p: &str) -> Option<&'a str> {
-    path(r, p).and_then(Value::as_str)
+    path(r, p).and_then(Value::as_str).filter(|s| !s.is_empty())
 }
 
 fn put(m: &mut Map<String, Value>, k: &str, v: Option<Value>) {
@@ -685,6 +733,51 @@ mod tests {
 
     const DISPENSE: &str = include_str!("../tests/fixtures/fhir/medication-dispense.json");
     const PHARMACY_EOB: &str = include_str!("../tests/fixtures/fhir/pharmacy-eob.json");
+    const STU3: &str = include_str!("../tests/fixtures/fhir/stu3.json");
+    const DISPENSE_CONTAINED: &str =
+        include_str!("../tests/fixtures/fhir/medication-dispense-contained.json");
+
+    #[test]
+    fn a_fill_names_the_prescriber_of_its_contained_request() {
+        let with: Value = serde_json::from_str(DISPENSE_CONTAINED).unwrap();
+        let rec = record(&with, prov()).unwrap();
+        assert_eq!(rec.fields["prescriber"], json!("Example Prescriber"));
+        // A prescription referenced elsewhere names no prescriber here.
+        let without: Value = serde_json::from_str(DISPENSE).unwrap();
+        assert!(record(&without, prov())
+            .unwrap()
+            .fields
+            .get("prescriber")
+            .is_none());
+    }
+
+    #[test]
+    fn stu3_shapes_read_as_their_r4_counterparts() {
+        let all: Vec<Value> = serde_json::from_str(STU3).unwrap();
+        let rec = |id: &str| {
+            let r = all.iter().find(|r| r["id"] == id).unwrap();
+            record(r, prov()).unwrap()
+        };
+        let cond = rec("cond-stu3");
+        assert_eq!(cond.status.as_deref(), Some("active"));
+        assert_eq!(cond.fields["verification_status"], json!("confirmed"));
+        // An empty onset is absent; the asserted date stands in.
+        assert_eq!(cond.date.as_deref(), Some("2026-02-10"));
+        let allergy = rec("allergy-stu3");
+        assert_eq!(allergy.status.as_deref(), Some("active"));
+        assert_eq!(allergy.date.as_deref(), Some("2026-02-11"));
+        let given = rec("imm-stu3-given");
+        assert_eq!(given.status.as_deref(), Some("completed"));
+        assert_eq!(given.date.as_deref(), Some("2026-01-15"));
+        assert_eq!(given.fields["performer"], json!("Example Nurse"));
+        assert_eq!(rec("imm-stu3-refused").status.as_deref(), Some("not-done"));
+        let med = rec("medreq-stu3");
+        assert_eq!(med.fields["prescriber"], json!("Example Prescriber"));
+        assert_eq!(med.date.as_deref(), Some("2026-02-01"));
+        let report = rec("report-stu3");
+        assert_eq!(report.fields["category"], json!("Laboratory"));
+        assert_eq!(report.date.as_deref(), Some("2026-02-20"));
+    }
 
     #[test]
     fn a_dispense_is_a_medication_fill_keyed_apart_from_a_prescription() {
