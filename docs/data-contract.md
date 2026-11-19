@@ -249,6 +249,8 @@ profile. Its standard output is NDJSON:
    markup a text reading leaves out (its timestamp and ids). Any other
    difference, one digit included, files a new document, as does a
    document with no text.
+   `medrec documents merge <copy> --into <id>` folds a copy filed before
+   that rule (0.2.3) into the document it renders, by the same rule.
 3. A trailer: `{"schema": "records-stream-end/v1", "complete", "counts":
    {<type>: n}, "skipped": [{resource_type, id, search, reason, code}],
    "finished_at", "error"}`.

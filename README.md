@@ -85,6 +85,8 @@ medrec intake --inbox                           # drain the folder's inbox/
 medrec intake --drive "gdrive:Old scans"        # the back catalogue, copied
 medrec review list                              # what intake could not decide
 medrec review file <id> --person Robin --type lab_report --date 2026-03-04
+medrec documents list --person Robin
+medrec documents merge <copy> --into <id>       # a document filed twice: one kept
 
 medrec images intake /Volumes/CDROM             # a disc, folder, DICOMDIR, .zip or .iso
 medrec images list
@@ -132,6 +134,17 @@ reads one source. It is for a provider whose `info --json` lists the
 records read through the login and from files carry the same organization
 and patient id, so they file under one source and the second import of
 them is unchanged.
+
+An import files a document once. When a source serves it again with other
+bytes and exactly the same text (a summary a portal generates on each
+export, with a new timestamp and id), nothing is filed: the import counts it
+`documents_unchanged` and notes the rendering on the document it renders.
+Any change in the text files a new document. Copies filed before 0.2.3 fold
+into the one they render with `medrec documents merge <copy> --into <id>`.
+It refuses unless they are that one document by the same rule, asks first
+(`--force` to skip), points records and notes at the kept one, keeps the
+copy's hash in its `renderings`, and removes the copy's file, to Drive's
+trash.
 
 ### Settings
 
