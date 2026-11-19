@@ -1322,7 +1322,13 @@ fn file_binaries(
     let ctx = intake::Context::new(cfg, household);
     for b in binaries {
         let sha = hash::sha256_hex(&b.bytes);
-        if index.documents.iter().any(|d| d.sha256 == sha) {
+        // The bytes of a filed document, or of a rendering of one already
+        // noted (a portal that serves its last rendering again).
+        if index
+            .documents
+            .iter()
+            .any(|d| d.sha256 == sha || d.renderings.iter().any(|r| r.sha256 == sha))
+        {
             filed.duplicate += 1;
             continue;
         }

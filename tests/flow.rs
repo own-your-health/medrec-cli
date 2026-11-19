@@ -1523,6 +1523,10 @@ fn a_document_rendered_again_on_a_later_export_is_not_filed_twice() {
     serve("rendering-b", finding, "1");
     assert_eq!(import(false), (0, 1, 1));
     assert_eq!(renderings().iter().sum::<usize>(), 1);
+    // The same rendering served again, byte for byte, is a duplicate and
+    // noted once.
+    assert_eq!(import(false), (0, 2, 0));
+    assert_eq!(renderings().iter().sum::<usize>(), 1);
 
     // One corrected digit, at the same version, is an amended document.
     serve("rendering-c", corrected, "1");

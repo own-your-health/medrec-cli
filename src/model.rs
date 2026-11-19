@@ -317,9 +317,10 @@ pub struct Document {
     pub near_duplicates: Vec<NearDuplicate>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub minhash: Vec<u32>,
-    /// Later imports that served this document again with other bytes and
-    /// the same text, and so filed nothing: each rendering's hash and when
-    /// it was fetched. Its raw Binary stays in the raw folder.
+    /// Renderings later imports served of this document, with other bytes
+    /// and the same text, and so filed nothing: each distinct one once, its
+    /// hash and when it was first fetched. Its raw Binary stays in the raw
+    /// folder; served again, it is a duplicate.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub renderings: Vec<Rendering>,
     /// What intake detected and how each field was decided.
