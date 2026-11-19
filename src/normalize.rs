@@ -342,21 +342,19 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
     let date = when
         .as_deref()
         .map(|w| w.chars().take(10).collect::<String>());
+    // A fill and a claim are each one event, not a fact two sources state:
+    // keyed by what names that event, so two of them on a day (two fills of
+    // a drug, two visits) never fold into one record and lose their
+    // quantities and amounts, and a fill never folds into a prescription.
     let key = match rt {
-        // A fill is its own fact: keyed apart from a prescription or a
-        // statement of the same drug that day, so it never folds into one
-        // and loses its quantity and pharmacy.
-        "MedicationDispense" => merge_key(
-            "medication-dispense",
-            code.as_ref(),
-            &display,
-            date.as_deref(),
+        "MedicationDispense" => format!(
+            "medication-dispense|{}|{}",
+            identity(r, &provenance),
+            date.as_deref().unwrap_or("")
         ),
-        // A claim is one claim: two of a type on a day (two fills, two
-        // visits) stay two, keyed by the claim's identifier, else its id.
         "ExplanationOfBenefit" => format!(
             "claim|{}|{}",
-            claim_identity(r),
+            identity(r, &provenance),
             date.as_deref().unwrap_or("")
         ),
         _ => merge_key(kind, code.as_ref(), &display, date.as_deref()),
@@ -507,16 +505,27 @@ fn money(m: Option<&Value>) -> Option<Value> {
     )
 }
 
-/// What names one claim: its first identifier (`system|value`), else its
-/// resource id.
-fn claim_identity(r: &Value) -> String {
-    match (
-        path_str(r, "identifier.0.system"),
-        path_str(r, "identifier.0.value"),
-    ) {
-        (s, Some(v)) => format!("{}|{v}", s.unwrap_or("")),
-        _ => format!("id|{}", path_str(r, "id").unwrap_or("")),
+/// What names one event (a fill, a claim): its first identifier
+/// (`system|value`); else its id, scoped to the source that served it,
+/// since an id is unique only on its own server; else a hash of the
+/// resource itself.
+fn identity(r: &Value, prov: &Provenance) -> String {
+    if let Some(v) = path_str(r, "identifier.0.value").filter(|v| !v.is_empty()) {
+        return format!("{}|{v}", path_str(r, "identifier.0.system").unwrap_or(""));
     }
+    if let Some(id) = path_str(r, "id").filter(|v| !v.is_empty()) {
+        let s = &prov.source;
+        return format!(
+            "id|{}|{}|{}|{id}",
+            s.fhir_base.as_deref().unwrap_or(""),
+            s.cli.as_deref().unwrap_or(""),
+            s.organization_id.as_deref().unwrap_or("")
+        );
+    }
+    format!(
+        "sha256|{}",
+        crate::hash::sha256_hex(r.to_string().as_bytes())
+    )
 }
 
 /// A `Quantity` as `{value, unit}`, the unit falling back to its code.
@@ -704,6 +713,12 @@ mod tests {
             Some("dispensed 30 TAB, 30 days")
         );
 
+        // Another fill of the drug that day (a partial fill and its
+        // completion) is another record.
+        let mut second = r.clone();
+        second["id"] = json!("md-0002");
+        assert_ne!(record(&second, prov()).unwrap().key, rec.key);
+
         // A prescription of the same drug that day is another fact.
         let mut req = json!({
             "resourceType": "MedicationRequest",
@@ -757,6 +772,21 @@ mod tests {
         let mut other = r.clone();
         other["id"] = json!("eob-rx-0002");
         assert_ne!(record(&other, prov()).unwrap().key, rec.key);
+        // An id names a claim only on its own source.
+        let mut elsewhere = prov();
+        elsewhere.source.cli = Some("otherrx".into());
+        assert_ne!(record(&r, elsewhere).unwrap().key, rec.key);
+        // With neither identifier nor id, the claim's content names it.
+        let mut bare = r.clone();
+        bare.as_object_mut().unwrap().remove("id");
+        let mut bare_other = bare.clone();
+        bare_other["payment"]["amount"]["value"] = json!(12);
+        let (k1, k2) = (
+            record(&bare, prov()).unwrap().key,
+            record(&bare_other, prov()).unwrap().key,
+        );
+        assert!(k1.contains("|sha256|"), "{k1}");
+        assert_ne!(k1, k2);
         let mut numbered = r.clone();
         numbered["identifier"] =
             json!([{"system": "https://payer.example.org/claim", "value": "CLAIM-0001"}]);
