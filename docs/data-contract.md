@@ -154,16 +154,20 @@ A fill and a claim are each one event, so their `key` names the event:
 identity is the resource's first identifier (`system|value`). Without one,
 it is `id|<fhir_base>|<cli>|<organization>|<resource id>`, since an id is
 unique only on the source that issued it. Without an id either, it is
-`sha256|<hash of the resource>`. So two fills of a drug, or two claims of
+`sha256|<hash of the resource>`, so such a resource whose content changes
+is a new record, and its earlier version stays beside it. So two fills of a drug, or two claims of
 a type, on one day stay two records, and a fill never folds into a
 prescription. The same event from two sources is one record only when both
 send the same identifier. Without one, it is two records, one per source.
 A record a resource shares with others, whose key that resource no longer
 matches, lets it go to a record of its own on its next import. That splits
-the claims 0.2.5 and earlier folded under a type-and-date key.
+the claims 0.2.5 and earlier folded under a type-and-date key. The record
+left behind keeps the fields last written to it, which may be the departed
+resource's, until its remaining source is imported again.
 
 A record is the same source resource when its `fhir_base`, `cli`,
-`organization_id`, resource type and id all match.
+`organization_id`, resource type and id all match. A resource with no id
+is never the same resource as another; it joins a record only by key.
 
 **ImagingStudy**: `id`, `study_uid`, `path`, `date`, `modalities`,
 `body_part`, `description`, `facility`, `accession`, `referring`, `series`

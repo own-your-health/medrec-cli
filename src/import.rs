@@ -1128,18 +1128,23 @@ enum Merge {
 /// the type-and-date key before 0.2.6 splits on its next import.
 fn merge(index: &mut PersonIndex, rec: Record) -> Merge {
     let incoming = rec.provenance[0].clone();
-    // An id is unique only on its own server: the source is part of it.
+    // An id is unique only on its own server: the source is part of it. A
+    // resource with no id is the same resource as nothing; it joins a
+    // record only by key.
+    let incoming_id = incoming
+        .source_resource
+        .as_ref()
+        .filter(|s| !s.id.is_empty())
+        .map(|s| (&s.resource_type, &s.id));
     let same_resource = |p: &Provenance| {
-        p.source.fhir_base == incoming.source.fhir_base
+        incoming_id.is_some()
+            && p.source.fhir_base == incoming.source.fhir_base
             && p.source.cli == incoming.source.cli
             && p.source.organization_id == incoming.source.organization_id
             && p.source_resource
                 .as_ref()
                 .map(|s| (&s.resource_type, &s.id))
-                == incoming
-                    .source_resource
-                    .as_ref()
-                    .map(|s| (&s.resource_type, &s.id))
+                == incoming_id
     };
     if let Some(existing) = index
         .records
@@ -1716,6 +1721,33 @@ mod tests {
             Merge::Unchanged
         ));
 
+        // Two claims with no id from one source are two records, each by its
+        // content, and one served again is unchanged.
+        let (mut d, mut pd) = eob_from("", 3.0);
+        let (mut e, mut pe) = eob_from("", 4.0);
+        for (r, p) in [(&mut d, &mut pd), (&mut e, &mut pe)] {
+            r.as_object_mut().unwrap().remove("id");
+            p.source_resource.as_mut().unwrap().id = String::new();
+        }
+        assert!(matches!(
+            merge(&mut index, normalize::record(&d, pd.clone()).unwrap()),
+            Merge::Added
+        ));
+        assert!(matches!(
+            merge(&mut index, normalize::record(&e, pe).unwrap()),
+            Merge::Added
+        ));
+        assert!(matches!(
+            merge(&mut index, normalize::record(&d, pd).unwrap()),
+            Merge::Updated
+        ));
+        assert_eq!(index.records.len(), 4);
+        let paid: Vec<&Value> = index.records[2..]
+            .iter()
+            .map(|r| &r.fields["payment"]["amount"])
+            .collect();
+        assert_eq!(paid, ["3.0", "4.0"]);
+
         // The same id from another source is another resource.
         let (c, mut pc) = eob_from("eob-a", 1.0);
         pc.source.cli = Some("otherrx".into());
@@ -1723,7 +1755,7 @@ mod tests {
             merge(&mut index, normalize::record(&c, pc).unwrap()),
             Merge::Added
         ));
-        assert_eq!(index.records.len(), 3);
+        assert_eq!(index.records.len(), 5);
     }
 
     #[test]
