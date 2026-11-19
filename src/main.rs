@@ -1117,7 +1117,9 @@ fn import_cmd(cli: &Cli, a: &ImportArgs, store: &ConfigStore) -> Result<(), CliE
         }
         (false, None) => None,
     };
-    let f = Folder::open(&cfg, Access::Write)?;
+    // Read fresh without the lock: `import::run` takes it after the
+    // provider's export.
+    let f = Folder::open(&cfg, Access::Fresh)?;
     note(cli, &format!("importing from {} ...", a.from));
     let r = import::run(
         &f,

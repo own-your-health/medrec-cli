@@ -220,7 +220,9 @@ pub fn write_dicom(dicom: &Path) {
 /// and `adult2`; an export that signs in without one of them is exit 2, as a
 /// provider's is, and `--files <DIR>` (with `files`) needs a directory and
 /// no `--profile`. It writes the export's arguments to `export-args`, and
-/// the `FAKEPROV_PROFILE` and `FAKEPROV_FILES` it saw to `export-env`.
+/// the `FAKEPROV_PROFILE` and `FAKEPROV_FILES` it saw to `export-env`. With
+/// `FAKEPROV_HOLD=<DIR>` its export writes `<DIR>/exporting` and waits, up to
+/// 30 seconds, for `<DIR>/go` before it prints the stream.
 pub fn write_provider(provider: &Path, stream: &str) -> PathBuf {
     std::fs::create_dir_all(provider).unwrap();
     std::fs::write(provider.join("synthetic.ndjson"), stream).unwrap();
@@ -272,6 +274,10 @@ case "$1" in
         adult1|adult2) ;;
         *) echo "fakeprov: this command needs a profile; configured: adult1, adult2" >&2; exit 2 ;;
       esac
+    fi
+    if [ -n "$FAKEPROV_HOLD" ]; then
+      : > "$FAKEPROV_HOLD/exporting"; n=0
+      while [ ! -e "$FAKEPROV_HOLD/go" ] && [ $n -lt 300 ]; do sleep 0.1; n=$((n + 1)); done
     fi
     cat "$d/synthetic.ndjson"
     [ -n "$FAKEPROV_STDERR" ] && printf '%s\n' "$FAKEPROV_STDERR" >&2

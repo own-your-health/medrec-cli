@@ -373,8 +373,9 @@ pub fn run(
     provider: &Provider,
     req: &Request,
 ) -> Result<Report, CliError> {
-    let mut household = folder.household()?;
-    let who = who(&household, req)?;
+    // A person who cannot be resolved fails before the provider runs; the
+    // resolution that counts is made again under the lock, below.
+    who(&folder.household()?, req)?;
     let max_binary = cfg.max_file_bytes();
 
     let mut cmd = Bounded::new(&provider.path)
@@ -442,7 +443,21 @@ pub fn run(
         binaries,
         skipped: skipped_large,
     } = streamed;
-    let (person, known_patients) = match who {
+
+    // The folder lock is taken only now, so intakes and other writers carry
+    // on while the provider exports, and the household is read again under
+    // it: another import or a `people` change may have written it since.
+    // Giving up would throw the export away, so it waits as long as an
+    // export may run, and it refuses a folder replaced in the meantime.
+    let writing = Folder::open_to_write_within(cfg, cfg.import_timeout())?;
+    if writing.folder_id != folder.folder_id {
+        return Err(CliError::Other(
+            "household.json was replaced while this command ran".into(),
+        ));
+    }
+    let folder = &writing;
+    let mut household = folder.household()?;
+    let (person, known_patients) = match who(&household, req)? {
         Who::Known(person, known) => (*person, known),
         Who::ByStream(elsewhere) => by_stream(&household, &elsewhere, &header, req)?,
     };
@@ -479,9 +494,6 @@ pub fn run(
 
     let source = source_slug(&header.source.cli, &header.organization.id);
     let source_dir = folder::records_dir(&person, &source);
-    // The provider may have run for many minutes: a household another
-    // machine changed since stops the import before anything is uploaded.
-    folder.household_unchanged(&household)?;
     let mut index = folder.index(&person)?;
     let written = write_raw(folder, &source_dir, &resources)?;
 
