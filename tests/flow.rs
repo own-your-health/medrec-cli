@@ -1613,6 +1613,18 @@ fn a_document_filed_twice_merges_into_the_one_it_renders_again() {
     copy["provenance"]["fetched_at"] = "2026-03-06T09:00:00Z".into();
     index["documents"].as_array_mut().unwrap().push(copy);
     index["records"][0]["documents"] = serde_json::json!(["d_copy0001"]);
+    // A study whose report it is.
+    index["studies"] = serde_json::json!([{
+        "id": "s_study0001",
+        "study_uid": "2.25.1",
+        "path": "Imaging/none",
+        "series": [],
+        "instances": 0,
+        "size": 0,
+        "report": "d_copy0001",
+        "filed_at": "2026-03-06T09:00:00Z",
+        "provenance": []
+    }]);
     text["texts"]["d_copy0001"] = text["texts"][&kept].clone();
     std::fs::write(folder.join("index.json"), index.to_string()).unwrap();
     std::fs::write(folder.join("text.json"), text.to_string()).unwrap();
@@ -1625,10 +1637,8 @@ fn a_document_filed_twice_merges_into_the_one_it_renders_again() {
         "d_copy0001",
     ]);
 
-    // A mutation asks first, and with no terminal it is exit 6.
-    let gate = e.run(&["documents", "merge", "d_copy0001", "--into", &kept]);
-    assert_eq!(gate.status.code(), Some(6));
-    // A document that is not a rendering of the other is refused.
+    // Refusals come before the prompt: with no terminal and no --force, a
+    // merge that would be refused is that refusal, not exit 6.
     let (code, said_) = said(&e.run(&[
         "--json",
         "documents",
@@ -1636,10 +1646,20 @@ fn a_document_filed_twice_merges_into_the_one_it_renders_again() {
         pdf["id"].as_str().unwrap(),
         "--into",
         &kept,
-        "--force",
     ]));
     assert_eq!(code, Some(2), "{said_}");
     assert!(said_.contains("is not a rendering of"), "{said_}");
+    let (code, said_) = said(&e.run(&["documents", "merge", &kept, "--into", &kept]));
+    assert_eq!(code, Some(2), "{said_}");
+    let (code, said_) = said(&e.run(&["documents", "merge", "d_nope0001", "--into", &kept]));
+    assert_eq!(code, Some(4), "{said_}");
+    assert!(
+        said_.contains("`d_nope0001`") && !said_.contains(&format!("`{kept}`")),
+        "{said_}"
+    );
+    // A merge that would go ahead asks, and with no terminal it is exit 6.
+    let gate = e.run(&["documents", "merge", "d_copy0001", "--into", &kept]);
+    assert_eq!(gate.status.code(), Some(6));
 
     let m = e.ok(&[
         "documents",
@@ -1651,7 +1671,7 @@ fn a_document_filed_twice_merges_into_the_one_it_renders_again() {
     ]);
     assert_eq!(m["document"], kept.as_str());
     assert_eq!(m["file_removed"], true);
-    assert_eq!(m["references_moved"], 2);
+    assert_eq!(m["references_moved"], 3);
     assert!(!e.records().join(&copy_path).exists());
     let index = read("index.json");
     let docs = index["documents"].as_array().unwrap();
@@ -1662,6 +1682,7 @@ fn a_document_filed_twice_merges_into_the_one_it_renders_again() {
         medrec::hash::sha256_hex(&bytes)
     );
     assert_eq!(index["records"][0]["documents"], serde_json::json!([kept]));
+    assert_eq!(index["studies"][0]["report"], kept.as_str());
     assert!(read("text.json")["texts"].get("d_copy0001").is_none());
     let notes = e.ok(&["note", "list"]);
     assert_eq!(notes["items"][0]["about"], serde_json::json!([kept]));

@@ -1270,15 +1270,18 @@ fn documents_cmd(cli: &Cli, cmd: &DocumentsCmd, store: &ConfigStore) -> Result<(
             into,
             force,
         } => {
+            let cfg = load(store, cli)?;
+            let f = Folder::open(&cfg, Access::Write)?;
+            let h = f.household()?;
+            // Every refusal before the prompt: it only asks about a merge
+            // that will go ahead.
+            let plan = medrec::documents::plan(&f, &h, duplicate, into)?;
             confirm::gate(
                 &cli.common,
                 *force,
                 &format!("Merge document {duplicate} into {into} and remove its file?"),
             )?;
-            let cfg = load(store, cli)?;
-            let f = Folder::open(&cfg, Access::Write)?;
-            let h = f.household()?;
-            let m = medrec::documents::merge(&f, &h, duplicate, into)?;
+            let m = medrec::documents::apply(&f, plan)?;
             output::emit(json, "document-merge", to_value(&m), |_| {
                 println!(
                     "merged {} into {}{}",

@@ -113,7 +113,8 @@ without a download), `size`, `media_type`, `pages`, `original_name`, `title`,
 `text` (`{chars, engines, ocr_pages, note}`), `near_duplicates`
 (`[{document, similarity}]`), `minhash`, `renderings` (`[{sha256, size,
 fetched_at}]`: each distinct rendering later imports served of it with the
-same text, once; served again byte for byte, it is a duplicate),
+same text, and those of a copy folded in by `documents merge`, once; served
+again byte for byte, it is a duplicate),
 `classification` (what was detected, with scores and evidence), and
 `provenance`. An imported document's `provenance.raw_path` names its
 Binary's raw file, which holds the latest rendering the source served;
