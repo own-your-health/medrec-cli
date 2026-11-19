@@ -536,7 +536,14 @@ pub fn run(
 
     let mut owners = Vec::new();
     let (mut added, mut updated, mut unchanged, mut older) = (0, 0, 0, 0);
-    let mut idless = HashMap::new();
+    let mut idless = Idless {
+        incoming: resources
+            .iter()
+            .filter(|r| r.id.is_empty())
+            .filter_map(|r| written.paths.get(&raw_sub(r)).cloned())
+            .collect(),
+        claimed: HashSet::new(),
+    };
     for r in &resources {
         let Ok(v) = r.value() else { continue };
         if let Some(o) = owner(&r.resource_type, &v) {
@@ -974,12 +981,34 @@ fn write_raw(
     filed: &HashMap<String, Provenance>,
     base: &Provenance,
 ) -> Result<Written, CliError> {
-    let existing: HashMap<String, Option<String>> = folder
+    let mut existing: HashMap<String, Option<String>> = folder
         .store
         .hashes(source_dir)?
         .into_iter()
         .map(|h| (h.rel, h.md5))
         .collect();
+    // A refresh moves the held copy to `<id>~refresh-<md5>.json` while the
+    // new one uploads, and removes it after. One still here is from a
+    // refresh cut short: it goes, or back in place if the copy it was making
+    // room for never arrived.
+    let leftovers: Vec<String> = existing
+        .keys()
+        .filter(|k| k.contains(REFRESHING))
+        .cloned()
+        .collect();
+    for left in leftovers {
+        let current = format!("{}.json", &left[..left.find(REFRESHING).unwrap_or(0)]);
+        let md5 = existing.remove(&left).flatten();
+        match existing.entry(current) {
+            std::collections::hash_map::Entry::Occupied(_) => {
+                folder.store.delete(&left)?;
+            }
+            std::collections::hash_map::Entry::Vacant(v) => {
+                folder.store.move_no_clobber(&left, v.key())?;
+                v.insert(md5);
+            }
+        }
+    }
     let staging = pk_cli_drive::private_temp_dir("medrec-import")?;
     let mut paths = HashMap::new();
     let mut filings = HashMap::new();
@@ -1097,13 +1126,14 @@ fn write_raw(
                 staged.push((aside, md5));
                 continue;
             }
-            Some(f @ (Filing::Refreshed | Filing::Replaces)) => {
+            Some(Filing::Refreshed) => {
+                let room = format!("{source_dir}/{sub}{REFRESHING}{}.json", &md5[..8]);
+                folder.store.move_no_clobber(&rel, &room)?;
+                overwritten.push(room);
+            }
+            Some(Filing::Replaces) => {
                 let old = held_md5.cloned().flatten();
-                if let Some(kept) = move_aside(folder, &existing, source_dir, &sub, &rel, old)? {
-                    if f == Filing::Refreshed {
-                        overwritten.push(kept);
-                    }
-                }
+                move_aside(folder, &existing, source_dir, &sub, &rel, old)?;
             }
             None => {}
         }
@@ -1145,10 +1175,13 @@ fn write_raw(
     })
 }
 
+/// The mark of a held copy moved aside only while a refresh uploads.
+const REFRESHING: &str = "~refresh-";
+
 /// Move the current copy at `rel` aside before a new one is uploaded
-/// (uploads never replace a file). Returns the path it moved to, or `None`
-/// when those bytes were already kept, from an earlier change back and
-/// forth, and the copy at `rel` was removed instead.
+/// (uploads never replace a file), as an earlier version. When those bytes
+/// are already kept, from an earlier change back and forth, the copy at
+/// `rel` is removed instead.
 fn move_aside(
     folder: &Folder,
     existing: &HashMap<String, Option<String>>,
@@ -1156,7 +1189,7 @@ fn move_aside(
     sub: &str,
     rel: &str,
     old: Option<String>,
-) -> Result<Option<String>, CliError> {
+) -> Result<(), CliError> {
     let tag = old
         .as_deref()
         .and_then(|m| m.get(..8))
@@ -1166,13 +1199,10 @@ fn move_aside(
     let mut n = 2;
     loop {
         match existing.get(&kept) {
-            None => {
-                folder.store.move_no_clobber(rel, &kept)?;
-                return Ok(Some(kept));
-            }
+            None => return folder.store.move_no_clobber(rel, &kept),
             Some(k) if old.is_some() && *k == old => {
                 folder.store.delete(rel)?;
-                return Ok(None);
+                return Ok(());
             }
             Some(_) => {
                 kept = format!("{source_dir}/{sub}~{tag}-{n}.json");
@@ -1293,9 +1323,8 @@ enum Merge {
 
 /// File `rec`, normalized from one resource, into `index`. `filing` is how
 /// the raw layer filed the version it came from over the one it held
-/// ([`write_raw`]), `None` when it held none. `idless`
-/// counts, for this import, the resources with no id filed under each type
-/// and key.
+/// ([`write_raw`]), `None` when it held none. `idless` is what this import
+/// knows of its resources with no id.
 ///
 /// The same source resource updates its record; the same fact from another
 /// source joins it with a second provenance; anything else is new. A record
@@ -1306,7 +1335,7 @@ fn merge(
     index: &mut PersonIndex,
     rec: Record,
     filing: Option<Filing>,
-    idless: &mut HashMap<String, usize>,
+    idless: &mut Idless,
 ) -> Merge {
     let incoming = rec.provenance[0].clone();
     let incoming_type = incoming
@@ -1334,7 +1363,8 @@ fn merge(
     };
     // A resource with no id is known only by its key: on the record its key
     // names, the provenances of its type from its source with no id are
-    // those of the resources like it, in the order the source serves them.
+    // those of the resources like it, each found by its raw file (named by
+    // its content).
     let same_idless = |p: &Provenance| {
         incoming_id.is_none()
             && same_source(p)
@@ -1374,47 +1404,74 @@ fn merge(
         index.records.push(rec);
         return Merge::Added;
     }
-    let slot = idless
-        .entry(format!(
-            "{}|{}",
-            incoming_type.clone().unwrap_or_default(),
-            rec.key
-        ))
-        .or_default();
-    let n = *slot;
-    *slot += 1;
+    let key = rec.key.clone();
     let Some(existing) = index.records.iter_mut().find(|r| r.key == rec.key) else {
         index.records.push(rec);
+        idless.claimed.insert((key, 0));
         return Merge::Added;
     };
-    let own = existing
+    let mine: Vec<usize> = existing
         .provenance
         .iter()
         .enumerate()
         .filter(|(_, p)| same_idless(p))
-        .nth(n)
-        .map(|(i, _)| i);
+        .map(|(i, _)| i)
+        .collect();
+    let free = |i: &usize| !idless.claimed.contains(&(key.clone(), *i));
+    // Its own provenance names its raw file. Failing that (a version with
+    // other content, or one filed before 0.2.7), it takes the first one that
+    // no resource of this import names.
+    let own = mine
+        .iter()
+        .copied()
+        .filter(free)
+        .find(|&i| {
+            incoming.raw_path.is_some() && existing.provenance[i].raw_path == incoming.raw_path
+        })
+        .or_else(|| {
+            mine.iter().copied().filter(free).find(|&i| {
+                existing.provenance[i]
+                    .raw_path
+                    .as_ref()
+                    .is_none_or(|p| !idless.incoming.contains(p))
+            })
+        });
     match own {
-        // The first one served writes the record, as a resource with an id
-        // that shares another's key keeps the first one's fields.
-        Some(i) if n == 0 => rewrite(existing, rec, incoming, Some(i), filing),
-        Some(i) => match filing {
-            Some(Filing::Unchanged) => Merge::Unchanged,
-            Some(Filing::Refreshed) => {
-                existing.provenance[i] = existing.provenance[i].refreshed_by(&incoming);
-                Merge::Unchanged
+        // The first of them writes the record, whatever order they come in,
+        // as a resource with an id that shares another's key keeps the first
+        // one's fields.
+        Some(i) => {
+            idless.claimed.insert((key, i));
+            if mine.first() == Some(&i) {
+                return rewrite(existing, rec, incoming, Some(i), filing);
             }
-            _ if existing.provenance[i] == incoming => Merge::Unchanged,
-            _ => {
-                existing.provenance[i] = incoming;
-                Merge::Updated
+            match filing {
+                Some(Filing::Unchanged) => Merge::Unchanged,
+                Some(Filing::Refreshed) => {
+                    existing.provenance[i] = existing.provenance[i].refreshed_by(&incoming);
+                    Merge::Unchanged
+                }
+                _ if existing.provenance[i] == incoming => Merge::Unchanged,
+                _ => {
+                    existing.provenance[i] = incoming;
+                    Merge::Updated
+                }
             }
-        },
+        }
         None => {
+            idless.claimed.insert((key, existing.provenance.len()));
             existing.provenance.push(incoming);
             Merge::Updated
         }
     }
+}
+
+/// What one import knows of its resources with no id: the raw files they
+/// were filed to, and which id-less provenances on records they have taken.
+#[derive(Default)]
+struct Idless {
+    incoming: HashSet<String>,
+    claimed: HashSet<(String, usize)>,
 }
 
 /// Whether two records say the same thing.
@@ -1947,7 +2004,7 @@ mod tests {
             Some(q) if q == p => Some(Filing::Unchanged),
             Some(_) => Some(Filing::Replaces),
         };
-        merge(index, rec, filing, &mut HashMap::new())
+        merge(index, rec, filing, &mut Idless::default())
     }
 
     fn eob_from(id: &str, paid: f64) -> (Value, Provenance) {
@@ -2051,30 +2108,45 @@ mod tests {
             version_id: None,
             last_updated: None,
         });
+        // Each is filed to a raw file named by its content.
+        let filed = |v: &Value, path: &str| {
+            let mut p = prov.clone();
+            p.raw_path = Some(path.into());
+            normalize::record(v, p).unwrap()
+        };
         let mut index = PersonIndex::new("p_test");
-        let mut import = |filing: Option<Filing>| -> Vec<Merge> {
-            let mut idless = HashMap::new();
-            [&a, &b]
+        let mut import = |order: [usize; 2], filing: Option<Filing>| -> Vec<Merge> {
+            let served = [(&a, "noid-a.json"), (&b, "noid-b.json")];
+            let mut idless = Idless {
+                incoming: served.iter().map(|(_, p)| p.to_string()).collect(),
+                claimed: HashSet::new(),
+            };
+            order
                 .iter()
-                .map(|v| {
-                    let rec = normalize::record(v, prov.clone()).unwrap();
-                    merge(&mut index, rec, filing, &mut idless)
+                .map(|&i| {
+                    let (v, path) = served[i];
+                    merge(&mut index, filed(v, path), filing, &mut idless)
                 })
                 .collect()
         };
-        let first = import(None);
+        let first = import([0, 1], None);
         assert!(
             matches!(first[..], [Merge::Added, Merge::Updated]),
             "{first:?}"
         );
-        // Served again, each takes its own provenance back: nothing changes.
-        for _ in 0..2 {
-            let again = import(Some(Filing::Unchanged));
+        // Served again, in either order, each takes its own provenance back:
+        // nothing changes.
+        for order in [[0, 1], [1, 0], [1, 0]] {
+            let again = import(order, Some(Filing::Unchanged));
             assert!(
                 matches!(again[..], [Merge::Unchanged, Merge::Unchanged]),
-                "{again:?}"
+                "{order:?} {again:?}"
             );
         }
+        assert_eq!(
+            index.records[0].provenance[0].raw_path.as_deref(),
+            Some("noid-a.json")
+        );
         assert_eq!(index.records.len(), 1);
         assert_eq!(index.records[0].provenance.len(), 2);
         // The record keeps the first one's value, as with two resources
