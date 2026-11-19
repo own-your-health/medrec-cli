@@ -111,8 +111,14 @@ without a download), `size`, `media_type`, `pages`, `original_name`, `title`,
 `doc_type`, `loinc`, `date` (of service), `organization`, `filed_at`,
 `origin` (`{kind: file|inbox|drive|fhir|review, name, action: copied|moved}`),
 `text` (`{chars, engines, ocr_pages, note}`), `near_duplicates`
-(`[{document, similarity}]`), `minhash`, `classification` (what was detected,
-with scores and evidence), and `provenance`.
+(`[{document, similarity}]`), `minhash`, `renderings` (`[{sha256, size,
+fetched_at}]`: each distinct rendering later imports served of it with the
+same text, once; served again byte for byte, it is a duplicate),
+`classification` (what was detected, with scores and evidence), and
+`provenance`. An imported document's `provenance.raw_path` names its
+Binary's raw file, which holds the latest rendering the source served;
+earlier ones stay beside it as `<id>~<md5>.json`, as for every raw
+resource, and the document's own bytes are the filed file.
 
 Document types: `visit_summary`, `lab_report`, `imaging_report`,
 `immunization_record`, `discharge_summary`, `referral`, `prescription`,
@@ -230,7 +236,19 @@ profile. Its standard output is NDJSON:
    and type, preferring a DocumentReference that names it too. A
    DiagnosticReport's `LAB` category makes a `lab_report`, an imaging one
    (`RAD`, `CT`, `MR`, `US`, …) an `imaging_report`; a Media's Binary is
-   `other`. The document's provenance names that resource.
+   `other`. The document's provenance names that resource. A Binary with
+   the bytes of a document already filed is a duplicate
+   (`documents_duplicate`). One with other bytes is that document rendered
+   again (`documents_unchanged`; nothing is filed, and the rendering's
+   `sha256`, `size` and `fetched_at` go on the kept document's
+   `renderings`) when the latest document filed from the same CLI and
+   organization, through the same resource and Binary (`raw_path`), in the
+   same media type, has exactly its text, whitespace aside, and no
+   `meta.versionId` or `lastUpdated` that differs where both imports have
+   one. A portal that generates a summary on each export changes only
+   markup a text reading leaves out (its timestamp and ids). Any other
+   difference, one digit included, files a new document, as does a
+   document with no text.
 3. A trailer: `{"schema": "records-stream-end/v1", "complete", "counts":
    {<type>: n}, "skipped": [{resource_type, id, search, reason, code}],
    "finished_at", "error"}`.

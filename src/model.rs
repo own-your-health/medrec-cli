@@ -317,10 +317,26 @@ pub struct Document {
     pub near_duplicates: Vec<NearDuplicate>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub minhash: Vec<u32>,
+    /// Renderings later imports served of this document, with other bytes
+    /// and the same text, and so filed nothing: each distinct one once, its
+    /// hash and when it was first fetched. Its raw Binary stays in the raw
+    /// folder; served again, it is a duplicate.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub renderings: Vec<Rendering>,
     /// What intake detected and how each field was decided.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub classification: Option<Value>,
     pub provenance: Provenance,
+}
+
+/// A rendering of a document that an import did not file: see
+/// [`Document::renderings`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Rendering {
+    pub sha256: String,
+    pub size: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fetched_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -35,6 +35,39 @@ pub const PROVIDER_INFO_NO_LOGIN: &str =
     include_str!("../tests/fixtures/stream/fakeprov-info-no-login.json");
 /// The fake provider's `profiles list --json`: `adult1` and `adult2`.
 pub const PROVIDER_PROFILES: &str = include_str!("../tests/fixtures/stream/fakeprov-profiles.json");
+/// A synthetic clinical summary with `{{RENDERING}}` (its timestamp and
+/// document id) and `{{FINDING}}` (a line of its text) to fill in.
+pub const SUMMARY_XML: &str = include_str!("../tests/fixtures/stream/summary.xml");
+
+/// [`STREAM`] with `doc-0001`'s Binary served as [`SUMMARY_XML`], rendered
+/// at `rendering` and saying `finding`, and the DocumentReference at
+/// `meta.versionId` `version`: a portal's summary, generated anew on each
+/// export, as two exports of the same document serve it.
+pub fn stream_with_summary(rendering: &str, finding: &str, version: &str) -> String {
+    use base64::Engine;
+    let xml = SUMMARY_XML
+        .replace("{{RENDERING}}", rendering)
+        .replace("{{FINDING}}", finding);
+    let data = base64::engine::general_purpose::STANDARD.encode(xml);
+    let mut out = String::new();
+    for line in STREAM.lines() {
+        let mut v: serde_json::Value = serde_json::from_str(line).unwrap();
+        match (v["resourceType"].as_str(), v["id"].as_str()) {
+            (Some("Binary"), Some("bin-0001")) => {
+                v["contentType"] = "application/xml".into();
+                v["data"] = data.clone().into();
+            }
+            (Some("DocumentReference"), Some("doc-0001")) => {
+                v["meta"]["versionId"] = version.into();
+                v["content"][0]["attachment"]["contentType"] = "application/xml".into();
+            }
+            _ => {}
+        }
+        out.push_str(&serde_json::to_string(&v).unwrap());
+        out.push('\n');
+    }
+    out
+}
 
 pub fn write(path: &Path, bytes: &[u8]) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();

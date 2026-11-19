@@ -916,6 +916,7 @@ pub fn document_for(
         text: Some(text_info(&prepared.extracted)),
         near_duplicates: near.to_vec(),
         minhash: prepared.signature.clone(),
+        renderings: Vec::new(),
         classification: serde_json::to_value(class).ok(),
         provenance: Provenance {
             source: ProvenanceSource {

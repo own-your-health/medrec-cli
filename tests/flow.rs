@@ -1464,3 +1464,84 @@ fn an_import_from_downloaded_files_runs_with_files_and_no_profile() {
         .any(|p| p["cli"] == "fakeprov" && p["records_files"] == true));
     let _ = std::fs::remove_dir_all(&e.root);
 }
+
+#[test]
+fn a_document_rendered_again_on_a_later_export_is_not_filed_twice() {
+    let base = Env::new("rendered-again");
+    setup(&base);
+    let finding = "Hemoglobin was 13.1 and the other routine blood tests were in range.";
+    let corrected = "Hemoglobin was 13.4 and the other routine blood tests were in range.";
+    let serve = |rendering: &str, finding: &str, version: &str| {
+        medrec::testdata::write_provider(
+            &base.root.join("provider"),
+            &medrec::testdata::stream_with_summary(rendering, finding, version),
+        )
+    };
+    let e = provider_env(
+        &base,
+        &medrec::testdata::stream_with_summary("rendering-a", finding, "1"),
+    );
+    let import = |person: bool| {
+        let mut a = vec![
+            "import",
+            "--from",
+            "fakeprov",
+            "--from-profile",
+            "adult1",
+            "--patient",
+            "pat-0001",
+        ];
+        if person {
+            a.extend_from_slice(&["--person", "Robin"]);
+        }
+        let v = e.ok(&a);
+        (
+            v["documents_added"].as_u64().unwrap(),
+            v["documents_duplicate"].as_u64().unwrap(),
+            v["documents_unchanged"].as_u64().unwrap(),
+        )
+    };
+    // Each filed document's renderings, in filing order.
+    let renderings = || {
+        let mut out = Vec::new();
+        for entry in std::fs::read_dir(e.records()).unwrap() {
+            let index = entry.unwrap().path().join("index.json");
+            if let Ok(t) = std::fs::read_to_string(&index) {
+                let v: Value = serde_json::from_str(&t).unwrap();
+                for d in v["documents"].as_array().unwrap() {
+                    out.push(d["renderings"].as_array().map_or(0, Vec::len));
+                }
+            }
+        }
+        out
+    };
+    assert_eq!(import(true), (2, 0, 0));
+
+    // The next export renders the summary again: a new timestamp and id,
+    // other bytes, the same text. The copy filed before stays the only one,
+    // and the rendering is noted on it.
+    serve("rendering-b", finding, "1");
+    assert_eq!(import(false), (0, 1, 1));
+    assert_eq!(renderings().iter().sum::<usize>(), 1);
+    // The same rendering served again, byte for byte, is a duplicate and
+    // noted once.
+    assert_eq!(import(false), (0, 2, 0));
+    assert_eq!(renderings().iter().sum::<usize>(), 1);
+
+    // One corrected digit, at the same version, is an amended document.
+    serve("rendering-c", corrected, "1");
+    assert_eq!(import(false), (1, 1, 0));
+    // The same text under a new version is a new version.
+    serve("rendering-d", corrected, "2");
+    assert_eq!(import(false), (1, 1, 0));
+    // A rendering of the latest version is that version again.
+    serve("rendering-e", corrected, "2");
+    assert_eq!(import(false), (0, 1, 1));
+    assert_eq!(renderings().iter().sum::<usize>(), 2);
+
+    let listed = e.ok(&["documents", "list"]);
+    assert_eq!(listed["items"].as_array().unwrap().len(), 4);
+    let v = e.ok(&["verify"]);
+    assert!(v["missing"].as_array().unwrap().is_empty(), "{v}");
+    let _ = std::fs::remove_dir_all(&e.root);
+}

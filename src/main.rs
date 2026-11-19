@@ -1126,6 +1126,12 @@ fn import_cmd(cli: &Cli, a: &ImportArgs, store: &ConfigStore) -> Result<(), CliE
             "{} resources from {} for {}: {} records added, {} updated, {} unchanged; {} documents added",
             r.resources, organization, r.person_name, r.records_added, r.records_updated, r.records_unchanged, r.documents_added
         );
+        if r.documents_unchanged > 0 {
+            println!(
+                "{} documents were served again with the same text; the copies filed before were kept",
+                r.documents_unchanged
+            );
+        }
         // Withheld skips are listed below by reason rather than counted.
         let other = if r.withheld_skips > 0 { "other " } else { "" };
         match r.skipped - r.withheld_skips {
