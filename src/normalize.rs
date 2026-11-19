@@ -12,6 +12,7 @@ pub const SNOMED: &str = "http://snomed.info/sct";
 pub const ICD10: &str = "http://hl7.org/fhir/sid/icd-10-cm";
 pub const RXNORM: &str = "http://www.nlm.nih.gov/research/umls/rxnorm";
 pub const CVX: &str = "http://hl7.org/fhir/sid/cvx";
+pub const NDC: &str = "http://hl7.org/fhir/sid/ndc";
 
 /// The record a resource becomes, if it is one medrec indexes.
 pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
@@ -39,6 +40,11 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
             &["onsetDateTime", "onsetPeriod.start", "recordedDate"],
         ),
         "MedicationRequest" => ("medication", &[RXNORM], &["authoredOn"]),
+        "MedicationDispense" => (
+            "medication",
+            &[RXNORM, NDC],
+            &["whenHandedOver", "whenPrepared"],
+        ),
         "MedicationStatement" => (
             "medication",
             &[RXNORM],
@@ -61,7 +67,9 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
     };
     let code_el = match rt {
         "Encounter" => first(r, "type"),
-        "MedicationRequest" | "MedicationStatement" => r.get("medicationCodeableConcept"),
+        "MedicationRequest" | "MedicationStatement" | "MedicationDispense" => {
+            r.get("medicationCodeableConcept")
+        }
         "Immunization" => r.get("vaccineCode"),
         "Coverage" => r.get("type"),
         "ExplanationOfBenefit" => r.get("type"),
@@ -170,6 +178,28 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
             put_str(&mut fields, "dosage", path_str(r, "dosage.0.text"));
             put(&mut fields, "source", Some(json!("statement")));
         }
+        "MedicationDispense" => {
+            put_str(
+                &mut fields,
+                "dosage",
+                path_str(r, "dosageInstruction.0.text"),
+            );
+            put(&mut fields, "quantity", quantity(r.get("quantity")));
+            put(
+                &mut fields,
+                "days_supply",
+                path(r, "daysSupply.value").cloned(),
+            );
+            put_str(
+                &mut fields,
+                "pharmacy",
+                path_str(r, "performer.0.actor.display")
+                    .or_else(|| path_str(r, "location.display")),
+            );
+            put(&mut fields, "type", r.get("type").map(concept_text));
+            put(&mut fields, "ndc", ndc(r.get("medicationCodeableConcept")));
+            put(&mut fields, "source", Some(json!("dispense")));
+        }
         "AllergyIntolerance" => {
             put_str(&mut fields, "criticality", path_str(r, "criticality"));
             let reactions: Vec<Value> = r
@@ -266,17 +296,38 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
             put_str(&mut fields, "use", path_str(r, "use"));
             put_str(&mut fields, "facility", path_str(r, "facility.display"));
             put(&mut fields, "items", eob_items(r));
+            // A pharmacy claim (CARIN's Pharmacy EOB) carries the fill on
+            // `supportingInfo`.
+            for (key, code) in [
+                ("days_supply", "dayssupply"),
+                ("refill_number", "refillnum"),
+                ("refills_authorized", "refillsauthorized"),
+            ] {
+                put(&mut fields, key, supporting_value(r, code));
+            }
+            put(
+                &mut fields,
+                "brand_generic",
+                supporting(r, "brandgenericindicator")
+                    .and_then(|s| s.get("code"))
+                    .map(concept_text),
+            );
             // CARIN carries plan-year accumulators (deductible and
             // out-of-pocket used and remaining) on the EOB.
             put(&mut fields, "benefit_balance", benefit_balance(r));
         }
         _ => {}
     }
-    let display = code
-        .as_ref()
-        .and_then(|c| c.display.clone())
+    // A pharmacy claim is named for what was filled, not "Pharmacy".
+    let filled = (rt == "ExplanationOfBenefit"
+        && code.as_ref().and_then(|c| c.code.as_deref()) == Some("pharmacy"))
+    .then(|| path(r, "item.0.productOrService").and_then(|c| codeable(c, &[RXNORM, NDC])))
+    .flatten()
+    .and_then(|c| c.display);
+    let display = filled
+        .or_else(|| code.as_ref().and_then(|c| c.display.clone()))
         .or_else(|| match rt {
-            "MedicationRequest" | "MedicationStatement" => {
+            "MedicationRequest" | "MedicationStatement" | "MedicationDispense" => {
                 path_str(r, "medicationReference.display").map(str::to_string)
             }
             "Encounter" => r
@@ -291,7 +342,23 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
     let date = when
         .as_deref()
         .map(|w| w.chars().take(10).collect::<String>());
-    let key = merge_key(kind, code.as_ref(), &display, date.as_deref());
+    // A fill and a claim are each one event, not a fact two sources state:
+    // keyed by what names that event, so two of them on a day (two fills of
+    // a drug, two visits) never fold into one record and lose their
+    // quantities and amounts, and a fill never folds into a prescription.
+    let key = match rt {
+        "MedicationDispense" => format!(
+            "medication-dispense|{}|{}",
+            identity(r, &provenance),
+            date.as_deref().unwrap_or("")
+        ),
+        "ExplanationOfBenefit" => format!(
+            "claim|{}|{}",
+            identity(r, &provenance),
+            date.as_deref().unwrap_or("")
+        ),
+        _ => merge_key(kind, code.as_ref(), &display, date.as_deref()),
+    };
     Some(Record {
         id: crate::ids::new("r"),
         kind: kind.into(),
@@ -438,6 +505,69 @@ fn money(m: Option<&Value>) -> Option<Value> {
     )
 }
 
+/// What names one event (a fill, a claim): its first identifier
+/// (`system|value`); else its id, scoped to the source that served it,
+/// since an id is unique only on its own server; else a hash of the
+/// resource itself.
+fn identity(r: &Value, prov: &Provenance) -> String {
+    if let Some(v) = path_str(r, "identifier.0.value").filter(|v| !v.is_empty()) {
+        return format!("{}|{v}", path_str(r, "identifier.0.system").unwrap_or(""));
+    }
+    if let Some(id) = path_str(r, "id").filter(|v| !v.is_empty()) {
+        let s = &prov.source;
+        return format!(
+            "id|{}|{}|{}|{id}",
+            s.fhir_base.as_deref().unwrap_or(""),
+            s.cli.as_deref().unwrap_or(""),
+            s.organization_id.as_deref().unwrap_or("")
+        );
+    }
+    format!(
+        "sha256|{}",
+        crate::hash::sha256_hex(r.to_string().as_bytes())
+    )
+}
+
+/// A `Quantity` as `{value, unit}`, the unit falling back to its code.
+fn quantity(q: Option<&Value>) -> Option<Value> {
+    let q = q?;
+    Some(json!({
+        "value": q.get("value")?,
+        "unit": q.get("unit").or_else(|| q.get("code")),
+    }))
+}
+
+/// The NDC among a concept's codings, when the preferred code is another.
+fn ndc(c: Option<&Value>) -> Option<Value> {
+    c?.get("coding")?
+        .as_array()?
+        .iter()
+        .find(|k| k.get("system").and_then(Value::as_str) == Some(NDC))
+        .and_then(|k| k.get("code").cloned())
+}
+
+/// An EOB's `supportingInfo` entry whose category has `code`.
+fn supporting<'a>(r: &'a Value, code: &str) -> Option<&'a Value> {
+    r.get("supportingInfo")?.as_array()?.iter().find(|s| {
+        s.get("category")
+            .and_then(|c| c.get("coding"))
+            .and_then(Value::as_array)
+            .is_some_and(|cs| {
+                cs.iter()
+                    .any(|k| k.get("code").and_then(Value::as_str) == Some(code))
+            })
+    })
+}
+
+fn supporting_value(r: &Value, code: &str) -> Option<Value> {
+    let s = supporting(r, code)?;
+    s.get("valueQuantity")
+        .and_then(|q| q.get("value"))
+        .or_else(|| s.get("valueInteger"))
+        .or_else(|| s.get("valueString"))
+        .cloned()
+}
+
 /// Each claim line: its service code, dates and adjudication amounts.
 fn eob_items(r: &Value) -> Option<Value> {
     let items: Vec<Value> = r
@@ -462,6 +592,7 @@ fn eob_items(r: &Value) -> Option<Value> {
                 "sequence": it.get("sequence"),
                 "service": it.get("productOrService").and_then(|c| codeable(c, &[])),
                 "serviced": it.get("servicedDate").or_else(|| it.get("servicedPeriod")),
+                "quantity": quantity(it.get("quantity")),
                 "net": money(it.get("net")),
                 "adjudication": adjudication,
             })
@@ -553,6 +684,118 @@ mod tests {
             derived_from: None,
             filed_by: filed_by(),
         }
+    }
+
+    const DISPENSE: &str = include_str!("../tests/fixtures/fhir/medication-dispense.json");
+    const PHARMACY_EOB: &str = include_str!("../tests/fixtures/fhir/pharmacy-eob.json");
+
+    #[test]
+    fn a_dispense_is_a_medication_fill_keyed_apart_from_a_prescription() {
+        let r: Value = serde_json::from_str(DISPENSE).unwrap();
+        let rec = record(&r, prov()).unwrap();
+        assert_eq!(rec.kind, "medication");
+        let code = rec.code.as_ref().unwrap();
+        assert_eq!(code.system.as_deref(), Some(RXNORM));
+        assert_eq!(code.code.as_deref(), Some("314076"));
+        // Handed over, not prepared, is when the fill happened.
+        assert_eq!(rec.date.as_deref(), Some("2026-03-10"));
+        assert_eq!(rec.status.as_deref(), Some("completed"));
+        let f = &rec.fields;
+        assert_eq!(f["source"], "dispense");
+        assert_eq!(f["quantity"], json!({"value": 30, "unit": "TAB"}));
+        assert_eq!(f["days_supply"], 30);
+        assert_eq!(f["pharmacy"], "Example Mail Pharmacy");
+        assert_eq!(f["ndc"], "00000-0001-01");
+        assert_eq!(f["dosage"], "Take 1 tablet by mouth once daily");
+        assert_eq!(f["type"], "Refill");
+        assert_eq!(
+            crate::views::record_detail(&rec).as_deref(),
+            Some("dispensed 30 TAB, 30 days")
+        );
+
+        // Another fill of the drug that day (a partial fill and its
+        // completion) is another record.
+        let mut second = r.clone();
+        second["id"] = json!("md-0002");
+        assert_ne!(record(&second, prov()).unwrap().key, rec.key);
+
+        // A prescription of the same drug that day is another fact.
+        let mut req = json!({
+            "resourceType": "MedicationRequest",
+            "id": "mr-0001",
+            "status": "active",
+            "intent": "order",
+            "authoredOn": "2026-03-10",
+        });
+        req["medicationCodeableConcept"] = r["medicationCodeableConcept"].clone();
+        let prescribed = record(&req, prov()).unwrap();
+        assert_eq!(prescribed.kind, "medication");
+        assert_ne!(prescribed.key, rec.key);
+
+        // Coded by NDC alone, the NDC is the code.
+        let mut ndc_only = r.clone();
+        ndc_only["medicationCodeableConcept"]["coding"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|c| c["system"] == NDC);
+        let rec = record(&ndc_only, prov()).unwrap();
+        assert_eq!(rec.code.unwrap().system.as_deref(), Some(NDC));
+        // With no handover, the date is when it was prepared.
+        let mut prepared = r.clone();
+        prepared.as_object_mut().unwrap().remove("whenHandedOver");
+        assert_eq!(
+            record(&prepared, prov()).unwrap().date.as_deref(),
+            Some("2026-03-09")
+        );
+    }
+
+    #[test]
+    fn a_pharmacy_claim_keeps_its_fill_details() {
+        let r: Value = serde_json::from_str(PHARMACY_EOB).unwrap();
+        let rec = record(&r, prov()).unwrap();
+        assert_eq!(rec.kind, "claim");
+        let f = &rec.fields;
+        assert_eq!(f["type"], "Pharmacy");
+        assert_eq!(f["days_supply"], 30);
+        assert_eq!(f["refill_number"], 2);
+        assert_eq!(f["refills_authorized"], 5);
+        assert_eq!(f["brand_generic"], "Generic");
+        let item = &f["items"][0];
+        assert_eq!(item["service"]["code"], "00000-0001-01");
+        assert_eq!(item["quantity"], json!({"value": 30, "unit": "TAB"}));
+        assert_eq!(f["payment"]["amount"], "32.5");
+        // Named for the fill.
+        assert_eq!(rec.display, "Synthetic tablet 10 mg, bottle of 30");
+
+        // Two claims of a type on one day are two records; the same claim
+        // from another source, by its identifier, is one.
+        let mut other = r.clone();
+        other["id"] = json!("eob-rx-0002");
+        assert_ne!(record(&other, prov()).unwrap().key, rec.key);
+        // An id names a claim only on its own source.
+        let mut elsewhere = prov();
+        elsewhere.source.cli = Some("otherrx".into());
+        assert_ne!(record(&r, elsewhere).unwrap().key, rec.key);
+        // With neither identifier nor id, the claim's content names it.
+        let mut bare = r.clone();
+        bare.as_object_mut().unwrap().remove("id");
+        let mut bare_other = bare.clone();
+        bare_other["payment"]["amount"]["value"] = json!(12);
+        let (k1, k2) = (
+            record(&bare, prov()).unwrap().key,
+            record(&bare_other, prov()).unwrap().key,
+        );
+        assert!(k1.contains("|sha256|"), "{k1}");
+        assert_ne!(k1, k2);
+        let mut numbered = r.clone();
+        numbered["identifier"] =
+            json!([{"system": "https://payer.example.org/claim", "value": "CLAIM-0001"}]);
+        let mut again = numbered.clone();
+        again["id"] = json!("eob-rx-9999");
+        assert_eq!(
+            record(&numbered, prov()).unwrap().key,
+            record(&again, prov()).unwrap().key
+        );
     }
 
     #[test]

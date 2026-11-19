@@ -1122,54 +1122,98 @@ enum Merge {
 }
 
 /// The same source resource updates its record; the same fact from another
-/// source joins it with a second provenance; anything else is new.
+/// source joins it with a second provenance; anything else is new. A record
+/// that holds other resources too, whose key this resource no longer
+/// shares, lets this one go to a record of its own: a claim folded under
+/// the type-and-date key before 0.2.6 splits on its next import.
 fn merge(index: &mut PersonIndex, rec: Record) -> Merge {
     let incoming = rec.provenance[0].clone();
-    let same_resource = |p: &Provenance| {
+    let incoming_type = incoming.source_resource.as_ref().map(|s| &s.resource_type);
+    let incoming_id = incoming
+        .source_resource
+        .as_ref()
+        .filter(|s| !s.id.is_empty())
+        .map(|s| (&s.resource_type, &s.id));
+    // An id is unique only on its own server: the source is part of it.
+    let same_source = |p: &Provenance| {
         p.source.fhir_base == incoming.source.fhir_base
+            && p.source.cli == incoming.source.cli
+            && p.source.organization_id == incoming.source.organization_id
+    };
+    let same_resource = |p: &Provenance| {
+        incoming_id.is_some()
+            && same_source(p)
             && p.source_resource
                 .as_ref()
                 .map(|s| (&s.resource_type, &s.id))
-                == incoming
-                    .source_resource
-                    .as_ref()
-                    .map(|s| (&s.resource_type, &s.id))
+                == incoming_id
+    };
+    // A resource with no id is known only by its key: on the record its key
+    // names, a provenance of its type from its source with no id is its own.
+    let same_idless = |p: &Provenance| {
+        incoming_id.is_none()
+            && same_source(p)
+            && p.source_resource.as_ref().map(|s| &s.resource_type) == incoming_type
+            && p.source_resource.as_ref().is_none_or(|s| s.id.is_empty())
     };
     if let Some(existing) = index
         .records
         .iter_mut()
         .find(|r| r.provenance.iter().any(same_resource))
+        .filter(|r| r.key == rec.key || r.provenance.iter().all(same_resource))
     {
-        let changed = existing.fields != rec.fields
-            || existing.display != rec.display
-            || existing.status != rec.status
-            || existing.code != rec.code
-            || existing.date != rec.date;
-        let version_changed = existing
-            .provenance
-            .iter()
-            .find(|p| same_resource(p))
-            .map(|p| p.source_resource != incoming.source_resource)
-            .unwrap_or(true);
-        if !changed && !version_changed {
-            return Merge::Unchanged;
-        }
-        existing.fields = rec.fields;
-        existing.display = rec.display;
-        existing.status = rec.status;
-        existing.code = rec.code;
-        existing.date = rec.date;
-        existing.key = rec.key;
-        existing.provenance.retain(|p| !same_resource(p));
-        existing.provenance.push(incoming);
-        return Merge::Updated;
+        return rewrite(existing, rec, incoming.clone(), &same_resource);
+    }
+    if let Some(shared) = index
+        .records
+        .iter_mut()
+        .find(|r| r.provenance.iter().any(same_resource))
+    {
+        shared.provenance.retain(|p| !same_resource(p));
     }
     if let Some(existing) = index.records.iter_mut().find(|r| r.key == rec.key) {
+        if existing.provenance.iter().any(same_idless) {
+            return rewrite(existing, rec, incoming.clone(), &same_idless);
+        }
         existing.provenance.push(incoming);
         return Merge::Updated;
     }
     index.records.push(rec);
     Merge::Added
+}
+
+/// Write `rec` over the record `existing`, whose provenance `mine` picks
+/// out is this resource's own: unchanged when nothing differs.
+fn rewrite(
+    existing: &mut Record,
+    rec: Record,
+    incoming: Provenance,
+    mine: &dyn Fn(&Provenance) -> bool,
+) -> Merge {
+    let changed = existing.key != rec.key
+        || existing.fields != rec.fields
+        || existing.display != rec.display
+        || existing.status != rec.status
+        || existing.code != rec.code
+        || existing.date != rec.date;
+    let version_changed = existing
+        .provenance
+        .iter()
+        .find(|p| mine(p))
+        .map(|p| p.source_resource != incoming.source_resource)
+        .unwrap_or(true);
+    if !changed && !version_changed {
+        return Merge::Unchanged;
+    }
+    existing.fields = rec.fields;
+    existing.display = rec.display;
+    existing.status = rec.status;
+    existing.code = rec.code;
+    existing.date = rec.date;
+    existing.key = rec.key;
+    existing.provenance.retain(|p| !mine(p));
+    existing.provenance.push(incoming);
+    Merge::Updated
 }
 
 fn owner(resource_type: &str, v: &Value) -> Option<Owner> {
@@ -1625,6 +1669,159 @@ fn record_source(h: &mut Household, pid: &str, cli: &str, header: &Header, porta
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn eob_from(id: &str, paid: f64) -> (Value, Provenance) {
+        let mut r: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/fhir/pharmacy-eob.json")).unwrap();
+        r["id"] = serde_json::json!(id);
+        r["payment"]["amount"]["value"] = serde_json::json!(paid);
+        let prov = Provenance {
+            source: crate::model::ProvenanceSource {
+                kind: "fhir".into(),
+                cli: Some("fakerx".into()),
+                cli_version: None,
+                organization_id: Some("example-rx".into()),
+                fhir_base: None,
+            },
+            method: "fhir-api".into(),
+            source_resource: Some(SourceResource {
+                resource_type: "ExplanationOfBenefit".into(),
+                id: id.into(),
+                version_id: None,
+                last_updated: None,
+            }),
+            fetched_at: None,
+            filed_at: "2026-11-19T00:00:00Z".into(),
+            raw_path: None,
+            classified_by: None,
+            derived_from: None,
+            filed_by: crate::model::filed_by(),
+        };
+        (r, prov)
+    }
+
+    #[test]
+    fn a_resource_with_no_id_is_rewritten_in_place_by_its_key() {
+        let mut obs: Value = crate::testdata::STREAM
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .find(|v| v["resourceType"] == "Observation")
+            .unwrap();
+        obs.as_object_mut().unwrap().remove("id");
+        let (_, mut prov) = eob_from("", 0.0);
+        prov.source_resource = Some(SourceResource {
+            resource_type: "Observation".into(),
+            id: String::new(),
+            version_id: None,
+            last_updated: None,
+        });
+        let mut index = PersonIndex::new("p_test");
+        assert!(matches!(
+            merge(&mut index, normalize::record(&obs, prov.clone()).unwrap()),
+            Merge::Added
+        ));
+        // Served again: one provenance, unchanged.
+        assert!(matches!(
+            merge(&mut index, normalize::record(&obs, prov.clone()).unwrap()),
+            Merge::Unchanged
+        ));
+        assert_eq!(index.records[0].provenance.len(), 1);
+        // Corrected at the source, under the same code and date: rewritten.
+        obs["valueQuantity"]["value"] = serde_json::json!(13.4);
+        assert!(matches!(
+            merge(&mut index, normalize::record(&obs, prov).unwrap()),
+            Merge::Updated
+        ));
+        assert_eq!(index.records.len(), 1);
+        assert_eq!(index.records[0].provenance.len(), 1);
+        assert_eq!(
+            index.records[0].fields["value"]["value"],
+            serde_json::json!(13.4)
+        );
+    }
+
+    #[test]
+    fn a_claim_folded_under_the_old_key_splits_on_its_next_import() {
+        let (a, pa) = eob_from("eob-a", 32.5);
+        let (b, pb) = eob_from("eob-b", 7.0);
+        // As 0.2.5 left it: two same-day claims in one record, keyed by type
+        // and date, holding the first one's amounts.
+        let mut folded = normalize::record(&a, pa.clone()).unwrap();
+        folded.key =
+            "claim|http://terminology.hl7.org/CodeSystem/claim-type|pharmacy|2026-03-10".into();
+        folded.provenance.push(pb.clone());
+        let mut index = PersonIndex::new("p_test");
+        index.records.push(folded);
+
+        assert!(matches!(
+            merge(&mut index, normalize::record(&a, pa.clone()).unwrap()),
+            Merge::Added
+        ));
+        assert!(matches!(
+            merge(&mut index, normalize::record(&b, pb.clone()).unwrap()),
+            Merge::Updated
+        ));
+        assert_eq!(index.records.len(), 2);
+        for (id, paid) in [("eob-a", "32.5"), ("eob-b", "7.0")] {
+            let rec = index
+                .records
+                .iter()
+                .find(|r| {
+                    r.provenance
+                        .iter()
+                        .any(|p| p.source_resource.as_ref().unwrap().id == id)
+                })
+                .unwrap();
+            assert_eq!(rec.provenance.len(), 1, "{id}");
+            assert_eq!(rec.fields["payment"]["amount"], paid, "{id}");
+        }
+        // Imported again, both are unchanged.
+        assert!(matches!(
+            merge(&mut index, normalize::record(&a, pa).unwrap()),
+            Merge::Unchanged
+        ));
+        assert!(matches!(
+            merge(&mut index, normalize::record(&b, pb).unwrap()),
+            Merge::Unchanged
+        ));
+
+        // Two claims with no id from one source are two records, each by its
+        // content, and one served again is unchanged.
+        let (mut d, mut pd) = eob_from("", 3.0);
+        let (mut e, mut pe) = eob_from("", 4.0);
+        for (r, p) in [(&mut d, &mut pd), (&mut e, &mut pe)] {
+            r.as_object_mut().unwrap().remove("id");
+            p.source_resource.as_mut().unwrap().id = String::new();
+        }
+        assert!(matches!(
+            merge(&mut index, normalize::record(&d, pd.clone()).unwrap()),
+            Merge::Added
+        ));
+        assert!(matches!(
+            merge(&mut index, normalize::record(&e, pe).unwrap()),
+            Merge::Added
+        ));
+        assert!(matches!(
+            merge(&mut index, normalize::record(&d, pd).unwrap()),
+            Merge::Unchanged
+        ));
+        assert_eq!(index.records.len(), 4);
+        assert_eq!(index.records[2].provenance.len(), 1);
+        let paid: Vec<&Value> = index.records[2..]
+            .iter()
+            .map(|r| &r.fields["payment"]["amount"])
+            .collect();
+        assert_eq!(paid, ["3.0", "4.0"]);
+
+        // The same id from another source is another resource.
+        let (c, mut pc) = eob_from("eob-a", 1.0);
+        pc.source.cli = Some("otherrx".into());
+        assert!(matches!(
+            merge(&mut index, normalize::record(&c, pc).unwrap()),
+            Merge::Added
+        ));
+        assert_eq!(index.records.len(), 5);
+    }
 
     #[test]
     fn a_providers_environment_prefix_is_its_name_in_upper_case() {

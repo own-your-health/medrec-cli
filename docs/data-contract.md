@@ -133,9 +133,43 @@ Document types: `visit_summary`, `lab_report`, `imaging_report`,
 **Record**, one normalized clinical fact: `id`, `kind` (`encounter`,
 `result`, `report`, `condition`, `medication`, `allergy`, `immunization`,
 `procedure`, `coverage`, `claim`), `key` (kind, code and date, so the same
-fact from two sources is one record), `date`, `code` (`{system, code,
+fact from two sources is one record; a fill and a claim are keyed by their
+identity instead, below), `date`, `code` (`{system, code,
 display}`), `display`, `status`, `fields` (kind-specific, with FHIR element
 names), `documents` (linked document ids) and `provenance` (one per source).
+
+A `medication` comes from a MedicationRequest (`source: request`), a
+MedicationStatement (`statement`) or a MedicationDispense (`dispense`, a
+fill). A fill is dated when it was handed over, else when it was prepared;
+it is coded by RxNorm, else NDC. Its fields are `quantity` (`{value,
+unit}`), `days_supply`, `pharmacy`, `type` (first fill or refill), `ndc`
+and `dosage`. A pharmacy `claim`
+(an ExplanationOfBenefit of type pharmacy) also has `days_supply`,
+`refill_number`, `refills_authorized` and `brand_generic`, from its
+`supportingInfo`. Each of its `items` has a `quantity`. It is named for
+what was filled (its first item's product).
+
+A fill and a claim are each one event, so their `key` names the event:
+`medication-dispense|<identity>|<date>` and `claim|<identity>|<date>`. The
+identity is the resource's first identifier (`system|value`). Without one,
+it is `id|<fhir_base>|<cli>|<organization>|<resource id>`, since an id is
+unique only on the source that issued it. Without an id either, it is
+`sha256|<hash of the resource>`, so such a resource whose content changes
+is a new record, and its earlier version stays beside it. So two fills of a drug, or two claims of
+a type, on one day stay two records, and a fill never folds into a
+prescription. The same event from two sources is one record only when both
+send the same identifier. Without one, it is two records, one per source.
+A record a resource shares with others, whose key that resource no longer
+matches, lets it go to a record of its own on its next import. That splits
+the claims 0.2.5 and earlier folded under a type-and-date key. The record
+left behind keeps the fields last written to it, which may be the departed
+resource's, until its remaining source is imported again.
+
+A record is the same source resource when its `fhir_base`, `cli`,
+`organization_id`, resource type and id all match. A resource with no id
+is never the same resource as another; it joins a record only by key, and
+on that record, a provenance of its type from its source with no id is its
+own, so serving it again is unchanged and a correction is written in place.
 
 **ImagingStudy**: `id`, `study_uid`, `path`, `date`, `modalities`,
 `body_part`, `description`, `facility`, `accession`, `referring`, `series`
