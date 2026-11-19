@@ -26,6 +26,7 @@ pub mod stream;
 pub mod testdata;
 pub mod view;
 pub mod views;
+pub mod when;
 
 /// Create `path` owner-only (0600) and write `bytes`; never replaces a file.
 pub fn write_private(path: &std::path::Path, bytes: &[u8]) -> Result<(), pk_cli_core::CliError> {
