@@ -206,6 +206,7 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
             );
             put(&mut fields, "type", r.get("type").map(concept_text));
             put(&mut fields, "ndc", ndc(r.get("medicationCodeableConcept")));
+            put_str(&mut fields, "prescriber", contained_prescriber(r));
             put(&mut fields, "source", Some(json!("dispense")));
         }
         "AllergyIntolerance" => {
@@ -651,6 +652,17 @@ fn first_or_one<'a>(r: &'a Value, key: &str) -> Option<&'a Value> {
     }
 }
 
+/// A fill's prescriber: the `requester` of the contained MedicationRequest
+/// its `authorizingPrescription` points at (medical-common DESIGN).
+fn contained_prescriber(r: &Value) -> Option<&str> {
+    let id = path_str(r, "authorizingPrescription.0.reference")?.strip_prefix('#')?;
+    let request = r.get("contained")?.as_array()?.iter().find(|c| {
+        c.get("resourceType").and_then(Value::as_str) == Some("MedicationRequest")
+            && c.get("id").and_then(Value::as_str) == Some(id)
+    })?;
+    path_str(request, "requester.display").or_else(|| path_str(request, "requester.agent.display"))
+}
+
 /// A status served as a CodeableConcept (R4) or a plain code (STU3).
 fn status_code(c: &Value) -> Option<String> {
     match c {
@@ -722,6 +734,22 @@ mod tests {
     const DISPENSE: &str = include_str!("../tests/fixtures/fhir/medication-dispense.json");
     const PHARMACY_EOB: &str = include_str!("../tests/fixtures/fhir/pharmacy-eob.json");
     const STU3: &str = include_str!("../tests/fixtures/fhir/stu3.json");
+    const DISPENSE_CONTAINED: &str =
+        include_str!("../tests/fixtures/fhir/medication-dispense-contained.json");
+
+    #[test]
+    fn a_fill_names_the_prescriber_of_its_contained_request() {
+        let with: Value = serde_json::from_str(DISPENSE_CONTAINED).unwrap();
+        let rec = record(&with, prov()).unwrap();
+        assert_eq!(rec.fields["prescriber"], json!("Example Prescriber"));
+        // A prescription referenced elsewhere names no prescriber here.
+        let without: Value = serde_json::from_str(DISPENSE).unwrap();
+        assert!(record(&without, prov())
+            .unwrap()
+            .fields
+            .get("prescriber")
+            .is_none());
+    }
 
     #[test]
     fn stu3_shapes_read_as_their_r4_counterparts() {

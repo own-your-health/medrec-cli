@@ -2021,6 +2021,19 @@ mod tests {
     }
 
     #[test]
+    fn an_empty_null_or_absent_id_is_no_id() {
+        for line in [
+            r#"{"resourceType":"Patient","id":"","name":[{"family":"Testperson"}]}"#,
+            r#"{"resourceType":"CareTeam","id":null,"status":"active"}"#,
+            r#"{"resourceType":"CareTeam","status":"active"}"#,
+        ] {
+            let r = RawResource::parse(line).unwrap();
+            assert!(r.id.is_empty(), "{line}");
+            assert!(raw_sub(&r).contains("/noid-"), "{line}");
+        }
+    }
+
+    #[test]
     fn two_resources_with_no_id_under_one_key_share_a_record_stably() {
         let mut a: Value = crate::testdata::STREAM
             .lines()

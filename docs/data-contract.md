@@ -147,8 +147,10 @@ A `medication` comes from a MedicationRequest (`source: request`), a
 MedicationStatement (`statement`) or a MedicationDispense (`dispense`, a
 fill). A fill is dated when it was handed over, else when it was prepared;
 it is coded by RxNorm, else NDC. Its fields are `quantity` (`{value,
-unit}`), `days_supply`, `pharmacy`, `type` (first fill or refill), `ndc`
-and `dosage`. A pharmacy `claim`
+unit}`), `days_supply`, `pharmacy`, `type` (first fill or refill), `ndc`,
+`dosage`, and `prescriber`, the `requester` of the contained
+MedicationRequest its `authorizingPrescription` points at (0.2.8 and
+later). A pharmacy `claim`
 (an ExplanationOfBenefit of type pharmacy) also has `days_supply`,
 `refill_number`, `refills_authorized` and `brand_generic`, from its
 `supportingInfo`. Each of its `items` has a `quantity`. It is named for

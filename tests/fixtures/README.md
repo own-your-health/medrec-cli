@@ -24,7 +24,9 @@ real record, document, study or provider response.
   coded by NDC and RxNorm, and `fhir/pharmacy-eob.json` the pharmacy claim
   for it (an ExplanationOfBenefit with CARIN's days supply and refill
   `supportingInfo`). Their NDC, `00000-0001-01`, is a dummy under the
-  unassigned labeler `00000`.
+  unassigned labeler `00000`. `fhir/medication-dispense-contained.json` is
+  the same fill with its prescription contained, naming an `Example
+  Prescriber`.
 - `fhir/stu3.json` holds invented FHIR STU3 resources in the shapes a
   behavioral-health EHR's patient API publishes: statuses as plain codes,
   `assertedDate`, `Immunization.notGiven` and `date`, `requester.agent`, one
