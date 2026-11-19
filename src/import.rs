@@ -55,7 +55,7 @@ use crate::version::{self, Filing};
 
 /// Provider CLIs medrec looks for without being told.
 pub const KNOWN_PROVIDERS: &[&str] = &[
-    "mychart", "kp", "athena", "uhc", "oneblood", "labcorp", "icanotes",
+    "mychart", "kp", "athena", "uhc", "oneblood", "labcorp", "icanotes", "caremark",
 ];
 const INFO_TIMEOUT: Duration = Duration::from_secs(10);
 
