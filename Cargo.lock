@@ -1263,7 +1263,7 @@ dependencies = [
 
 [[package]]
 name = "medrec-cli"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "assert_cmd",
  "base64 0.22.1",
@@ -1564,8 +1564,8 @@ dependencies = [
 
 [[package]]
 name = "pk-med-dicom"
-version = "0.6.2"
-source = "git+https://github.com/piekstra/medical-common?tag=v0.6.2#99332503d2dce9f021141bfc86561124a6a5620e"
+version = "0.6.4"
+source = "git+https://github.com/piekstra/medical-common?tag=v0.6.4#87e599f7ad62cfa69b7a4a09489e1e9ce8938f69"
 dependencies = [
  "flate2",
  "pk-cli-core",
@@ -1573,8 +1573,8 @@ dependencies = [
 
 [[package]]
 name = "pk-med-fhir"
-version = "0.6.2"
-source = "git+https://github.com/piekstra/medical-common?tag=v0.6.2#99332503d2dce9f021141bfc86561124a6a5620e"
+version = "0.6.4"
+source = "git+https://github.com/piekstra/medical-common?tag=v0.6.4#87e599f7ad62cfa69b7a4a09489e1e9ce8938f69"
 dependencies = [
  "base64 0.22.1",
  "pk-cli-core",
@@ -1585,8 +1585,8 @@ dependencies = [
 
 [[package]]
 name = "pk-med-records"
-version = "0.6.2"
-source = "git+https://github.com/piekstra/medical-common?tag=v0.6.2#99332503d2dce9f021141bfc86561124a6a5620e"
+version = "0.6.4"
+source = "git+https://github.com/piekstra/medical-common?tag=v0.6.4#87e599f7ad62cfa69b7a4a09489e1e9ce8938f69"
 dependencies = [
  "pk-cli-core",
  "pk-med-fhir",

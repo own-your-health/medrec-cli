@@ -21,9 +21,9 @@ a row below, and a change that removes one deletes its row.
   empty list, not an error.
 - **Providers are found by profile, not by name.** Any CLI whose `info --json`
   lists `health-records/v1` and that writes `records-stream/v1` can be
-  imported from (`medrec config set providers <cli>,<cli>`). The four names
-  medrec probes by default (`mychart`, `kp`, `athena`, `uhc`) are a
-  convenience, not a list of what is supported.
+  imported from (`medrec config set providers <cli>,<cli>`). The names
+  medrec probes by default (`mychart`, `kp`, `athena`, `uhc`, `oneblood`,
+  `labcorp`, `icanotes`) are a convenience, not a list of what is supported.
 - **Every decision has a hand path.** What detection cannot decide goes to
   `_review/`, and `medrec review file` takes the person, type, date and
   organization by hand. `intake --person --type --date --org` overrides

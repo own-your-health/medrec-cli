@@ -522,10 +522,7 @@ fn identity(r: &Value, prov: &Provenance) -> String {
             s.organization_id.as_deref().unwrap_or("")
         );
     }
-    format!(
-        "sha256|{}",
-        crate::hash::sha256_hex(r.to_string().as_bytes())
-    )
+    format!("sha256|{}", crate::version::value_digest(r))
 }
 
 /// A `Quantity` as `{value, unit}`, the unit falling back to its code.

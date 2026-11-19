@@ -1148,6 +1148,12 @@ fn import_cmd(cli: &Cli, a: &ImportArgs, store: &ConfigStore) -> Result<(), CliE
                 r.documents_unchanged
             );
         }
+        if r.records_older > 0 {
+            println!(
+                "{} records came in older versions than the ones filed (meta.lastUpdated); the filed versions were kept",
+                r.records_older
+            );
+        }
         // Withheld skips are listed below by reason rather than counted.
         let other = if r.withheld_skips > 0 { "other " } else { "" };
         match r.skipped - r.withheld_skips {

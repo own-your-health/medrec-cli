@@ -420,6 +420,10 @@ pub struct ImportRun {
     pub records_added: usize,
     pub records_updated: usize,
     pub records_unchanged: usize,
+    /// Versions older than the one filed, which stayed (0.2.7 and later;
+    /// 0 in a run filed before).
+    #[serde(default)]
+    pub records_older: usize,
     pub resources_written: usize,
     pub resources_unchanged: usize,
     pub documents_added: usize,
