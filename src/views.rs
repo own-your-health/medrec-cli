@@ -213,7 +213,8 @@ fn first_line(s: &str, max: usize) -> String {
     }
 }
 
-fn record_detail(r: &Record) -> Option<String> {
+/// The short line a record shows beside its name in a list.
+pub(crate) fn record_detail(r: &Record) -> Option<String> {
     let f = &r.fields;
     let text = |k: &str| f.get(k).and_then(Value::as_str).map(str::to_string);
     match r.kind.as_str() {
@@ -224,6 +225,22 @@ fn record_detail(r: &Record) -> Option<String> {
                 (Some(v), Some(i)) => Some(format!("{v} ({i})")),
                 (v, i) => v.or(i),
             }
+        }
+        "medication" if text("source").as_deref() == Some("dispense") => {
+            let filled: Vec<String> = [
+                f.get("quantity").map(value_text),
+                f.get("days_supply")
+                    .map(value_text)
+                    .map(|d| format!("{d} days")),
+            ]
+            .into_iter()
+            .flatten()
+            .filter(|s| !s.is_empty())
+            .collect();
+            (!filled.is_empty())
+                .then(|| format!("dispensed {}", filled.join(", ")))
+                .or_else(|| text("dosage"))
+                .or_else(|| r.status.clone())
         }
         "medication" => text("dosage").or_else(|| r.status.clone()),
         "claim" => {

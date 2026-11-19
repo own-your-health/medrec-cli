@@ -20,6 +20,11 @@ real record, document, study or provider response.
   portal renders on each export: `{{RENDERING}}` (its timestamp and document
   id) changes the bytes and not the text, and `{{FINDING}}` changes the
   text. `testdata::stream_with_summary` serves it as `doc-0001`'s Binary.
+- `fhir/medication-dispense.json` is a pharmacy fill (MedicationDispense),
+  coded by NDC and RxNorm, and `fhir/pharmacy-eob.json` the pharmacy claim
+  for it (an ExplanationOfBenefit with CARIN's days supply and refill
+  `supportingInfo`). Their NDC, `00000-0001-01`, is a dummy under the
+  unassigned labeler `00000`.
 
 The scans, DICOM studies and the fake provider script are generated at test
 time by `medrec::testdata` (and by `cargo run --example synth -- <DIR>` for
