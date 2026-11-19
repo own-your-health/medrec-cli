@@ -400,12 +400,13 @@ fn an_import_files_records_and_documents_and_is_idempotent() {
         (Some(9), Some(0), Some(0))
     );
 
-    // A result corrected at the source: updated, the old version kept.
+    // A result corrected at the source, as a new version last updated
+    // later: updated, the old version kept.
     let changed = medrec::testdata::STREAM
         .replace("\"value\":12.5", "\"value\":12.7")
         .replace(
-            "\"id\":\"obs-0001\",\"meta\":{\"versionId\":\"1\"",
-            "\"id\":\"obs-0001\",\"meta\":{\"versionId\":\"2\"",
+            "\"id\":\"obs-0001\",\"meta\":{\"versionId\":\"1\",\"lastUpdated\":\"2026-03-05T11:00:00Z\"",
+            "\"id\":\"obs-0001\",\"meta\":{\"versionId\":\"2\",\"lastUpdated\":\"2026-03-06T11:00:00Z\"",
         );
     let e2 = provider_env(&base, &changed);
     let upd = e2.ok(&[
@@ -1580,15 +1581,23 @@ fn an_import_from_downloaded_files_runs_with_files_and_no_profile() {
     let _ = std::fs::remove_dir_all(&e.root);
 }
 
-/// The synthetic stream with its Observation at `value`, as of `updated`.
-fn with_observation(value: f64, updated: &str) -> String {
+/// The synthetic stream read at `pulled`, its Observation at `value` and
+/// last updated at `updated`, or undated.
+fn with_observation(value: f64, updated: Option<&str>, pulled: &str) -> String {
     medrec::testdata::STREAM
         .lines()
         .map(|l| {
             let mut v: Value = serde_json::from_str(l).unwrap();
+            if v["schema"] == "records-stream/v1" {
+                v["pulled_at"] = serde_json::json!(pulled);
+            }
             if v["resourceType"] == "Observation" {
                 v["valueQuantity"]["value"] = serde_json::json!(value);
-                v["meta"]["lastUpdated"] = serde_json::json!(updated);
+                let meta = v["meta"].as_object_mut().unwrap();
+                match updated {
+                    Some(u) => meta.insert("lastUpdated".into(), serde_json::json!(u)),
+                    None => meta.remove("lastUpdated"),
+                };
             }
             format!("{}\n", serde_json::to_string(&v).unwrap())
         })
@@ -1599,11 +1608,15 @@ fn with_observation(value: f64, updated: &str) -> String {
 fn an_older_version_does_not_replace_the_one_filed() {
     let base = Env::new("import-older");
     setup(&base);
-    let e = provider_env(&base, &with_observation(13.0, "2026-03-06T11:00:00Z"));
-    let serve = |value: f64, updated: &str| {
+    let pulled = "2026-03-06T12:00:00Z";
+    let e = provider_env(
+        &base,
+        &with_observation(13.0, Some("2026-03-06T11:00:00Z"), pulled),
+    );
+    let serve = |value: f64, updated: Option<&str>, pulled: &str| {
         std::fs::write(
             e.root.join("provider").join("synthetic.ndjson"),
-            with_observation(value, updated),
+            with_observation(value, updated, pulled),
         )
         .unwrap()
     };
@@ -1624,11 +1637,11 @@ fn an_older_version_does_not_replace_the_one_filed() {
         let r = e.ok(&["results", "--code", "718-7"]);
         r["items"][0]["detail"].as_str().unwrap_or("").to_string()
     };
+    let dir = e
+        .records()
+        .join("Robin Testperson/Records/fakeprov-example-health/Observation");
     let raw = || -> Vec<String> {
-        let dir = e
-            .records()
-            .join("Robin Testperson/Records/fakeprov-example-health/Observation");
-        let mut names: Vec<String> = std::fs::read_dir(dir)
+        let mut names: Vec<String> = std::fs::read_dir(&dir)
             .unwrap()
             .flatten()
             .map(|d| d.file_name().to_string_lossy().into_owned())
@@ -1636,53 +1649,52 @@ fn an_older_version_does_not_replace_the_one_filed() {
         names.sort();
         names
     };
+    let current = || std::fs::read_to_string(dir.join("obs-0001.json")).unwrap();
     import();
     assert!(value().starts_with("13"), "{}", value());
     assert_eq!(raw(), ["obs-0001.json"]);
 
-    // An export from before it, in another zone, changes nothing filed; its
-    // version goes beside the current one.
-    serve(11.0, "2026-03-01T09:00:00-05:00");
+    // A version last updated before it, in another zone, changes nothing
+    // filed; it goes beside the current one.
+    serve(11.0, Some("2026-03-01T09:00:00-05:00"), pulled);
     let r = import();
     assert_eq!(r["records_older"], 1, "{r}");
     assert_eq!(r["records_updated"], 0, "{r}");
     assert!(value().starts_with("13"), "{}", value());
-    let files = raw();
-    assert_eq!(files.len(), 2, "{files:?}");
-    assert_eq!(files[0], "obs-0001.json");
-    let current = std::fs::read_to_string(
-        e.records()
-            .join("Robin Testperson/Records/fakeprov-example-health/Observation/obs-0001.json"),
-    )
-    .unwrap();
-    assert!(current.contains("2026-03-06T11:00:00Z"), "{current}");
-    // Served again, it is already kept.
-    let r = import();
-    assert_eq!(r["records_older"], 1, "{r}");
     assert_eq!(raw().len(), 2);
+    assert!(current().contains("2026-03-06T11:00:00Z"));
+    // Served again, it is already kept.
+    assert_eq!(import()["records_older"], 1);
+    assert_eq!(raw().len(), 2);
+    // The same instant is not later: the version held stays.
+    serve(12.0, Some("2026-03-06T06:00:00-05:00"), pulled);
+    assert_eq!(import()["records_older"], 1);
+    assert!(value().starts_with("13"), "{}", value());
 
     // A later version replaces it.
-    serve(14.0, "2026-03-07T11:00:00Z");
+    serve(14.0, Some("2026-03-07T11:00:00Z"), pulled);
     let r = import();
     assert_eq!(r["records_updated"], 1, "{r}");
     assert_eq!(r["records_older"], 0, "{r}");
     assert!(value().starts_with("14"), "{}", value());
-    assert_eq!(raw().len(), 3);
-    // Without a lastUpdated on the version served, the last import wins.
-    let undated: String = with_observation(15.0, "x")
-        .lines()
-        .map(|l| {
-            let mut v: Value = serde_json::from_str(l).unwrap();
-            if v["resourceType"] == "Observation" {
-                v["meta"].as_object_mut().unwrap().remove("lastUpdated");
-            }
-            format!("{}\n", serde_json::to_string(&v).unwrap())
-        })
-        .collect();
-    std::fs::write(e.root.join("provider").join("synthetic.ndjson"), undated).unwrap();
-    let r = import();
-    assert_eq!(r["records_updated"], 1, "{r}");
+
+    // A version the server sent undated is as of the read: one read before
+    // the held version loses, one after it wins.
+    serve(15.0, None, "2026-03-07T09:00:00Z");
+    assert_eq!(import()["records_older"], 1);
+    serve(15.0, None, "2026-03-08T12:00:00Z");
+    assert_eq!(import()["records_updated"], 1);
     assert!(value().starts_with("15"), "{}", value());
+    // Read again unchanged, later: a version dated between the two reads is
+    // older than the second.
+    serve(15.0, None, "2026-03-20T12:00:00Z");
+    let r = import();
+    assert_eq!(r["records_updated"], 0, "{r}");
+    assert_eq!(r["records_older"], 0, "{r}");
+    serve(16.0, Some("2026-03-10T00:00:00Z"), "2026-03-21T12:00:00Z");
+    assert_eq!(import()["records_older"], 1);
+    assert!(value().starts_with("15"), "{}", value());
+
     let v = e.ok(&["verify"]);
     assert_eq!(v["missing"].as_array().unwrap().len(), 0, "{v}");
     assert_eq!(v["changed"].as_array().unwrap().len(), 0, "{v}");

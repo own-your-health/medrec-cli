@@ -31,8 +31,8 @@ use base64::Engine;
 use md5::Md5;
 use pk_cli_config::profile::{ProfileList, ProfileName};
 use pk_cli_core::CliError;
-use pk_med_records::LOGIN_PROFILES;
 pub use pk_med_records::RECORDS_FILES;
+use pk_med_records::{Timestamp, LOGIN_PROFILES};
 use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -53,7 +53,7 @@ use crate::proc::{which, Bounded};
 use crate::stream::{self, Header, Item, RawResource, RecordsReader, Skip};
 
 /// Provider CLIs medrec looks for without being told.
-pub const KNOWN_PROVIDERS: &[&str] = &["mychart", "kp", "athena", "uhc", "oneblood"];
+pub const KNOWN_PROVIDERS: &[&str] = &["mychart", "kp", "athena", "uhc", "oneblood", "labcorp"];
 const INFO_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, Serialize)]
@@ -498,8 +498,6 @@ pub fn run(
     let source = source_slug(&header.source.cli, &header.organization.id);
     let source_dir = folder::records_dir(&person, &source);
     let mut index = folder.index(&person)?;
-    let written = write_raw(folder, &source_dir, &resources, &filed_versions(&index))?;
-
     let mut texts = folder.text(&person)?;
     let imported_at = now_rfc3339();
     let portal = header.method.as_deref() == Some("portal");
@@ -526,6 +524,13 @@ pub fn run(
         derived_from: None,
         filed_by: filed_by(),
     };
+    let written = write_raw(
+        folder,
+        &source_dir,
+        &resources,
+        &filed_versions(&index),
+        &base_prov,
+    )?;
 
     let mut owners = Vec::new();
     let (mut added, mut updated, mut unchanged, mut older) = (0, 0, 0, 0);
@@ -923,20 +928,15 @@ struct Written {
 /// Write each resource verbatim under `source_dir`, skipping those already
 /// there byte for byte and keeping the previous version of those that
 /// changed. One upload for the lot, then every file's MD5 checked.
-/// Each raw file the index's records and documents were filed from, with the
-/// `meta.lastUpdated` of the version filed.
-fn filed_versions(index: &PersonIndex) -> HashMap<String, String> {
+/// The provenance of the version each raw file the index's records were
+/// filed from. Records only: a document's provenance names the resource
+/// that describes it, not the Binary its `raw_path` is.
+fn filed_versions(index: &PersonIndex) -> HashMap<String, Provenance> {
     index
         .records
         .iter()
         .flat_map(|r| r.provenance.iter())
-        .chain(index.documents.iter().map(|d| &d.provenance))
-        .filter_map(|p| {
-            Some((
-                p.raw_path.clone()?,
-                p.source_resource.as_ref()?.last_updated.clone()?,
-            ))
-        })
+        .filter_map(|p| Some((p.raw_path.clone()?, p.clone())))
         .collect()
 }
 
@@ -944,7 +944,8 @@ fn write_raw(
     folder: &Folder,
     source_dir: &str,
     resources: &[RawResource],
-    filed: &HashMap<String, String>,
+    filed: &HashMap<String, Provenance>,
+    base: &Provenance,
 ) -> Result<Written, CliError> {
     let existing: HashMap<String, Option<String>> = folder
         .store
@@ -969,12 +970,12 @@ fn write_raw(
         let md5 = hash::md5_hex(body.as_bytes());
         let rel = format!("{source_dir}/{sub}.json");
         paths.insert((r.resource_type.clone(), r.id.clone()), rel.clone());
-        let served = r
-            .value()
-            .ok()
-            .and_then(|v| normalize::path_str(&v, "meta.lastUpdated").map(str::to_string));
-        if matches!(existing.get(&rel), Some(old) if old.as_deref() != Some(md5.as_str()))
-            && crate::when::earlier(served.as_deref(), filed.get(&rel).map(String::as_str))
+        let mut served = base.clone();
+        served.source_resource = r.value().ok().as_ref().and_then(source_resource);
+        let older = filed.get(&rel).is_some_and(|held| {
+            held.source_resource != served.source_resource && !served.supersedes(held)
+        });
+        if matches!(existing.get(&rel), Some(old) if old.as_deref() != Some(md5.as_str())) && older
         {
             // Older than the version filed: it goes beside it under its own
             // hash, and the current one stays.
@@ -1217,19 +1218,18 @@ fn merge(index: &mut PersonIndex, rec: Record) -> Merge {
             && p.source_resource.as_ref().map(|s| &s.resource_type) == incoming_type
             && p.source_resource.as_ref().is_none_or(|s| s.id.is_empty())
     };
-    let last_updated = |p: &Provenance| {
-        p.source_resource
-            .as_ref()
-            .and_then(|s| s.last_updated.clone())
-    };
-    let filed_version = index
+    // Another version of a resource replaces the one held only when it is
+    // later by medical-common's rule (DESIGN §1.4); the same version is
+    // normalized again.
+    if let Some(held) = index
         .records
         .iter()
         .flat_map(|r| r.provenance.iter())
         .find(|p| same_resource(p))
-        .and_then(last_updated);
-    if crate::when::earlier(last_updated(&incoming).as_deref(), filed_version.as_deref()) {
-        return Merge::Older;
+    {
+        if held.source_resource != incoming.source_resource && !incoming.supersedes(held) {
+            return Merge::Older;
+        }
     }
     if let Some(existing) = index
         .records
@@ -1278,6 +1278,14 @@ fn rewrite(
         .map(|p| p.source_resource != incoming.source_resource)
         .unwrap_or(true);
     if !changed && !version_changed {
+        // An unchanged read moves the version's read time on, so a version
+        // dated between two reads of this one still counts as older.
+        if let Some(p) = existing.provenance.iter_mut().find(|p| mine(p)) {
+            let read = |p: &Provenance| p.fetched_at.as_deref().and_then(Timestamp::parse);
+            if read(&incoming) > read(p) {
+                p.fetched_at = incoming.fetched_at;
+            }
+        }
         return Merge::Unchanged;
     }
     existing.fields = rec.fields;

@@ -292,19 +292,22 @@ profile. Its standard output is NDJSON:
    `medrec documents merge <copy> --into <id>` folds a copy filed before
    that rule (0.2.3) into the document it renders, by the same rule.
 
-   A resource served in an older version than the one filed is kept and
-   changes nothing (0.2.7 and later). Older means its `meta.lastUpdated` is
-   an earlier instant than the filed version's, compared across zones and
-   precisions; a date alone is that day at `00:00:00Z` (medical-common
-   DESIGN §1.4). Its record stays as filed, and the import counts it
-   `records_older`. Its raw file goes beside the current one as
-   `<id>~<md5>.json`, and the current file stays. A document filed from an
-   older Binary names that file as its `raw_path`. When either version has
-   no `lastUpdated`, or the time cannot be read, the later import wins, as
-   before. `lastUpdated` measures when content was current, not how
-   complete it is. When one source serves a resource in two shapes (a
-   portal page and a downloaded statement), the later one is kept even if
-   it carries less. The other stays in the raw layer.
+   Another version of a resource already filed replaces it only when it is
+   later, by medical-common's rule (`Provenance::supersedes`, DESIGN §1.4;
+   0.2.7 and later). A version's time is its `meta.lastUpdated`. For a FHIR
+   API read (`method` `fhir-api`) the server left undated, it is when the
+   source was read (`pulled_at`). Otherwise it is unknown. A known time
+   replaces a known one only when it is a later instant. An unknown one
+   never replaces a known one. Anything replaces a version whose time is
+   unknown. A version that is not later is kept and changes nothing: its
+   record stays as filed, the import counts it `records_older`, and its raw
+   file goes beside the current one as `<id>~<md5>.json`. (A Binary keeps
+   the rendering rule above; the newest one is its current raw file.) The same version
+   served again (same id, `versionId` and `lastUpdated`) is normalized
+   again as before. Read again unchanged, it moves its `fetched_at` on, so
+   a version dated between the two reads is older than the second.
+   `lastUpdated` measures when content was current, not how complete it
+   is. The raw layer keeps every version either way.
 3. A trailer: `{"schema": "records-stream-end/v1", "complete", "counts":
    {<type>: n}, "skipped": [{resource_type, id, search, reason, code}],
    "finished_at", "error"}`.
