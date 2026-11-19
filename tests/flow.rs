@@ -1717,6 +1717,18 @@ fn an_older_version_does_not_replace_the_one_filed() {
     assert!(value().starts_with("15"), "{}", value());
     assert_eq!(raw().len(), files + 1);
 
+    // A refresh cut short leaves the held copy as `~refresh-`: the next
+    // import removes it, or puts it back when the current copy is missing.
+    let left = dir.join("obs-0001~refresh-0000abcd.json");
+    std::fs::copy(dir.join("obs-0001.json"), &left).unwrap();
+    import();
+    assert!(!left.exists());
+    std::fs::rename(dir.join("obs-0001.json"), &left).unwrap();
+    import();
+    assert!(!left.exists());
+    assert!(current().contains("2026-03-22T12:00:00Z"));
+    assert_eq!(raw().len(), files + 1);
+
     let v = e.ok(&["verify"]);
     assert_eq!(v["missing"].as_array().unwrap().len(), 0, "{v}");
     assert_eq!(v["changed"].as_array().unwrap().len(), 0, "{v}");

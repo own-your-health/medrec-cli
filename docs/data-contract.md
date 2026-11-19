@@ -47,7 +47,10 @@ _review/                      documents intake could not file, and review.json
 - A raw resource that changed at its source is written as the new
   `<id>.json`. The previous version stays beside it as
   `<id>~<first 8 hex of its MD5>.json`. Which version is current is the
-  import's rule (Import, below).
+  import's rule (Import, below). A copy refreshed in place is held as
+  `<id>~refresh-<hex>.json` only while its replacement uploads; one left by
+  an import cut short is removed by the next, or put back if the
+  replacement never arrived.
 
 ## Rules
 
@@ -176,11 +179,13 @@ A record is the same source resource when its `fhir_base`, `cli`,
 `organization_id`, resource type and id all match. A resource with no id
 is never the same resource as another; it joins a record only by key. On
 that record, the provenances of its type from its source with no id belong
-to the resources like it, in the order the source serves them in one
-import. The first one served writes the record's fields, as the first of
-two resources with ids that share a key does, and each later one takes the
-next of those provenances, or adds one. So serving them again is unchanged,
-and a correction to the first is written in place.
+to the resources like it: each takes the one naming its raw file
+(`noid-<digest>`), or else, for a version with other content or one filed
+before 0.2.7, the first that no resource of the same import names, or adds
+one. The first of those provenances on the record writes its fields,
+whatever order the source serves them in, as the first of two resources
+with ids that share a key does. So serving them again is unchanged, and a
+correction to the first is written in place.
 
 **ImagingStudy**: `id`, `study_uid`, `path`, `date`, `modalities`,
 `body_part`, `description`, `facility`, `accession`, `referring`, `series`
@@ -191,8 +196,11 @@ filed file's MD5 by its path in the study folder, for `verify`), `filed_at`,
 
 **ImportRun**, one `medrec import`: `id`, `source_dir`, `stream_sha256`,
 `stream_bytes`, `cli`, `cli_version`, `organization`, `patient_id`,
-`pulled_at`, `imported_at`, `counts`, `skipped`, and the added, updated,
-unchanged and written counts.
+`pulled_at`, `imported_at`, `counts`, `skipped`, and the counts the import
+report gives (below): `resources_written`, `resources_unchanged`,
+`records_added`, `records_updated`, `records_unchanged`, `records_older`
+(0.2.7 and later; 0 in a run filed before), `documents_added`,
+`documents_duplicate` and `documents_unchanged`.
 
 **Provenance** (the `provenance/v1` fields of medical-common's
 `pk-med-records`): `source` (`{kind, cli, cli_version, organization_id,
@@ -350,6 +358,26 @@ its human output gives each reason with its types, says their records may
 be incomplete, and counts only the other skips. Both fields drop control
 characters and the invisible format characters that reorder or hide text
 (bidi overrides, zero-width marks).
+
+`medrec import --json` prints `import/v1`: `import` (the ImportRun's id),
+`person`, `person_name`, `cli`, `cli_version`, `organization`,
+`patient_id`, `source_dir`, `resources` and `counts` (by type), `skipped`,
+`withheld_types`, `withheld`, `stream_bytes`, and these counts:
+
+| Count | What it counts |
+|---|---|
+| `resources_written` | raw files uploaded: new, replacing, older (beside the current one) or refreshed in place |
+| `resources_unchanged` | raw files left as they were |
+| `records_added` | new records |
+| `records_updated` | records whose content or version changed |
+| `records_unchanged` | records the same as filed, a refresh included |
+| `records_older` | versions not later than the one filed, which stayed (0.2.7 and later) |
+| `documents_added` | documents filed |
+| `documents_duplicate` | Binaries with the bytes of a document or rendering already filed |
+| `documents_unchanged` | renderings of a document already filed |
+
+A field added to `import/v1` is additive: a script reads a missing one as
+absent, never as an error.
 
 The patient's birth date in the stream must match the person's in
 `household.json`, unless `--allow-birth-date-mismatch`. A source's first import needs
