@@ -1425,6 +1425,13 @@ fn merge(
             .filter(|r| r.key == rec.key || r.provenance.iter().all(same_resource))
         {
             let at = existing.provenance.iter().position(same_resource);
+            // The first resource from this source on the record writes its
+            // fields; another from it that shares the key keeps only its own
+            // provenance, so the two do not write over each other.
+            let owner = existing.provenance.iter().position(same_source);
+            if let Some(i) = at.filter(|&i| Some(i) != owner) {
+                return refresh_provenance(existing, i, incoming, filing);
+            }
             return rewrite(existing, rec, incoming, at, filing);
         }
         if let Some(shared) = index
@@ -1482,18 +1489,7 @@ fn merge(
             if mine.first() == Some(&i) {
                 return rewrite(existing, rec, incoming, Some(i), filing);
             }
-            match filing {
-                Some(Filing::Unchanged) => Merge::Unchanged,
-                Some(Filing::Refreshed) => {
-                    existing.provenance[i] = existing.provenance[i].refreshed_by(&incoming);
-                    Merge::Unchanged
-                }
-                _ if existing.provenance[i] == incoming => Merge::Unchanged,
-                _ => {
-                    existing.provenance[i] = incoming;
-                    Merge::Updated
-                }
-            }
+            refresh_provenance(existing, i, incoming, filing)
         }
         None => {
             idless.claimed.insert((key, existing.provenance.len()));
@@ -1556,6 +1552,28 @@ fn request_id(reference: &str) -> Option<&str> {
 struct Idless {
     incoming: HashSet<String>,
     claimed: HashSet<(String, usize)>,
+}
+
+/// Put `incoming` in place of the record's provenance at `i`, leaving its
+/// fields to the resource that writes them.
+fn refresh_provenance(
+    existing: &mut Record,
+    i: usize,
+    incoming: Provenance,
+    filing: Option<Filing>,
+) -> Merge {
+    match filing {
+        Some(Filing::Unchanged) => Merge::Unchanged,
+        Some(Filing::Refreshed) => {
+            existing.provenance[i] = existing.provenance[i].refreshed_by(&incoming);
+            Merge::Unchanged
+        }
+        _ if existing.provenance[i] == incoming => Merge::Unchanged,
+        _ => {
+            existing.provenance[i] = incoming;
+            Merge::Updated
+        }
+    }
 }
 
 /// Whether two records say the same thing.
@@ -2175,6 +2193,51 @@ mod tests {
         ] {
             assert_eq!(request_id(reference), id, "{reference}");
         }
+    }
+
+    #[test]
+    fn two_resources_from_one_source_under_one_key_share_a_record_stably() {
+        let a: Value = crate::testdata::STREAM
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .find(|v| v["resourceType"] == "Observation")
+            .unwrap();
+        // A second reading of the same test on the same day.
+        let mut b = a.clone();
+        b["id"] = serde_json::json!("obs-0002");
+        b["valueQuantity"]["value"] = serde_json::json!(13.9);
+        let (_, base) = eob_from("", 0.0);
+        let filed = |v: &Value| {
+            let mut p = base.clone();
+            p.source_resource = source_resource(v);
+            normalize::record(v, p).unwrap()
+        };
+        let mut index = PersonIndex::new("p_test");
+        let mut import = |order: [&Value; 2], filing: Option<Filing>| -> Vec<Merge> {
+            let mut idless = Idless::default();
+            order
+                .iter()
+                .map(|v| merge(&mut index, filed(v), filing, &mut idless))
+                .collect()
+        };
+        let first = import([&a, &b], None);
+        assert!(
+            matches!(first[..], [Merge::Added, Merge::Updated]),
+            "{first:?}"
+        );
+        for order in [[&a, &b], [&b, &a], [&a, &b]] {
+            let again = import(order, Some(Filing::Unchanged));
+            assert!(
+                matches!(again[..], [Merge::Unchanged, Merge::Unchanged]),
+                "{again:?}"
+            );
+        }
+        assert_eq!(index.records.len(), 1);
+        assert_eq!(index.records[0].provenance.len(), 2);
+        assert_eq!(
+            index.records[0].fields["value"]["value"],
+            serde_json::json!(12.5)
+        );
     }
 
     #[test]

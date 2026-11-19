@@ -182,7 +182,13 @@ left behind keeps the fields last written to it, which may be the departed
 resource's, until its remaining source is imported again.
 
 A record is the same source resource when its `fhir_base`, `cli`,
-`organization_id`, resource type and id all match. A resource with no id
+`organization_id`, resource type and id all match. Two resources from one
+source that share a key (two readings of one test on one day, a condition
+entered twice) are one record: the first of them on the record writes its
+fields, and the other keeps only its own provenance, whatever order the
+source serves them in (0.2.8 and later; before, each import's later one
+wrote over the first). Both stay in the raw layer, and the record names
+both. A resource with no id
 is never the same resource as another; it joins a record only by key. On
 that record, the provenances of its type from its source with no id belong
 to the resources like it: each takes the one naming its raw file
