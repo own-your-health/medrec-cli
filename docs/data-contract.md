@@ -237,8 +237,8 @@ profile. Its standard output is NDJSON:
    DiagnosticReport's `LAB` category makes a `lab_report`, an imaging one
    (`RAD`, `CT`, `MR`, `US`, …) an `imaging_report`; a Media's Binary is
    `other`. The document's provenance names that resource. A Binary with
-   the bytes of a document already filed is a duplicate
-   (`documents_duplicate`). One with other bytes is that document rendered
+   the bytes of a document already filed, or of a rendering already noted
+   on one, is a duplicate (`documents_duplicate`). One with other bytes is that document rendered
    again (`documents_unchanged`; nothing is filed, and the rendering's
    `sha256`, `size` and `fetched_at` go on the kept document's
    `renderings`) when the latest document filed from the same CLI and
