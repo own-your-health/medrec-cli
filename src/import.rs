@@ -44,7 +44,8 @@ use crate::ids;
 use crate::intake::{self, classify, filetype, text};
 use crate::model::{
     filed_by, now_rfc3339, Document, Household, Identifier, ImportRun, Organization, Origin,
-    Person, PersonIndex, PersonText, Provenance, ProvenanceSource, Record, Source, SourceResource,
+    Person, PersonIndex, PersonText, Provenance, ProvenanceSource, Record, Rendering, Source,
+    SourceResource,
 };
 use crate::normalize;
 use crate::people;
@@ -1389,14 +1390,19 @@ fn file_binaries(
             Some(k) => text::extract(&ctx.tools, k, &local, &ctx.opts),
             None => text::Extracted::default(),
         };
-        let signature = intake::dupes::signature(&extracted.text);
         let mut prov = base.clone();
         prov.source_resource = Some(resource);
         prov.raw_path = raw_path;
-        if rendered_again(index, &prov, &media_type, &signature) {
+        if let Some(kept) = rendered_again(index, texts, &prov, &media_type, &extracted.text) {
+            index.documents[kept].renderings.push(Rendering {
+                sha256: sha,
+                size: b.bytes.len() as u64,
+                fetched_at: prov.fetched_at.clone(),
+            });
             filed.unchanged += 1;
             continue;
         }
+        let signature = intake::dupes::signature(&extracted.text);
         let md5 = {
             let mut h = Md5::new();
             h.update(&b.bytes);
@@ -1430,6 +1436,7 @@ fn file_binaries(
             text: Some(intake::text_info(&extracted)),
             near_duplicates: Vec::new(),
             minhash: signature,
+            renderings: Vec::new(),
             classification: None,
             provenance: prov,
         });
@@ -1463,45 +1470,50 @@ struct Filed {
     unchanged: usize,
 }
 
-/// The text similarity at which a source document served with other bytes
-/// is the same document rendered again rather than an amended one. A
-/// summary a portal generates on each export differs only in markup a text
-/// reading leaves out (its timestamp and ids) and scores 1.0.
-const SAME_TEXT: f32 = 0.95;
-
-/// Whether a document from `prov` is one already filed, rendered again:
-/// the same CLI and organization, the same source resource and raw Binary,
-/// the same media type, no version that says it changed, and the same text.
-/// Without text to compare, or with a version that differs, it is filed as
-/// a new document, so an amended one is never lost.
+/// The document a document from `prov` renders again, if it does: the
+/// latest one filed from the same CLI and organization, through the same
+/// source resource and Binary (its raw path), in the same media type, with
+/// no version that says it changed and exactly the same text, whitespace
+/// aside. A portal that generates a summary on each export changes only
+/// markup a text reading leaves out (its timestamp and ids). Any other
+/// difference, a version that differs, or no text to compare files it as a
+/// new document, so an amended one is never lost.
 fn rendered_again(
     index: &PersonIndex,
+    texts: &PersonText,
     prov: &Provenance,
     media_type: &str,
-    signature: &[u32],
-) -> bool {
-    let Some(ours) = &prov.source_resource else {
-        return false;
-    };
-    if signature.is_empty() {
-        return false;
+    text: &str,
+) -> Option<usize> {
+    let ours = prov.source_resource.as_ref()?;
+    let text = normalized(text);
+    if text.is_empty() {
+        return None;
     }
-    let differs =
-        |a: &Option<String>, b: &Option<String>| matches!((a, b), (Some(a), Some(b)) if a != b);
-    index.documents.iter().any(|d| {
-        let Some(theirs) = &d.provenance.source_resource else {
-            return false;
-        };
+    let (i, latest) = index.documents.iter().enumerate().rev().find(|(_, d)| {
         d.provenance.source.cli == prov.source.cli
             && d.provenance.source.organization_id == prov.source.organization_id
-            && theirs.resource_type == ours.resource_type
-            && theirs.id == ours.id
             && d.provenance.raw_path == prov.raw_path
             && d.media_type == media_type
-            && !differs(&theirs.version_id, &ours.version_id)
-            && !differs(&theirs.last_updated, &ours.last_updated)
-            && intake::dupes::similarity(&d.minhash, signature) >= SAME_TEXT
-    })
+            && d.provenance.source_resource.as_ref().is_some_and(|theirs| {
+                theirs.resource_type == ours.resource_type && theirs.id == ours.id
+            })
+    })?;
+    let theirs = latest.provenance.source_resource.as_ref()?;
+    let differs =
+        |a: &Option<String>, b: &Option<String>| matches!((a, b), (Some(a), Some(b)) if a != b);
+    if differs(&theirs.version_id, &ours.version_id)
+        || differs(&theirs.last_updated, &ours.last_updated)
+    {
+        return None;
+    }
+    let filed = texts.texts.get(&latest.id).map(|t| normalized(t))?;
+    (filed == text).then_some(i)
+}
+
+/// `s` with each run of whitespace as one space, trimmed.
+fn normalized(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn record_source(h: &mut Household, pid: &str, cli: &str, header: &Header, portal: bool) {

@@ -243,6 +243,7 @@ pub fn file(folder: &Folder, req: &FileRequest) -> Result<Filed, CliError> {
         text: item.text_info.clone(),
         near_duplicates: near,
         minhash: item.minhash.clone(),
+        renderings: Vec::new(),
         classification: serde_json::to_value(&class).ok(),
         provenance: Provenance {
             source: ProvenanceSource {
