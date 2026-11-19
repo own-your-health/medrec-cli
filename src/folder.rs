@@ -64,13 +64,34 @@ impl Folder {
         Folder::open_at(&cfg.folder_location()?, access, cfg.rclone_budget())
     }
 
+    /// Open to write, waiting up to `wait` for another writer to finish:
+    /// for a command that has already done long work it would lose by
+    /// giving up, as an import has once its provider's export is read.
+    pub fn open_to_write_within(cfg: &Config, wait: Duration) -> Result<Folder, CliError> {
+        Folder::open_within(
+            &cfg.folder_location()?,
+            Access::Write,
+            cfg.rclone_budget(),
+            wait,
+        )
+    }
+
     pub fn open_at(
         location: &Location,
         access: Access,
         budget: Duration,
     ) -> Result<Folder, CliError> {
+        Folder::open_within(location, access, budget, LOCK_WAIT)
+    }
+
+    fn open_within(
+        location: &Location,
+        access: Access,
+        budget: Duration,
+        wait: Duration,
+    ) -> Result<Folder, CliError> {
         let lock = match access {
-            Access::Write => Some(FolderLock::acquire(location)?),
+            Access::Write => Some(FolderLock::acquire_within(location, wait)?),
             Access::Read | Access::Fresh => None,
         };
         let reads = match access {
@@ -528,8 +549,15 @@ pub struct FolderLock {
     _file: File,
 }
 
+/// How long a writer waits for another one before it gives up.
+pub const LOCK_WAIT: Duration = Duration::from_secs(120);
+
 impl FolderLock {
     pub fn acquire(location: &Location) -> Result<FolderLock, CliError> {
+        FolderLock::acquire_within(location, LOCK_WAIT)
+    }
+
+    pub fn acquire_within(location: &Location, wait: Duration) -> Result<FolderLock, CliError> {
         let base = pk_cli_drive::cache::cache_base("medrec").ok_or_else(|| {
             CliError::Other("cannot resolve a cache directory ($HOME unset)".into())
         })?;
@@ -557,10 +585,11 @@ impl FolderLock {
             match file.try_lock() {
                 Ok(()) => return Ok(FolderLock { _file: file }),
                 Err(std::fs::TryLockError::WouldBlock) => {
-                    if start.elapsed() > Duration::from_secs(120) {
+                    if start.elapsed() > wait {
                         return Err(CliError::Other(format!(
-                            "another medrec has been writing this records folder for 2 minutes (lock {}); \
+                            "another medrec has been writing this records folder for {} (lock {}); \
                              try again when it finishes",
+                            how_long(wait),
                             path.display()
                         )));
                     }
@@ -578,6 +607,14 @@ impl FolderLock {
     }
 }
 
+fn how_long(d: Duration) -> String {
+    match d.as_secs() {
+        s if s >= 120 && s % 60 == 0 => format!("{} minutes", s / 60),
+        1 => "1 second".into(),
+        s => format!("{s} seconds"),
+    }
+}
+
 fn changed_elsewhere(rel: &str) -> CliError {
     CliError::Other(format!(
         "{rel} changed while this command ran (another machine wrote it), so medrec left it as it \
@@ -588,6 +625,33 @@ fn changed_elsewhere(rel: &str) -> CliError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_writer_waits_for_the_lock_as_long_as_it_is_told() {
+        let root = crate::testutil::temp_dir("folder-lock");
+        let loc = crate::store::Location::Dir(root.join("records"));
+        let held = FolderLock::acquire(&loc).unwrap();
+        let start = Instant::now();
+        let Err(CliError::Other(why)) =
+            FolderLock::acquire_within(&loc, Duration::from_millis(400))
+        else {
+            panic!("a held lock was taken");
+        };
+        assert!(start.elapsed() >= Duration::from_millis(400));
+        assert!(
+            why.contains("another medrec") && why.contains("0 seconds"),
+            "{why}"
+        );
+        // Released while it waits, the lock is taken.
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            drop(held);
+        });
+        FolderLock::acquire_within(&loc, Duration::from_secs(10)).unwrap();
+        release.join().unwrap();
+        assert_eq!(how_long(LOCK_WAIT), "2 minutes");
+        assert_eq!(how_long(Duration::from_secs(1800)), "30 minutes");
+    }
 
     #[test]
     fn a_new_file_adopts_its_own_earlier_upload_and_never_replaces_another() {

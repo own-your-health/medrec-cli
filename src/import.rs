@@ -38,7 +38,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use crate::config::Config;
-use crate::folder::{self, Access, Folder};
+use crate::folder::{self, Folder};
 use crate::hash;
 use crate::ids;
 use crate::intake::{self, classify, filetype, text};
@@ -447,7 +447,14 @@ pub fn run(
     // The folder lock is taken only now, so intakes and other writers carry
     // on while the provider exports, and the household is read again under
     // it: another import or a `people` change may have written it since.
-    let writing = Folder::open(cfg, Access::Write)?;
+    // Giving up would throw the export away, so it waits as long as an
+    // export may run, and it refuses a folder replaced in the meantime.
+    let writing = Folder::open_to_write_within(cfg, cfg.import_timeout())?;
+    if writing.folder_id != folder.folder_id {
+        return Err(CliError::Other(
+            "household.json was replaced while this command ran".into(),
+        ));
+    }
     let folder = &writing;
     let mut household = folder.household()?;
     let (person, known_patients) = match who(&household, req)? {

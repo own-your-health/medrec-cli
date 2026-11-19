@@ -84,8 +84,10 @@ are built.
 - A command that rewrites `household.json`, an `index.json` or
   `review.json` reads it fresh (`Reads::Fresh`) and holds the `FolderLock`.
   An import opens the folder `Access::Fresh` (fresh reads, no lock) for the
-  provider's export, then opens it `Access::Write` and reads the household
-  again before it resolves the person and writes anything.
+  provider's export, then opens it to write (`Folder::open_to_write_within`,
+  waiting up to `import_timeout_secs` for the lock), checks the `folder_id`
+  is the one it started with, and reads the household again before it
+  resolves the person and writes anything.
 - Arguments are validated before any rclone call or subprocess, so `--help`
   and bad input never touch the folder.
 - One JSON document per invocation. A command that has printed its result

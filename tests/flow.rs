@@ -1114,21 +1114,17 @@ fn a_reports_and_a_medias_binary_are_filed_with_their_date_and_title() {
     let _ = std::fs::remove_dir_all(&e.root);
 }
 
-/// `medrec <args>` output, stdout and stderr together, and its exit code.
-#[test]
-fn an_import_takes_the_folder_lock_only_after_the_export() {
-    let base = Env::new("import-lock");
-    setup(&base);
-    let e = provider_env(&base, medrec::testdata::STREAM);
-    let hold = e.root.join("hold");
-    std::fs::create_dir_all(&hold).unwrap();
+/// An import of `pat-0001` as Robin whose provider holds its export open
+/// until `<hold>/go` exists; it returns once the export has started.
+fn held_import(e: &Env, hold: &Path) -> std::process::Child {
+    std::fs::create_dir_all(hold).unwrap();
     let mut c = std::process::Command::new(env!("CARGO_BIN_EXE_medrec"));
     c.env("XDG_CONFIG_HOME", e.root.join("config"))
         .env("XDG_CACHE_HOME", e.root.join("cache"))
         .env("HOME", &e.root)
         .env("PATH", &e.path)
         .env("MEDREC_PROFILE", "home")
-        .env("FAKEPROV_HOLD", &hold)
+        .env("FAKEPROV_HOLD", hold)
         .args([
             "--json",
             "import",
@@ -1143,12 +1139,22 @@ fn an_import_takes_the_folder_lock_only_after_the_export() {
         ])
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
-    let import = c.spawn().unwrap();
+    let child = c.spawn().unwrap();
     let started = std::time::Instant::now();
     while !hold.join("exporting").exists() {
         assert!(started.elapsed().as_secs() < 30, "the export never started");
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
+    child
+}
+
+#[test]
+fn an_import_takes_the_folder_lock_only_after_the_export() {
+    let base = Env::new("import-lock");
+    setup(&base);
+    let e = provider_env(&base, medrec::testdata::STREAM);
+    let hold = e.root.join("hold");
+    let import = held_import(&e, &hold);
     // While the provider exports, other writers have the folder, and one
     // changes the household the import read before its export.
     let during = std::time::Instant::now();
@@ -1189,6 +1195,41 @@ fn an_import_takes_the_folder_lock_only_after_the_export() {
     let _ = std::fs::remove_dir_all(&e.root);
 }
 
+#[test]
+fn an_import_refuses_a_folder_replaced_during_its_export() {
+    let base = Env::new("import-replaced");
+    setup(&base);
+    let e = provider_env(&base, medrec::testdata::STREAM);
+    let hold = e.root.join("hold");
+    let import = held_import(&e, &hold);
+    // The records folder is replaced at the same place, with the same person.
+    std::fs::remove_dir_all(e.records()).unwrap();
+    e.ok(&["init", e.records().to_str().unwrap()]);
+    e.ok(&[
+        "people",
+        "add",
+        "Robin Testperson",
+        "--birth-date",
+        "2020-02-02",
+    ]);
+    std::fs::write(hold.join("go"), "").unwrap();
+    let (code, text) = said(&import.wait_with_output().unwrap());
+    assert_eq!(code, Some(1), "{text}");
+    assert!(
+        text.contains("was replaced while this command ran"),
+        "{text}"
+    );
+    // Nothing went into the new folder.
+    assert!(!std::fs::read_dir(e.records())
+        .unwrap()
+        .flatten()
+        .any(|d| d.file_name().to_string_lossy().contains("example-health")));
+    let records = e.ok(&["timeline", "--person", "Robin"]);
+    assert_eq!(records["items"].as_array().unwrap().len(), 0);
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
+/// `medrec <args>` output, stdout and stderr together, and its exit code.
 fn said(out: &Output) -> (Option<i32>, String) {
     (
         out.status.code(),
