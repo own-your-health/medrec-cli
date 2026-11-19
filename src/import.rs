@@ -544,7 +544,7 @@ pub fn run(
             .collect(),
         claimed: HashSet::new(),
     };
-    let prescribers = prescribers(&resources, &index, &base_prov);
+    let mut prescribers = stream_prescribers(&resources);
     for r in &resources {
         let Ok(v) = r.value() else { continue };
         if let Some(o) = owner(&r.resource_type, &v) {
@@ -559,11 +559,25 @@ pub fn run(
             .get(&format!("{source_dir}/{sub}.json"))
             .copied();
         if let Some(mut rec) = normalize::record(&v, prov) {
-            if r.resource_type == "MedicationDispense" && !rec.fields.contains_key("prescriber") {
-                let named = normalize::path_str(&v, "authorizingPrescription.0.reference")
-                    .and_then(request_id)
-                    .and_then(|id| prescribers.get(id));
-                if let Some(name) = named {
+            let prescription = (r.resource_type == "MedicationDispense"
+                && !rec.fields.contains_key("prescriber"))
+            .then(|| normalize::path_str(&v, "authorizingPrescription.0.reference"))
+            .flatten()
+            .and_then(request_id);
+            if let Some(id) = prescription {
+                if !prescribers.contains_key(id) {
+                    // Filed by an earlier import: its own raw file, under
+                    // this source.
+                    let rel = format!("{source_dir}/{}.json", id_sub("MedicationRequest", id));
+                    let named = folder
+                        .store
+                        .read_text(&rel)?
+                        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+                        .as_ref()
+                        .and_then(requester);
+                    prescribers.insert(id.to_string(), named);
+                }
+                if let Some(Some(name)) = prescribers.get(id) {
                     rec.fields
                         .insert("prescriber".into(), serde_json::json!(name));
                 }
@@ -1499,44 +1513,23 @@ fn merge(
     }
 }
 
-/// Each MedicationRequest's prescriber from this source, by id: those in
-/// the stream, then those filed from it before. A fill names its
-/// prescription as `MedicationRequest/<id>` (medical-common DESIGN §2.1).
-fn prescribers(
-    resources: &[RawResource],
-    index: &PersonIndex,
-    base: &Provenance,
-) -> HashMap<String, String> {
-    let mut out: HashMap<String, String> = HashMap::new();
-    for r in index.records.iter() {
-        let Some(name) = r.fields.get("prescriber").and_then(Value::as_str) else {
-            continue;
-        };
-        for p in &r.provenance {
-            let Some(s) = p.source_resource.as_ref() else {
-                continue;
-            };
-            if s.resource_type == "MedicationRequest"
-                && p.source.cli == base.source.cli
-                && p.source.organization_id == base.source.organization_id
-                && p.source.fhir_base == base.source.fhir_base
-            {
-                out.insert(s.id.clone(), name.to_string());
-            }
-        }
-    }
-    for r in resources
+/// Each MedicationRequest's prescriber in the stream, by id. A fill names
+/// its prescription as `MedicationRequest/<id>` (medical-common DESIGN
+/// §2.1); one filed by an earlier import is read from its own raw file.
+fn stream_prescribers(resources: &[RawResource]) -> HashMap<String, Option<String>> {
+    resources
         .iter()
         .filter(|r| r.resource_type == "MedicationRequest")
-    {
-        let Ok(v) = r.value() else { continue };
-        let name = normalize::path_str(&v, "requester.display")
-            .or_else(|| normalize::path_str(&v, "requester.agent.display"));
-        if let Some(name) = name {
-            out.insert(r.id.clone(), name.to_string());
-        }
-    }
-    out
+        .filter_map(|r| Some((r.id.clone(), requester(&r.value().ok()?))))
+        .collect()
+}
+
+/// A MedicationRequest's prescriber: `requester.display` (R4), or
+/// `requester.agent.display` (STU3).
+fn requester(v: &Value) -> Option<String> {
+    normalize::path_str(v, "requester.display")
+        .or_else(|| normalize::path_str(v, "requester.agent.display"))
+        .map(str::to_string)
 }
 
 /// The id in a reference to a MedicationRequest (`MedicationRequest/<id>`,
