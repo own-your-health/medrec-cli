@@ -48,9 +48,12 @@ _review/                      documents intake could not file, and review.json
   `<id>.json`. The previous version stays beside it as
   `<id>~<first 8 hex of its MD5>.json`. Which version is current is the
   import's rule (Import, below). A copy refreshed in place is held as
-  `<id>~refresh-<hex>.json` only while its replacement uploads; one left by
-  an import cut short is removed by the next, or put back if the
-  replacement never arrived.
+  `<id>~refresh-<hex>.json` only while its replacement uploads, `<hex>`
+  being the start of the replacement's MD5. One left by an import cut short
+  is removed by the next when the current copy is that replacement.
+  Otherwise it is put back, and a current copy that is not the replacement
+  (an upload that did not read back) is kept beside it as an earlier
+  version.
 
 ## Rules
 

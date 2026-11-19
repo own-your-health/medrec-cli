@@ -1717,17 +1717,31 @@ fn an_older_version_does_not_replace_the_one_filed() {
     assert!(value().starts_with("15"), "{}", value());
     assert_eq!(raw().len(), files + 1);
 
-    // A refresh cut short leaves the held copy as `~refresh-`: the next
-    // import removes it, or puts it back when the current copy is missing.
-    let left = dir.join("obs-0001~refresh-0000abcd.json");
-    std::fs::copy(dir.join("obs-0001.json"), &left).unwrap();
+    // A refresh cut short leaves the held copy as `~refresh-<tag>`, the tag
+    // starting the MD5 of the copy it made room for. The next import removes
+    // it when the current copy is that one, and otherwise puts it back.
+    let good = std::fs::read(dir.join("obs-0001.json")).unwrap();
+    let tag = &medrec::hash::md5_hex(&good)[..8];
+    let left = dir.join(format!("obs-0001~refresh-{tag}.json"));
+    std::fs::write(&left, b"{\"resourceType\":\"Observation\"}\n").unwrap();
     import();
     assert!(!left.exists());
+    assert_eq!(std::fs::read(dir.join("obs-0001.json")).unwrap(), good);
+    // The current copy missing: the held one goes back.
+    let left = dir.join("obs-0001~refresh-0000abcd.json");
     std::fs::rename(dir.join("obs-0001.json"), &left).unwrap();
     import();
     assert!(!left.exists());
-    assert!(current().contains("2026-03-22T12:00:00Z"));
+    assert_eq!(std::fs::read(dir.join("obs-0001.json")).unwrap(), good);
     assert_eq!(raw().len(), files + 1);
+    // A current copy that is not the one made room for (an upload that did
+    // not read back): the held one goes back, and that copy stays beside it.
+    std::fs::rename(dir.join("obs-0001.json"), &left).unwrap();
+    std::fs::write(dir.join("obs-0001.json"), b"{\"resourceType\":\"Obs\n").unwrap();
+    import();
+    assert!(!left.exists());
+    assert_eq!(std::fs::read(dir.join("obs-0001.json")).unwrap(), good);
+    assert_eq!(raw().len(), files + 2);
 
     let v = e.ok(&["verify"]);
     assert_eq!(v["missing"].as_array().unwrap().len(), 0, "{v}");
