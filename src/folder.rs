@@ -43,10 +43,13 @@ pub const PROBE: &str = ".medrec-probe";
 pub const README_MARK: &str = "# Medical records (managed by medrec)";
 
 /// A read-only command reads through the cache; a mutating one reads fresh
-/// and holds the machine-wide folder lock.
+/// and holds the machine-wide folder lock. `Fresh` reads fresh without the
+/// lock, for the part of a mutation that only reads and may take long (an
+/// import's provider export), before it opens the folder to write.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Access {
     Read,
+    Fresh,
     Write,
 }
 
@@ -68,10 +71,10 @@ impl Folder {
     ) -> Result<Folder, CliError> {
         let lock = match access {
             Access::Write => Some(FolderLock::acquire(location)?),
-            Access::Read => None,
+            Access::Read | Access::Fresh => None,
         };
         let reads = match access {
-            Access::Write => Reads::Fresh,
+            Access::Write | Access::Fresh => Reads::Fresh,
             Access::Read => Reads::Cached,
         };
         let store = Store::open(location, reads, budget);
@@ -108,16 +111,6 @@ impl Folder {
             ));
         }
         Ok(h)
-    }
-
-    /// Refuse when another machine wrote the household since `h` was read.
-    pub fn household_unchanged(&self, h: &Household) -> Result<(), CliError> {
-        if let Some(current) = read_household(&self.store)? {
-            if current.rev != h.rev {
-                return Err(changed_elsewhere(HOUSEHOLD));
-            }
-        }
-        Ok(())
     }
 
     /// Write the household, refusing when another machine wrote it since

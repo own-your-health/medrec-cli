@@ -59,9 +59,11 @@ _review/                      documents intake could not file, and review.json
 3. **One writer at a time per machine**, through a lock file under the
    per-machine cache. Across machines, `household.json`, `index.json` and
    `review.json` carry a `rev` counter. A write whose `rev` no longer matches
-   the folder's is refused, and the command is run again. Import and
-   `images intake` check the `rev` before uploading, too, and save each
-   study's index entry as soon as it is filed.
+   the folder's is refused, and the command is run again. An import takes
+   the lock only once its provider's export has finished, so other writers
+   carry on during a long export. It then reads `household.json` again and
+   resolves the person from that. `images intake` checks the `rev` before
+   uploading, and saves each study's index entry as soon as it is filed.
 4. **A newer layout is refused.** `household.json` declares `format: 1`. A
    medrec that finds a larger number stops and says to update.
 5. **Rename or move files through medrec**, so the index stays right.

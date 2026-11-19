@@ -1115,6 +1115,80 @@ fn a_reports_and_a_medias_binary_are_filed_with_their_date_and_title() {
 }
 
 /// `medrec <args>` output, stdout and stderr together, and its exit code.
+#[test]
+fn an_import_takes_the_folder_lock_only_after_the_export() {
+    let base = Env::new("import-lock");
+    setup(&base);
+    let e = provider_env(&base, medrec::testdata::STREAM);
+    let hold = e.root.join("hold");
+    std::fs::create_dir_all(&hold).unwrap();
+    let mut c = std::process::Command::new(env!("CARGO_BIN_EXE_medrec"));
+    c.env("XDG_CONFIG_HOME", e.root.join("config"))
+        .env("XDG_CACHE_HOME", e.root.join("cache"))
+        .env("HOME", &e.root)
+        .env("PATH", &e.path)
+        .env("MEDREC_PROFILE", "home")
+        .env("FAKEPROV_HOLD", &hold)
+        .args([
+            "--json",
+            "import",
+            "--from",
+            "fakeprov",
+            "--from-profile",
+            "adult1",
+            "--patient",
+            "pat-0001",
+            "--person",
+            "Robin",
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let import = c.spawn().unwrap();
+    let started = std::time::Instant::now();
+    while !hold.join("exporting").exists() {
+        assert!(started.elapsed().as_secs() < 30, "the export never started");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    // While the provider exports, other writers have the folder, and one
+    // changes the household the import read before its export.
+    let during = std::time::Instant::now();
+    e.ok(&[
+        "people",
+        "add",
+        "Sam Testperson",
+        "--birth-date",
+        "1991-03-03",
+    ]);
+    e.ok(&["note", "add", "Robin", "Written while an export ran."]);
+    assert!(
+        during.elapsed().as_secs() < 10,
+        "a writer waited on the import's export"
+    );
+    std::fs::write(hold.join("go"), "").unwrap();
+    let out = import.wait_with_output().unwrap();
+    let (code, text) = said(&out);
+    assert_eq!(code, Some(0), "{text}");
+    let r: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(r["records_added"].as_u64().unwrap() > 0, "{r}");
+    // The household holds both: the person added during the export, and the
+    // source the import recorded.
+    let h: Value =
+        serde_json::from_slice(&std::fs::read(e.records().join("household.json")).unwrap())
+            .unwrap();
+    assert!(h["people"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|p| p["name"] == "Sam Testperson"));
+    assert!(h["sources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|s| s["cli"] == "fakeprov"));
+    e.ok(&["verify"]);
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
 fn said(out: &Output) -> (Option<i32>, String) {
     (
         out.status.code(),
