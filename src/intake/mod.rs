@@ -694,7 +694,15 @@ fn prepare(
             (copy.path.clone(), Some(copy))
         }
     };
-    let bytes = read_bounded(&local, ctx.max_bytes).map_err(Skip)?;
+    let bytes = if copy.is_some() {
+        read_bounded(&local, ctx.max_bytes)
+    } else {
+        read_stable(
+            || read_bounded(&local, ctx.max_bytes),
+            || std::fs::metadata(&local).ok().map(|m| m.len()),
+        )
+    }
+    .map_err(Skip)?;
     let kind = filetype::identify(&bytes).map_err(|e| Skip(e.to_string()))?;
     // A file named on the command line is read once, into a private copy,
     // so its text, its hashes and the upload are one set of bytes even if
@@ -763,6 +771,30 @@ pub fn apply_given(class: &mut Classification, given: &Given, person: Option<&st
     if let Some(o) = &given.organization {
         class.organization.set_given(o.clone());
     }
+}
+
+/// A local file's bytes, read until two reads in a row agree and are the
+/// size the file system gives. A cloud folder's online-only placeholder
+/// (a File Provider file) can serve other bytes while it downloads, and a
+/// file still being written changes under the read; either is refused
+/// rather than filed as bytes the file does not hold.
+fn read_stable(
+    mut read: impl FnMut() -> Result<Vec<u8>, String>,
+    size: impl Fn() -> Option<u64>,
+) -> Result<Vec<u8>, String> {
+    const READS: usize = 4;
+    let mut last = read()?;
+    for _ in 1..READS {
+        let again = read()?;
+        if again == last && size() == Some(again.len() as u64) {
+            return Ok(again);
+        }
+        last = again;
+    }
+    Err(format!(
+        "read differently {READS} times in a row (a placeholder still downloading, or a file \
+         still being written); intake it again once it is complete"
+    ))
 }
 
 fn read_bounded(path: &Path, max: u64) -> Result<Vec<u8>, String> {
@@ -1202,6 +1234,25 @@ mod tests {
         assert_eq!(crate::store::md5_file(&p.local).unwrap(), p.md5);
         assert_ne!(crate::store::md5_file(&source).unwrap(), p.md5);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_file_is_taken_only_once_two_reads_agree_with_its_size() {
+        let reads = |seq: Vec<&'static [u8]>| {
+            let mut it = seq.into_iter();
+            move || Ok(it.next().expect("no more reads").to_vec())
+        };
+        // A placeholder that serves part of itself first.
+        let got = read_stable(reads(vec![b"pa", b"partial", b"partial"]), || Some(7));
+        assert_eq!(got.unwrap(), b"partial");
+        // Two reads agree, but the file system gives another size.
+        let got = read_stable(reads(vec![b"abc", b"abc", b"abcdef", b"abcdef"]), || {
+            Some(6)
+        });
+        assert_eq!(got.unwrap(), b"abcdef");
+        // A file that never settles is refused.
+        let got = read_stable(reads(vec![b"a", b"ab", b"abc", b"abcd"]), || Some(4));
+        assert!(got.unwrap_err().contains("read differently"));
     }
 
     #[test]
