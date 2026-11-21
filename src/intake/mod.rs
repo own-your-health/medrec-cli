@@ -185,8 +185,11 @@ pub struct Report {
 
 /// A document intake has read and classified, ready to file.
 pub struct Prepared {
+    /// The bytes read, in a private file: what is analyzed and uploaded,
+    /// whatever happens to the source afterwards.
     pub local: PathBuf,
     _copy: Option<LocalCopy>,
+    _scratch: Option<pk_cli_drive::TempDir>,
     pub kind: filetype::Kind,
     pub sha: String,
     pub md5: String,
@@ -203,7 +206,15 @@ pub struct Prepared {
 pub type Signature = (String, String, Vec<u32>, Option<String>, Option<String>);
 
 /// (item, outcome, and for a duplicate the filed copy's path and MD5).
-type Removable = (usize, usize, Option<(String, String)>);
+/// A source to remove once the indexes are written: the item, its outcome,
+/// the MD5 of the bytes read from it, and for a duplicate the filed copy's
+/// path and MD5.
+struct Removable {
+    item: usize,
+    outcome: usize,
+    read_md5: String,
+    duplicate_of: Option<(String, String)>,
+}
 
 /// Everything already filed that a new document is compared with.
 struct Seen {
@@ -290,11 +301,13 @@ pub fn run(folder: &Folder, cfg: &Config, req: &Request) -> Result<(Report, bool
         {
             mark_duplicate(&mut out, &household, &owner, &id);
             if item.policy == Policy::Move && !req.dry_run {
-                removable.push((
-                    n,
-                    outcomes.len(),
-                    Some((path, item.md5.clone().unwrap_or_default())),
-                ));
+                let md5 = item.md5.clone().unwrap_or_default();
+                removable.push(Removable {
+                    item: n,
+                    outcome: outcomes.len(),
+                    read_md5: md5.clone(),
+                    duplicate_of: Some((path, md5)),
+                });
             }
             outcomes.push(out);
             continue;
@@ -318,7 +331,12 @@ pub fn run(folder: &Folder, cfg: &Config, req: &Request) -> Result<(Report, bool
         if let Some((owner, id, path)) = seen.by_hash.get(&prepared.sha).cloned() {
             mark_duplicate(&mut out, &household, &owner, &id);
             if item.policy == Policy::Move && !req.dry_run {
-                removable.push((n, outcomes.len(), Some((path, prepared.md5.clone()))));
+                removable.push(Removable {
+                    item: n,
+                    outcome: outcomes.len(),
+                    read_md5: prepared.md5.clone(),
+                    duplicate_of: Some((path, prepared.md5.clone())),
+                });
             }
             outcomes.push(out);
             continue;
@@ -409,7 +427,12 @@ pub fn run(folder: &Folder, cfg: &Config, req: &Request) -> Result<(Report, bool
         match stored {
             Ok(()) => {
                 if item.policy == Policy::Move {
-                    removable.push((n, outcomes.len(), None));
+                    removable.push(Removable {
+                        item: n,
+                        outcome: outcomes.len(),
+                        read_md5: prepared.md5.clone(),
+                        duplicate_of: None,
+                    });
                 }
                 outcomes.push(out);
             }
@@ -458,7 +481,13 @@ pub fn run(folder: &Folder, cfg: &Config, req: &Request) -> Result<(Report, bool
             failed = true;
             removable.clear();
         }
-        for (n, o, duplicate_of) in removable {
+        for Removable {
+            item: n,
+            outcome: o,
+            read_md5,
+            duplicate_of,
+        } in removable
+        {
             let out = &mut outcomes[o];
             // A duplicate's source goes only while the copy already filed
             // is still there with the same bytes.
@@ -470,7 +499,7 @@ pub fn run(folder: &Folder, cfg: &Config, req: &Request) -> Result<(Report, bool
                     continue;
                 }
             }
-            match remove_source(&items[n], &folder_stores) {
+            match remove_source(&items[n], &folder_stores, &read_md5) {
                 Ok(r) => out.source_removed = r,
                 Err(e) => {
                     out.error = Some(format!("filed, but the source could not be removed: {e}"))
@@ -667,8 +696,26 @@ fn prepare(
     };
     let bytes = read_bounded(&local, ctx.max_bytes).map_err(Skip)?;
     let kind = filetype::identify(&bytes).map_err(|e| Skip(e.to_string()))?;
+    // A file named on the command line is read once, into a private copy,
+    // so its text, its hashes and the upload are one set of bytes even if
+    // it is still being written or synced. A folder's file is a download
+    // already.
+    let (local, scratch) = if copy.is_some() {
+        (local, None)
+    } else {
+        let dir = pk_cli_drive::private_temp_dir("medrec-intake")
+            .map_err(|e| Skip(format!("no private temp dir: {e}")))?;
+        let name = local
+            .file_name()
+            .map(|n| n.to_owned())
+            .unwrap_or_else(|| "document".into());
+        let path = dir.path().join(name);
+        crate::write_private(&path, &bytes).map_err(|e| Skip(e.to_string()))?;
+        (path, Some(dir))
+    };
     let mut p = analyze(ctx, kind, &local, &bytes, &item.name);
     p._copy = copy;
+    p._scratch = scratch;
     apply_given(&mut p.classification, given, given_person);
     Ok(p)
 }
@@ -691,6 +738,7 @@ pub fn analyze(
     Prepared {
         local: local.to_path_buf(),
         _copy: None,
+        _scratch: None,
         kind,
         sha: hash::sha256_hex(bytes),
         md5: hash::md5_hex(bytes),
@@ -1000,7 +1048,19 @@ fn hold_for_review(
     })
 }
 
-fn remove_source(item: &Item, stores: &[Store]) -> Result<bool, CliError> {
+/// Remove a moved source, unless it is not the bytes that were read: one
+/// changed since (still being written or synced) stays.
+fn remove_source(item: &Item, stores: &[Store], read_md5: &str) -> Result<bool, CliError> {
+    let now = match &item.from {
+        From::Local(p) if p.is_file() => Some(crate::store::md5_file(p)?),
+        From::Local(_) => None,
+        From::Folder { store, rel } => stores[*store].md5(rel)?,
+    };
+    if now.as_deref().is_some_and(|m| m != read_md5) {
+        return Err(CliError::Other(
+            "it changed after it was read, so it was kept; file it again".into(),
+        ));
+    }
     match &item.from {
         From::Local(p) => match std::fs::remove_file(p) {
             Ok(()) => Ok(true),
@@ -1090,4 +1150,73 @@ fn file_name(p: &Path) -> String {
     p.file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "document".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("medrec-intake-test-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn local_item(path: &Path) -> Item {
+        Item {
+            from: From::Local(path.to_path_buf()),
+            name: "statement.pdf".into(),
+            origin: "file",
+            policy: Policy::Move,
+            size: None,
+            md5: None,
+        }
+    }
+
+    #[test]
+    fn a_named_file_is_read_once_into_a_private_copy() {
+        let dir = scratch("copy");
+        let source = dir.join("statement.pdf");
+        std::fs::write(&source, crate::pdfgen::text_pdf(&["Example", "first"])).unwrap();
+        let cfg = Config::default();
+        let ctx = Context {
+            tools: text::Tools::from_path(),
+            opts: text::Options {
+                languages: cfg.ocr_languages(),
+                max_ocr_pages: cfg.ocr_max_pages(),
+            },
+            people: Vec::new(),
+            organizations: Vec::new(),
+            today: "2026-11-21".into(),
+            max_bytes: 1 << 20,
+        };
+        let Ok(p) = prepare(&local_item(&source), &[], &ctx, &Given::default(), None) else {
+            panic!("prepared");
+        };
+        // The source is rewritten after it was read, as a file still being
+        // written or synced is: the upload is still the bytes hashed.
+        std::fs::write(&source, crate::pdfgen::text_pdf(&["Example", "second"])).unwrap();
+        assert_ne!(p.local, source);
+        assert_eq!(crate::store::md5_file(&p.local).unwrap(), p.md5);
+        assert_ne!(crate::store::md5_file(&source).unwrap(), p.md5);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_moved_source_that_changed_after_it_was_read_is_kept() {
+        let dir = scratch("remove");
+        let source = dir.join("statement.pdf");
+        std::fs::write(&source, b"the bytes read").unwrap();
+        let read = crate::store::md5_file(&source).unwrap();
+        std::fs::write(&source, b"the bytes since").unwrap();
+        let item = local_item(&source);
+        assert!(remove_source(&item, &[], &read).is_err());
+        assert!(source.exists(), "kept");
+        let now = crate::store::md5_file(&source).unwrap();
+        assert!(remove_source(&item, &[], &now).unwrap());
+        assert!(!source.exists(), "removed");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

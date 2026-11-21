@@ -267,6 +267,11 @@ this machine's:
 moved file is removed only after the filed copy's MD5, as Drive reports it,
 matches, and the index that points at it has been written and read back.
 
+Intake reads each file once, into a private copy, and reads its text from
+and uploads that copy. A file still being written or synced while intake
+runs is filed as it was when read, and a moved one is kept, not removed,
+when it no longer has those bytes (0.2.10 and later).
+
 ### How a document is filed
 
 Intake extracts text locally, with `pdftotext` first and `tesseract` for
