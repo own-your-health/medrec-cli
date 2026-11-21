@@ -1263,7 +1263,7 @@ dependencies = [
 
 [[package]]
 name = "medrec-cli"
-version = "0.2.8"
+version = "0.2.9"
 dependencies = [
  "assert_cmd",
  "base64 0.22.1",

@@ -2150,3 +2150,135 @@ fn a_document_filed_twice_merges_into_the_one_it_renders_again() {
     assert!(v["unindexed"].as_array().unwrap().is_empty(), "{v}");
     let _ = std::fs::remove_dir_all(&e.root);
 }
+
+/// The synthetic stream with a billing CLI's statement: a DocumentReference
+/// typed `bill` by text, dated the statement date, and its PDF.
+fn with_statement(lines: &[&str]) -> String {
+    use base64::Engine;
+    let pdf = base64::engine::general_purpose::STANDARD.encode(medrec::pdfgen::text_pdf(lines));
+    medrec::testdata::STREAM
+        .replace(
+            "{\"schema\":\"records-stream-end/v1\"",
+            &format!(
+                concat!(
+                    r#"{{"resourceType":"DocumentReference","id":"stmt-0001","status":"current","type":{{"text":"bill"}},"subject":{{"reference":"Patient/pat-0001"}},"date":"2026-11-02T00:00:00Z","content":[{{"attachment":{{"contentType":"application/pdf","url":"Binary/bin-0009","title":"Statement"}}}}]}}"#, "\n",
+                    r#"{{"resourceType":"Binary","id":"bin-0009","contentType":"application/pdf","data":"{}"}}"#, "\n",
+                    r#"{{"schema":"records-stream-end/v1""#
+                ),
+                pdf
+            ),
+        )
+        .replace("\"DocumentReference\":2,\"Binary\":2", "\"DocumentReference\":3,\"Binary\":3")
+}
+
+#[test]
+fn a_statement_filed_by_hand_and_the_portals_copy_are_one_statement() {
+    if !has("pdftotext") {
+        eprintln!("skipped: pdftotext (poppler) is not installed");
+        return;
+    }
+    let base = Env::new("statements");
+    setup(&base);
+    // The scan the user files: a masked account, each field on its line.
+    let scan = base.root.join("statement-scan.pdf");
+    std::fs::write(
+        &scan,
+        medrec::pdfgen::text_pdf(&[
+            "Example Medical Group",
+            "STATEMENT",
+            "Statement date: Nov 2, 2026",
+            "Guarantor Account #: ****0123",
+            "Patient: Robin Testperson",
+            "Balance due: $1,234.56",
+            "Please pay by 12/01/2026",
+        ]),
+    )
+    .unwrap();
+    let filed = base.ok(&[
+        "intake",
+        scan.to_str().unwrap(),
+        "--person",
+        "Robin",
+        "--type",
+        "bill",
+        "--date",
+        "2026-10-14",
+        "--org",
+        "Example Medical Group",
+    ]);
+    let first = filed["items"][0]["document"].as_str().unwrap().to_string();
+    assert_eq!(
+        filed["items"][0]["same_statement_as"],
+        Value::Null,
+        "{filed}"
+    );
+    let bills = base.ok(&["documents", "list", "--type", "bill"]);
+    let st = &bills["items"][0]["statement"];
+    assert_eq!(
+        (
+            st["statement_date"].as_str(),
+            st["amount_due"]["amount"].as_str(),
+            st["due_date"].as_str(),
+            st["account"].as_str()
+        ),
+        (
+            Some("2026-11-02"),
+            Some("1234.56"),
+            Some("2026-12-01"),
+            Some("****0123")
+        ),
+        "{bills}"
+    );
+
+    // The billing CLI exports the portal's PDF of the same statement later.
+    let e = provider_env(
+        &base,
+        &with_statement(&[
+            "Example Medical Group",
+            "Patient Statement",
+            "Statement Date: 11/02/2026",
+            "Account Number: EX-000123",
+            "Amount Due: $1,234.56",
+            "Due Date: 12/01/2026",
+        ]),
+    );
+    let import = || {
+        e.ok(&[
+            "import",
+            "--from",
+            "fakeprov",
+            "--from-profile",
+            "adult1",
+            "--patient",
+            "pat-0001",
+            "--person",
+            "Robin",
+        ])
+    };
+    let r = import();
+    assert_eq!(r["documents_same_statement"], 1, "{r}");
+    let bills = e.ok(&["documents", "list", "--type", "bill"]);
+    let items = bills["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2, "{bills}");
+    let portal = items.iter().find(|d| d["id"] != first.as_str()).unwrap();
+    assert_eq!(portal["same_statement_as"], first.as_str(), "{portal}");
+    assert_eq!(portal["statement"]["account"], "EX-000123");
+    assert!(
+        portal["path"]
+            .as_str()
+            .unwrap()
+            .starts_with("Robin Testperson/Claims/2026/"),
+        "{portal}"
+    );
+    // Imported again, nothing more is filed.
+    let again = import();
+    assert_eq!(
+        (
+            again["documents_added"].as_u64(),
+            again["documents_same_statement"].as_u64()
+        ),
+        (Some(0), Some(0)),
+        "{again}"
+    );
+    let _ = std::fs::remove_dir_all(&base.root);
+}

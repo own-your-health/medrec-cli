@@ -48,3 +48,9 @@ because they carry no personal data. `tests/fixture_shapes.rs` and
 `tests/no_personal_data.rs` enforce these rules.
 
 Never add a real record, study, header or screenshot here, scrubbed or not.
+- `bills/` holds invented text in the shapes `pdftotext -layout` gives a
+  provider's patient statement and a payment receipt:
+  `statement-columns.txt` puts the statement's fields in a header row over a
+  row of values, `statement-inline.txt` gives each on its own line with a
+  masked account number, and `receipt.txt` is a payment receipt. The two
+  statements are one statement, read two ways.

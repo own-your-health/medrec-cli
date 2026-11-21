@@ -371,11 +371,11 @@ pub fn notes_rel(p: &Person) -> String {
     format!("{}/notes.md", p.folder)
 }
 
-/// Where a document of this type and date goes: `Claims/<YYYY>` for EOBs
-/// and bills, `Documents/<YYYY>` for everything else.
+/// Where a document of this type and date goes: `Claims/<YYYY>` for EOBs,
+/// bills and receipts, `Documents/<YYYY>` for everything else.
 pub fn document_dir(p: &Person, doc_type: &str, date: &str) -> String {
     let year = date.get(..4).unwrap_or("undated");
-    let top = if matches!(doc_type, "eob" | "bill") {
+    let top = if matches!(doc_type, "eob" | "bill" | "receipt") {
         "Claims"
     } else {
         "Documents"

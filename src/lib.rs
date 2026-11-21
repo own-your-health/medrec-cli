@@ -2,6 +2,7 @@
 //! binary's commands live in `main.rs`; the mechanisms they use live here so
 //! the tests can reach them.
 
+pub mod bill;
 pub mod config;
 pub mod dicom;
 pub mod documents;

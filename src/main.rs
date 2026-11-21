@@ -1006,6 +1006,17 @@ fn intake_cmd(cli: &Cli, a: &IntakeArgs, store: &ConfigStore) -> Result<(), CliE
         if !counts.is_empty() {
             println!("{}", counts.join(", "));
         }
+        for i in report
+            .items
+            .iter()
+            .filter(|i| i.same_statement_as.is_some())
+        {
+            println!(
+                "{} is the same statement as {}, filed before",
+                medrec::printable(&i.source),
+                i.same_statement_as.as_deref().unwrap_or_default()
+            );
+        }
     });
     if !ok {
         std::process::exit(1);
@@ -1146,6 +1157,12 @@ fn import_cmd(cli: &Cli, a: &ImportArgs, store: &ConfigStore) -> Result<(), CliE
             println!(
                 "{} documents were served again with the same text; the copies filed before were kept",
                 r.documents_unchanged
+            );
+        }
+        if r.documents_same_statement > 0 {
+            println!(
+                "{} bills are the same statement as a bill filed before; each points at it",
+                r.documents_same_statement
             );
         }
         if r.records_older > 0 {

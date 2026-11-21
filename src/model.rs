@@ -326,7 +326,39 @@ pub struct Document {
     /// What intake detected and how each field was decided.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub classification: Option<Value>,
+    /// A bill's statement, as its text gives it (0.2.9 and later).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub statement: Option<Statement>,
+    /// The bill filed before that is the same statement (a scan and the
+    /// portal's PDF of one bill), by [`crate::bill::same_statement`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub same_statement_as: Option<String>,
     pub provenance: Provenance,
+}
+
+/// What a bill's statement says: each field only where the text labels it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Statement {
+    /// `YYYY-MM-DD`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub statement_date: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub amount_due: Option<Amount>,
+    /// `YYYY-MM-DD`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub due_date: Option<String>,
+    /// The account number as printed, upper-cased; a masked one keeps its
+    /// mask (`****0123`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
+}
+
+/// An amount as printed: a plain decimal with two places (`1234.56`,
+/// `-12.00` for a credit), and its currency.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Amount {
+    pub amount: String,
+    pub currency: String,
 }
 
 /// A rendering of a document that an import did not file: see

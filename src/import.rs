@@ -280,6 +280,9 @@ pub struct Report {
     /// Documents the source served again with other bytes but the same text
     /// (a rendering it makes on each export): the one filed before stays.
     pub documents_unchanged: usize,
+    /// Bills filed that are the same statement as a bill filed before (a
+    /// scan the user filed, and the portal's PDF): each points at it.
+    pub documents_same_statement: usize,
     pub stream_bytes: u64,
 }
 
@@ -663,6 +666,7 @@ pub fn run(
         documents_added: filed.added,
         documents_duplicate: filed.duplicate,
         documents_unchanged: filed.unchanged,
+        documents_same_statement: filed.same_statement,
         stream_bytes,
     })
 }
@@ -1648,6 +1652,14 @@ fn owner(resource_type: &str, v: &Value) -> Option<Owner> {
                 .and_then(|t| normalize::codeable(t, &[normalize::LOINC]));
             o.type_code = concept.as_ref().and_then(|c| c.code.clone());
             o.type_text = concept.and_then(|c| c.display);
+            // A billing CLI types a statement or a receipt by text alone
+            // (`bill`, `receipt`): a house type by its code.
+            o.doc_type = text("type.text").and_then(|t| {
+                classify::DOC_TYPES
+                    .iter()
+                    .find(|d| d.0.eq_ignore_ascii_case(t.trim()))
+                    .map(|d| d.0)
+            });
             o.date = date(&["date", "context.period.start"]);
             o.title = text("description").or_else(|| text("content.0.attachment.title"));
             o.urls = urls("content", "attachment.url");
@@ -1873,7 +1885,7 @@ fn file_binaries(
         if !extracted.text.is_empty() {
             texts.texts.insert(id.clone(), extracted.text.clone());
         }
-        index.documents.push(Document {
+        let mut doc = Document {
             id: id.clone(),
             path,
             sha256: sha,
@@ -1897,9 +1909,16 @@ fn file_binaries(
             near_duplicates: Vec::new(),
             minhash: signature,
             renderings: Vec::new(),
+            statement: None,
+            same_statement_as: None,
             classification: None,
             provenance: prov,
-        });
+        };
+        crate::bill::annotate(&mut doc, &extracted.text, index);
+        if doc.same_statement_as.is_some() {
+            filed.same_statement += 1;
+        }
+        index.documents.push(doc);
         // The claim the EOB document belongs to points back at it.
         if let Some(claim_id) = claim {
             for r in index.records.iter_mut().filter(|r| {
@@ -1928,6 +1947,8 @@ struct Filed {
     duplicate: usize,
     /// A rendering of a document already filed: see [`rendered_again`].
     unchanged: usize,
+    /// A bill filed as the same statement as one filed before.
+    same_statement: usize,
 }
 
 /// The document a document from `prov` renders again, if it does: the

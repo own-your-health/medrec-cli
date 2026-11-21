@@ -610,6 +610,12 @@ pub struct DocumentRow {
     pub origin: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub near_duplicates: Vec<String>,
+    /// A bill's statement (statement date, amount due, due date, account).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub statement: Option<crate::model::Statement>,
+    /// The bill filed before that is the same statement.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub same_statement_as: Option<String>,
 }
 
 pub fn documents(
@@ -647,6 +653,8 @@ pub fn documents(
                 pages: d.pages,
                 origin: d.origin.kind,
                 near_duplicates: d.near_duplicates.into_iter().map(|n| n.document).collect(),
+                statement: d.statement,
+                same_statement_as: d.same_statement_as,
             });
         }
     }

@@ -1,0 +1,7 @@
+Example Medical Group
+PAYMENT RECEIPT
+Thank you for your payment.
+Receipt number: R-0001
+Account number: EX-000123
+Payment date: 11/20/2026
+Amount paid: $120.00
