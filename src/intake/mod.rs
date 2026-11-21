@@ -696,17 +696,13 @@ fn prepare(
     let bytes = if copy.is_some() {
         read_bounded(&local, ctx.max_bytes)
     } else {
-        settle(&local, QUIET, SETTLE_TRIES).and_then(|before| {
-            let bytes = read_stable(
-                || read_bounded(&local, ctx.max_bytes),
-                || std::fs::metadata(&local).ok().map(|m| m.len()),
-            )?;
-            // Written to while it was read: not the file it will be.
-            if modified(&local) != before {
-                return Err(STILL_WRITTEN.into());
-            }
-            Ok(bytes)
-        })
+        read_local(
+            || modified(&local),
+            std::time::SystemTime::now,
+            std::thread::sleep,
+            || read_bounded(&local, ctx.max_bytes),
+            || std::fs::metadata(&local).ok().map(|m| m.len()),
+        )
     }
     .map_err(Skip)?;
     let kind = filetype::identify(&bytes).map_err(|e| Skip(e.to_string()))?;
@@ -790,22 +786,48 @@ fn modified(path: &Path) -> Option<std::time::SystemTime> {
     std::fs::metadata(path).and_then(|m| m.modified()).ok()
 }
 
-/// Wait until `path` has gone `quiet` unmodified, trying `tries` times, so
+/// A local file's bytes: once it has gone [`QUIET`] unmodified ([`settle`]),
+/// read until two reads agree with its size ([`read_stable`]), and refused
+/// if it was modified while it was read. The clock, the file's modification
+/// time and the wait are passed in, so the rules are tested without timing.
+fn read_local(
+    mtime: impl Fn() -> Option<std::time::SystemTime>,
+    now: impl Fn() -> std::time::SystemTime,
+    mut sleep: impl FnMut(std::time::Duration),
+    read: impl FnMut() -> Result<Vec<u8>, String>,
+    size: impl Fn() -> Option<u64>,
+) -> Result<Vec<u8>, String> {
+    let before = settle(&mtime, &now, &mut sleep, QUIET, SETTLE_TRIES)?;
+    let bytes = read_stable(read, size)?;
+    if mtime() != before {
+        return Err(STILL_WRITTEN.into());
+    }
+    Ok(bytes)
+}
+
+/// Wait until the file has gone `quiet` unmodified, trying `tries` times, so
 /// a file written in bursts (a scanner, a hand-off still copying) is read
 /// whole. Returns its modification time.
 fn settle(
-    path: &Path,
+    mtime: &impl Fn() -> Option<std::time::SystemTime>,
+    now: &impl Fn() -> std::time::SystemTime,
+    sleep: &mut impl FnMut(std::time::Duration),
     quiet: std::time::Duration,
     tries: usize,
 ) -> Result<Option<std::time::SystemTime>, String> {
     for _ in 0..tries {
-        let at = modified(path);
-        let age = at.and_then(|t| t.elapsed().ok()).unwrap_or(quiet);
-        if age >= quiet {
-            return Ok(at);
-        }
-        std::thread::sleep(quiet - age);
-        if modified(path) == at {
+        let at = mtime();
+        // No metadata: the read that follows says why.
+        let Some(t) = at else { return Ok(None) };
+        // A time ahead of the clock (skew on a synced folder) cannot be
+        // aged, so the whole quiet period is waited.
+        let wait = match now().duration_since(t) {
+            Ok(age) if age >= quiet => return Ok(at),
+            Ok(age) => quiet - age,
+            Err(_) => quiet,
+        };
+        sleep(wait);
+        if mtime() == at {
             return Ok(at);
         }
     }
@@ -1336,32 +1358,83 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// A file whose modification time is `times[n]` on the nth look, on a
+    /// clock that each wait moves forward.
+    struct Fake {
+        times: Vec<u64>,
+        look: std::cell::Cell<usize>,
+        clock: std::cell::Cell<std::time::Duration>,
+    }
+
+    impl Fake {
+        fn new(times: &[u64], at_ms: u64) -> Self {
+            Fake {
+                times: times.to_vec(),
+                look: std::cell::Cell::new(0),
+                clock: std::cell::Cell::new(std::time::Duration::from_millis(at_ms)),
+            }
+        }
+        fn mtime(&self) -> Option<std::time::SystemTime> {
+            let n = self.look.get();
+            self.look.set(n + 1);
+            let ms = self.times[n.min(self.times.len() - 1)];
+            Some(std::time::UNIX_EPOCH + std::time::Duration::from_millis(ms))
+        }
+        fn now(&self) -> std::time::SystemTime {
+            std::time::UNIX_EPOCH + self.clock.get()
+        }
+        fn wait(&self, d: std::time::Duration) {
+            self.clock.set(self.clock.get() + d);
+        }
+    }
+
     #[test]
     fn a_file_still_growing_is_not_read_until_it_goes_quiet() {
-        let dir = scratch("growing");
-        let file = dir.join("scan.pdf");
-        std::fs::write(&file, b"page 1").unwrap();
-        let quiet = std::time::Duration::from_millis(300);
-        // Written in bursts, more often than it goes quiet.
-        let writer = {
-            let file = file.clone();
-            std::thread::spawn(move || {
-                use std::io::Write;
-                for _ in 0..15 {
-                    std::thread::sleep(std::time::Duration::from_millis(100));
-                    let mut f = std::fs::OpenOptions::new()
-                        .append(true)
-                        .open(&file)
-                        .unwrap();
-                    f.write_all(b" more").unwrap();
-                }
-            })
-        };
-        assert_eq!(settle(&file, quiet, 3).unwrap_err(), STILL_WRITTEN);
-        writer.join().unwrap();
-        // Done: it goes quiet, and is read.
-        assert!(settle(&file, quiet, 3).is_ok());
-        let _ = std::fs::remove_dir_all(&dir);
+        let quiet = std::time::Duration::from_secs(2);
+        // Modified again during every wait: still being written. Each try
+        // looks before and after its wait.
+        let f = Fake::new(&[1000, 2900, 2900, 4800, 4800, 6700], 1500);
+        let got = settle(&|| f.mtime(), &|| f.now(), &mut |d| f.wait(d), quiet, 3);
+        assert_eq!(got.unwrap_err(), STILL_WRITTEN);
+        // Written just now, then left alone: read after one wait.
+        let f = Fake::new(&[1000], 1500);
+        let got = settle(&|| f.mtime(), &|| f.now(), &mut |d| f.wait(d), quiet, 3);
+        assert!(got.is_ok());
+        assert_eq!(f.clock.get(), std::time::Duration::from_millis(3000));
+        // Old enough already: no wait.
+        let f = Fake::new(&[1000], 9000);
+        let got = settle(&|| f.mtime(), &|| f.now(), &mut |d| f.wait(d), quiet, 3);
+        assert!(got.is_ok());
+        assert_eq!(f.clock.get(), std::time::Duration::from_millis(9000));
+        // A time ahead of the clock: the whole quiet period, then unchanged.
+        let f = Fake::new(&[5000], 1500);
+        let got = settle(&|| f.mtime(), &|| f.now(), &mut |d| f.wait(d), quiet, 3);
+        assert!(got.is_ok());
+        assert_eq!(f.clock.get(), std::time::Duration::from_millis(3500));
+    }
+
+    #[test]
+    fn a_file_modified_while_it_was_read_is_refused() {
+        // Quiet when looked at, then modified before the reads finished,
+        // which agreed.
+        let f = Fake::new(&[1000, 6000], 9000);
+        let got = read_local(
+            || f.mtime(),
+            || f.now(),
+            |d| f.wait(d),
+            || Ok(b"same".to_vec()),
+            || Some(4),
+        );
+        assert_eq!(got.unwrap_err(), STILL_WRITTEN);
+        let f = Fake::new(&[1000], 9000);
+        let got = read_local(
+            || f.mtime(),
+            || f.now(),
+            |d| f.wait(d),
+            || Ok(b"same".to_vec()),
+            || Some(4),
+        );
+        assert_eq!(got.unwrap(), b"same");
     }
 
     #[test]
