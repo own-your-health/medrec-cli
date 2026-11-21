@@ -2235,6 +2235,27 @@ mod tests {
     }
 
     #[test]
+    fn the_readme_lists_the_providers_medrec_probes() {
+        // The README's provider table is where the docs send a reader for
+        // this list, so it names exactly these.
+        let readme = include_str!("../README.md");
+        let table = readme
+            .split("\n## Provider CLIs\n")
+            .nth(1)
+            .and_then(|s| s.split("\n## ").next())
+            .expect("a Provider CLIs section");
+        let mut named: Vec<&str> = table
+            .lines()
+            .filter_map(|l| l.strip_prefix("| [`"))
+            .filter_map(|l| l.split('`').next())
+            .collect();
+        let mut known = KNOWN_PROVIDERS.to_vec();
+        named.sort_unstable();
+        known.sort_unstable();
+        assert_eq!(named, known);
+    }
+
+    #[test]
     fn an_empty_null_or_absent_id_is_no_id() {
         for line in [
             r#"{"resourceType":"Patient","id":"","name":[{"family":"Testperson"}]}"#,
