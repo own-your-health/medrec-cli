@@ -185,8 +185,11 @@ pub struct Report {
 
 /// A document intake has read and classified, ready to file.
 pub struct Prepared {
+    /// The bytes read, in a private file: what is analyzed and uploaded,
+    /// whatever happens to the source afterwards.
     pub local: PathBuf,
     _copy: Option<LocalCopy>,
+    _scratch: Option<pk_cli_drive::TempDir>,
     pub kind: filetype::Kind,
     pub sha: String,
     pub md5: String,
@@ -202,8 +205,15 @@ pub struct Prepared {
 /// A signature already filed: (person, document id, signature, type, date).
 pub type Signature = (String, String, Vec<u32>, Option<String>, Option<String>);
 
-/// (item, outcome, and for a duplicate the filed copy's path and MD5).
-type Removable = (usize, usize, Option<(String, String)>);
+/// A source to remove once the indexes are written: the item, its outcome,
+/// the MD5 of the bytes read from it, and for a duplicate the filed copy's
+/// path and MD5.
+struct Removable {
+    item: usize,
+    outcome: usize,
+    read_md5: String,
+    duplicate_of: Option<(String, String)>,
+}
 
 /// Everything already filed that a new document is compared with.
 struct Seen {
@@ -290,11 +300,13 @@ pub fn run(folder: &Folder, cfg: &Config, req: &Request) -> Result<(Report, bool
         {
             mark_duplicate(&mut out, &household, &owner, &id);
             if item.policy == Policy::Move && !req.dry_run {
-                removable.push((
-                    n,
-                    outcomes.len(),
-                    Some((path, item.md5.clone().unwrap_or_default())),
-                ));
+                let md5 = item.md5.clone().unwrap_or_default();
+                removable.push(Removable {
+                    item: n,
+                    outcome: outcomes.len(),
+                    read_md5: md5.clone(),
+                    duplicate_of: Some((path, md5)),
+                });
             }
             outcomes.push(out);
             continue;
@@ -318,7 +330,12 @@ pub fn run(folder: &Folder, cfg: &Config, req: &Request) -> Result<(Report, bool
         if let Some((owner, id, path)) = seen.by_hash.get(&prepared.sha).cloned() {
             mark_duplicate(&mut out, &household, &owner, &id);
             if item.policy == Policy::Move && !req.dry_run {
-                removable.push((n, outcomes.len(), Some((path, prepared.md5.clone()))));
+                removable.push(Removable {
+                    item: n,
+                    outcome: outcomes.len(),
+                    read_md5: prepared.md5.clone(),
+                    duplicate_of: Some((path, prepared.md5.clone())),
+                });
             }
             outcomes.push(out);
             continue;
@@ -409,7 +426,12 @@ pub fn run(folder: &Folder, cfg: &Config, req: &Request) -> Result<(Report, bool
         match stored {
             Ok(()) => {
                 if item.policy == Policy::Move {
-                    removable.push((n, outcomes.len(), None));
+                    removable.push(Removable {
+                        item: n,
+                        outcome: outcomes.len(),
+                        read_md5: prepared.md5.clone(),
+                        duplicate_of: None,
+                    });
                 }
                 outcomes.push(out);
             }
@@ -458,7 +480,13 @@ pub fn run(folder: &Folder, cfg: &Config, req: &Request) -> Result<(Report, bool
             failed = true;
             removable.clear();
         }
-        for (n, o, duplicate_of) in removable {
+        for Removable {
+            item: n,
+            outcome: o,
+            read_md5,
+            duplicate_of,
+        } in removable
+        {
             let out = &mut outcomes[o];
             // A duplicate's source goes only while the copy already filed
             // is still there with the same bytes.
@@ -470,7 +498,7 @@ pub fn run(folder: &Folder, cfg: &Config, req: &Request) -> Result<(Report, bool
                     continue;
                 }
             }
-            match remove_source(&items[n], &folder_stores) {
+            match remove_source(&items[n], &folder_stores, &read_md5) {
                 Ok(r) => out.source_removed = r,
                 Err(e) => {
                     out.error = Some(format!("filed, but the source could not be removed: {e}"))
@@ -665,10 +693,39 @@ fn prepare(
             (copy.path.clone(), Some(copy))
         }
     };
-    let bytes = read_bounded(&local, ctx.max_bytes).map_err(Skip)?;
+    let bytes = if copy.is_some() {
+        read_bounded(&local, ctx.max_bytes)
+    } else {
+        read_local(
+            || modified(&local),
+            std::time::SystemTime::now,
+            std::thread::sleep,
+            || read_bounded(&local, ctx.max_bytes),
+            || std::fs::metadata(&local).ok().map(|m| m.len()),
+        )
+    }
+    .map_err(Skip)?;
     let kind = filetype::identify(&bytes).map_err(|e| Skip(e.to_string()))?;
+    // A file named on the command line is read once, into a private copy,
+    // so its text, its hashes and the upload are one set of bytes even if
+    // it is still being written or synced. A folder's file is a download
+    // already.
+    let (local, scratch) = if copy.is_some() {
+        (local, None)
+    } else {
+        let dir = pk_cli_drive::private_temp_dir("medrec-intake")
+            .map_err(|e| Skip(format!("no private temp dir: {e}")))?;
+        let name = local
+            .file_name()
+            .map(|n| n.to_owned())
+            .unwrap_or_else(|| "document".into());
+        let path = dir.path().join(name);
+        crate::write_private(&path, &bytes).map_err(|e| Skip(e.to_string()))?;
+        (path, Some(dir))
+    };
     let mut p = analyze(ctx, kind, &local, &bytes, &item.name);
     p._copy = copy;
+    p._scratch = scratch;
     apply_given(&mut p.classification, given, given_person);
     Ok(p)
 }
@@ -691,6 +748,7 @@ pub fn analyze(
     Prepared {
         local: local.to_path_buf(),
         _copy: None,
+        _scratch: None,
         kind,
         sha: hash::sha256_hex(bytes),
         md5: hash::md5_hex(bytes),
@@ -715,6 +773,89 @@ pub fn apply_given(class: &mut Classification, given: &Given, person: Option<&st
     if let Some(o) = &given.organization {
         class.organization.set_given(o.clone());
     }
+}
+
+/// How long a file must go unmodified before intake reads it, and how many
+/// times it waits for that.
+const QUIET: std::time::Duration = std::time::Duration::from_secs(2);
+const SETTLE_TRIES: usize = 3;
+const STILL_WRITTEN: &str =
+    "still being written (modified while intake waited to read it); intake it again once it is complete";
+
+fn modified(path: &Path) -> Option<std::time::SystemTime> {
+    std::fs::metadata(path).and_then(|m| m.modified()).ok()
+}
+
+/// A local file's bytes: once it has gone [`QUIET`] unmodified ([`settle`]),
+/// read until two reads agree with its size ([`read_stable`]), and refused
+/// if it was modified while it was read. The clock, the file's modification
+/// time and the wait are passed in, so the rules are tested without timing.
+fn read_local(
+    mtime: impl Fn() -> Option<std::time::SystemTime>,
+    now: impl Fn() -> std::time::SystemTime,
+    mut sleep: impl FnMut(std::time::Duration),
+    read: impl FnMut() -> Result<Vec<u8>, String>,
+    size: impl Fn() -> Option<u64>,
+) -> Result<Vec<u8>, String> {
+    let before = settle(&mtime, &now, &mut sleep, QUIET, SETTLE_TRIES)?;
+    let bytes = read_stable(read, size)?;
+    if mtime() != before {
+        return Err(STILL_WRITTEN.into());
+    }
+    Ok(bytes)
+}
+
+/// Wait until the file has gone `quiet` unmodified, trying `tries` times, so
+/// a file written in bursts (a scanner, a hand-off still copying) is read
+/// whole. Returns its modification time.
+fn settle(
+    mtime: &impl Fn() -> Option<std::time::SystemTime>,
+    now: &impl Fn() -> std::time::SystemTime,
+    sleep: &mut impl FnMut(std::time::Duration),
+    quiet: std::time::Duration,
+    tries: usize,
+) -> Result<Option<std::time::SystemTime>, String> {
+    for _ in 0..tries {
+        let at = mtime();
+        // No metadata: the read that follows says why.
+        let Some(t) = at else { return Ok(None) };
+        // A time ahead of the clock (skew on a synced folder) cannot be
+        // aged, so the whole quiet period is waited.
+        let wait = match now().duration_since(t) {
+            Ok(age) if age >= quiet => return Ok(at),
+            Ok(age) => quiet - age,
+            Err(_) => quiet,
+        };
+        sleep(wait);
+        if mtime() == at {
+            return Ok(at);
+        }
+    }
+    Err(STILL_WRITTEN.into())
+}
+
+/// A local file's bytes, read until two reads in a row agree and are the
+/// size the file system gives. A cloud folder's online-only placeholder
+/// (a File Provider file) can serve other bytes while it downloads, and a
+/// file still being written changes under the read; either is refused
+/// rather than filed as bytes the file does not hold.
+fn read_stable(
+    mut read: impl FnMut() -> Result<Vec<u8>, String>,
+    size: impl Fn() -> Option<u64>,
+) -> Result<Vec<u8>, String> {
+    const READS: usize = 4;
+    let mut last = read()?;
+    for _ in 1..READS {
+        let again = read()?;
+        if again == last && size() == Some(again.len() as u64) {
+            return Ok(again);
+        }
+        last = again;
+    }
+    Err(format!(
+        "read differently {READS} times in a row (a placeholder still downloading, or a file \
+         still being written); intake it again once it is complete"
+    ))
 }
 
 fn read_bounded(path: &Path, max: u64) -> Result<Vec<u8>, String> {
@@ -1000,7 +1141,31 @@ fn hold_for_review(
     })
 }
 
-fn remove_source(item: &Item, stores: &[Store]) -> Result<bool, CliError> {
+/// Remove a moved source, unless it is not the bytes that were read: one
+/// changed since (still being written or synced) stays.
+fn remove_source(item: &Item, stores: &[Store], read_md5: &str) -> Result<bool, CliError> {
+    let now = match &item.from {
+        From::Local(p) if p.is_file() => Some(crate::store::md5_file(p)?),
+        From::Local(_) => None,
+        From::Folder { store, rel } => {
+            let store = &stores[*store];
+            match store.md5(rel)? {
+                Some(m) => Some(m),
+                // A remote that lists no MD5 (OneDrive, Dropbox, crypt): the
+                // file is downloaded again and hashed.
+                None if store.exists(rel)? => {
+                    let copy = store.fetch(rel)?;
+                    Some(crate::store::md5_file(&copy.path)?)
+                }
+                None => None,
+            }
+        }
+    };
+    if now.as_deref().is_some_and(|m| m != read_md5) {
+        return Err(CliError::Other(
+            "it changed after it was read, so it was kept; file it again".into(),
+        ));
+    }
     match &item.from {
         From::Local(p) => match std::fs::remove_file(p) {
             Ok(()) => Ok(true),
@@ -1090,4 +1255,201 @@ fn file_name(p: &Path) -> String {
     p.file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "document".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("medrec-intake-test-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn local_item(path: &Path) -> Item {
+        Item {
+            from: From::Local(path.to_path_buf()),
+            name: "statement.pdf".into(),
+            origin: "file",
+            policy: Policy::Move,
+            size: None,
+            md5: None,
+        }
+    }
+
+    #[test]
+    fn a_named_file_is_read_once_into_a_private_copy() {
+        let dir = scratch("copy");
+        let source = dir.join("statement.pdf");
+        std::fs::write(&source, crate::pdfgen::text_pdf(&["Example", "first"])).unwrap();
+        let cfg = Config::default();
+        let ctx = Context {
+            tools: text::Tools::from_path(),
+            opts: text::Options {
+                languages: cfg.ocr_languages(),
+                max_ocr_pages: cfg.ocr_max_pages(),
+            },
+            people: Vec::new(),
+            organizations: Vec::new(),
+            today: "2026-11-21".into(),
+            max_bytes: 1 << 20,
+        };
+        let Ok(p) = prepare(&local_item(&source), &[], &ctx, &Given::default(), None) else {
+            panic!("prepared");
+        };
+        // The source is rewritten after it was read, as a file still being
+        // written or synced is: the upload is still the bytes hashed.
+        std::fs::write(&source, crate::pdfgen::text_pdf(&["Example", "second"])).unwrap();
+        assert_ne!(p.local, source);
+        assert_eq!(crate::store::md5_file(&p.local).unwrap(), p.md5);
+        assert_ne!(crate::store::md5_file(&source).unwrap(), p.md5);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_file_is_taken_only_once_two_reads_agree_with_its_size() {
+        let reads = |seq: Vec<&'static [u8]>| {
+            let mut it = seq.into_iter();
+            move || Ok(it.next().expect("no more reads").to_vec())
+        };
+        // A placeholder that serves part of itself first.
+        let got = read_stable(reads(vec![b"pa", b"partial", b"partial"]), || Some(7));
+        assert_eq!(got.unwrap(), b"partial");
+        // Two reads agree, but the file system gives another size.
+        let got = read_stable(reads(vec![b"abc", b"abc", b"abcdef", b"abcdef"]), || {
+            Some(6)
+        });
+        assert_eq!(got.unwrap(), b"abcdef");
+        // A file that never settles is refused.
+        let got = read_stable(reads(vec![b"a", b"ab", b"abc", b"abcd"]), || Some(4));
+        assert!(got.unwrap_err().contains("read differently"));
+    }
+
+    #[test]
+    fn a_folder_source_is_removed_only_while_it_has_the_bytes_read() {
+        let dir = scratch("folder");
+        let store = Store::open(
+            &crate::store::Location::Dir(dir.clone()),
+            crate::store::Reads::Fresh,
+            std::time::Duration::from_secs(5),
+        );
+        let file = dir.join("scan.pdf");
+        std::fs::write(&file, b"the bytes read").unwrap();
+        let read = crate::store::md5_file(&file).unwrap();
+        let item = Item {
+            from: From::Folder {
+                store: 0,
+                rel: "scan.pdf".into(),
+            },
+            ..local_item(&file)
+        };
+        let stores = [store];
+        std::fs::write(&file, b"the bytes since").unwrap();
+        assert!(remove_source(&item, &stores, &read).is_err());
+        assert!(file.exists(), "kept");
+        std::fs::write(&file, b"the bytes read").unwrap();
+        assert!(remove_source(&item, &stores, &read).unwrap());
+        assert!(!file.exists(), "removed");
+        // Gone already: nothing to remove.
+        assert!(!remove_source(&item, &stores, &read).unwrap());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A file whose modification time is `times[n]` on the nth look, on a
+    /// clock that each wait moves forward.
+    struct Fake {
+        times: Vec<u64>,
+        look: std::cell::Cell<usize>,
+        clock: std::cell::Cell<std::time::Duration>,
+    }
+
+    impl Fake {
+        fn new(times: &[u64], at_ms: u64) -> Self {
+            Fake {
+                times: times.to_vec(),
+                look: std::cell::Cell::new(0),
+                clock: std::cell::Cell::new(std::time::Duration::from_millis(at_ms)),
+            }
+        }
+        fn mtime(&self) -> Option<std::time::SystemTime> {
+            let n = self.look.get();
+            self.look.set(n + 1);
+            let ms = self.times[n.min(self.times.len() - 1)];
+            Some(std::time::UNIX_EPOCH + std::time::Duration::from_millis(ms))
+        }
+        fn now(&self) -> std::time::SystemTime {
+            std::time::UNIX_EPOCH + self.clock.get()
+        }
+        fn wait(&self, d: std::time::Duration) {
+            self.clock.set(self.clock.get() + d);
+        }
+    }
+
+    #[test]
+    fn a_file_still_growing_is_not_read_until_it_goes_quiet() {
+        let quiet = std::time::Duration::from_secs(2);
+        // Modified again during every wait: still being written. Each try
+        // looks before and after its wait.
+        let f = Fake::new(&[1000, 2900, 2900, 4800, 4800, 6700], 1500);
+        let got = settle(&|| f.mtime(), &|| f.now(), &mut |d| f.wait(d), quiet, 3);
+        assert_eq!(got.unwrap_err(), STILL_WRITTEN);
+        // Written just now, then left alone: read after one wait.
+        let f = Fake::new(&[1000], 1500);
+        let got = settle(&|| f.mtime(), &|| f.now(), &mut |d| f.wait(d), quiet, 3);
+        assert!(got.is_ok());
+        assert_eq!(f.clock.get(), std::time::Duration::from_millis(3000));
+        // Old enough already: no wait.
+        let f = Fake::new(&[1000], 9000);
+        let got = settle(&|| f.mtime(), &|| f.now(), &mut |d| f.wait(d), quiet, 3);
+        assert!(got.is_ok());
+        assert_eq!(f.clock.get(), std::time::Duration::from_millis(9000));
+        // A time ahead of the clock: the whole quiet period, then unchanged.
+        let f = Fake::new(&[5000], 1500);
+        let got = settle(&|| f.mtime(), &|| f.now(), &mut |d| f.wait(d), quiet, 3);
+        assert!(got.is_ok());
+        assert_eq!(f.clock.get(), std::time::Duration::from_millis(3500));
+    }
+
+    #[test]
+    fn a_file_modified_while_it_was_read_is_refused() {
+        // Quiet when looked at, then modified before the reads finished,
+        // which agreed.
+        let f = Fake::new(&[1000, 6000], 9000);
+        let got = read_local(
+            || f.mtime(),
+            || f.now(),
+            |d| f.wait(d),
+            || Ok(b"same".to_vec()),
+            || Some(4),
+        );
+        assert_eq!(got.unwrap_err(), STILL_WRITTEN);
+        let f = Fake::new(&[1000], 9000);
+        let got = read_local(
+            || f.mtime(),
+            || f.now(),
+            |d| f.wait(d),
+            || Ok(b"same".to_vec()),
+            || Some(4),
+        );
+        assert_eq!(got.unwrap(), b"same");
+    }
+
+    #[test]
+    fn a_moved_source_that_changed_after_it_was_read_is_kept() {
+        let dir = scratch("remove");
+        let source = dir.join("statement.pdf");
+        std::fs::write(&source, b"the bytes read").unwrap();
+        let read = crate::store::md5_file(&source).unwrap();
+        std::fs::write(&source, b"the bytes since").unwrap();
+        let item = local_item(&source);
+        assert!(remove_source(&item, &[], &read).is_err());
+        assert!(source.exists(), "kept");
+        let now = crate::store::md5_file(&source).unwrap();
+        assert!(remove_source(&item, &[], &now).unwrap());
+        assert!(!source.exists(), "removed");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
