@@ -14,33 +14,85 @@ Part of the `piekstra-cli/1` family. It is built on
 [cli-common](https://github.com/piekstra/cli-common) and
 [medical-common](https://github.com/piekstra/medical-common).
 
-> Unofficial. `medrec` is not affiliated with or endorsed by Google, Epic,
-> Kaiser Permanente, athenahealth, UnitedHealthcare or the Weasis project.
-> It is not a medical device and gives no medical advice.
+It is for anyone keeping their own or their family's records: there is no
+account, no server and no one else's copy. The folder is yours, in your own
+Google Drive (or a local directory), and every file in it is a plain PDF,
+image, DICOM file or JSON document you can open without medrec.
+
+> Unofficial. `medrec` is not affiliated with or endorsed by Google, the
+> Weasis project, or any provider, insurer, pharmacy, lab or portal named
+> here. It is not a medical device and gives no medical advice.
 
 ## Install
 
+A release, for macOS (Apple silicon or Intel) or Linux:
+
 ```sh
-make install                          # from a checkout, signed for macOS
-brew install poppler tesseract        # text extraction and OCR (local)
+T=aarch64-apple-darwin                # or x86_64-apple-darwin, x86_64-unknown-linux-gnu
+curl -LO https://github.com/piekstra/medrec-cli/releases/latest/download/medrec-$T.tar.gz
+curl -LO https://github.com/piekstra/medrec-cli/releases/latest/download/medrec-$T.tar.gz.sha256
+shasum -a 256 -c medrec-$T.tar.gz.sha256
+tar -xzf medrec-$T.tar.gz && install -m 0755 medrec ~/.local/bin/   # any directory on PATH
+medrec self-update                    # later releases
+```
+
+Or from source (Rust 1.89 or later): `cargo install --git
+https://github.com/piekstra/medrec-cli --locked`, or `make install` from a
+checkout. medrec reads no Keychain item, so an unsigned build asks for no
+approval.
+
+The tools it runs, all local (Homebrew on macOS; on Linux, your package
+manager's `rclone`, `poppler-utils` and `tesseract-ocr`):
+
+```sh
 brew install rclone                   # the Drive folder
+brew install poppler tesseract        # text extraction and OCR
 ```
 
 Weasis (https://weasis.org) is the default DICOM viewer. Another viewer is
 set with `medrec config set viewer <app or executable>`, or `none` to only
 copy a study.
 
-## Set up
+## Quick start
 
-```sh
-rclone config                                   # a Drive remote, e.g. `gdrive`
-medrec profiles add home                        # one profile per records folder
-export MEDREC_PROFILE=home                      # or --profile home on each command
-medrec init "gdrive:Medical Records"            # creates the folder layout
-medrec people add "Alex Example" --birth-date 1990-01-01 --adult
-medrec people add "Robin Example" --birth-date 2020-02-02 --guardian Alex
-medrec doctor                                   # FileVault, rclone, free space, tools
-```
+1. **A Drive remote.** `rclone config` adds one (here `gdrive`); it opens a
+   browser for Google's sign-in, and rclone keeps and refreshes the token.
+   A local directory works too, with no remote.
+2. **A records folder and the people in it.**
+
+   ```sh
+   medrec profiles add home                        # one profile per records folder
+   export MEDREC_PROFILE=home                      # or --profile home on each command
+   medrec init "gdrive:Medical Records"            # creates the folder layout
+   medrec people add "Alex Example" --birth-date 1990-01-01 --adult
+   medrec people add "Robin Example" --birth-date 2020-02-02 --guardian Alex
+   medrec doctor                                   # FileVault, rclone, free space, tools
+   ```
+
+3. **Documents you already have.** `medrec intake ~/Downloads/lab.pdf`
+   files one; anything dropped in the folder's `inbox/` is filed by
+   `medrec intake --inbox`. What intake cannot decide waits in
+   `medrec review list`.
+4. **Records from a provider.** Install its CLI ([Provider
+   CLIs](#provider-clis)), do its one-time setup, and sign in as its README
+   says. Then medrec runs its export and files what it returns:
+
+   ```sh
+   medrec providers list                           # the provider CLIs on PATH
+   <cli> profiles add <LOGIN>                      # one per account at the provider
+   <cli> auth login --profile <LOGIN> …            # a browser sign-in; the flags are the CLI's
+   <cli> patients list --profile <LOGIN>           # who the sign-in can read
+   medrec import --from <cli> --from-profile <LOGIN> --patient <WHO> --person Alex
+   ```
+
+   Importing again later files only what changed.
+5. **Check the folder.** `medrec verify` reads every indexed file back
+   against the index.
+
+What needs you: Google's sign-in in step 1, and at each provider its
+one-time registration (the CLIs that need one) and every sign-in, code and
+consent. How long a provider's sign-in lasts is in its README. Everything
+else runs without you.
 
 `init` adopts an existing medrec folder, and refuses a folder that holds
 other files unless given `--allow-other-files`. The folder's layout and every file format
@@ -76,6 +128,36 @@ machine's settings at the top and each profile's under `profiles.<NAME>`.
 With a profile named, it and `config set|unset` of a profile key also give
 `profile` and that profile's `folder`, `mount`, `inbox` and `me` at the
 top, where they were before 0.2.0.
+
+## Provider CLIs
+
+medrec signs in nowhere: each source has its own CLI, which writes the
+`records-stream/v1` stream medrec imports
+([medical-common](https://github.com/piekstra/medical-common)'s
+`health-records/v1` profile). `medrec providers list` probes these names;
+any other CLI on that profile is added with `medrec config set providers
+<cli>,<cli>`.
+
+| CLI | Source | What it reads | Before the first sign-in |
+|---|---|---|---|
+| [`mychart`](https://github.com/piekstra/mychart-cli) | Any Epic MyChart organization | Health records | A developer app at Epic ([registration](https://github.com/piekstra/mychart-cli/blob/main/docs/registration.md)) |
+| [`athena`](https://github.com/piekstra/athena-cli) | athenahealth practices | Health records | A developer app at athenahealth ([registration](https://github.com/piekstra/athena-cli/blob/main/docs/registration.md)) |
+| [`kp`](https://github.com/piekstra/kaiser-cli) | Kaiser Permanente, the health plan | Claims and coverage | A developer app at Kaiser ([registration](https://github.com/piekstra/kaiser-cli/blob/main/docs/registration.md)) |
+| [`modmed`](https://github.com/piekstra/modmed-cli) | ModMed practices | Health records | A developer app at ModMed ([registration](https://github.com/piekstra/modmed-cli/blob/main/docs/registration.md)) |
+| [`icanotes`](https://github.com/piekstra/icanotes-cli) | ICANotes practices | Health records | An API key the practice's patient portal generates ([setup](https://github.com/piekstra/icanotes-cli/blob/main/docs/registration.md)) |
+| [`uhc`](https://github.com/piekstra/uhc-cli) | UnitedHealthcare | Coverage, claims, EOBs | None: a member site ([README](https://github.com/piekstra/uhc-cli#readme)) |
+| [`caremark`](https://github.com/piekstra/caremark-cli) | CVS Caremark | Prescription fills, pharmacy claims | None: a member site ([README](https://github.com/piekstra/caremark-cli#readme)) |
+| [`labcorp`](https://github.com/piekstra/labcorp-cli) | Labcorp Patient | Lab results and report PDFs | None: a member site ([README](https://github.com/piekstra/labcorp-cli#readme)) |
+| [`oneblood`](https://github.com/piekstra/oneblood-cli) | OneBlood | A donor's blood type and readings | None: a member site ([README](https://github.com/piekstra/oneblood-cli#readme)) |
+| [`fertemr`](https://github.com/piekstra/fertemr-cli) | Fertility clinics on the FERT EMR | Results, visits, documents, messages | None: a member site ([README](https://github.com/piekstra/fertemr-cli#readme)) |
+| [`salve`](https://github.com/piekstra/salve-cli) | The Salve fertility app | Documents, forms, treatment records | None: a member site ([README](https://github.com/piekstra/salve-cli#readme)) |
+
+A developer app is free and registered once, by the person who uses the
+CLI; each registration doc walks through the vendor's form, and the CLI's
+`registration` command prints the values to enter. A member site needs only
+your own sign-in; its README says what the site's terms say about automated
+access. A provider whose site offers downloads instead (statements, an
+export) is imported from them with `--from-files` (below).
 
 ## Use
 
