@@ -205,7 +205,6 @@ pub struct Prepared {
 /// A signature already filed: (person, document id, signature, type, date).
 pub type Signature = (String, String, Vec<u32>, Option<String>, Option<String>);
 
-/// (item, outcome, and for a duplicate the filed copy's path and MD5).
 /// A source to remove once the indexes are written: the item, its outcome,
 /// the MD5 of the bytes read from it, and for a duplicate the filed copy's
 /// path and MD5.
@@ -1086,7 +1085,19 @@ fn remove_source(item: &Item, stores: &[Store], read_md5: &str) -> Result<bool, 
     let now = match &item.from {
         From::Local(p) if p.is_file() => Some(crate::store::md5_file(p)?),
         From::Local(_) => None,
-        From::Folder { store, rel } => stores[*store].md5(rel)?,
+        From::Folder { store, rel } => {
+            let store = &stores[*store];
+            match store.md5(rel)? {
+                Some(m) => Some(m),
+                // A remote that lists no MD5 (OneDrive, Dropbox, crypt): the
+                // file is downloaded again and hashed.
+                None if store.exists(rel)? => {
+                    let copy = store.fetch(rel)?;
+                    Some(crate::store::md5_file(&copy.path)?)
+                }
+                None => None,
+            }
+        }
     };
     if now.as_deref().is_some_and(|m| m != read_md5) {
         return Err(CliError::Other(
@@ -1253,6 +1264,36 @@ mod tests {
         // A file that never settles is refused.
         let got = read_stable(reads(vec![b"a", b"ab", b"abc", b"abcd"]), || Some(4));
         assert!(got.unwrap_err().contains("read differently"));
+    }
+
+    #[test]
+    fn a_folder_source_is_removed_only_while_it_has_the_bytes_read() {
+        let dir = scratch("folder");
+        let store = Store::open(
+            &crate::store::Location::Dir(dir.clone()),
+            crate::store::Reads::Fresh,
+            std::time::Duration::from_secs(5),
+        );
+        let file = dir.join("scan.pdf");
+        std::fs::write(&file, b"the bytes read").unwrap();
+        let read = crate::store::md5_file(&file).unwrap();
+        let item = Item {
+            from: From::Folder {
+                store: 0,
+                rel: "scan.pdf".into(),
+            },
+            ..local_item(&file)
+        };
+        let stores = [store];
+        std::fs::write(&file, b"the bytes since").unwrap();
+        assert!(remove_source(&item, &stores, &read).is_err());
+        assert!(file.exists(), "kept");
+        std::fs::write(&file, b"the bytes read").unwrap();
+        assert!(remove_source(&item, &stores, &read).unwrap());
+        assert!(!file.exists(), "removed");
+        // Gone already: nothing to remove.
+        assert!(!remove_source(&item, &stores, &read).unwrap());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

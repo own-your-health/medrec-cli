@@ -273,7 +273,8 @@ text, their hashes and the upload all come from it. A cloud folder's
 online-only placeholder that serves other bytes while it downloads, or a
 file still being written, is skipped with a reason rather than filed as
 bytes the file does not hold. A moved source is kept, not removed, when it
-no longer has the bytes filed (0.2.10 and later).
+no longer has the bytes filed, checked by its MD5 (a remote that lists none
+is downloaded again and hashed; 0.2.10 and later).
 
 ### How a document is filed
 
