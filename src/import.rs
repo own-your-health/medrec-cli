@@ -1653,14 +1653,7 @@ fn owner(resource_type: &str, v: &Value) -> Option<Owner> {
                 .and_then(|t| normalize::codeable(t, &[normalize::LOINC]));
             o.type_code = concept.as_ref().and_then(|c| c.code.clone());
             o.type_text = concept.and_then(|c| c.display);
-            // A billing CLI types a statement or a receipt by text alone
-            // (`bill`, `receipt`): a house type by its code.
-            o.doc_type = text("type.text").and_then(|t| {
-                classify::DOC_TYPES
-                    .iter()
-                    .find(|d| d.0.eq_ignore_ascii_case(t.trim()))
-                    .map(|d| d.0)
-            });
+            o.doc_type = house_doc_type(v);
             o.date = date(&["date", "context.period.start"]);
             o.title = text("description").or_else(|| text("content.0.attachment.title"));
             o.urls = urls("content", "attachment.url");
@@ -1688,6 +1681,47 @@ fn owner(resource_type: &str, v: &Value) -> Option<Owner> {
     }
     Some(o)
 }
+
+/// The house document type a DocumentReference names: a `type.coding` in
+/// [`DOC_TYPE_SYSTEM`] with a house type's code, or, on a type with no LOINC
+/// code, `type.text` `bill` or `receipt` (a billing CLI's statement or
+/// receipt). Any other text is a display, and a LOINC code decides.
+fn house_doc_type(v: &Value) -> Option<&'static str> {
+    let house = |code: &str| {
+        classify::DOC_TYPES
+            .iter()
+            .find(|d| d.0 == code)
+            .map(|d| d.0)
+    };
+    let codings = v
+        .pointer("/type/coding")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten();
+    let mut loinc = false;
+    for c in codings {
+        match c.get("system").and_then(Value::as_str) {
+            Some(DOC_TYPE_SYSTEM) => {
+                if let Some(t) = c.get("code").and_then(Value::as_str).and_then(house) {
+                    return Some(t);
+                }
+            }
+            Some(normalize::LOINC) => loinc = true,
+            _ => {}
+        }
+    }
+    if loinc {
+        return None;
+    }
+    normalize::path_str(v, "type.text")
+        .map(|t| t.trim().to_ascii_lowercase())
+        .filter(|t| matches!(t.as_str(), "bill" | "receipt"))
+        .and_then(|t| house(&t))
+}
+
+/// The code system for medrec's house document types on a
+/// DocumentReference's `type.coding`.
+pub const DOC_TYPE_SYSTEM: &str = "urn:pk-med:doc-type";
 
 /// A DiagnosticReport's category (HL7 v2 table 0074) as medrec's document
 /// type: a lab report, or an imaging one.
@@ -1915,7 +1949,7 @@ fn file_binaries(
             classification: None,
             provenance: prov,
         };
-        crate::bill::annotate(&mut doc, &extracted.text, index);
+        crate::bill::annotate(&mut doc, &extracted.text, index, texts);
         if doc.same_statement_as.is_some() {
             filed.same_statement += 1;
         }
@@ -2274,6 +2308,33 @@ mod tests {
         named.sort_unstable();
         known.sort_unstable();
         assert_eq!(named, known);
+    }
+
+    #[test]
+    fn a_document_reference_names_a_house_type_by_its_system_or_a_bills_text() {
+        let dr = |ty: Value| serde_json::json!({"resourceType": "DocumentReference", "type": ty});
+        let cases = [
+            (serde_json::json!({"text": "bill"}), Some("bill")),
+            (serde_json::json!({"text": " Receipt "}), Some("receipt")),
+            (
+                serde_json::json!({"coding": [{"system": DOC_TYPE_SYSTEM, "code": "receipt"}], "text": "Payment"}),
+                Some("receipt"),
+            ),
+            // Another house word is a display, not a type.
+            (serde_json::json!({"text": "Letter"}), None),
+            // A LOINC code decides over the text.
+            (
+                serde_json::json!({"coding": [{"system": normalize::LOINC, "code": "34133-9"}], "text": "Bill"}),
+                None,
+            ),
+            (
+                serde_json::json!({"coding": [{"system": DOC_TYPE_SYSTEM, "code": "not-a-type"}]}),
+                None,
+            ),
+        ];
+        for (ty, want) in cases {
+            assert_eq!(house_doc_type(&dr(ty.clone())), want, "{ty}");
+        }
     }
 
     #[test]

@@ -281,10 +281,10 @@ pub fn file(folder: &Folder, req: &FileRequest) -> Result<Filed, CliError> {
             filed_by: filed_by(),
         },
     };
-    crate::bill::annotate(&mut doc, &item.text, &index);
+    let mut texts = folder.text(&person)?;
+    crate::bill::annotate(&mut doc, &item.text, &mut index, &texts);
     index.documents.push(doc);
     crate::imaging::link_reports(&mut index);
-    let mut texts = folder.text(&person)?;
     if !item.text.is_empty() {
         texts.texts.insert(id.clone(), item.text.clone());
     }

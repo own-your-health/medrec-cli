@@ -13,7 +13,7 @@ use std::sync::OnceLock;
 use regex::Regex;
 
 use crate::intake::classify::all_dates;
-use crate::model::{Amount, Document, PersonIndex, Statement};
+use crate::model::{Amount, Document, PersonIndex, PersonText, Statement};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Field {
@@ -150,13 +150,20 @@ fn starts_with(hay: &[char], needle: &str) -> bool {
     hay.len() >= n.len() && hay[..n.len()] == n[..]
 }
 
-/// What follows a label on its line: past the separators, up to the next
-/// gap of two or more spaces.
+/// What follows a label on its line: past whitespace, a colon, and a dash
+/// or dot standing alone (`Amount due - $12.00`), so a credit's sign
+/// (`-$12.00`) stays; up to the next gap of two or more spaces.
 fn segment_after(rest: &[char]) -> String {
-    let start = rest
-        .iter()
-        .position(|c| !(c.is_whitespace() || matches!(c, ':' | '-' | '.')))
-        .unwrap_or(rest.len());
+    let mut start = 0;
+    while let Some(&c) = rest.get(start) {
+        let alone =
+            matches!(c, '-' | '.') && rest.get(start + 1).is_some_and(|n| n.is_whitespace());
+        if c.is_whitespace() || c == ':' || alone {
+            start += 1;
+        } else {
+            break;
+        }
+    }
     let rest = &rest[start..];
     let end = (0..rest.len())
         .find(|&j| rest[j] == ' ' && rest.get(j + 1) == Some(&' '))
@@ -288,7 +295,8 @@ fn same_account(a: &str, b: &str) -> bool {
     if a == b {
         return true;
     }
-    let masked = |s: &str| s.contains('*') || s.contains("XX");
+    // A mask is asterisks anywhere, or a leading run of two or more `X`s.
+    let masked = |s: &str| s.contains('*') || s.starts_with("XX");
     let shown = |s: &str| -> String {
         let tail: String = s.chars().rev().take_while(char::is_ascii_digit).collect();
         tail.chars().rev().collect()
@@ -302,19 +310,47 @@ fn same_account(a: &str, b: &str) -> bool {
 }
 
 /// Give a bill its statement, read from `text`, and point it at the bill
-/// filed before that is the same statement, if one is.
-pub fn annotate(doc: &mut Document, text: &str, index: &PersonIndex) {
+/// filed before that is the same statement, if one is. The bills filed
+/// before it get theirs first where they have none ([`backfill`]).
+pub fn annotate(doc: &mut Document, text: &str, index: &mut PersonIndex, texts: &PersonText) {
     if doc.doc_type.as_deref() != Some("bill") {
         return;
     }
+    backfill(index, texts);
     let Some(st) = read(text) else { return };
-    doc.same_statement_as = index
-        .documents
-        .iter()
-        .filter(|d| d.id != doc.id && d.doc_type.as_deref() == Some("bill"))
-        .find(|d| d.statement.as_ref().is_some_and(|s| same_statement(s, &st)))
-        .map(|d| d.same_statement_as.clone().unwrap_or_else(|| d.id.clone()));
+    doc.same_statement_as = first_same(&index.documents, &doc.id, &st);
     doc.statement = Some(st);
+}
+
+/// A bill with no statement, filed before 0.2.9 or saved since by an
+/// older medrec (which drops the fields it does not know), gets it again
+/// from its stored text, and its link to the bill filed before it that is
+/// the same statement, in filing order.
+pub fn backfill(index: &mut PersonIndex, texts: &PersonText) {
+    for i in 0..index.documents.len() {
+        let d = &index.documents[i];
+        if d.doc_type.as_deref() != Some("bill") || d.statement.is_some() {
+            continue;
+        }
+        let Some(st) = texts.texts.get(&d.id).and_then(|t| read(t)) else {
+            continue;
+        };
+        let same = first_same(&index.documents[..i], &d.id, &st);
+        let d = &mut index.documents[i];
+        if d.same_statement_as.is_none() {
+            d.same_statement_as = same;
+        }
+        d.statement = Some(st);
+    }
+}
+
+/// The first bill in `docs`, other than `id`, that is the same statement as
+/// `st`: the one its chain starts with.
+fn first_same(docs: &[Document], id: &str, st: &Statement) -> Option<String> {
+    docs.iter()
+        .filter(|d| d.id != id && d.doc_type.as_deref() == Some("bill"))
+        .find(|d| d.statement.as_ref().is_some_and(|s| same_statement(s, st)))
+        .map(|d| d.same_statement_as.clone().unwrap_or_else(|| d.id.clone()))
 }
 
 #[cfg(test)]
@@ -370,6 +406,31 @@ mod tests {
             !same_statement(&a, &dated_only),
             "a date alone is not enough"
         );
+        let mut due_later = b.clone();
+        due_later.due_date = Some("2026-12-15".into());
+        assert!(!same_statement(&a, &due_later), "a due date that differs");
+        let mut undated = b.clone();
+        undated.statement_date = None;
+        assert!(!same_statement(&a, &undated), "no statement date");
+        assert!(!same_statement(&undated, &a), "no statement date");
+    }
+
+    #[test]
+    fn a_label_followed_by_text_takes_no_value_from_the_next_line() {
+        assert_eq!(read("Please pay online\n$5.00\n"), None);
+    }
+
+    #[test]
+    fn a_credit_read_from_a_line_keeps_its_sign() {
+        for text in [
+            "Statement date: 11/02/2026\nBalance due: -$12.00\n",
+            "Statement date: 11/02/2026\nBalance due: ($12.00)\n",
+            "Statement date: 11/02/2026\nBalance due - -12.00\n",
+        ] {
+            assert_eq!(read(text).unwrap().amount_due, usd("-12.00"), "{text}");
+        }
+        let plain = read("Balance due - $12.00\n").unwrap();
+        assert_eq!(plain.amount_due, usd("12.00"), "a dash standing alone");
     }
 
     #[test]
@@ -404,5 +465,74 @@ mod tests {
         assert!(same_account("XXXX0123", "****0123"));
         assert!(!same_account("****0124", "EX-000123"));
         assert!(!same_account("**23", "EX-000123"), "two digits are too few");
+        assert!(
+            !same_account("AXX1234", "BXX1234"),
+            "letters inside a number are no mask"
+        );
+        assert!(!same_account("AXX1234", "ZZ01234"));
+    }
+
+    fn bill(id: &str) -> Document {
+        serde_json::from_value(serde_json::json!({
+            "id": id, "path": format!("Robin/Claims/2026/{id}.pdf"), "sha256": id, "md5": id,
+            "size": 1, "media_type": "application/pdf", "doc_type": "bill",
+            "filed_at": "2026-11-21T00:00:00Z",
+            "origin": {"kind": "file", "action": "copied"},
+            "provenance": {"source": {"kind": "scan"}, "method": "file",
+                           "filed_at": "2026-11-21T00:00:00Z", "filed_by": "medrec 0.2.9"}
+        }))
+        .unwrap()
+    }
+
+    fn no_texts() -> PersonText {
+        PersonText {
+            schema: "medrec-text/v1".into(),
+            person: "p_test".into(),
+            texts: Default::default(),
+        }
+    }
+
+    #[test]
+    fn copies_of_one_statement_point_at_the_first_and_old_bills_are_read_again() {
+        let mut index = PersonIndex::new("p_test");
+        let mut texts = no_texts();
+        // Filed before 0.2.9: a bill with its text and no statement.
+        index.documents.push(bill("d_old"));
+        texts.texts.insert("d_old".into(), INLINE.into());
+        let mut second = bill("d_second");
+        annotate(&mut second, COLUMNS, &mut index, &texts);
+        assert_eq!(
+            index.documents[0]
+                .statement
+                .as_ref()
+                .and_then(|s| s.account.as_deref()),
+            Some("****0123"),
+            "the old bill is read again"
+        );
+        assert_eq!(second.same_statement_as.as_deref(), Some("d_old"));
+        index.documents.push(second);
+        // A third copy points at the first, not at the second.
+        let mut third = bill("d_third");
+        annotate(&mut third, COLUMNS, &mut index, &texts);
+        assert_eq!(third.same_statement_as.as_deref(), Some("d_old"));
+        // Another document type is left alone.
+        let mut letter = bill("d_letter");
+        letter.doc_type = Some("letter".into());
+        annotate(&mut letter, COLUMNS, &mut index, &texts);
+        assert_eq!((letter.statement, letter.same_statement_as), (None, None));
+    }
+
+    #[test]
+    fn a_bill_saved_by_an_older_medrec_gets_its_link_again() {
+        let mut index = PersonIndex::new("p_test");
+        let mut texts = no_texts();
+        for (id, text) in [("d_a", INLINE), ("d_b", COLUMNS)] {
+            index.documents.push(bill(id));
+            texts.texts.insert(id.into(), text.into());
+        }
+        backfill(&mut index, &texts);
+        assert!(index.documents[0].statement.is_some());
+        assert_eq!(index.documents[0].same_statement_as, None);
+        assert_eq!(index.documents[1].same_statement_as.as_deref(), Some("d_a"));
     }
 }

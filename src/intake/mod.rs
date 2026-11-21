@@ -873,7 +873,8 @@ fn file_document(
     let index = indexes
         .get_mut(&person.id)
         .ok_or_else(|| CliError::Other(format!("no index loaded for {}", person.id)))?;
-    crate::bill::annotate(&mut doc, &prepared.extracted.text, index);
+    let person_texts = texts.get(&person.id).expect("loaded above");
+    crate::bill::annotate(&mut doc, &prepared.extracted.text, index, person_texts);
     let same_statement_as = doc.same_statement_as.clone();
     index.documents.push(doc);
     Ok(Filed {

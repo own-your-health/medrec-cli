@@ -155,9 +155,16 @@ exports later are known to be one. They are one when both give the same
 statement date, nothing both give differs, and both give the same account
 number (a masked one matching by its last four or more digits) or the
 same amount due. The one filed later keeps its own file and sets
-`same_statement_as` to the first one's id. A billing CLI types a
-statement `bill` and a payment receipt `receipt` by the
-DocumentReference's `type.text`.
+`same_statement_as` to the first one's id. A bill filed before 0.2.9, or
+saved since by an older medrec (which drops fields it does not know), gets
+its statement and link again from its stored text the next time a bill is
+filed for that person.
+
+A DocumentReference names a house type with a `type.coding` in the system
+`urn:pk-med:doc-type` (code `bill`, `receipt`, or any type above). With no
+such coding and no LOINC code, a `type.text` of `bill` or `receipt` (any
+case) is that type. Otherwise the LOINC code decides, and other text is
+only a display.
 
 **Record**, one normalized clinical fact: `id`, `kind` (`encounter`,
 `result`, `report`, `condition`, `medication`, `allergy`, `immunization`,

@@ -244,7 +244,7 @@ struct GivenArgs {
 #[derive(Args, Debug)]
 #[command(
     after_help = "Document types: visit_summary, lab_report, imaging_report, immunization_record, \
-discharge_summary, referral, prescription, letter, bill, eob, insurance_card, other.\n\n\
+discharge_summary, referral, prescription, letter, bill, receipt, eob, insurance_card, other.\n\n\
 Files from the inbox and ~/Downloads are moved (removed once filed and read back); \
 other files and Drive folders are copied. --move moves named files too; --keep copies everything."
 )]

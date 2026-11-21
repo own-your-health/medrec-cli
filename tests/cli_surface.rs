@@ -393,3 +393,22 @@ fn config_round_trips() {
     assert!(v.get("viewer").is_none());
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn intake_help_lists_every_document_type() {
+    let out = medrec().args(["intake", "--help"]).output().unwrap();
+    let help = String::from_utf8_lossy(&out.stdout);
+    let line = help
+        .lines()
+        .find(|l| l.starts_with("Document types: "))
+        .expect("a Document types line");
+    let listed: Vec<&str> = line["Document types: ".len()..]
+        .trim_end_matches('.')
+        .split(", ")
+        .collect();
+    let types: Vec<&str> = medrec::intake::classify::DOC_TYPES
+        .iter()
+        .map(|t| t.0)
+        .collect();
+    assert_eq!(listed, types);
+}
