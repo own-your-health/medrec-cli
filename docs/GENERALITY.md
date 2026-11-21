@@ -48,9 +48,9 @@ a row below, and a change that removes one deletes its row.
 
 | Assumption | Where | What another household needs |
 |---|---|---|
-| Documents are in English | Document-type phrases and labels in `src/intake/classify.rs`; `ocr_languages` defaults to `eng` | Phrases per language, chosen by `ocr_languages`, and the tesseract language packs |
+| Documents are in English | Document-type phrases and labels in `src/intake/classify.rs`, a statement's labels in `src/bill.rs`; `ocr_languages` defaults to `eng` | Phrases per language, chosen by `ocr_languages`, and the tesseract language packs |
 | Numeric dates are month first (`03/04/2026` is March 4) | `all_dates` in `src/intake/classify.rs` | A day-first setting, used when both orders are valid dates |
-| Payer documents are US explanations of benefits and bills | The `eob` and `bill` types, `Claims/`, the EOB fields | Other payer document types, mapped to the same FHIR `ExplanationOfBenefit` fields |
+| Payer documents are US explanations of benefits, bills and receipts | The `eob`, `bill` and `receipt` types, `Claims/`, the EOB fields, a statement's labels in `src/bill.rs` | Other payer document types, mapped to the same FHIR `ExplanationOfBenefit` fields |
 | The records folder's remote reports MD5 | Every write is checked by MD5 (`check_md5` in `src/folder.rs`) | Remotes without MD5 (OneDrive, Dropbox, Box) fail the read-back. Comparing SHA-256 after a download would serve them at the cost of a download per write. |
 | The machine is a Mac, or Linux with the same tools | `doctor`'s FileVault check, `open` and `xdg-open` for viewers, `/usr/bin/bsdtar` | A Windows build would need its own viewer launch, archive reader and disk-encryption check |
 | Document organizations are matched by the names in `household.json` | Organization detection | Nothing more: add each organization's names as aliases |

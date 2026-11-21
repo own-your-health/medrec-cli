@@ -139,6 +139,9 @@ pub struct Outcome {
     pub duplicate_of: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub near_duplicates: Vec<NearDuplicate>,
+    /// A bill filed before that is the same statement.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub same_statement_as: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<TextInfo>,
     pub source_removed: bool,
@@ -165,6 +168,7 @@ impl Outcome {
             reasons: Vec::new(),
             duplicate_of: None,
             near_duplicates: Vec::new(),
+            same_statement_as: None,
             text: None,
             source_removed: false,
             error: None,
@@ -388,6 +392,7 @@ pub fn run(folder: &Folder, cfg: &Config, req: &Request) -> Result<(Report, bool
                 ));
                 out.document = Some(doc.id);
                 out.path = Some(doc.path);
+                out.same_statement_as = doc.same_statement_as;
             })
         } else {
             hold_for_review(
@@ -827,6 +832,7 @@ pub fn ask(
 pub struct Filed {
     pub id: String,
     pub path: String,
+    pub same_statement_as: Option<String>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -845,7 +851,7 @@ fn file_document(
     let name = folder::filed_name(date, doc_type, class.organization.value(), None, &item.name);
     let dir = folder::document_dir(person, doc_type, date);
     let path = folder.put_new_file(&prepared.local, &dir, &name, &prepared.md5)?;
-    let doc = document_for(
+    let mut doc = document_for(
         path.clone(),
         item_origin(item),
         prepared,
@@ -864,12 +870,18 @@ fn file_document(
             .texts
             .insert(id.clone(), prepared.extracted.text.clone());
     }
-    indexes
+    let index = indexes
         .get_mut(&person.id)
-        .ok_or_else(|| CliError::Other(format!("no index loaded for {}", person.id)))?
-        .documents
-        .push(doc);
-    Ok(Filed { id, path })
+        .ok_or_else(|| CliError::Other(format!("no index loaded for {}", person.id)))?;
+    let person_texts = texts.get(&person.id).expect("loaded above");
+    crate::bill::annotate(&mut doc, &prepared.extracted.text, index, person_texts);
+    let same_statement_as = doc.same_statement_as.clone();
+    index.documents.push(doc);
+    Ok(Filed {
+        id,
+        path,
+        same_statement_as,
+    })
 }
 
 fn item_origin(item: &Item) -> Origin {
@@ -917,6 +929,8 @@ pub fn document_for(
         near_duplicates: near.to_vec(),
         minhash: prepared.signature.clone(),
         renderings: Vec::new(),
+        statement: None,
+        same_statement_as: None,
         classification: serde_json::to_value(class).ok(),
         provenance: Provenance {
             source: ProvenanceSource {
@@ -979,7 +993,11 @@ fn hold_for_review(
         classification: serde_json::to_value(class).unwrap_or(Value::Null),
         classified_by: given.classified_by.clone(),
     });
-    Ok(Filed { id, path })
+    Ok(Filed {
+        id,
+        path,
+        same_statement_as: None,
+    })
 }
 
 fn remove_source(item: &Item, stores: &[Store]) -> Result<bool, CliError> {

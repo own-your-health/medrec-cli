@@ -1,0 +1,13 @@
+                                   Example Medical Group
+
+  PATIENT STATEMENT
+
+  Statement Date         Account Number          Amount Due            Due Date
+  11/02/2026             EX-000123               $1,234.56             12/01/2026
+
+  Patient: Robin Example
+
+  Date of Service   Description                         Charges    Insurance    Balance
+  10/14/2026        Office visit                        250.00     -180.00       70.00
+
+  Please pay online. Pay by phone at the number on the back.

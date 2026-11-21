@@ -171,6 +171,7 @@ pub const DOC_TYPES: &[(&str, &str, Option<&str>)] = &[
     ("prescription", "Prescription", None),
     ("letter", "Letter", None),
     ("bill", "Bill", None),
+    ("receipt", "Receipt", None),
     ("eob", "Explanation of benefits", None),
     ("insurance_card", "Insurance card", None),
     ("other", "Other", None),
@@ -208,6 +209,11 @@ const TYPE_RULES: &[(&str, &str, u8)] = &[
     ("bill", "pay this amount", 70),
     ("bill", "statement date", 55),
     ("bill", "account number", 35),
+    ("receipt", "payment receipt", 90),
+    ("receipt", "payment confirmation", 80),
+    ("receipt", "thank you for your payment", 75),
+    ("receipt", "receipt number", 60),
+    ("receipt", "amount paid", 45),
     ("insurance_card", "rx bin", 85),
     ("insurance_card", "rxbin", 85),
     ("insurance_card", "rx pcn", 80),
@@ -1169,6 +1175,12 @@ mod tests {
             "c.jpg",
         );
         assert_eq!(card.doc_type.value(), Some("insurance_card"));
+        // A receipt names the account and a balance too, and is no bill.
+        let receipt = run(
+            include_str!("../../tests/fixtures/bills/receipt.txt"),
+            "d.pdf",
+        );
+        assert_eq!(receipt.doc_type.value(), Some("receipt"));
     }
 
     #[test]

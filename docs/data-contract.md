@@ -18,7 +18,7 @@ _review/                      documents intake could not file, and review.json
   index.json                  the person's index (documents, records, studies, imports)
   text.json                   extracted text per document
   Documents/<YYYY>/<YYYY-MM-DD>_<type>_<org>_<details>_<original name>
-  Claims/<YYYY>/              EOBs and bills, named the same way
+  Claims/<YYYY>/              EOBs, bills and receipts, named the same way
   Imaging/<YYYY-MM-DD>_<modality>_<body part>_<facility>/
     S<series:03>/<instance:05>.dcm   DICOM files exactly as received
     study.json                       the study's summary (medrec-study/v1)
@@ -131,15 +131,40 @@ without a download), `size`, `media_type`, `pages`, `original_name`, `title`,
 fetched_at}]`: each distinct rendering later imports served of it with the
 same text, and those of a copy folded in by `documents merge`, once; served
 again byte for byte, it is a duplicate),
-`classification` (what was detected, with scores and evidence), and
-`provenance`. An imported document's `provenance.raw_path` names its
+`classification` (what was detected, with scores and evidence),
+`statement` and `same_statement_as` (a bill's, below), and `provenance`. An imported document's `provenance.raw_path` names its
 Binary's raw file, which holds the latest rendering the source served;
 earlier ones stay beside it as `<id>~<md5>.json`, as for every raw
 resource, and the document's own bytes are the filed file.
 
 Document types: `visit_summary`, `lab_report`, `imaging_report`,
 `immunization_record`, `discharge_summary`, `referral`, `prescription`,
-`letter`, `bill`, `eob`, `insurance_card`, `other`.
+`letter`, `bill`, `receipt` (0.2.9 and later), `eob`, `insurance_card`,
+`other`.
+
+**A bill's statement** (0.2.9 and later). A `bill` carries `statement`:
+`{statement_date, amount_due: {amount, currency}, due_date, account}`, each
+only where its text labels it (`Statement date`, `Amount due` or `Balance
+due`, `Due date` or `Please pay by`, `Account number` or `Guarantor
+account #`), on the label's line or, under a column's header, on the next
+line. An amount is a plain decimal with two places, negative for a credit.
+The account is as printed, upper-cased, a mask kept (`****0123`). Intake,
+`review file` and an import read it the same way, from the document's
+text, so a statement the user files and the same statement a billing CLI
+exports later are known to be one. They are one when both give the same
+statement date, nothing both give differs, and both give the same account
+number (a masked one matching by its last four or more digits) or the
+same amount due. The one filed later keeps its own file and sets
+`same_statement_as` to the first one's id. A bill filed before 0.2.9, or
+saved since by an older medrec (which drops fields it does not know), gets
+its statement and link again from its stored text the next time a bill is
+filed for that person.
+
+A DocumentReference names a house type with a `type.coding` in the system
+`urn:pk-med:doc-type` (code `bill`, `receipt`, or any type above). With no
+such coding and no LOINC code, a `type.text` of `bill` or `receipt` (any
+case) is that type. Otherwise the LOINC code decides, and other text is
+only a display.
 
 **Record**, one normalized clinical fact: `id`, `kind` (`encounter`,
 `result`, `report`, `condition`, `medication`, `allergy`, `immunization`,
@@ -393,6 +418,7 @@ characters and the invisible format characters that reorder or hide text
 | `documents_added` | documents filed |
 | `documents_duplicate` | Binaries with the bytes of a document or rendering already filed |
 | `documents_unchanged` | renderings of a document already filed |
+| `documents_same_statement` | bills filed that are the same statement as a bill filed before (0.2.9 and later) |
 
 A field added to `import/v1` is additive: a script reads a missing one as
 absent, never as an error.

@@ -220,7 +220,7 @@ pub fn file(folder: &Folder, req: &FileRequest) -> Result<Filed, CliError> {
     let near = intake::near_duplicates_in(&signatures, &item.minhash, &class);
     let filed_at = now_rfc3339();
     let id = ids::new("d");
-    index.documents.push(Document {
+    let mut doc = Document {
         id: id.clone(),
         path: path.clone(),
         sha256: item.sha256.clone(),
@@ -244,6 +244,8 @@ pub fn file(folder: &Folder, req: &FileRequest) -> Result<Filed, CliError> {
         near_duplicates: near,
         minhash: item.minhash.clone(),
         renderings: Vec::new(),
+        statement: None,
+        same_statement_as: None,
         classification: serde_json::to_value(&class).ok(),
         provenance: Provenance {
             source: ProvenanceSource {
@@ -278,9 +280,11 @@ pub fn file(folder: &Folder, req: &FileRequest) -> Result<Filed, CliError> {
             derived_from: None,
             filed_by: filed_by(),
         },
-    });
-    crate::imaging::link_reports(&mut index);
+    };
     let mut texts = folder.text(&person)?;
+    crate::bill::annotate(&mut doc, &item.text, &mut index, &texts);
+    index.documents.push(doc);
+    crate::imaging::link_reports(&mut index);
     if !item.text.is_empty() {
         texts.texts.insert(id.clone(), item.text.clone());
     }

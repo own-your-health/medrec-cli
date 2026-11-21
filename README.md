@@ -281,6 +281,14 @@ Duplicates are found by SHA-256 and by Drive's MD5, so a duplicate in Drive
 needs no download. Re-scans of the same page are linked as near-duplicates,
 by text similarity.
 
+A bill also keeps what its statement says, where the text labels it: the
+statement date, amount due, due date and account number. A paper statement
+you file and the same statement a billing CLI exports later are one
+statement (the same statement date, and the same account number or amount
+due), so the later one points at the first (`same_statement_as`). A
+payment receipt is its own type, `receipt`, filed beside bills under
+`Claims/`.
+
 ### Imaging
 
 A study's DICOM files are kept byte for byte. A study is identified by its
