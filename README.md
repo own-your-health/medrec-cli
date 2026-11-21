@@ -267,8 +267,9 @@ this machine's:
 moved file is removed only after the filed copy's MD5, as Drive reports it,
 matches, and the index that points at it has been written and read back.
 
-Intake reads a local file until two reads in a row agree and match the
-size the file system gives, then keeps those bytes in a private copy: their
+Intake waits until a local file has gone 2 seconds unmodified (up to 3
+times), then reads it until two reads in a row agree and match the size the
+file system gives, then keeps those bytes in a private copy: their
 text, their hashes and the upload all come from it. A cloud folder's
 online-only placeholder that serves other bytes while it downloads, or a
 file still being written, is skipped with a reason rather than filed as

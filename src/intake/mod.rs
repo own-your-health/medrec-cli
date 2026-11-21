@@ -696,10 +696,17 @@ fn prepare(
     let bytes = if copy.is_some() {
         read_bounded(&local, ctx.max_bytes)
     } else {
-        read_stable(
-            || read_bounded(&local, ctx.max_bytes),
-            || std::fs::metadata(&local).ok().map(|m| m.len()),
-        )
+        settle(&local, QUIET, SETTLE_TRIES).and_then(|before| {
+            let bytes = read_stable(
+                || read_bounded(&local, ctx.max_bytes),
+                || std::fs::metadata(&local).ok().map(|m| m.len()),
+            )?;
+            // Written to while it was read: not the file it will be.
+            if modified(&local) != before {
+                return Err(STILL_WRITTEN.into());
+            }
+            Ok(bytes)
+        })
     }
     .map_err(Skip)?;
     let kind = filetype::identify(&bytes).map_err(|e| Skip(e.to_string()))?;
@@ -770,6 +777,39 @@ pub fn apply_given(class: &mut Classification, given: &Given, person: Option<&st
     if let Some(o) = &given.organization {
         class.organization.set_given(o.clone());
     }
+}
+
+/// How long a file must go unmodified before intake reads it, and how many
+/// times it waits for that.
+const QUIET: std::time::Duration = std::time::Duration::from_secs(2);
+const SETTLE_TRIES: usize = 3;
+const STILL_WRITTEN: &str =
+    "still being written (modified while intake waited to read it); intake it again once it is complete";
+
+fn modified(path: &Path) -> Option<std::time::SystemTime> {
+    std::fs::metadata(path).and_then(|m| m.modified()).ok()
+}
+
+/// Wait until `path` has gone `quiet` unmodified, trying `tries` times, so
+/// a file written in bursts (a scanner, a hand-off still copying) is read
+/// whole. Returns its modification time.
+fn settle(
+    path: &Path,
+    quiet: std::time::Duration,
+    tries: usize,
+) -> Result<Option<std::time::SystemTime>, String> {
+    for _ in 0..tries {
+        let at = modified(path);
+        let age = at.and_then(|t| t.elapsed().ok()).unwrap_or(quiet);
+        if age >= quiet {
+            return Ok(at);
+        }
+        std::thread::sleep(quiet - age);
+        if modified(path) == at {
+            return Ok(at);
+        }
+    }
+    Err(STILL_WRITTEN.into())
 }
 
 /// A local file's bytes, read until two reads in a row agree and are the
@@ -1293,6 +1333,34 @@ mod tests {
         assert!(!file.exists(), "removed");
         // Gone already: nothing to remove.
         assert!(!remove_source(&item, &stores, &read).unwrap());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_file_still_growing_is_not_read_until_it_goes_quiet() {
+        let dir = scratch("growing");
+        let file = dir.join("scan.pdf");
+        std::fs::write(&file, b"page 1").unwrap();
+        let quiet = std::time::Duration::from_millis(300);
+        // Written in bursts, more often than it goes quiet.
+        let writer = {
+            let file = file.clone();
+            std::thread::spawn(move || {
+                use std::io::Write;
+                for _ in 0..15 {
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    let mut f = std::fs::OpenOptions::new()
+                        .append(true)
+                        .open(&file)
+                        .unwrap();
+                    f.write_all(b" more").unwrap();
+                }
+            })
+        };
+        assert_eq!(settle(&file, quiet, 3).unwrap_err(), STILL_WRITTEN);
+        writer.join().unwrap();
+        // Done: it goes quiet, and is read.
+        assert!(settle(&file, quiet, 3).is_ok());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
