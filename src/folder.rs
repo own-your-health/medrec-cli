@@ -521,7 +521,7 @@ fn dir_readme(dir: &str) -> String {
 pub const README_TEXT: &str = "# Medical records (managed by medrec)
 
 This folder holds a household's medical records, filed by `medrec`
-(https://github.com/piekstra/medrec-cli). Every file is a plain file you can
+(https://github.com/own-your-health/medrec-cli). Every file is a plain file you can
 open in the Drive app.
 
 - `household.json`: the people, organizations and sources.

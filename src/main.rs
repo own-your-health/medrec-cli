@@ -23,7 +23,7 @@ use medrec::store::{Location, BIN};
 use medrec::views::Range;
 use medrec::{imaging, import, maint, notes, people, review, store, view, views};
 
-const REPO: &str = "piekstra/medrec-cli";
+const REPO: &str = "own-your-health/medrec-cli";
 
 /// A household's medical records in a plain Drive folder: people, intake of
 /// scans and files with local OCR, imaging studies, provider and insurer
