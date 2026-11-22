@@ -317,6 +317,101 @@ impl Store {
         }
     }
 
+    /// The files directly in the folder `rel`, not below it, in one listing
+    /// that never comes from the cache: what a cheap, frequent check of a
+    /// folder another program writes into needs. Empty when the folder is
+    /// not there.
+    pub fn list_here(&self, rel: &str) -> Result<Vec<FileEntry>, CliError> {
+        let rel = rel.trim_matches('/');
+        match &self.location {
+            Location::Dir(root) => {
+                let dir = root.join(rel);
+                let rd = match std::fs::read_dir(&dir) {
+                    Ok(rd) => rd,
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+                    Err(e) => {
+                        return Err(CliError::Other(format!("listing {}: {e}", dir.display())))
+                    }
+                };
+                let mut out = Vec::new();
+                for entry in rd.flatten() {
+                    let Ok(meta) = entry.metadata() else { continue };
+                    if !meta.is_file() {
+                        continue;
+                    }
+                    let modified = meta
+                        .modified()
+                        .ok()
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| d.as_secs() as i64);
+                    out.push(FileEntry {
+                        rel: entry.file_name().to_string_lossy().into_owned(),
+                        size: Some(meta.len()),
+                        modified,
+                    });
+                }
+                out.sort_by(|a, b| a.rel.cmp(&b.rel));
+                Ok(out)
+            }
+            Location::Remote(spec) => {
+                let target = Self::spec_of(spec, rel);
+                let out = self.rclone(
+                    &[
+                        "lsjson",
+                        "--max-depth",
+                        "1",
+                        "--files-only",
+                        "--no-mimetype",
+                        target.as_str(),
+                    ],
+                    16 * 1024 * 1024,
+                )?;
+                match out.code {
+                    Some(0) => {}
+                    Some(3) => return Ok(Vec::new()),
+                    _ => {
+                        return Err(CliError::Upstream(format!(
+                            "rclone lsjson {target}: {}",
+                            out.stderr_tail.lines().next().unwrap_or("failed")
+                        )))
+                    }
+                }
+                let v: Vec<Value> = serde_json::from_slice(&out.stdout).map_err(|e| {
+                    CliError::Upstream(format!("rclone lsjson printed no JSON list: {e}"))
+                })?;
+                let mut files: Vec<FileEntry> = v
+                    .iter()
+                    .filter_map(|e| {
+                        let name = e.get("Path")?.as_str()?;
+                        Some(FileEntry {
+                            rel: name.to_string(),
+                            size: e.get("Size").and_then(Value::as_u64),
+                            modified: e
+                                .get("ModTime")
+                                .and_then(Value::as_str)
+                                .and_then(crate::refresh::time::parse),
+                        })
+                    })
+                    .collect();
+                files.sort_by(|a, b| a.rel.cmp(&b.rel));
+                Ok(files)
+            }
+        }
+    }
+
+    /// Make the folder `rel` (and its parents); owner-only on a directory.
+    pub fn mkdir(&self, rel: &str) -> Result<(), CliError> {
+        let rel = rel.trim_matches('/');
+        match &self.location {
+            Location::Dir(root) => private_dirs(&root.join(rel)),
+            Location::Remote(spec) => {
+                let target = Self::spec_of(spec, rel);
+                self.rclone_ok("mkdir", &["mkdir", target.as_str()])
+                    .map(|_| ())
+            }
+        }
+    }
+
     /// The MD5 the store holds for one file; `None` when it is not there.
     pub fn md5(&self, rel: &str) -> Result<Option<String>, CliError> {
         match &self.location {

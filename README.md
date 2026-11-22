@@ -108,6 +108,19 @@ command is exit 2 and lists the configured profiles. `profiles`, `providers
 list`, `config path|show`, a machine setting's `config set|unset`, `cache
 clear`, `auth status`, `info`, `completions` and `self-update` take none.
 
+`refresh sign-in <source id>` is the one command that may run without
+`--profile`, because the source id already names one choice someone made on
+purpose. Only `medrec --profile <NAME> refresh add --source <id>
+--provider-profile <LOGIN>`, which names both the medrec profile and the
+provider's login on its command line, binds a source for refresh; nothing
+infers a binding, not even when the machine has one profile. `sign-in` finds
+the profile whose binding holds the source. A `--profile` (or
+`MEDREC_PROFILE`) that names another is exit 2. Before it opens any sign-in
+it prints the medrec profile and the provider profile it resolved, names
+only. No binding, or more than one, is exit 2 and lists them. So the command
+a background refresh leaves for a person in `_status/status.json` names no
+profile, and profile names stay in this machine's config.
+
 ```sh
 medrec profiles list                            # profile-list/v1, with each records folder
 medrec profiles add <NAME>
@@ -233,6 +246,56 @@ It refuses (exit 2, or 4 for an id that is not filed) unless they are that
 one document by the same rule, and only then asks (`--force` to skip). It
 points records, imaging studies and notes at the kept one, keeps the copy's
 hash in its `renderings`, and removes the copy's file, to Drive's trash.
+
+### Refresh
+
+```sh
+medrec --profile home refresh add --source <id> --provider-profile adult1   # bind a source to its login
+medrec refresh list                             # the bindings (this machine's config)
+medrec refresh                                  # import every bound source now, if its interval allows
+medrec refresh --person Robin                   # one person's sources; --source <id> for one
+medrec refresh --install                        # a LaunchAgent: a pass every 5 minutes (--every)
+medrec refresh status                           # what _status/status.json records
+medrec refresh pause <id> --reason consent      # until `medrec refresh resume <id>`
+medrec refresh sign-in <id>                     # sign a source's login in; clears "needs a person"
+medrec refresh --uninstall
+```
+
+`refresh` imports each bound source on a schedule, on a reader's request (a
+file the own-your-health app writes in `_requests/`), or now, and records
+every attempt in `_status/` ([data contract](docs/data-contract.md)). A
+scheduled pass lists `_requests/` once; when nothing is requested, nothing
+is due and the hourly heartbeat is not due, it stops there.
+
+| Provider | Least time between imports | Default schedule |
+|---|---|---|
+| A developer app (`mychart`, `athena`, `kp`, `modmed`) or a portal key (`icanotes`) | 6 hours | daily |
+| A member site (`uhc`, `caremark`, `labcorp`, `oneblood`, `fertemr`, `salve`) or any other CLI | 24 hours | daily |
+
+`refresh add --every <DURATION>` sets the schedule, never below the least
+time; `--manual` imports only when asked. The interval is counted from the
+source's latest import in the person's `index.json`, so an import run by
+hand counts, and a request never shortens it. After a failure the source
+waits 30 minutes, doubling with each failure after, up to its least time.
+
+A scheduled pass never waits on a person. Before importing a source that
+signs in, it reads `<cli> auth status --json --profile <LOGIN>` with a
+30-second limit. A sign-in that is signed out or expired, or a read that
+outlives the limit (a Keychain approval nobody gave), marks the source as
+needing a person, with the command `medrec refresh sign-in <id>`, and
+scheduled passes do not try it again until that has run. `medrec refresh` at
+the terminal waits up to 10 minutes for an approval. `--scheduled` runs a
+pass as the LaunchAgent does.
+
+One machine refreshes a folder. `--install` records this machine's random
+id in `status.json`; another machine's `--install` and passes refuse while
+that one's heartbeat is fresh, and `--install --take-over` moves refresh to
+the machine it runs on, serving requests from one pass later. The agent is
+`~/Library/LaunchAgents/io.github.own-your-health.medrec.refresh.<profile>.plist`,
+in the person's own session, and logs ids, outcomes and counts to
+`~/Library/Logs/medrec/refresh-<profile>.log`, never a name or a record.
+`medrec refresh` exits 3 when a source needs a person and 5 when one failed;
+`--scheduled` exits 0.
 
 ### Settings
 

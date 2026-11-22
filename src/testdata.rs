@@ -256,6 +256,21 @@ case "$1" in
       *) cat "$d/fakeprov-info.json" ;;
     esac ;;
   profiles) cat "$d/fakeprov-profiles.json" ;;
+  auth)
+    printf '%s\n' "$*" >> "$d/auth-calls"
+    case "$2" in
+      status)
+        mode="${{FAKEPROV_AUTH:-ok}}"
+        [ -f "$d/auth-state" ] && mode=$(cat "$d/auth-state")
+        case "$mode" in
+          hang) sleep 600 ;;
+          expired) printf '%s\n' '{{"schema":"auth-status/v1","required":true,"authenticated":true,"session_valid":false}}' ;;
+          signed-out) printf '%s\n' '{{"schema":"auth-status/v1","required":true,"authenticated":false}}' ;;
+          *) printf '%s\n' '{{"schema":"auth-status/v1","required":true,"authenticated":true,"session_valid":true,"expires_at":"2099-01-01T00:00:00Z"}}' ;;
+        esac ;;
+      login) printf 'ok' > "$d/auth-state"; echo "fakeprov: signed in" ;;
+      *) echo "fakeprov: unknown auth command $2" >&2; exit 2 ;;
+    esac ;;
   records)
     printf '%s\n' "$*" > "$d/export-args"
     printf 'profile=%s files=%s\n' "${{FAKEPROV_PROFILE:-}}" "${{FAKEPROV_FILES:-}}" > "$d/export-env"

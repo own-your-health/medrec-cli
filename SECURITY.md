@@ -15,6 +15,9 @@ each place, and what medrec does and does not do with them.
 | `~/.config/medrec/config.json` | Each profile's records folder location and settings, and this machine's settings; no secret. Written owner-only (0600). `config.json.pre-profiles` beside it, also 0600, is the file as it was before `profiles migrate` | This Mac's user |
 | A records folder or backup on a local disk (`init <dir>`, `backup --to <dir>`) | Everything the Drive folder holds | This Mac's user: medrec creates its folders 0700 and its files 0600, and `medrec doctor` warns when anything under the records folder can be read by other users |
 | A study exported with `images export` | That study's DICOM files | This Mac's user; 0700 folders and 0600 files |
+| `~/.cache/medrec/refresh/` | This machine's refresher id (`h_…`, random) and, per folder, the `status.json` it last wrote and when; ids, outcomes and counts, no names. The run lock is in `~/.cache/medrec/locks/` | This Mac's user; 0700 directory, 0600 files |
+| `~/Library/LaunchAgents/io.github.own-your-health.medrec.refresh.<profile>.plist` | The command `refresh --install` set up: medrec's path, the profile name, the pass interval and the `PATH` at install time; no secret | This Mac's user; launchd runs it in the user's own session, never as root |
+| `~/Library/Logs/medrec/refresh-<profile>.log` | One line per scheduled pass that did something: source ids, outcomes, error codes, counts and the command a person should run; never a name or record content | This Mac's user |
 
 medrec holds **no credentials**. Provider and insurer CLIs keep their own
 logins in the macOS Keychain under their own names. medrec runs them as
@@ -29,6 +32,10 @@ date. It reads Drive through `rclone`, which owns the Drive token.
 - It has no MCP server and is not registered in `cli-mcp`. An MCP tool returns
   records to the model that calls it, which is a third-party service.
 - It never prints or logs a credential, and never takes one on argv.
+- A scheduled refresh never waits on a person. A provider's `auth status` that
+  hangs on a Keychain approval is stopped after 30 seconds, and the source is
+  not tried again in the background until a person runs `medrec refresh
+  sign-in <id>`, so the LaunchAgent never piles up dialogs.
 - It never runs a disc's bundled viewer. `images open` hands the viewer a
   local folder (Weasis through `weasis://$dicom:get -l <folder>`), and makes no
   network call with study data. Weasis's own update check is a Weasis setting;

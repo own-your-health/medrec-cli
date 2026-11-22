@@ -325,11 +325,15 @@ fn timed_out(name: &str, t: Duration) -> CliError {
     timed_out_err(name, t)
 }
 
+/// Whether `e` is a [`Bounded`] call that outlived its timeout.
+pub fn is_timeout(e: &CliError) -> bool {
+    e.message().contains(TIMED_OUT)
+}
+
+const TIMED_OUT: &str = "gave no answer within";
+
 fn timed_out_err(name: &str, t: Duration) -> CliError {
-    CliError::Upstream(format!(
-        "`{name}` gave no answer within {} s; stopped",
-        t.as_secs()
-    ))
+    CliError::Upstream(format!("`{name}` {TIMED_OUT} {} s; stopped", t.as_secs()))
 }
 
 fn spawn_error(name: &str, e: std::io::Error) -> CliError {

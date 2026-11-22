@@ -552,6 +552,14 @@ pub struct FolderLock {
 /// How long a writer waits for another one before it gives up.
 pub const LOCK_WAIT: Duration = Duration::from_secs(120);
 
+const LOCK_BUSY: &str = "another medrec has been writing this records folder";
+
+/// Whether `e` is a writer giving up on the folder's lock, which another
+/// writer still held.
+pub fn is_lock_busy(e: &CliError) -> bool {
+    e.message().starts_with(LOCK_BUSY)
+}
+
 impl FolderLock {
     pub fn acquire(location: &Location) -> Result<FolderLock, CliError> {
         FolderLock::acquire_within(location, LOCK_WAIT)
@@ -587,8 +595,7 @@ impl FolderLock {
                 Err(std::fs::TryLockError::WouldBlock) => {
                     if start.elapsed() > wait {
                         return Err(CliError::Other(format!(
-                            "another medrec has been writing this records folder for {} (lock {}); \
-                             try again when it finishes",
+                            "{LOCK_BUSY} for {} (lock {}); try again when it finishes",
                             how_long(wait),
                             path.display()
                         )));

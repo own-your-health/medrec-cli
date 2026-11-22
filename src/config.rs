@@ -42,6 +42,56 @@ pub struct FolderSettings {
     /// the author of notes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub me: Option<String>,
+    /// What `medrec refresh` imports, and how: set by `refresh add`,
+    /// `remove`, `pause`, `resume` and `--install`, never by `config set`.
+    /// The provider login profiles named here stay on this machine.
+    #[serde(default, skip_serializing_if = "RefreshSettings::is_empty")]
+    pub refresh: RefreshSettings,
+}
+
+/// A profile's refresh settings (`refresh` in its config).
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RefreshSettings {
+    /// Each source set up for refresh, by its id in household.json.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub sources: std::collections::BTreeMap<String, Binding>,
+    /// How often the LaunchAgent runs a pass (`--install --every`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pass_every_secs: Option<u64>,
+}
+
+impl RefreshSettings {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// One source's refresh: the binding `refresh add` made on purpose.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Binding {
+    /// The provider's login profile its export runs with; `None` for a
+    /// provider that signs in to nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_profile: Option<String>,
+    /// What the export's `--patient` takes; the source's patient id when
+    /// not given.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub patient: Option<String>,
+    /// The export's `--org`, when the import that set it up named one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub org: Option<String>,
+    /// Imported on its schedule.
+    #[serde(default = "yes")]
+    pub auto: bool,
+    /// How often, when on its schedule; never below its minimum interval.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub every_secs: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paused: Option<crate::refresh::contract::Pause>,
+}
+
+fn yes() -> bool {
+    true
 }
 
 impl FolderSettings {

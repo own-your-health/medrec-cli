@@ -62,6 +62,9 @@ enum Command {
     /// Provider CLIs medrec can import from.
     #[command(subcommand)]
     Providers(ProvidersCmd),
+    /// Import each source set up for it: on a schedule (a LaunchAgent), on
+    /// a reader's request in `_requests/`, or now.
+    Refresh(RefreshArgs),
     /// Everything dated, newest first: visits, results, documents, studies,
     /// notes.
     Timeline(TimelineArgs),
@@ -137,6 +140,99 @@ enum ProfilesCmd {
         #[arg(value_parser = profile_name)]
         name: ProfileName,
     },
+}
+
+#[derive(Args, Debug)]
+#[command(args_conflicts_with_subcommands = true)]
+struct RefreshArgs {
+    #[command(subcommand)]
+    cmd: Option<RefreshCmd>,
+    /// Only this source (its `s_` id).
+    #[arg(long, value_name = "ID", conflicts_with = "person")]
+    source: Option<String>,
+    /// Only this person's sources (name or id).
+    #[arg(long)]
+    person: Option<String>,
+    /// Run as the LaunchAgent does, with nobody at the terminal: only what
+    /// is due or requested, and a sign-in that waits on a person is not
+    /// waited for.
+    #[arg(long, conflicts_with_all = ["source", "person"])]
+    scheduled: bool,
+    /// Install the LaunchAgent that runs a scheduled pass every `--every`
+    /// (5 minutes unless given), as this profile.
+    #[arg(long, conflicts_with_all = ["uninstall", "scheduled", "source", "person"])]
+    install: bool,
+    /// How often the LaunchAgent runs a pass: `90s`, `5m`, `1h`.
+    #[arg(long, requires = "install", value_name = "DURATION", value_parser = duration)]
+    every: Option<u64>,
+    /// Move refresh of this folder to this machine from the one that does
+    /// it now.
+    #[arg(long, requires = "install")]
+    take_over: bool,
+    /// Remove this profile's LaunchAgent.
+    #[arg(long, conflicts_with_all = ["scheduled", "source", "person"])]
+    uninstall: bool,
+}
+
+#[derive(Subcommand, Debug)]
+enum RefreshCmd {
+    /// Set a source up for refresh, bound to the provider login it imports
+    /// through. Needs `--profile` on the command line.
+    Add {
+        /// The source (its `s_` id, from `medrec people show`).
+        #[arg(long, value_name = "ID")]
+        source: String,
+        /// The provider CLI's own profile (its login) to import through.
+        #[arg(long, value_name = "NAME")]
+        provider_profile: Option<String>,
+        /// The patient at the provider, when the source does not say.
+        #[arg(long)]
+        patient: Option<String>,
+        /// The provider organization, when the source does not say.
+        #[arg(long)]
+        org: Option<String>,
+        /// Import only when asked (a request or `medrec refresh`), never on
+        /// the schedule.
+        #[arg(long)]
+        manual: bool,
+        /// How often it is imported on the schedule (default daily; never
+        /// below the provider's minimum).
+        #[arg(long, value_name = "DURATION", value_parser = duration)]
+        every: Option<u64>,
+    },
+    /// Stop refreshing a source. Its records stay.
+    Remove { source: String },
+    /// The sources set up for refresh in this profile (refresh-list/v1).
+    List,
+    /// What refresh last recorded for each source (`_status/status.json`).
+    Status,
+    /// Stop a source's imports, scheduled and requested, until `resume`.
+    Pause {
+        source: String,
+        #[arg(long, value_enum)]
+        reason: PauseReason,
+        /// Why, for the household (no record content).
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Let a paused source be imported again.
+    Resume { source: String },
+    /// Sign in a source's provider login, with a person at the terminal,
+    /// and clear "needs a person". Takes a source id: the profile is the
+    /// one that set the source up (see README, Profiles).
+    SignIn { source: String },
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+enum PauseReason {
+    /// Waiting on a consent or a terms decision.
+    Consent,
+    /// The household paused it.
+    User,
+}
+
+fn duration(s: &str) -> Result<u64, String> {
+    medrec::refresh::time::parse_duration(s)
 }
 
 #[derive(Args, Debug)]
@@ -659,6 +755,7 @@ fn run(cli: &Cli) -> Result<(), CliError> {
         Command::Intake(a) => intake_cmd(cli, a, &store),
         Command::Review(cmd) => review_cmd(cli, cmd, &store),
         Command::Import(a) => import_cmd(cli, a, &store),
+        Command::Refresh(a) => refresh_cmd(cli, a, &store),
         Command::Providers(ProvidersCmd::List) => {
             let cfg = Config::load(&store)?;
             let rows = import::providers(&cfg);
@@ -1073,6 +1170,340 @@ fn review_cmd(cli: &Cli, cmd: &ReviewCmd, store: &ConfigStore) -> Result<(), Cli
         }
     }
     Ok(())
+}
+
+fn refresh_cmd(cli: &Cli, a: &RefreshArgs, store: &ConfigStore) -> Result<(), CliError> {
+    use medrec::refresh::{self, Mode, Pick};
+    let json = cli.common.json;
+    let Some(cmd) = &a.cmd else {
+        if a.install {
+            let mut cfg = load(store, cli)?;
+            let r = refresh::install(&mut cfg, a.every, a.take_over)?;
+            cfg.keep_active()?;
+            store.save(&cfg)?;
+            output::emit(json, "refresh-install", to_value(&r), |v| {
+                println!(
+                    "installed {} (a pass every {} s), log {}",
+                    v["agent"].as_str().unwrap_or(""),
+                    v["pass_every_secs"],
+                    v["log"].as_str().unwrap_or("")
+                );
+                if r.took_over {
+                    println!(
+                        "took refresh over from the other machine; requests are served from one pass from now"
+                    );
+                }
+            });
+            return Ok(());
+        }
+        if a.uninstall {
+            let cfg = load(store, cli)?;
+            let r = refresh::uninstall(&cfg)?;
+            output::emit(json, "refresh-uninstall", to_value(&r), |v| {
+                println!(
+                    "{}",
+                    if v["removed"] == true {
+                        "removed the LaunchAgent"
+                    } else {
+                        "no LaunchAgent was installed for this profile"
+                    }
+                )
+            });
+            return Ok(());
+        }
+        let cfg = load(store, cli)?;
+        let pick = match (&a.source, &a.person) {
+            (Some(s), _) => Some(Pick::Source(s.clone())),
+            (_, Some(p)) => Some(Pick::Person(p.clone())),
+            _ => None,
+        };
+        let mode = if a.scheduled {
+            Mode::Scheduled
+        } else {
+            Mode::Manual
+        };
+        let r = refresh::pass(&cfg, mode, pick.as_ref())?;
+        let failed = r.attempts.iter().any(|x| x.outcome == "failed");
+        let needs = r.attempts.iter().any(|x| x.outcome == "needs_person");
+        if mode == Mode::Scheduled && r.status == "idle" && !json {
+            return Ok(());
+        }
+        let stamp = medrec::model::now_rfc3339();
+        output::emit(json, "refresh-pass", to_value(&r), |v| {
+            if mode == Mode::Scheduled {
+                print!("{stamp} ");
+            }
+            println!(
+                "{}: {} attempts, {} requests",
+                v["status"].as_str().unwrap_or(""),
+                r.attempts.len(),
+                r.requests.len()
+            );
+            for x in &r.attempts {
+                let mut line = format!("  {} {} {} {}", x.source, x.cli, x.trigger, x.outcome);
+                if let Some(e) = &x.error {
+                    line.push_str(&format!(" ({e})"));
+                }
+                if let (Some(a), Some(u)) = (x.records_added, x.records_updated) {
+                    line.push_str(&format!(" records +{a} ~{u}"));
+                }
+                if let Some(d) = x.documents_added {
+                    line.push_str(&format!(" documents +{d}"));
+                }
+                if let Some(c) = &x.command {
+                    line.push_str(&format!("; run `{c}`"));
+                }
+                println!("{line}");
+            }
+            for q in &r.requests {
+                println!("  request {} {}", q.request, q.outcome);
+            }
+        });
+        if mode == Mode::Manual && failed {
+            std::process::exit(5);
+        }
+        if mode == Mode::Manual && needs {
+            std::process::exit(3);
+        }
+        return Ok(());
+    };
+    match cmd {
+        RefreshCmd::Add {
+            source,
+            provider_profile,
+            patient,
+            org,
+            manual,
+            every,
+        } => {
+            // A binding is made only by a command that names both profiles.
+            if cli.profile.is_none() {
+                return Err(CliError::Usage(
+                    "`refresh add` binds a source to this profile: name it with --profile on the command line"
+                        .into(),
+                ));
+            }
+            let mut cfg = load(store, cli)?;
+            let h = Folder::open(&cfg, Access::Fresh)?.household()?;
+            let wanted = medrec::config::Binding {
+                provider_profile: provider_profile.clone(),
+                patient: patient.clone(),
+                org: org.clone(),
+                auto: !manual,
+                every_secs: *every,
+                paused: None,
+            };
+            let r = refresh::add(&mut cfg, &h, source, wanted)?;
+            cfg.keep_active()?;
+            store.save(&cfg)?;
+            refresh::publish(&cfg)?;
+            output::emit(json, "refresh-binding", to_value(&r), |v| {
+                println!(
+                    "{} ({}) is refreshed {} through {}",
+                    v["source"].as_str().unwrap_or(""),
+                    v["cli"].as_str().unwrap_or(""),
+                    if r.auto {
+                        format!("every {} h and on request", r.every_secs / 3600)
+                    } else {
+                        "on request only".into()
+                    },
+                    r.provider_profile
+                        .as_deref()
+                        .map(|p| format!("login `{p}`"))
+                        .unwrap_or_else(|| "no login".into())
+                )
+            });
+            Ok(())
+        }
+        RefreshCmd::Remove { source } => {
+            let mut cfg = load(store, cli)?;
+            if cfg.active.refresh.sources.remove(source).is_none() {
+                return Err(CliError::NotFound(format!(
+                    "source `{source}` is not set up for refresh in this profile"
+                )));
+            }
+            cfg.keep_active()?;
+            store.save(&cfg)?;
+            refresh::publish(&cfg)?;
+            output::emit(
+                json,
+                "refresh-remove",
+                json!({ "source": source, "removed": true }),
+                |_| println!("{source} is no longer refreshed; its records stay"),
+            );
+            Ok(())
+        }
+        RefreshCmd::List => {
+            let cfg = load(store, cli)?;
+            let rows = refresh::list(&cfg)?;
+            output::emit(json, "refresh-list", json!({ "items": rows }), |v| {
+                table(
+                    v,
+                    &[
+                        "source",
+                        "cli",
+                        "provider_profile",
+                        "auto",
+                        "paused",
+                        "last_outcome",
+                        "next_run_at",
+                        "needs_person",
+                    ],
+                )
+            });
+            Ok(())
+        }
+        RefreshCmd::Status => {
+            let cfg = load(store, cli)?;
+            let st = refresh::read_status(&cfg)?;
+            let v = to_value(&st);
+            let rows: Vec<Value> = st
+                .as_ref()
+                .map(|s| {
+                    s.sources
+                        .iter()
+                        .map(|e| {
+                            json!({
+                                "source": e.source,
+                                "cli": e.cli,
+                                "auto": e.auto,
+                                "paused": e.paused.as_ref().map(|p| p.reason.clone()),
+                                "sign_in": e.sign_in.state,
+                                "last_attempt": e.last_attempt.as_ref().map(|a| a.outcome.clone()),
+                                "last_success": e.last_success.as_ref().map(|x| x.finished_at.clone()),
+                                "failures": e.failures,
+                                "next_run_at": e.next_run_at,
+                                "needs_person": e.sign_in.needs_person.as_ref().map(|n| n.command.clone()),
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            if json {
+                output::json(&json!({ "schema": "refresh-status/v1", "status": v }));
+                return Ok(());
+            }
+            match &st {
+                None => println!("refresh has not run for this folder"),
+                Some(s) => {
+                    println!(
+                        "refreshed by {} (medrec {}), last pass {}, next {}",
+                        s.refresher.machine,
+                        s.refresher.medrec_version,
+                        s.refresher.last_pass_at.as_deref().unwrap_or("-"),
+                        s.refresher.next_pass_at.as_deref().unwrap_or("-")
+                    );
+                    table(
+                        &json!({ "items": rows }),
+                        &[
+                            "source",
+                            "cli",
+                            "auto",
+                            "paused",
+                            "sign_in",
+                            "last_attempt",
+                            "last_success",
+                            "failures",
+                            "next_run_at",
+                            "needs_person",
+                        ],
+                    );
+                }
+            }
+            Ok(())
+        }
+        RefreshCmd::Pause {
+            source,
+            reason,
+            note,
+        } => {
+            let mut cfg = load(store, cli)?;
+            let b = cfg.active.refresh.sources.get_mut(source).ok_or_else(|| {
+                CliError::NotFound(format!(
+                    "source `{source}` is not set up for refresh in this profile"
+                ))
+            })?;
+            b.paused = Some(medrec::refresh::contract::Pause {
+                reason: match reason {
+                    PauseReason::Consent => "consent".into(),
+                    PauseReason::User => "user".into(),
+                },
+                note: note.as_deref().map(|n| {
+                    medrec::refresh::contract::clip(n, medrec::refresh::contract::SHOWN_MAX)
+                }),
+                since: medrec::model::now_rfc3339(),
+            });
+            cfg.keep_active()?;
+            store.save(&cfg)?;
+            refresh::publish(&cfg)?;
+            output::emit(
+                json,
+                "refresh-pause",
+                json!({ "source": source, "paused": true }),
+                |_| println!("{source} is paused until `medrec refresh resume {source}`"),
+            );
+            Ok(())
+        }
+        RefreshCmd::Resume { source } => {
+            let mut cfg = load(store, cli)?;
+            let b = cfg.active.refresh.sources.get_mut(source).ok_or_else(|| {
+                CliError::NotFound(format!(
+                    "source `{source}` is not set up for refresh in this profile"
+                ))
+            })?;
+            b.paused = None;
+            cfg.keep_active()?;
+            store.save(&cfg)?;
+            refresh::publish(&cfg)?;
+            output::emit(
+                json,
+                "refresh-resume",
+                json!({ "source": source, "paused": false }),
+                |_| println!("{source} is refreshed again"),
+            );
+            Ok(())
+        }
+        RefreshCmd::SignIn { source } => {
+            let mut cfg = Config::load(store)?;
+            let given = cli.profile.clone().or_else(|| {
+                std::env::var(medrec::config::PROFILE_ENV)
+                    .ok()
+                    .filter(|v| !v.is_empty())
+            });
+            let name = refresh::binding_profile(&cfg, source, given.as_deref())?;
+            cfg.select(Some(name.as_str()))?;
+            let pp = cfg
+                .active
+                .refresh
+                .sources
+                .get(source)
+                .and_then(|b| b.provider_profile.clone());
+            // Which logins this is, before anything signs in (names only).
+            eprintln!(
+                "medrec profile `{name}`, provider profile {}",
+                pp.as_deref()
+                    .map(|p| format!("`{p}`"))
+                    .unwrap_or_else(|| "none (no login)".into())
+            );
+            let r = refresh::sign_in(&cfg, source)?;
+            output::emit(json, "refresh-sign-in", to_value(&r), |v| {
+                println!(
+                    "{}: sign-in {}{}",
+                    v["source"].as_str().unwrap_or(""),
+                    v["state"].as_str().unwrap_or(""),
+                    if r.needs_person {
+                        "; it still needs a person"
+                    } else {
+                        ""
+                    }
+                )
+            });
+            if r.needs_person {
+                std::process::exit(3);
+            }
+            Ok(())
+        }
+    }
 }
 
 fn import_cmd(cli: &Cli, a: &ImportArgs, store: &ConfigStore) -> Result<(), CliError> {
