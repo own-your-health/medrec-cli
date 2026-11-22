@@ -776,8 +776,10 @@ pub fn clear_local_copies() -> Result<Cleared, CliError> {
             )))
         }
     };
+    // `refresh/` stays too: it holds this machine's refresher id, and a
+    // new one would make this Mac another machine to its own folder.
     for e in entries {
-        if e.file_name() == "locks" {
+        if e.file_name() == "locks" || e.file_name() == "refresh" {
             continue;
         }
         let path = e.path();

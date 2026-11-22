@@ -431,7 +431,7 @@ listing of `_requests/`.
 ```text
 _requests/
   <YYYYMMDDTHHMMSSZ>_<id>.json    pending
-  done/<same name>                handled; kept 90 days
+  done/<same name>                handled; kept 90 days, or while its pending file stays
 ```
 
 A pending request:
@@ -484,7 +484,12 @@ How medrec handles one:
    being tried.
 4. **The outcome goes to `done/`.** Once every source of a request is done,
    medrec writes `done/<same name>`, and then deletes the pending file. A
-   pending file means the request is not finished. A request left pending
+   pending file means the request is not finished, unless its `done/` file
+   exists: a request written by another Google account than the one medrec
+   runs as may be a file medrec cannot remove. medrec then leaves it, never
+   serves it again, keeps its `done/` file for as long as it stays, and
+   tries to remove it on later passes (at least hourly); the app may delete
+   it once it has read `done/`. A request left pending
    by a pass that was cut short is answered by the next pass. A source
    imported since the request's `requested_at` answers from that
    `ImportRun`: `ok`, with `attempt` the attempt that recorded it (`null`
@@ -493,7 +498,7 @@ How medrec handles one:
 5. **One refresh runs at a time** on the refreshing machine. A pass that
    finds a refresh running ends at once.
 6. **Old outcomes go.** medrec deletes a `done/` file 90 days after its
-   `finished_at`.
+   `finished_at`, unless its request file is still pending (rule 4).
 
 A `done/` file is written by medrec, not copied. It holds the request's
 `schema`, `id`, `requested_at`, `scope`, `requested_by` and `app`,
