@@ -207,11 +207,19 @@ pub fn login_overwrites(provider: &Provider) -> bool {
         .timeout(Duration::from_secs(15))
         .max_stdout(256 * 1024)
         .run()
-        .is_ok_and(|r| {
-            String::from_utf8_lossy(&r.stdout)
-                .lines()
-                .any(|l| l.trim_start().starts_with("--overwrite"))
-        })
+        .is_ok_and(|r| lists_overwrite(&String::from_utf8_lossy(&r.stdout)))
+}
+
+/// Whether a `--help` text lists `--overwrite` as a flag: on an option line
+/// (`      --overwrite`, `  -o, --overwrite`), not in prose about it.
+fn lists_overwrite(help: &str) -> bool {
+    help.lines().any(|l| {
+        let l = l.trim_start();
+        l.starts_with('-')
+            && l.split(|c: char| c.is_whitespace() || c == ',')
+                .take_while(|t| t.is_empty() || t.starts_with('-'))
+                .any(|t| t == "--overwrite")
+    })
 }
 
 /// `<cli> <args>` in the person's terminal: its prompts, browser and codes
@@ -305,6 +313,48 @@ mod tests {
             login_args("fakeprov", None, fill).unwrap(),
             ["auth", "login", "--profile", "p1"]
         );
+        // A group goes whole: one placeholder it cannot fill drops all of it.
+        assert_eq!(
+            args(
+                "x",
+                "x auth login [--org <ORG> --label <LABEL>] --browser",
+                no_org
+            )
+            .unwrap(),
+            ["auth", "login", "--browser", "--profile", "p1"]
+        );
+        assert_eq!(
+            args("x", "x auth login [--org <ORG> --label <LABEL>]", fill).unwrap(),
+            [
+                "auth",
+                "login",
+                "--org",
+                "org-1",
+                "--label",
+                "kid one",
+                "--profile",
+                "p1"
+            ]
+        );
+        assert!(args("x", "x auth login [--label <LABEL>", fill)
+            .unwrap_err()
+            .contains("leaves a `[` open"));
+    }
+
+    #[test]
+    fn overwrite_is_known_from_its_option_line_whatever_the_layout() {
+        assert!(lists_overwrite(
+            "Options:\n      --overwrite\n          Replace it\n"
+        ));
+        assert!(lists_overwrite(
+            "  -o, --overwrite    Replace a stored sign-in\n"
+        ));
+        assert!(lists_overwrite("  --overwrite, -o\n"));
+        assert!(!lists_overwrite("      --overwrite-all\n"));
+        assert!(!lists_overwrite(
+            "A stored session is kept; pass --overwrite to replace it.\n"
+        ));
+        assert!(!lists_overwrite("  --stdin   read it; see --overwrite\n"));
     }
 
     #[test]
