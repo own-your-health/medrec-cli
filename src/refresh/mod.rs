@@ -30,7 +30,7 @@ use crate::store::{Reads, Store};
 use contract::*;
 use requests::{Parsed, Scope};
 
-/// How often the LaunchAgent runs a pass, unless `--install --every` says.
+/// How often the LaunchAgent runs a pass, unless `--install --pass-every` says.
 pub const DEFAULT_PASS_SECS: u64 = 300;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -124,6 +124,41 @@ fn not_the_refresher(s: &Status) -> CliError {
     .with_remedy("run `medrec refresh --install --take-over` on this machine to move refresh here")
 }
 
+/// A provider CLI name medrec runs: a plain command name looked up on
+/// `PATH`, never a path.
+pub fn plain_cli(name: &str) -> bool {
+    let mut c = name.chars();
+    c.next()
+        .is_some_and(|f| f.is_ascii_lowercase() || f.is_ascii_digit())
+        && c.all(|x| x.is_ascii_lowercase() || x.is_ascii_digit() || x == '-' || x == '_')
+}
+
+/// A `status.json` a later medrec wrote is not rewritten by this one.
+fn check_format(s: &Status) -> Result<(), CliError> {
+    if s.format > FORMAT {
+        return Err(CliError::Other(format!(
+            "_status/status.json is format {}, newer than this medrec (format {FORMAT}); run `medrec self-update`",
+            s.format
+        )));
+    }
+    Ok(())
+}
+
+/// The folder's `status.json` as this machine's starting point: its
+/// per-source history is the folder's, kept across a take-over; a sign-in
+/// is this machine's own, so another machine's is not taken as this one's.
+fn adopt(mut s: Status, machine: &str) -> Status {
+    if s.refresher.machine != machine {
+        for e in &mut s.sources {
+            e.sign_in = SignIn {
+                state: "unknown".into(),
+                ..SignIn::default()
+            };
+        }
+    }
+    s
+}
+
 /// The pieces of a pass that write `_status/`.
 struct Writer<'a> {
     store: &'a Store,
@@ -138,6 +173,7 @@ impl Writer<'_> {
     /// taken refresh over.
     fn still_refresher(&self) -> Result<(), CliError> {
         if let Some(s) = folder::read_json::<Status>(self.store, STATUS)? {
+            check_format(&s)?;
             if other_refresher(&s, &self.machine, time::now()) {
                 return Err(not_the_refresher(&s));
             }
@@ -232,10 +268,7 @@ fn latest_import(
 
 /// A source's entry, as kept or new.
 fn entry(prev: Option<&SourceStatus>, id: &str, src: Option<&Source>, b: &Binding) -> SourceStatus {
-    let cli = src
-        .and_then(|s| s.cli.clone())
-        .or_else(|| prev.map(|p| p.cli.clone()))
-        .unwrap_or_default();
+    let cli = b.cli.clone();
     let mut e = prev.cloned().unwrap_or(SourceStatus {
         source: id.into(),
         person: String::new(),
@@ -367,7 +400,7 @@ fn error_info(e: &CliError) -> ErrorInfo {
 }
 
 fn counts(r: &import::Report) -> BTreeMap<String, u64> {
-    let v = serde_json::to_value(r).unwrap_or_default();
+    let v = serde_json::to_value(r).expect("an import report is plain data and serializes");
     let mut out = BTreeMap::new();
     for k in [
         "records_added",
@@ -427,7 +460,11 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
     }
 
     let in_folder: Option<Status> = folder::read_json(&store, STATUS)?;
+    if let Some(s) = &local.status {
+        check_format(s)?;
+    }
     if let Some(s) = &in_folder {
+        check_format(s)?;
         if other_refresher(s, &machine, started) {
             if mode == Mode::Scheduled {
                 report.status = "other_machine".into();
@@ -437,7 +474,7 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
         }
     }
     if local.status.is_none() {
-        local.status = in_folder.filter(|s| s.refresher.machine == machine);
+        local.status = in_folder.map(|s| adopt(s, &machine));
     }
     let settling = local
         .took_over_at
@@ -621,7 +658,27 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
             .cloned()
             .unwrap_or_else(|| entry(None, id, source_of(id), b));
 
-        let Some(src) = source_of(id) else {
+        let src = match source_of(id) {
+            Some(s) if s.cli.as_deref() == Some(b.cli.as_str()) && plain_cli(&b.cli) => Some(s),
+            Some(_) => {
+                let mut a = t.attempt(&e, "failed");
+                a.error = Some(ErrorInfo {
+                    code: "provider".into(),
+                    message: format!(
+                        "household.json names another provider CLI for source {id} than the `{}` it was set up with; not run",
+                        b.cli
+                    ),
+                    remedy: Some(format!(
+                        "check the source, then set it up again with `medrec --profile <NAME> refresh add --source {id}`"
+                    )),
+                });
+                t.record(&writer, &mut e, &a, None, true, &mut report, &mut answers)?;
+                entries.insert(id.clone(), e);
+                continue;
+            }
+            None => None,
+        };
+        let Some(src) = src else {
             let mut a = t.attempt(&e, "failed");
             a.error = Some(ErrorInfo {
                 code: "not_found".into(),
@@ -738,7 +795,7 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
         entries.insert(id.clone(), e.clone());
         writer.status(&entries, &mut local)?;
 
-        let provider = import::probe(&e.cli);
+        let provider = import::probe(&b.cli);
         let outcome = attempt(cfg, mode, &provider, src, b, &mut e, &mut a);
         if outcome == BUSY {
             // Another writer held the folder: no attempt, and its requests
@@ -1168,6 +1225,7 @@ pub fn install(
     let in_folder: Option<Status> = folder::read_json(&store, STATUS)?;
     let mut took_over = false;
     if let Some(s) = &in_folder {
+        check_format(s)?;
         if s.refresher.machine != machine {
             if other_refresher(s, &machine, now) && !take_over {
                 return Err(not_the_refresher(s));
@@ -1182,7 +1240,7 @@ pub fn install(
     }
     let mut local = state::load(&location)?;
     if local.status.is_none() {
-        local.status = in_folder.clone().filter(|s| s.refresher.machine == machine);
+        local.status = in_folder.clone().map(|s| adopt(s, &machine));
     }
     let entries = current_entries(
         cfg,
@@ -1322,12 +1380,7 @@ pub fn add(
         .iter()
         .find(|s| s.id == source)
         .ok_or_else(|| CliError::NotFound(format!("no source `{source}` in household.json")))?;
-    let cli = src.cli.clone().ok_or_else(|| {
-        CliError::Usage(format!(
-            "source `{source}` has no provider CLI (it is a {} source); only an import refreshes",
-            src.kind
-        ))
-    })?;
+    let cli = source_cli(src)?;
     let provider = import::probe(&cli);
     if !provider.usable() {
         return Err(CliError::Usage(format!(
@@ -1367,6 +1420,7 @@ pub fn add(
         }
     }
     let b = Binding {
+        cli: cli.clone(),
         paused: cfg
             .active
             .refresh
@@ -1380,6 +1434,23 @@ pub fn add(
         .sources
         .insert(source.to_string(), b.clone());
     Ok(bound_row(source, src.person.clone(), &cli, &b))
+}
+
+/// The provider CLI a source imports from, as a plain command name.
+fn source_cli(src: &Source) -> Result<String, CliError> {
+    let cli = src.cli.clone().ok_or_else(|| {
+        CliError::Usage(format!(
+            "source `{}` has no provider CLI (it is a {} source); only an import refreshes",
+            src.id, src.kind
+        ))
+    })?;
+    if !plain_cli(&cli) {
+        return Err(CliError::Usage(format!(
+            "source `{}` names its provider CLI as `{cli}`, which is not a plain command name",
+            src.id
+        )));
+    }
+    Ok(cli)
 }
 
 fn bound_row(source: &str, person: String, cli: &str, b: &Binding) -> Bound {
@@ -1407,7 +1478,7 @@ pub fn list(cfg: &Config) -> Result<Vec<serde_json::Value>, CliError> {
                 .status
                 .as_ref()
                 .and_then(|s| s.sources.iter().find(|e| e.source == *id));
-            let cli = e.map(|e| e.cli.clone()).unwrap_or_default();
+            let cli = b.cli.clone();
             serde_json::json!({
                 "source": id,
                 "cli": cli,
@@ -1496,7 +1567,16 @@ pub fn sign_in(cfg: &Config, source: &str) -> Result<SignedIn, CliError> {
         .iter()
         .find(|s| s.id == source)
         .ok_or_else(|| CliError::NotFound(format!("no source `{source}` in household.json")))?;
-    let cli = src.cli.clone().unwrap_or_default();
+    let cli = source_cli(src)?;
+    if cli != b.cli {
+        return Err(CliError::Usage(format!(
+            "household.json names `{cli}` for source `{source}`, set up for refresh with `{}`",
+            b.cli
+        ))
+        .with_remedy(format!(
+            "check the source, then set it up again with `medrec --profile <NAME> refresh add --source {source}`"
+        )));
+    }
     let provider = import::probe(&cli);
     if !provider.usable() {
         return Err(CliError::Usage(format!(
@@ -1524,9 +1604,9 @@ pub fn sign_in(cfg: &Config, source: &str) -> Result<SignedIn, CliError> {
     let mut local = state::load(&location)?;
     let store = Store::open(&location, Reads::Fresh, cfg.rclone_budget());
     let mut entries = current_entries(cfg, &local, &h);
-    let e = entries
-        .get_mut(source)
-        .expect("a bound source has an entry");
+    let e = entries.get_mut(source).ok_or_else(|| {
+        CliError::NotFound(format!("source `{source}` is not set up for refresh"))
+    })?;
     e.sign_in.checked_at = Some(time::fmt(time::now()));
     let state_text = match &state {
         signin::Read::Read { state, expires_at } => {
@@ -1567,7 +1647,11 @@ pub fn sign_in(cfg: &Config, source: &str) -> Result<SignedIn, CliError> {
 /// `_status/status.json` as the folder holds it now.
 pub fn read_status(cfg: &Config) -> Result<Option<Status>, CliError> {
     let store = Store::open(&cfg.folder_location()?, Reads::Fresh, cfg.rclone_budget());
-    folder::read_json(&store, STATUS)
+    let s: Option<Status> = folder::read_json(&store, STATUS)?;
+    if let Some(s) = &s {
+        check_format(s)?;
+    }
+    Ok(s)
 }
 
 /// The name a pending request is filed under, for tests and the synthetic

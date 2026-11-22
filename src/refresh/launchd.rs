@@ -44,10 +44,31 @@ fn xml(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
+/// The variables the agent runs with: this shell's `PATH`, so it finds
+/// rclone and the provider CLIs, and `XDG_CONFIG_HOME` and `XDG_CACHE_HOME`
+/// when set, so it reads the config and cache the install used.
+pub fn agent_env() -> Vec<(String, String)> {
+    let mut env = vec![(
+        "PATH".to_string(),
+        std::env::var("PATH").unwrap_or_else(|_| "/usr/bin:/bin".into()),
+    )];
+    for k in ["XDG_CONFIG_HOME", "XDG_CACHE_HOME"] {
+        if let Some(v) = std::env::var(k).ok().filter(|v| !v.is_empty()) {
+            env.push((k.to_string(), v));
+        }
+    }
+    env
+}
+
 /// The agent: `<exe> --profile <profile> refresh --scheduled` every
-/// `every_secs`, with this shell's `PATH` so it finds rclone and the
-/// provider CLIs, and its output in `log`.
-pub fn plist(profile: &str, exe: &Path, every_secs: u64, path_env: &str, log: &Path) -> String {
+/// `every_secs`, with `env`, and its output in `log`.
+pub fn plist(
+    profile: &str,
+    exe: &Path,
+    every_secs: u64,
+    env: &[(String, String)],
+    log: &Path,
+) -> String {
     let args = [
         exe.to_string_lossy().into_owned(),
         "--profile".into(),
@@ -58,6 +79,16 @@ pub fn plist(profile: &str, exe: &Path, every_secs: u64, path_env: &str, log: &P
     let args: String = args
         .iter()
         .map(|a| format!("    <string>{}</string>\n", xml(a)))
+        .collect();
+    let env: String = env
+        .iter()
+        .map(|(k, v)| {
+            format!(
+                "    <key>{}</key>\n    <string>{}</string>\n",
+                xml(k),
+                xml(v)
+            )
+        })
         .collect();
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -71,9 +102,7 @@ pub fn plist(profile: &str, exe: &Path, every_secs: u64, path_env: &str, log: &P
 {args}  </array>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>PATH</key>
-    <string>{path}</string>
-  </dict>
+{env}  </dict>
   <key>StartInterval</key>
   <integer>{every_secs}</integer>
   <key>RunAtLoad</key>
@@ -90,7 +119,6 @@ pub fn plist(profile: &str, exe: &Path, every_secs: u64, path_env: &str, log: &P
 </plist>
 "#,
         label = xml(&label(profile)),
-        path = xml(path_env),
         log = xml(&log.to_string_lossy()),
     )
 }
@@ -114,7 +142,6 @@ pub fn install(profile: &str, every_secs: u64) -> Result<PathBuf, CliError> {
     let exe = std::env::current_exe()
         .and_then(std::fs::canonicalize)
         .map_err(|e| CliError::Other(format!("finding medrec's own path: {e}")))?;
-    let path_env = std::env::var("PATH").unwrap_or_else(|_| "/usr/bin:/bin".into());
     let log = log_path(profile)?;
     if let Some(dir) = log.parent() {
         std::fs::create_dir_all(dir)
@@ -125,7 +152,7 @@ pub fn install(profile: &str, every_secs: u64) -> Result<PathBuf, CliError> {
         std::fs::create_dir_all(dir)
             .map_err(|e| CliError::Other(format!("creating {}: {e}", dir.display())))?;
     }
-    let text = plist(profile, &exe, every_secs, &path_env, &log);
+    let text = plist(profile, &exe, every_secs, &agent_env(), &log);
     std::fs::write(&plist_file, text)
         .map_err(|e| CliError::Other(format!("writing {}: {e}", plist_file.display())))?;
     let domain = format!("gui/{}", uid());
@@ -170,7 +197,10 @@ mod tests {
             "home",
             Path::new("/Users/x/.cargo/bin/medrec"),
             300,
-            "/usr/bin:/bin:/a&b",
+            &[
+                ("PATH".into(), "/usr/bin:/bin:/a&b".into()),
+                ("XDG_CONFIG_HOME".into(), "/Users/x/cfg".into()),
+            ],
             Path::new("/Users/x/Library/Logs/medrec/refresh-home.log"),
         );
         assert!(p.contains("<string>io.github.own-your-health.medrec.refresh.home</string>"));
@@ -178,7 +208,8 @@ mod tests {
             "    <string>/Users/x/.cargo/bin/medrec</string>\n    <string>--profile</string>\n    <string>home</string>\n    <string>refresh</string>\n    <string>--scheduled</string>\n"
         ));
         assert!(p.contains("<integer>300</integer>"));
-        assert!(p.contains("/usr/bin:/bin:/a&amp;b"));
+        assert!(p.contains("    <key>PATH</key>\n    <string>/usr/bin:/bin:/a&amp;b</string>\n"));
+        assert!(p.contains("<key>XDG_CONFIG_HOME</key>"));
         assert!(!p.contains("UserName"), "never as another user");
     }
 }

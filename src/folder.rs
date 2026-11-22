@@ -645,6 +645,7 @@ mod tests {
             panic!("a held lock was taken");
         };
         assert!(start.elapsed() >= Duration::from_millis(400));
+        assert!(is_lock_busy(&CliError::Other(why.clone())), "{why}");
         assert!(
             why.contains("another medrec") && why.contains("0 seconds"),
             "{why}"

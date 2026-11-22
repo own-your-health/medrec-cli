@@ -142,6 +142,15 @@ enum ProfilesCmd {
     },
 }
 
+/// With no subcommand, a pass: every bound source, or one `--person`'s or
+/// `--source`'s. A subcommand that acts on one bound source takes its id
+/// as an argument (`medrec refresh sign-in <id>`); `--source` picks or binds
+/// one.
+///
+/// Exit codes of a pass: 0 when nothing failed, 5 when a source failed, 3
+/// when none failed and one needs a person (`refresh sign-in <id>`);
+/// `--scheduled` exits 0. `refresh status --json` prints `"status": null`
+/// for a folder refresh has never run on.
 #[derive(Args, Debug)]
 #[command(args_conflicts_with_subcommands = true)]
 struct RefreshArgs {
@@ -158,13 +167,14 @@ struct RefreshArgs {
     /// waited for.
     #[arg(long, conflicts_with_all = ["source", "person"])]
     scheduled: bool,
-    /// Install the LaunchAgent that runs a scheduled pass every `--every`
-    /// (5 minutes unless given), as this profile.
+    /// Install the LaunchAgent that runs a scheduled pass every
+    /// `--pass-every` (5 minutes unless given), as this profile.
     #[arg(long, conflicts_with_all = ["uninstall", "scheduled", "source", "person"])]
     install: bool,
-    /// How often the LaunchAgent runs a pass: `90s`, `5m`, `1h`.
+    /// How often the LaunchAgent looks for due sources and requests: `90s`,
+    /// `5m`. Not how often a source is imported (`refresh add --every`).
     #[arg(long, requires = "install", value_name = "DURATION", value_parser = duration)]
-    every: Option<u64>,
+    pass_every: Option<u64>,
     /// Move refresh of this folder to this machine from the one that does
     /// it now.
     #[arg(long, requires = "install")]
@@ -182,8 +192,10 @@ enum RefreshCmd {
         /// The source (its `s_` id, from `medrec people show`).
         #[arg(long, value_name = "ID")]
         source: String,
-        /// The provider CLI's own profile (its login) to import through.
-        #[arg(long, value_name = "NAME")]
+        /// The provider CLI's own profile (its login) to import through, as
+        /// `import --from-profile`. Required for a provider that signs in;
+        /// refused for one that needs no login.
+        #[arg(long, alias = "from-profile", value_name = "NAME", value_parser = profile_name_text)]
         provider_profile: Option<String>,
         /// The patient at the provider, when the source does not say.
         #[arg(long)]
@@ -196,7 +208,7 @@ enum RefreshCmd {
         #[arg(long)]
         manual: bool,
         /// How often it is imported on the schedule (default daily; never
-        /// below the provider's minimum).
+        /// below the provider's minimum). Not `--install --pass-every`.
         #[arg(long, value_name = "DURATION", value_parser = duration)]
         every: Option<u64>,
     },
@@ -1178,7 +1190,7 @@ fn refresh_cmd(cli: &Cli, a: &RefreshArgs, store: &ConfigStore) -> Result<(), Cl
     let Some(cmd) = &a.cmd else {
         if a.install {
             let mut cfg = load(store, cli)?;
-            let r = refresh::install(&mut cfg, a.every, a.take_over)?;
+            let r = refresh::install(&mut cfg, a.pass_every, a.take_over)?;
             cfg.keep_active()?;
             store.save(&cfg)?;
             output::emit(json, "refresh-install", to_value(&r), |v| {
@@ -1286,6 +1298,7 @@ fn refresh_cmd(cli: &Cli, a: &RefreshArgs, store: &ConfigStore) -> Result<(), Cl
             let mut cfg = load(store, cli)?;
             let h = Folder::open(&cfg, Access::Fresh)?.household()?;
             let wanted = medrec::config::Binding {
+                cli: String::new(),
                 provider_profile: provider_profile.clone(),
                 patient: patient.clone(),
                 org: org.clone(),

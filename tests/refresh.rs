@@ -460,7 +460,7 @@ fn one_machine_refreshes_a_folder_until_another_takes_over() {
         "adult1",
     ]);
 
-    let v = e.ok(&["refresh", "--install", "--every", "10m"]);
+    let v = e.ok(&["refresh", "--install", "--pass-every", "10m"]);
     assert_eq!(v["pass_every_secs"], 600);
     assert_eq!(v["took_over"], false);
     let plist = e
@@ -558,5 +558,140 @@ fn an_attempt_a_stopped_pass_left_running_counts_as_a_failure() {
     assert_eq!(v["attempts"][0]["error"], "interrupted");
     let st = e.json_at("_status/status.json");
     assert_eq!(st["sources"][0]["failures"], 1);
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
+#[test]
+fn a_signed_out_login_needs_a_person_and_is_not_read_again_in_the_background() {
+    let e = Env::new("signed-out");
+    let src = setup(&e);
+    e.ok(&[
+        "--profile",
+        "home",
+        "refresh",
+        "add",
+        "--source",
+        &src,
+        "--from-profile",
+        "adult1",
+    ]);
+    e.age_imports();
+    e.request("x_aaaaaaaaaaaaaaaaaaaa", json!({"all": true}));
+    let out = [("FAKEPROV_AUTH", "signed-out")];
+    let v = e.ok_env(&["refresh", "--scheduled"], &out);
+    assert_eq!(v["attempts"][0]["outcome"], "needs_person", "{v}");
+    assert_eq!(v["attempts"][0]["error"], "needs_person", "{v}");
+    let st = e.json_at("_status/status.json");
+    let s0 = &st["sources"][0];
+    assert_eq!(s0["sign_in"]["state"], "signed_out");
+    assert_eq!(s0["sign_in"]["needs_person"]["reason"], "sign_in");
+    assert_eq!(
+        s0["sign_in"]["needs_person"]["command"],
+        format!("medrec refresh sign-in {src}").as_str()
+    );
+    assert_eq!(s0["failures"], 0, "a sign-in is not a failure to back off");
+    let calls = e.auth_calls();
+    e.request("x_bbbbbbbbbbbbbbbbbbbb", json!({"all": true}));
+    e.ok_env(&["refresh", "--scheduled"], &[("FAKEPROV_AUTH", "expired")]);
+    assert_eq!(e.auth_calls(), calls);
+
+    // `cache clear` keeps this machine the refresher, and its history.
+    e.ok(&["cache", "clear"]);
+    e.request("x_cccccccccccccccccccc", json!({"all": true}));
+    let v = e.ok(&["refresh", "--scheduled"]);
+    assert_eq!(v["status"], "ran", "{v}");
+    assert_eq!(v["requests"][0]["outcome"], "needs_person", "{v}");
+    let st = e.json_at("_status/status.json");
+    assert!(
+        st["sources"][0]["sign_in"]["needs_person"].is_object(),
+        "{st}"
+    );
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
+#[test]
+fn a_pass_runs_only_the_provider_the_binding_names() {
+    let e = Env::new("tampered");
+    let src = setup(&e);
+    e.ok(&[
+        "--profile",
+        "home",
+        "refresh",
+        "add",
+        "--source",
+        &src,
+        "--provider-profile",
+        "adult1",
+    ]);
+    let b = e.ok(&["refresh", "list"]);
+    assert_eq!(b["items"][0]["cli"], "fakeprov", "{b}");
+    e.age_imports();
+    let path = e.records().join("household.json");
+    let mut h: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    for s in h["sources"].as_array_mut().unwrap() {
+        if s["id"] == src.as_str() {
+            s["cli"] = e
+                .root
+                .join("provider/fakeprov")
+                .to_string_lossy()
+                .into_owned()
+                .into();
+        }
+    }
+    std::fs::write(&path, serde_json::to_vec_pretty(&h).unwrap()).unwrap();
+    let calls = e.auth_calls();
+    let (code, v) = e.doc(&["refresh"], &[]);
+    assert_eq!(code, Some(5), "{v}");
+    assert_eq!(v["attempts"][0]["outcome"], "failed", "{v}");
+    assert_eq!(v["attempts"][0]["error"], "provider", "{v}");
+    assert_eq!(e.auth_calls(), calls, "the provider ran");
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
+#[test]
+fn a_newer_status_is_left_alone_and_a_take_over_keeps_the_history() {
+    let e = Env::new("format");
+    let src = setup(&e);
+    e.ok(&[
+        "--profile",
+        "home",
+        "refresh",
+        "add",
+        "--source",
+        &src,
+        "--provider-profile",
+        "adult1",
+    ]);
+    e.age_imports();
+    e.ok(&["refresh"]);
+    let path = e.records().join("_status/status.json");
+    let before: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert!(before["sources"][0]["last_success"].is_object());
+
+    // Another machine, its heartbeat gone stale: a take-over keeps each
+    // source's history, and not that machine's sign-in.
+    let mut other = before.clone();
+    other["refresher"]["machine"] = "h_bbbbbbbbbbbbbbbbbbbb".into();
+    other["refresher"]["last_pass_at"] = "2026-01-01T00:00:00Z".into();
+    std::fs::write(&path, serde_json::to_vec(&other).unwrap()).unwrap();
+    let _ = std::fs::remove_dir_all(e.root.join("cache/medrec/refresh"));
+    e.ok(&["refresh", "--install", "--take-over"]);
+    let st = e.json_at("_status/status.json");
+    assert_eq!(
+        st["sources"][0]["last_success"], before["sources"][0]["last_success"],
+        "{st}"
+    );
+    assert_eq!(st["sources"][0]["sign_in"]["state"], "unknown");
+
+    // A status.json a later medrec wrote is not rewritten.
+    let mut newer = st.clone();
+    newer["format"] = 2.into();
+    std::fs::write(&path, serde_json::to_vec(&newer).unwrap()).unwrap();
+    let written = std::fs::read(&path).unwrap();
+    let (code, text) = e.code(&["refresh"]);
+    assert_ne!(code, Some(0), "{text}");
+    assert!(text.contains("self-update"), "{text}");
+    assert_eq!(e.code(&["refresh", "status"]).0, Some(1));
+    assert_eq!(std::fs::read(&path).unwrap(), written);
     let _ = std::fs::remove_dir_all(&e.root);
 }

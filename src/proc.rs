@@ -325,9 +325,14 @@ fn timed_out(name: &str, t: Duration) -> CliError {
     timed_out_err(name, t)
 }
 
-/// Whether `e` is a [`Bounded`] call that outlived its timeout.
+/// Whether `e` is a [`Bounded`] call that outlived its timeout: exactly
+/// the message [`timed_out_err`] writes, not any text that quotes it.
 pub fn is_timeout(e: &CliError) -> bool {
-    e.message().contains(TIMED_OUT)
+    let m = e.message();
+    m.starts_with('`')
+        && m.ends_with(" s; stopped")
+        && m.split_once("` ")
+            .is_some_and(|(_, rest)| rest.starts_with(TIMED_OUT))
 }
 
 const TIMED_OUT: &str = "gave no answer within";
@@ -441,6 +446,21 @@ fn is_executable(p: &Path) -> bool {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_timeout_is_known_by_the_message_its_constructor_writes() {
+        assert!(is_timeout(&timed_out_err(
+            "fakeprov auth status",
+            Duration::from_secs(30)
+        )));
+        for other in [
+            "rclone lsjson: `x` gave no answer within 30 s; stopped (retrying)",
+            "provider said: gave no answer within 5 s; stopped",
+            "`x` exited 1",
+        ] {
+            assert!(!is_timeout(&CliError::Upstream(other.into())), "{other}");
+        }
+    }
 
     #[test]
     fn captures_stdout_exit_code_and_stderr_tail() {

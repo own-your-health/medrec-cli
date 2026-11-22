@@ -254,7 +254,7 @@ medrec --profile home refresh add --source <id> --provider-profile adult1   # bi
 medrec refresh list                             # the bindings (this machine's config)
 medrec refresh                                  # import every bound source now, if its interval allows
 medrec refresh --person Robin                   # one person's sources; --source <id> for one
-medrec refresh --install                        # a LaunchAgent: a pass every 5 minutes (--every)
+medrec refresh --install                        # a LaunchAgent: a pass every 5 minutes (--pass-every)
 medrec refresh status                           # what _status/status.json records
 medrec refresh pause <id> --reason consent      # until `medrec refresh resume <id>`
 medrec refresh sign-in <id>                     # sign a source's login in; clears "needs a person"
@@ -294,8 +294,14 @@ the machine it runs on, serving requests from one pass later. The agent is
 `~/Library/LaunchAgents/io.github.own-your-health.medrec.refresh.<profile>.plist`,
 in the person's own session, and logs ids, outcomes and counts to
 `~/Library/Logs/medrec/refresh-<profile>.log`, never a name or a record.
-`medrec refresh` exits 3 when a source needs a person and 5 when one failed;
-`--scheduled` exits 0.
+`medrec refresh` exits 5 when a source failed, else 3 when one needs a
+person, else 0; `--scheduled` exits 0. `refresh sign-in` exits 3 when the
+source still needs a person. `refresh status --json` prints `"status": null`
+for a folder refresh has never run on. A subcommand that acts on one bound
+source takes its id as an argument (`refresh sign-in <id>`, `pause`,
+`resume`, `remove`); `--source` picks one for a pass or binds one.
+`--provider-profile` is `import --from-profile`'s login, and takes that name
+too.
 
 ### Settings
 

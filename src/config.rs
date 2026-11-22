@@ -55,7 +55,7 @@ pub struct RefreshSettings {
     /// Each source set up for refresh, by its id in household.json.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub sources: std::collections::BTreeMap<String, Binding>,
-    /// How often the LaunchAgent runs a pass (`--install --every`).
+    /// How often the LaunchAgent runs a pass (`--install --pass-every`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pass_every_secs: Option<u64>,
 }
@@ -69,6 +69,11 @@ impl RefreshSettings {
 /// One source's refresh: the binding `refresh add` made on purpose.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Binding {
+    /// The provider CLI the binding was made for. A pass runs this name,
+    /// never one read from the records folder, and refuses a source whose
+    /// `household.json` names another.
+    #[serde(default)]
+    pub cli: String,
     /// The provider's login profile its export runs with; `None` for a
     /// provider that signs in to nothing.
     #[serde(default, skip_serializing_if = "Option::is_none")]

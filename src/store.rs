@@ -334,8 +334,16 @@ impl Store {
                     }
                 };
                 let mut out = Vec::new();
-                for entry in rd.flatten() {
-                    let Ok(meta) = entry.metadata() else { continue };
+                let failed =
+                    |e: std::io::Error| CliError::Other(format!("listing {}: {e}", dir.display()));
+                for entry in rd {
+                    let entry = entry.map_err(failed)?;
+                    let meta = match entry.metadata() {
+                        Ok(m) => m,
+                        // Gone since the listing: a cancelled request.
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                        Err(e) => return Err(failed(e)),
+                    };
                     if !meta.is_file() {
                         continue;
                     }

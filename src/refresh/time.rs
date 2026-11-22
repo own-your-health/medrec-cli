@@ -32,7 +32,7 @@ pub fn parse(s: &str) -> Option<i64> {
     };
     let (y, mo, d) = (num(0..4)?, num(5..7)?, num(8..10)?);
     let (h, mi, sec) = (num(11..13)?, num(14..16)?, num(17..19)?);
-    if !(1..=12).contains(&mo) || !(1..=31).contains(&d) || h > 23 || mi > 59 || sec > 60 {
+    if !(1..=12).contains(&mo) || d < 1 || d > days_in(y, mo) || h > 23 || mi > 59 || sec > 60 {
         return None;
     }
     let mut rest = &s[19..];
@@ -50,8 +50,13 @@ pub fn parse(s: &str) -> Option<i64> {
             if rb.len() != 6 || !matches!(rb[0], b'+' | b'-') || rb[3] != b':' {
                 return None;
             }
-            let oh: i64 = rest[1..3].parse().ok()?;
-            let om: i64 = rest[4..6].parse().ok()?;
+            let (oh, om) = (
+                num(20 + n_frac(s)..22 + n_frac(s))?,
+                num(23 + n_frac(s)..25 + n_frac(s))?,
+            );
+            if oh > 23 || om > 59 {
+                return None;
+            }
             let o = oh * 3600 + om * 60;
             if rb[0] == b'-' {
                 -o
@@ -61,6 +66,24 @@ pub fn parse(s: &str) -> Option<i64> {
         }
     };
     Some(days_from_civil(y, mo, d) * 86400 + h * 3600 + mi * 60 + sec - offset)
+}
+
+/// The length of the fractional-seconds part (`.` and digits) after the
+/// seconds of an RFC 3339 time.
+fn n_frac(s: &str) -> usize {
+    match s.get(19..).and_then(|r| r.strip_prefix('.')) {
+        Some(f) => 1 + f.bytes().take_while(u8::is_ascii_digit).count(),
+        None => 0,
+    }
+}
+
+fn days_in(y: i64, m: i64) -> i64 {
+    match m {
+        4 | 6 | 9 | 11 => 30,
+        2 if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 => 29,
+        2 => 28,
+        _ => 31,
+    }
 }
 
 /// Days since 1970-01-01 of a proleptic Gregorian date (Howard Hinnant's
@@ -126,6 +149,11 @@ mod tests {
             assert_eq!(parse(&fmt(secs)), Some(secs));
         }
         assert_eq!(parse("1970-01-01T00:00:00Z"), Some(0));
+        assert!(parse("2024-02-29T00:00:00Z").is_some());
+        assert_eq!(
+            parse("2026-07-12T05:00:00.25+02:00"),
+            parse("2026-07-12T03:00:00Z")
+        );
         assert_eq!(
             parse("2026-07-12T03:00:00.123Z"),
             parse("2026-07-12T03:00:00Z")
@@ -144,6 +172,14 @@ mod tests {
             "2026-13-01T00:00:00Z",
             "2026-07-12T03:00:00",
             "soon",
+            "2026-02-31T00:00:00Z",
+            "2025-02-29T00:00:00Z",
+            "2026-04-31T00:00:00Z",
+            "2026-07-12T03:00:00+-1:00",
+            "2026-07-12T03:00:00++1:00",
+            "2026-07-12T03:00:00+24:00",
+            "2026-07-12T03:00:00+01:60",
+            "2026-07-12T03:00:00.5+-1:00",
         ] {
             assert_eq!(parse(bad), None, "{bad}");
         }
