@@ -98,15 +98,20 @@ pub fn too_large(name: &str, bytes: u64) -> Parsed {
     )
 }
 
+/// The name of `done/`'s answer to the request file `name`.
+pub fn done_name_of(name: &str) -> String {
+    if id_of_name(name).is_some() {
+        name.to_string()
+    } else {
+        invalid_name(name)
+    }
+}
+
 fn invalid(name: &str, body: Option<&[u8]>, bytes: u64, why: String) -> Parsed {
     let id = id_of_name(name);
     Parsed::Invalid(Invalid {
         name: name.to_string(),
-        done_name: if id.is_some() {
-            name.to_string()
-        } else {
-            invalid_name(name)
-        },
+        done_name: done_name_of(name),
         id,
         bytes,
         sha256: body.map(crate::hash::sha256_hex),

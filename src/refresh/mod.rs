@@ -16,7 +16,7 @@ pub mod signin;
 pub mod state;
 pub mod time;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use pk_cli_config::profile::ProfileName;
 use pk_cli_core::CliError;
@@ -456,7 +456,10 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
         let due = bound
             .iter()
             .any(|(id, b)| due_by_local(&local, id, b, started));
-        if listing.is_empty() && !due && !heartbeat_due {
+        // A request file answered already that medrec could not remove
+        // costs nothing past the listing.
+        let waiting = listing.iter().any(|e| !local.left.contains(&e.rel));
+        if !waiting && !due && !heartbeat_due {
             report.status = "idle".into();
             return Ok(report);
         }
@@ -507,16 +510,26 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
     let known = Known { h: &h, bound };
     let mut parsed: Vec<Parsed> = Vec::new();
     if !settling {
+        local.left.retain(|n| listing.iter().any(|e| &e.rel == n));
+        let answered: BTreeSet<String> = if listing.is_empty() {
+            BTreeSet::new()
+        } else {
+            store
+                .list_here(DONE_DIR)?
+                .into_iter()
+                .map(|e| e.rel)
+                .collect()
+        };
         for e in &listing {
             let rel = format!("{REQUESTS_DIR}/{}", e.rel);
-            // Handled already, its file left because medrec could not
-            // remove it (another Google account's): not served again.
-            let done_name = match requests::id_of_name(&e.rel) {
-                Some(_) => e.rel.clone(),
-                None => requests::invalid_name(&e.rel),
-            };
-            if store.exists(&format!("{DONE_DIR}/{done_name}"))? {
-                let _ = store.delete(&rel);
+            // Answered already, its file left because medrec could not
+            // remove it (another Google account's): never served again.
+            if answered.contains(&requests::done_name_of(&e.rel)) {
+                if store.delete(&rel).is_ok() {
+                    local.left.remove(&e.rel);
+                } else {
+                    local.left.insert(e.rel.clone());
+                }
                 continue;
             }
             let size = e.size.unwrap_or(0);
@@ -905,6 +918,9 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
         let file_left = store
             .delete(&format!("{REQUESTS_DIR}/{}", p.name()))
             .is_err();
+        if file_left {
+            local.left.insert(p.name().to_string());
+        }
         report.requests.push(RequestRow {
             file_left,
             request: match p {
@@ -917,7 +933,16 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
 
     // Old outcomes go, once a day.
     if started - local.pruned_at >= 86400 {
+        // An answer whose request file is still there is what keeps that
+        // request from being served again: it stays as long as the file.
+        let twins: BTreeSet<String> = listing
+            .iter()
+            .map(|e| requests::done_name_of(&e.rel))
+            .collect();
         for e in store.list(DONE_DIR)? {
+            if twins.contains(&e.rel) {
+                continue;
+            }
             if e.modified.is_some_and(|m| started - m > DONE_KEEP_SECS) {
                 let _ = store.delete(&format!("{DONE_DIR}/{}", e.rel));
             }

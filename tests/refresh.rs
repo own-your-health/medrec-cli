@@ -705,9 +705,6 @@ fn a_newer_status_is_left_alone_and_a_take_over_keeps_the_history() {
 
 #[test]
 fn a_folder_another_writer_holds_records_nothing_and_keeps_the_request() {
-    if medrec::proc::which("python3").is_none() {
-        return;
-    }
     let e = Env::new("busy");
     let src = setup(&e);
     e.ok(&[
@@ -726,7 +723,7 @@ fn a_folder_another_writer_holds_records_nothing_and_keeps_the_request() {
     let lines = attempt_lines(&e).len();
     e.age_imports();
 
-    // The folder's lock, as another medrec writing it holds it.
+    // The folder's lock, held here as another medrec writing it would.
     let mut lock = None;
     walk(&e.root.join("cache/medrec/locks"), &mut |p| {
         let name = p.file_name().unwrap().to_string_lossy().into_owned();
@@ -735,29 +732,12 @@ fn a_folder_another_writer_holds_records_nothing_and_keeps_the_request() {
         }
     });
     let lock = lock.expect("the import left the folder's lock file");
-    let ready = e.root.join("held");
-    let mut holder = std::process::Command::new("python3")
-        .args([
-            "-I",
-            "-c",
-            "import fcntl,sys,time\nf=open(sys.argv[1],'a')\nfcntl.flock(f,fcntl.LOCK_EX)\nopen(sys.argv[2],'w').close()\ntime.sleep(60)",
-        ])
-        .arg(&lock)
-        .arg(&ready)
-        .spawn()
-        .unwrap();
-    for _ in 0..100 {
-        if ready.exists() {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(50));
-    }
-    assert!(ready.exists(), "the lock holder did not start");
+    let held = std::fs::OpenOptions::new().write(true).open(&lock).unwrap();
+    held.lock().unwrap();
 
     e.request("x_aaaaaaaaaaaaaaaaaaaa", json!({"all": true}));
     let v = e.ok(&["refresh", "--scheduled"]);
-    let _ = holder.kill();
-    let _ = holder.wait();
+    drop(held);
     assert_eq!(v["attempts"][0]["outcome"], "busy", "{v}");
     assert!(v["requests"].as_array().unwrap().is_empty(), "{v}");
     assert_eq!(attempt_lines(&e).len(), lines, "an attempt was recorded");
@@ -775,9 +755,25 @@ fn a_folder_another_writer_holds_records_nothing_and_keeps_the_request() {
     let _ = std::fs::remove_dir_all(&e.root);
 }
 
+/// Gives a directory its owner's write permission back, whatever a test
+/// asserted before.
+struct Writable(std::path::PathBuf);
+
+impl Drop for Writable {
+    fn drop(&mut self) {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o700));
+    }
+}
+
 #[test]
 fn a_request_file_medrec_cannot_remove_is_handled_once() {
     use std::os::unix::fs::PermissionsExt;
+    // SAFETY: geteuid reads the process's effective user id; no memory.
+    if unsafe { libc::geteuid() } == 0 {
+        eprintln!("skipped: as root, a directory without write permission still allows unlinking");
+        return;
+    }
     let e = Env::new("left");
     let src = setup(&e);
     e.ok(&[
@@ -794,20 +790,58 @@ fn a_request_file_medrec_cannot_remove_is_handled_once() {
     std::fs::create_dir_all(e.records().join("_requests/done")).unwrap();
     e.request("x_aaaaaaaaaaaaaaaaaaaa", json!({"all": true}));
     let requests = e.records().join("_requests");
+    let name = "20261122T200312Z_x_aaaaaaaaaaaaaaaaaaaa.json";
+    let pending = requests.join(name);
+    let answer = requests.join("done").join(name);
     // As a file another account owns: the folder's owner cannot remove it.
+    let writable = Writable(requests.clone());
     std::fs::set_permissions(&requests, std::fs::Permissions::from_mode(0o500)).unwrap();
+
     let v = e.ok(&["refresh", "--scheduled"]);
-    let first = attempt_lines(&e).len();
-    let again = e.ok(&["refresh", "--scheduled"]);
-    std::fs::set_permissions(&requests, std::fs::Permissions::from_mode(0o700)).unwrap();
     assert_eq!(v["requests"][0]["outcome"], "ok", "{v}");
     assert_eq!(v["requests"][0]["file_left"], true, "{v}");
-    let pending = requests.join("20261122T200312Z_x_aaaaaaaaaaaaaaaaaaaa.json");
+    assert!(pending.exists() && answer.exists());
+
+    // A scheduled pass passes over it without opening the folder.
+    let v = e.ok(&["refresh", "--scheduled"]);
+    assert_eq!(v["status"], "idle", "{v}");
+
+    // Past the answers' 90 days, at the daily prune, its answer stays.
+    std::fs::File::options()
+        .write(true)
+        .open(&answer)
+        .unwrap()
+        .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000_000))
+        .unwrap();
+    let mut state = None;
+    walk(&e.root.join("cache/medrec/refresh"), &mut |p| {
+        if p.extension().is_some_and(|x| x == "json") {
+            state = Some(p.to_path_buf());
+        }
+    });
+    let state = state.expect("refresh keeps its state in the cache");
+    let mut s: Value = serde_json::from_slice(&std::fs::read(&state).unwrap()).unwrap();
+    assert_eq!(s["left"], json!([name]), "{s}");
+    s["pruned_at"] = 0.into();
+    std::fs::write(&state, serde_json::to_vec(&s).unwrap()).unwrap();
+    let v = e.ok(&["refresh"]);
+    assert!(v["requests"].as_array().unwrap().is_empty(), "{v}");
+    let pruned: Value = serde_json::from_slice(&std::fs::read(&state).unwrap()).unwrap();
+    assert!(
+        pruned["pruned_at"].as_i64().unwrap() > 0,
+        "the prune did not run"
+    );
+    assert!(
+        answer.exists(),
+        "the prune removed the answer of a request still pending"
+    );
     assert!(pending.exists());
-    assert!(again["requests"].as_array().unwrap().is_empty(), "{again}");
-    assert_eq!(attempt_lines(&e).len(), first, "served twice");
+
     // Once it can, a later pass removes it.
-    e.ok(&["refresh", "--scheduled"]);
+    drop(writable);
+    e.ok(&["refresh"]);
     assert!(!pending.exists());
+    let s: Value = serde_json::from_slice(&std::fs::read(&state).unwrap()).unwrap();
+    assert!(s.get("left").is_none(), "{s}");
     let _ = std::fs::remove_dir_all(&e.root);
 }

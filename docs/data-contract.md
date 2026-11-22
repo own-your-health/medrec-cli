@@ -487,8 +487,9 @@ How medrec handles one:
    pending file means the request is not finished, unless its `done/` file
    exists: a request written by another Google account than the one medrec
    runs as may be a file medrec cannot remove. medrec then leaves it, never
-   serves it again, and tries to remove it on later passes; the app may
-   delete it once it has read `done/`. A request left pending
+   serves it again, keeps its `done/` file for as long as it stays, and
+   tries to remove it on later passes (at least hourly); the app may delete
+   it once it has read `done/`. A request left pending
    by a pass that was cut short is answered by the next pass. A source
    imported since the request's `requested_at` answers from that
    `ImportRun`: `ok`, with `attempt` the attempt that recorded it (`null`

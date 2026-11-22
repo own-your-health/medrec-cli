@@ -87,6 +87,10 @@ pub struct Local {
     /// after it.
     #[serde(default)]
     pub took_over_at: Option<i64>,
+    /// Pending request files already answered in `done/` that medrec could
+    /// not remove (another Google account's): passed over until they go.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub left: std::collections::BTreeSet<String>,
 }
 
 fn local_path(location: &Location) -> Result<PathBuf, CliError> {
