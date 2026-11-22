@@ -845,3 +845,96 @@ fn a_request_file_medrec_cannot_remove_is_handled_once() {
     assert!(s.get("left").is_none(), "{s}");
     let _ = std::fs::remove_dir_all(&e.root);
 }
+
+#[test]
+fn a_refused_export_signs_in_again_with_the_providers_own_command_and_names_no_profile() {
+    let e = Env::new("refused");
+    let src = setup(&e);
+    e.ok(&[
+        "--profile",
+        "home",
+        "refresh",
+        "add",
+        "--source",
+        &src,
+        "--provider-profile",
+        "adult1",
+    ]);
+    e.age_imports();
+    // The site refuses a session `auth status` reads as valid, and says so
+    // naming the login, as a member site's CLI does.
+    let refused = [
+        ("FAKEPROV_EXIT", "3"),
+        (
+            "FAKEPROV_STDERR",
+            "error: the session for profile adult1 has expired; sign in again: `fakeprov auth login --browser --profile adult1 --overwrite`",
+        ),
+    ];
+    let v = e.ok_env(&["refresh", "--scheduled"], &refused);
+    assert_eq!(v["attempts"][0]["outcome"], "needs_person", "{v}");
+    let st = e.json_at("_status/status.json");
+    let s0 = &st["sources"][0];
+    assert_eq!(s0["sign_in"]["state"], "ok", "{st}");
+    assert_eq!(s0["sign_in"]["needs_person"]["reason"], "sign_in");
+    let message = s0["last_attempt"]["error"]["message"].as_str().unwrap();
+    assert!(message.contains("<provider profile>"), "{message}");
+    // No file in the folder names a profile, medrec's or the provider's.
+    let mut named = Vec::new();
+    walk(&e.records(), &mut |p| {
+        let text = String::from_utf8_lossy(&std::fs::read(p).unwrap()).into_owned();
+        if text.contains("adult1") || text.contains("\"home\"") || text.contains(" home ") {
+            named.push(p.to_path_buf());
+        }
+    });
+    assert!(named.is_empty(), "{named:?}");
+
+    // A sign-in the person does not finish leaves the source waiting on
+    // one, though the status still reads as valid.
+    let (_, v) = e.doc(
+        &["refresh", "sign-in", &src],
+        &[("FAKEPROV_LOGIN_FAIL", "1")],
+    );
+    assert_eq!(v["logged_in"], false, "{v}");
+    assert_eq!(v["needs_person"], true, "{v}");
+
+    // `sign-in` runs the provider's own sign-in for this login although its
+    // status reads as valid, replacing the stored one.
+    let v = e.ok(&["refresh", "sign-in", &src]);
+    assert_eq!(v["logged_in"], true, "{v}");
+    assert_eq!(v["needs_person"], false, "{v}");
+    let calls = std::fs::read_to_string(e.root.join("provider/auth-calls")).unwrap();
+    let login: Vec<&str> = calls
+        .lines()
+        .filter(|l| l.starts_with("auth login"))
+        .collect();
+    let own = "auth login --browser --profile adult1 --org example-health --label Robin Testperson --overwrite";
+    assert_eq!(login, [own, own], "{calls}");
+    let st = e.json_at("_status/status.json");
+    assert_eq!(
+        st["sources"][0]["sign_in"]["needs_person"],
+        Value::Null,
+        "{st}"
+    );
+
+    // A line an earlier medrec wrote with the name loses it at the next
+    // attempt, and none is lost.
+    let month = std::fs::read_dir(e.records().join("_status/attempts"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let mut text = std::fs::read_to_string(&month).unwrap();
+    text.push_str(r#"{"schema":"medrec-attempt/v1","attempt":"t_aaaaaaaaaaaaaaaaaaaa","outcome":"needs_person","error":{"code":"auth","message":"profile adult1 expired","remedy":"`fakeprov auth login --profile adult1`"}}"#);
+    text.push('\n');
+    std::fs::write(&month, &text).unwrap();
+    let lines = text.lines().count();
+    e.age_imports();
+    let v = e.ok(&["refresh", "--scheduled"]);
+    assert_eq!(v["attempts"][0]["outcome"], "ok", "{v}");
+    let after = std::fs::read_to_string(&month).unwrap();
+    assert_eq!(after.lines().count(), lines + 1);
+    assert!(!after.contains("adult1"), "{after}");
+    assert!(after.contains("t_aaaaaaaaaaaaaaaaaaaa"));
+    let _ = std::fs::remove_dir_all(&e.root);
+}

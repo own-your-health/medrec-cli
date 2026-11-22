@@ -257,6 +257,9 @@ case "$1" in
     esac ;;
   profiles) cat "$d/fakeprov-profiles.json" ;;
   auth)
+    case " $* " in
+      *" --help "*) printf '%s\n' 'Usage: fakeprov auth login [OPTIONS]' '      --browser' '      --overwrite' '          Replace a stored sign-in'; exit 0 ;;
+    esac
     printf '%s\n' "$*" >> "$d/auth-calls"
     case "$2" in
       status)
@@ -268,7 +271,9 @@ case "$1" in
           signed-out) printf '%s\n' '{{"schema":"auth-status/v1","required":true,"authenticated":false}}' ;;
           *) printf '%s\n' '{{"schema":"auth-status/v1","required":true,"authenticated":true,"session_valid":true,"expires_at":"2099-01-01T00:00:00Z"}}' ;;
         esac ;;
-      login) printf 'ok' > "$d/auth-state"; echo "fakeprov: signed in" ;;
+      login)
+        [ -n "$FAKEPROV_LOGIN_FAIL" ] && {{ echo "fakeprov: the sign-in was canceled" >&2; exit 3; }}
+        printf 'ok' > "$d/auth-state"; echo "fakeprov: signed in" ;;
       *) echo "fakeprov: unknown auth command $2" >&2; exit 2 ;;
     esac ;;
   records)

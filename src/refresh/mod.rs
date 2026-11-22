@@ -10,6 +10,7 @@
 
 pub mod contract;
 pub mod launchd;
+pub mod names;
 pub mod policy;
 pub mod requests;
 pub mod signin;
@@ -100,6 +101,18 @@ fn settings(cfg: &Config) -> &crate::config::RefreshSettings {
     &cfg.active.refresh
 }
 
+/// The profile names this folder's files leave out: every provider
+/// profile this profile's sources are bound to, and medrec's own.
+fn names(cfg: &Config) -> names::Names {
+    names::Names::new(
+        settings(cfg)
+            .sources
+            .values()
+            .filter_map(|b| b.provider_profile.as_deref()),
+        cfg.profiles.names().map(|n| n.as_str()),
+    )
+}
+
 fn pass_every(cfg: &Config) -> u64 {
     settings(cfg).pass_every_secs.unwrap_or(DEFAULT_PASS_SECS)
 }
@@ -168,6 +181,7 @@ struct Writer<'a> {
     machine: String,
     pass_every: u64,
     wrote: bool,
+    names: names::Names,
 }
 
 impl Writer<'_> {
@@ -203,7 +217,7 @@ impl Writer<'_> {
                 pass_every_secs: self.pass_every,
                 heartbeat_every_secs: HEARTBEAT_SECS,
             },
-            sources: sources.values().cloned().collect(),
+            sources: self.sources(sources),
         };
         folder::write_json(self.store, STATUS, &status)?;
         local.status = Some(status);
@@ -212,20 +226,40 @@ impl Writer<'_> {
         Ok(())
     }
 
+    /// The sources as the folder gets them: no profile name in an error.
+    fn sources(&self, sources: &BTreeMap<String, SourceStatus>) -> Vec<SourceStatus> {
+        sources
+            .values()
+            .cloned()
+            .map(|mut s| {
+                if let Some(e) = s.last_attempt.as_mut().and_then(|a| a.error.as_mut()) {
+                    self.names.error(e);
+                }
+                s
+            })
+            .collect()
+    }
+
     /// Add one line to its month's file, never losing one already there.
     fn attempt(&self, a: &Attempt) -> Result<(), CliError> {
         self.still_refresher()?;
         let started = time::parse(&a.started_at).unwrap_or_else(time::now);
         let rel = format!("{ATTEMPTS_DIR}/{}.ndjson", time::month(started));
         let old = self.store.read_text(&rel)?.unwrap_or_default();
+        // Lines an earlier medrec wrote with a profile name in an error
+        // lose it here too.
         let mut lines: Vec<String> = old
             .lines()
             .filter(|l| !l.trim().is_empty())
-            .map(str::to_string)
+            .map(|l| self.names.line(l))
             .collect();
         let before = lines.len();
+        let mut a = a.clone();
+        if let Some(e) = a.error.as_mut() {
+            self.names.error(e);
+        }
         lines.push(
-            serde_json::to_string(a)
+            serde_json::to_string(&a)
                 .map_err(|e| CliError::Other(format!("encoding an attempt: {e}")))?,
         );
         if lines.len() != before + 1 {
@@ -621,6 +655,7 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
         machine: machine.clone(),
         pass_every: every,
         wrote: false,
+        names: names(cfg),
     };
     let mut answers: BTreeMap<String, Answer> = BTreeMap::new();
     let mut unfinished: Vec<String> = Vec::new();
@@ -1295,6 +1330,7 @@ pub fn install(
         machine: machine.clone(),
         pass_every: every,
         wrote: false,
+        names: names(cfg),
     };
     // A take-over writes over the other machine's id on purpose.
     let status = Status {
@@ -1309,7 +1345,7 @@ pub fn install(
             pass_every_secs: every,
             heartbeat_every_secs: HEARTBEAT_SECS,
         },
-        sources: entries.values().cloned().collect(),
+        sources: writer.sources(&entries),
     };
     if took_over {
         folder::write_json(&store, STATUS, &status)?;
@@ -1391,6 +1427,7 @@ pub fn publish(cfg: &Config) -> Result<bool, CliError> {
         machine: state::machine()?,
         pass_every: pass_every(cfg),
         wrote: false,
+        names: names(cfg),
     };
     writer.status(&entries, &mut local)?;
     state::save(&location, &local)?;
@@ -1587,8 +1624,10 @@ pub struct SignedIn {
 }
 
 /// `refresh sign-in`: read the provider's sign-in with a person at the
-/// terminal, run its `auth login` when it is not usable, and clear
-/// `needs_person` when it is.
+/// terminal; run the provider's own sign-in command (its `login_hint`, for
+/// this login) when it is not usable or the provider refused the last
+/// export; clear `needs_person` once it is usable and, after a refusal,
+/// the sign-in succeeded.
 pub fn sign_in(cfg: &Config, source: &str) -> Result<SignedIn, CliError> {
     let profile = cfg
         .profile
@@ -1628,12 +1667,37 @@ pub fn sign_in(cfg: &Config, source: &str) -> Result<SignedIn, CliError> {
         )));
     }
     let pp = b.provider_profile.as_deref();
+    let mut local = state::load(&location)?;
+    let store = Store::open(&location, Reads::Fresh, cfg.rclone_budget());
+    let mut entries = current_entries(cfg, &local, &h);
+    // The provider refused this login's last export, whatever its status
+    // reads: a member site's session can read as valid on this Mac and be
+    // dead on the site. Only a new sign-in settles it.
+    let refused = entries
+        .get(source)
+        .and_then(|e| e.sign_in.needs_person.as_ref())
+        .is_some_and(|n| n.reason == "sign_in");
     let mut logged_in = false;
     let state = if provider.login_profiles {
         let mut read = signin::read(&provider, pp, signin::PERSON_WAIT);
         let ok = matches!(&read, signin::Read::Read { state, .. } if signin::usable(state));
-        if !ok {
-            let code = signin::login(&provider, pp)?;
+        if !ok || refused {
+            let fill = signin::Fill {
+                profile: pp,
+                org: b.org.as_deref().or(src.organization.as_deref()),
+                label: src.patient_label.as_deref(),
+            };
+            let mut args = signin::login_args(&cli, provider.login_hint.as_deref(), fill)
+                .map_err(|m| {
+                    CliError::Usage(m).with_remedy(format!(
+                        "sign in with `{cli}`'s own `auth login`, then run `medrec refresh sign-in {source}` again"
+                    ))
+                })?;
+            // The person asked for a new sign-in: it replaces the stored one.
+            if !args.iter().any(|a| a == "--overwrite") && signin::login_overwrites(&provider) {
+                args.push("--overwrite".into());
+            }
+            let code = signin::login(&provider, &args)?;
             logged_in = code == 0;
             read = signin::read(&provider, pp, signin::PERSON_WAIT);
         }
@@ -1644,9 +1708,6 @@ pub fn sign_in(cfg: &Config, source: &str) -> Result<SignedIn, CliError> {
             expires_at: None,
         }
     };
-    let mut local = state::load(&location)?;
-    let store = Store::open(&location, Reads::Fresh, cfg.rclone_budget());
-    let mut entries = current_entries(cfg, &local, &h);
     let e = entries.get_mut(source).ok_or_else(|| {
         CliError::NotFound(format!("source `{source}` is not set up for refresh"))
     })?;
@@ -1655,7 +1716,7 @@ pub fn sign_in(cfg: &Config, source: &str) -> Result<SignedIn, CliError> {
         signin::Read::Read { state, expires_at } => {
             e.sign_in.state = (*state).into();
             e.sign_in.expires_at = expires_at.clone();
-            if signin::usable(state) {
+            if signin::usable(state) && (!refused || logged_in) {
                 e.sign_in.needs_person = None;
             }
             (*state).to_string()
@@ -1673,6 +1734,7 @@ pub fn sign_in(cfg: &Config, source: &str) -> Result<SignedIn, CliError> {
             machine: state::machine()?,
             pass_every: pass_every(cfg),
             wrote: false,
+            names: names(cfg),
         };
         writer.status(&entries, &mut local)?;
         state::save(&location, &local)?;
