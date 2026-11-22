@@ -645,6 +645,13 @@ fn a_pass_runs_only_the_provider_the_binding_names() {
     assert_eq!(v["attempts"][0]["outcome"], "failed", "{v}");
     assert_eq!(v["attempts"][0]["error"], "provider", "{v}");
     assert_eq!(e.auth_calls(), calls, "the provider ran");
+    let _ = std::fs::remove_file(e.root.join("provider/export-args"));
+    let (code, _) = e.doc(&["refresh"], &[]);
+    assert_eq!(code, Some(5));
+    assert!(
+        !e.root.join("provider/export-args").exists(),
+        "the provider exported"
+    );
     let _ = std::fs::remove_dir_all(&e.root);
 }
 
@@ -693,5 +700,114 @@ fn a_newer_status_is_left_alone_and_a_take_over_keeps_the_history() {
     assert!(text.contains("self-update"), "{text}");
     assert_eq!(e.code(&["refresh", "status"]).0, Some(1));
     assert_eq!(std::fs::read(&path).unwrap(), written);
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
+#[test]
+fn a_folder_another_writer_holds_records_nothing_and_keeps_the_request() {
+    if medrec::proc::which("python3").is_none() {
+        return;
+    }
+    let e = Env::new("busy");
+    let src = setup(&e);
+    e.ok(&[
+        "--profile",
+        "home",
+        "refresh",
+        "add",
+        "--source",
+        &src,
+        "--provider-profile",
+        "adult1",
+    ]);
+    e.ok(&["config", "set", "import_timeout_secs", "1"]);
+    e.age_imports();
+    e.ok(&["refresh"]);
+    let lines = attempt_lines(&e).len();
+    e.age_imports();
+
+    // The folder's lock, as another medrec writing it holds it.
+    let mut lock = None;
+    walk(&e.root.join("cache/medrec/locks"), &mut |p| {
+        let name = p.file_name().unwrap().to_string_lossy().into_owned();
+        if name.ends_with(".lock") && !name.starts_with("refresh-") {
+            lock = Some(p.to_path_buf());
+        }
+    });
+    let lock = lock.expect("the import left the folder's lock file");
+    let ready = e.root.join("held");
+    let mut holder = std::process::Command::new("python3")
+        .args([
+            "-I",
+            "-c",
+            "import fcntl,sys,time\nf=open(sys.argv[1],'a')\nfcntl.flock(f,fcntl.LOCK_EX)\nopen(sys.argv[2],'w').close()\ntime.sleep(60)",
+        ])
+        .arg(&lock)
+        .arg(&ready)
+        .spawn()
+        .unwrap();
+    for _ in 0..100 {
+        if ready.exists() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    assert!(ready.exists(), "the lock holder did not start");
+
+    e.request("x_aaaaaaaaaaaaaaaaaaaa", json!({"all": true}));
+    let v = e.ok(&["refresh", "--scheduled"]);
+    let _ = holder.kill();
+    let _ = holder.wait();
+    assert_eq!(v["attempts"][0]["outcome"], "busy", "{v}");
+    assert!(v["requests"].as_array().unwrap().is_empty(), "{v}");
+    assert_eq!(attempt_lines(&e).len(), lines, "an attempt was recorded");
+    let st = e.json_at("_status/status.json");
+    assert_eq!(st["sources"][0]["failures"], 0);
+    assert_eq!(st["sources"][0]["last_attempt"]["outcome"], "ok", "{st}");
+    assert!(e
+        .records()
+        .join("_requests/20261122T200312Z_x_aaaaaaaaaaaaaaaaaaaa.json")
+        .exists());
+
+    // The next pass, with the folder free, serves it.
+    let v = e.ok(&["refresh", "--scheduled"]);
+    assert_eq!(v["requests"][0]["outcome"], "ok", "{v}");
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
+#[test]
+fn a_request_file_medrec_cannot_remove_is_handled_once() {
+    use std::os::unix::fs::PermissionsExt;
+    let e = Env::new("left");
+    let src = setup(&e);
+    e.ok(&[
+        "--profile",
+        "home",
+        "refresh",
+        "add",
+        "--source",
+        &src,
+        "--provider-profile",
+        "adult1",
+    ]);
+    e.age_imports();
+    std::fs::create_dir_all(e.records().join("_requests/done")).unwrap();
+    e.request("x_aaaaaaaaaaaaaaaaaaaa", json!({"all": true}));
+    let requests = e.records().join("_requests");
+    // As a file another account owns: the folder's owner cannot remove it.
+    std::fs::set_permissions(&requests, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let v = e.ok(&["refresh", "--scheduled"]);
+    let first = attempt_lines(&e).len();
+    let again = e.ok(&["refresh", "--scheduled"]);
+    std::fs::set_permissions(&requests, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(v["requests"][0]["outcome"], "ok", "{v}");
+    assert_eq!(v["requests"][0]["file_left"], true, "{v}");
+    let pending = requests.join("20261122T200312Z_x_aaaaaaaaaaaaaaaaaaaa.json");
+    assert!(pending.exists());
+    assert!(again["requests"].as_array().unwrap().is_empty(), "{again}");
+    assert_eq!(attempt_lines(&e).len(), first, "served twice");
+    // Once it can, a later pass removes it.
+    e.ok(&["refresh", "--scheduled"]);
+    assert!(!pending.exists());
     let _ = std::fs::remove_dir_all(&e.root);
 }

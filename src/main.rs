@@ -679,7 +679,8 @@ enum AuthCmd {
 #[derive(Subcommand, Debug)]
 enum CacheCmd {
     /// Remove every copy medrec keeps on this machine (the records folder
-    /// itself is untouched). The next command reads from Drive again.
+    /// itself is untouched). The next command reads from Drive again. The
+    /// run locks and the refresh state stay.
     Clear,
     /// The background refresh a stale cached read starts.
     #[command(hide = true)]

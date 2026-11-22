@@ -82,6 +82,9 @@ pub struct AttemptRow {
 pub struct RequestRow {
     pub request: String,
     pub outcome: String,
+    /// medrec could not remove the pending file; its `done/` file stands.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub file_left: bool,
 }
 
 /// An attempt that found another writer holding the folder: not recorded.
@@ -506,6 +509,16 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
     if !settling {
         for e in &listing {
             let rel = format!("{REQUESTS_DIR}/{}", e.rel);
+            // Handled already, its file left because medrec could not
+            // remove it (another Google account's): not served again.
+            let done_name = match requests::id_of_name(&e.rel) {
+                Some(_) => e.rel.clone(),
+                None => requests::invalid_name(&e.rel),
+            };
+            if store.exists(&format!("{DONE_DIR}/{done_name}"))? {
+                let _ = store.delete(&rel);
+                continue;
+            }
             let size = e.size.unwrap_or(0);
             if size > REQUEST_MAX_BYTES {
                 parsed.push(requests::too_large(&e.rel, size));
@@ -887,8 +900,13 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
             Parsed::Invalid(i) => i.done_name.clone(),
         };
         folder::write_json(&store, &format!("{DONE_DIR}/{done_name}"), &doc)?;
-        store.delete(&format!("{REQUESTS_DIR}/{}", p.name()))?;
+        // A file another Google account owns may not be removable by the
+        // folder's: done/ already says it is handled, so it stays.
+        let file_left = store
+            .delete(&format!("{REQUESTS_DIR}/{}", p.name()))
+            .is_err();
         report.requests.push(RequestRow {
+            file_left,
             request: match p {
                 Parsed::Valid(v) => v.id.clone(),
                 Parsed::Invalid(i) => i.id.clone().unwrap_or_else(|| i.done_name.clone()),

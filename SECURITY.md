@@ -16,7 +16,7 @@ each place, and what medrec does and does not do with them.
 | A records folder or backup on a local disk (`init <dir>`, `backup --to <dir>`) | Everything the Drive folder holds | This Mac's user: medrec creates its folders 0700 and its files 0600, and `medrec doctor` warns when anything under the records folder can be read by other users |
 | A study exported with `images export` | That study's DICOM files | This Mac's user; 0700 folders and 0600 files |
 | `~/.cache/medrec/refresh/` | This machine's refresher id (`h_…`, random) and, per folder, the `status.json` it last wrote and when; ids, outcomes and counts, no names. The run lock is in `~/.cache/medrec/locks/`. `medrec cache clear` leaves both, so this Mac stays its folder's refresher | This Mac's user; 0700 directory, 0600 files |
-| `~/Library/LaunchAgents/io.github.own-your-health.medrec.refresh.<profile>.plist` | The command `refresh --install` set up: medrec's path, the profile name, the pass interval and the `PATH` at install time; no secret | This Mac's user; launchd runs it in the user's own session, never as root |
+| `~/Library/LaunchAgents/io.github.own-your-health.medrec.refresh.<profile>.plist` | The command `refresh --install` set up: medrec's path, the profile name, the pass interval, and the `PATH`, `XDG_CONFIG_HOME` and `XDG_CACHE_HOME` (when set) at install time; no secret | This Mac's user; launchd runs it in the user's own session, never as root |
 | `~/Library/Logs/medrec/refresh-<profile>.log` | One line per scheduled pass that did something: source ids, outcomes, error codes, counts and the command a person should run; never a name or record content | This Mac's user |
 
 medrec holds **no credentials**. Provider and insurer CLIs keep their own
@@ -63,7 +63,8 @@ The records folder is a plain, private Drive folder without encryption
 | **This repository** (public) | No personal data | [PRIVACY.md](PRIVACY.md) and the tests that enforce it |
 
 `medrec cache clear` removes every copy on this Mac (the read cache and
-opened copies). The records folder is not touched.
+opened copies). It keeps the run locks and the refresh state. The records
+folder is not touched.
 
 ## Supply chain
 
