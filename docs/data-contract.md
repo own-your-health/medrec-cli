@@ -13,6 +13,8 @@ README.md                     what this folder is, and its rules (written by `in
 household.json                people, organizations, sources
 inbox/                        drops waiting for `medrec intake --inbox`
 _review/                      documents intake could not file, and review.json
+_status/                      what `medrec refresh` did: status.json, attempts/ (0.3.0 and later)
+_requests/                    refresh requests from the app, and done/ (0.3.0 and later)
 <Person>/
   notes.md                    dated notes; this file is their source
   index.json                  the person's index (documents, records, studies, imports)
@@ -282,6 +284,208 @@ Ask about the recheck at the next visit.
 Notes are sorted by date. The `Tags:` and `About:` lines are optional.
 `notes.md` is the notes' only store; a note edited by hand in this format is
 read back as edited.
+
+## _status/ (`medrec-status/v1`, `medrec-attempt/v1`)
+
+What `medrec refresh` (0.3.0 and later) has done: for each source it
+refreshes, the latest attempt, the latest success and the sign-in, and every
+attempt. Only the one machine that refreshes writes here; every other reader
+(the own-your-health app among them) only reads. `medrec refresh --install`
+creates the folder. These are state, not filed bytes (Rules, above): medrec
+rewrites them, and they carry no `rev`.
+
+```text
+_status/
+  status.json                 each refreshed source now
+  attempts/<YYYY-MM>.ndjson   every attempt that month, one per line
+```
+
+### status.json
+
+```json
+{
+  "schema": "medrec-status/v1",
+  "format": 1,
+  "updated_at": "2026-11-22T20:05:00Z",
+  "refresher": {
+    "medrec_version": "0.3.0",
+    "last_pass_at": "2026-11-22T20:05:00Z",
+    "next_pass_at": "2026-11-22T20:10:00Z",
+    "pass_every_secs": 300,
+    "heartbeat_every_secs": 3600
+  },
+  "sources": [
+    {
+      "source": "s_aaaaaaaaaaaaaaaaaaaa",
+      "person": "p_aaaaaaaaaaaaaaaaaaaa",
+      "cli": "mychart",
+      "organization": "example-health",
+      "auto": true,
+      "paused": null,
+      "min_interval_secs": 86400,
+      "next_run_at": "2026-11-23T20:04:31Z",
+      "sign_in": {
+        "state": "ok",
+        "expires_at": "2026-12-01T00:00:00Z",
+        "checked_at": "2026-11-22T20:04:02Z",
+        "needs_person": null
+      },
+      "last_attempt": {
+        "attempt": "t_aaaaaaaaaaaaaaaaaaaa",
+        "started_at": "2026-11-22T20:04:02Z",
+        "finished_at": "2026-11-22T20:04:31Z",
+        "trigger": "request",
+        "requests": ["x_aaaaaaaaaaaaaaaaaaaa"],
+        "outcome": "ok",
+        "exit_code": 0,
+        "error": null,
+        "import": "i_aaaaaaaaaaaaaaaaaaaa"
+      },
+      "last_success": {
+        "attempt": "t_aaaaaaaaaaaaaaaaaaaa",
+        "finished_at": "2026-11-22T20:04:31Z",
+        "import": "i_aaaaaaaaaaaaaaaaaaaa",
+        "counts": {
+          "records_added": 2, "records_updated": 0, "records_unchanged": 41,
+          "records_older": 0, "resources_written": 2, "resources_unchanged": 41,
+          "documents_added": 0, "documents_duplicate": 0, "documents_unchanged": 3
+        },
+        "withheld_types": []
+      }
+    }
+  ]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `format` | `1`. A reader that finds a larger number stops and says to update, as for `household.json`. Fields added within a format are additive, and a reader ignores fields it does not know. |
+| `updated_at` | When medrec last wrote the file. |
+| `refresher.last_pass_at` | The latest pass of `medrec refresh`. A pass that runs an attempt or handles a request writes it; otherwise it is written at least every `heartbeat_every_secs`. A reader takes the refreshing machine as offline when it is older than `heartbeat_every_secs + pass_every_secs`. |
+| `refresher.next_pass_at` | When the next pass is due. |
+| `refresher.pass_every_secs` | How often a pass looks at `_requests/`. |
+| `sources[]` | Each source set up for refresh (`medrec refresh add`). A source in `household.json` that is not here is not refreshed; its last load is its latest `ImportRun`. |
+| `source`, `person`, `cli`, `organization` | The source's id in `household.json`, its person, its provider CLI and its organization. |
+| `auto` | `true`: imported on its schedule. `false`: imported only when a request or a terminal `medrec refresh` asks. |
+| `paused` | `null`, or `{"reason": "consent" \| "user", "note": "…", "since": "…"}`. Nothing imports a paused source, neither the schedule, a request nor a terminal `medrec refresh`, until `medrec refresh resume <source>`. A source whose provider terms wait on the household's consent is paused with `consent`. |
+| `min_interval_secs` | The shortest time between two of its imports: never shorter than its CLI documents, and at least a day (`86400`) for a member site. A request does not shorten it. |
+| `next_run_at` | The next scheduled import; `null` when `auto` is `false`, the source is paused, or it needs a person. |
+| `sign_in.state` | From the provider's `auth status --json` (`auth-status/v1`): `ok`, `expiring` (`expires_at` within 72 hours), `expired`, `signed_out`, `needs_person`, `not_needed` (a provider with nothing to sign in to) or `unknown` (not read yet). |
+| `sign_in.expires_at` | The sign-in's end, where auth status gives one; else `null`. |
+| `sign_in.checked_at` | When auth status was last read. |
+| `sign_in.needs_person` | Set when `state` is `needs_person`, else `null`: `{"reason": "sign_in" \| "keychain", "since": "…", "command": "medrec refresh sign-in <source>"}`. `sign_in`: the provider's sign-in ended or never happened. `keychain`: reading the provider's stored sign-in waited on an approval nobody gave, as a rebuilt provider CLI's first Keychain read does, and timed out. `command` is what to run in a terminal on the refreshing machine. Until it has run, neither the schedule nor a request tries the source again. |
+| `last_attempt` | The latest attempt: an `attempts/` line without `source`, `person`, `cli`, `organization` and `counts`. While it runs, `outcome` is `running` and `finished_at` is `null`. |
+| `last_success` | The latest attempt whose outcome was `ok`: its attempt, when it finished, its `ImportRun`, and the import report's counts and `withheld_types`. |
+
+### attempts/<YYYY-MM>.ndjson (`medrec-attempt/v1`)
+
+One JSON object per line, in the order the attempts started, in the file of
+the month (UTC) the attempt started. Drive has no append, so medrec rewrites
+the month's file whole after each attempt.
+
+```json
+{"schema":"medrec-attempt/v1","attempt":"t_aaaaaaaaaaaaaaaaaaaa","source":"s_aaaaaaaaaaaaaaaaaaaa","person":"p_aaaaaaaaaaaaaaaaaaaa","cli":"mychart","organization":"example-health","started_at":"2026-11-22T20:04:02Z","finished_at":"2026-11-22T20:04:31Z","trigger":"request","requests":["x_aaaaaaaaaaaaaaaaaaaa"],"outcome":"ok","exit_code":0,"error":null,"import":"i_aaaaaaaaaaaaaaaaaaaa","counts":{"records_added":2,"records_updated":0,"records_unchanged":41}}
+```
+
+| Field | Meaning |
+|---|---|
+| `attempt` | Its id, `t_` and 20 base32 characters. |
+| `trigger` | `schedule`; `request`, with the `requests` it served; or `manual`, a terminal `medrec refresh`. |
+| `requests` | The `_requests/` ids the attempt served; empty otherwise. |
+| `outcome` | `ok`, `failed`, `needs_person`, `skipped_interval` (imported less than `min_interval_secs` ago) or `skipped_paused`. `running` appears only in `status.json`. |
+| `exit_code` | The import's exit code (Import, below); `null` for a skip, and for `needs_person` found before the import ran. |
+| `error` | `null`, or `{"code", "message", "remedy"}` from the failing command's `--json` error (the family's error shape). `message` is at most 300 characters. medrec's own codes are `timeout` (a call outlived its limit) and `needs_person`. |
+| `import` | The `ImportRun` id in the person's `index.json`, when `ok`. |
+| `counts` | When `ok`, the import report's counts: `records_added`, `records_updated`, `records_unchanged`, `records_older`, `resources_written`, `resources_unchanged`, `documents_added`, `documents_duplicate`, `documents_unchanged`. Additive. |
+
+A scheduled pass records nothing for a source that is not due. A skip is
+recorded only when a request or a terminal command asked for that source.
+When another writer holds the folder's lock, no attempt is recorded and the
+next pass tries again.
+
+## _requests/ (`medrec-request/v1`)
+
+Requests to refresh, from a reader that cannot run medrec itself (the
+own-your-health app). Each pass of `medrec refresh` looks for them with one
+listing of `_requests/`.
+
+```text
+_requests/
+  <YYYYMMDDTHHMMSSZ>_<id>.json    pending
+  done/<same name>                handled; kept 90 days
+```
+
+A pending request:
+
+```json
+{
+  "schema": "medrec-request/v1",
+  "id": "x_aaaaaaaaaaaaaaaaaaaa",
+  "requested_at": "2026-11-22T20:03:12Z",
+  "requested_by": {"email": "alex@example.com", "name": "Alex Testperson"},
+  "scope": {"source": "s_aaaaaaaaaaaaaaaaaaaa"},
+  "app": {"name": "own-your-health-app", "version": "0.1.0"}
+}
+```
+
+- The writer creates each request once and never edits it. While it is
+  still pending it may delete it, as a cancel. It writes nothing else in the
+  folder.
+- `scope` is `{"all": true}`, `{"person": "p_…"}` or `{"source": "s_…"}`.
+  `all` and `person` cover the sources set up for refresh (`status.json`
+  `sources`).
+- `requested_by` and `app` are shown, never trusted.
+
+How medrec handles one:
+
+1. **A request is untrusted input.** It is handled at once as `invalid` if
+   any of these holds:
+   - it is larger than 4 KiB;
+   - it carries another schema;
+   - its id is not `x_` and 20 base32 characters, or does not match its file
+     name;
+   - its scope names no person or source in `household.json`;
+   - it names a single source that is not set up for refresh.
+
+   A request names what to refresh, never a command, a path, a profile or
+   an argument. Unknown fields are ignored.
+2. **The pending requests a pass finds are served together.** Each source
+   is imported at most once, and every request that covers it gets that
+   attempt. While it runs, `status.json` names them in `last_attempt.requests`.
+3. **A request does not bypass a source's limits.** A source imported less
+   than `min_interval_secs` ago answers `skipped_interval`. A paused source
+   answers `skipped_paused`. One that needs a person answers `needs_person`
+   without being tried.
+4. **The outcome goes to `done/`.** Once every source of a request is done,
+   medrec writes `done/<same name>`, holding the request as received plus
+   `handled`, and then deletes the pending file. A pending file means the
+   request is not finished. One left pending by a pass that was cut short is
+   taken again by the next pass, and the interval keeps that from importing
+   twice.
+5. **One refresh runs at a time.** A pass that finds a refresh running ends
+   at once.
+6. **Old outcomes go.** medrec deletes a `done/` file 90 days after its
+   `finished_at`.
+
+```json
+"handled": {
+  "picked_up_at": "2026-11-22T20:04:01Z",
+  "finished_at": "2026-11-22T20:04:31Z",
+  "outcome": "ok",
+  "sources": [
+    {"source": "s_aaaaaaaaaaaaaaaaaaaa", "outcome": "ok", "attempt": "t_aaaaaaaaaaaaaaaaaaaa", "next_allowed_at": "2026-11-23T20:04:31Z"}
+  ],
+  "message": "1 source imported",
+  "by": "medrec 0.3.0"
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `outcome` | Counts only the sources that were imported. `ok`: every one was `ok`. `partial`: some were `ok` and some `failed` or `needs_person`. `failed`: none was `ok`. `skipped`: none was imported, each being skipped. `invalid`: refused by rule 1, with `sources` empty and `message` saying why. |
+| `sources[]` | Each source the request covered: its outcome (an attempt outcome), the attempt that served it (`null` for a skip found without one), and `next_allowed_at`, the earliest time it may import again. |
+| `message` | One line for a person, with no record content. |
+| `by` | The medrec that handled it. |
 
 ## Import input: `records-stream/v1`
 
