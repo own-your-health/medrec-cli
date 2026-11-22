@@ -283,9 +283,24 @@ signs in, it reads `<cli> auth status --json --profile <LOGIN>` with a
 30-second limit. A sign-in that is signed out or expired, or a read that
 outlives the limit (a Keychain approval nobody gave), marks the source as
 needing a person, with the command `medrec refresh sign-in <id>`, and
-scheduled passes do not try it again until that has run. `medrec refresh` at
-the terminal waits up to 10 minutes for an approval. `--scheduled` runs a
-pass as the LaunchAgent does.
+scheduled passes do not try it again until that has run. So does an export
+the provider refuses for its sign-in (exit 3), as a member site does with a
+session `auth status` still reads as valid. `medrec refresh` at the terminal
+waits up to 10 minutes for an approval. `--scheduled` runs a pass as the
+LaunchAgent does.
+
+`refresh sign-in <id>` runs the provider's own sign-in command, built from
+the `login_hint` its `info` gives (`uhc auth login --browser --profile
+<NAME>`) with the source's login, organization and patient label filled
+in, and `--overwrite` when its `auth login` takes it. It runs when the
+sign-in is not usable, or when the provider refused the last export,
+whatever `auth status` says; `needs a person` clears once a sign-in
+succeeds and reads as usable.
+
+Error messages in `_status/` are the failing command's own words, with
+every profile name in them replaced: a provider profile by `<provider
+profile>`, a medrec profile by `<profile>`. A line an earlier medrec wrote
+with one loses it the next time its month's file is written.
 
 One machine refreshes a folder. `--install` records this machine's random
 id in `status.json`; another machine's `--install` and passes refuse while

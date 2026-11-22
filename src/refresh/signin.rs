@@ -104,14 +104,129 @@ pub fn read(provider: &Provider, profile: Option<&str>, wait: Duration) -> Read 
     }
 }
 
-/// `<cli> auth login [--profile <p>]` in the person's terminal: its prompts,
-/// browser and codes are theirs. Its exit code.
-pub fn login(provider: &Provider, profile: Option<&str>) -> Result<i32, pk_cli_core::CliError> {
-    let mut cmd = std::process::Command::new(&provider.path);
-    cmd.args(["auth", "login"]);
-    if let Some(p) = profile {
-        cmd.args(["--profile", p]);
+/// What fills a provider's `info.auth.login_hint` for one source.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct Fill<'a> {
+    /// `<NAME>`: the provider profile the source is bound to.
+    pub profile: Option<&'a str>,
+    /// `<ORG>`: the source's organization, as the provider names it.
+    pub org: Option<&'a str>,
+    /// `<LABEL>`, `<WHO>`: the patient's label at that sign-in.
+    pub label: Option<&'a str>,
+}
+
+/// The provider's own sign-in command for one login, from its
+/// `info.auth.login_hint` (`uhc auth login --browser --profile <NAME>`,
+/// `athena --profile <NAME> auth login --org <ORG> [--label <LABEL>]`): the
+/// arguments after the program. Of a hint of several commands (`mychart
+/// profiles add <NAME>; mychart auth login ...`) the `auth login` one is
+/// used. A `[...]` part goes in only when it can be filled; a placeholder
+/// elsewhere that cannot be is an error naming the hint. Without a hint it
+/// is `auth login --profile <NAME>`.
+pub fn login_args(cli: &str, hint: Option<&str>, fill: Fill) -> Result<Vec<String>, String> {
+    let Some(hint) = hint else {
+        let mut v = vec!["auth".to_string(), "login".to_string()];
+        if let Some(p) = fill.profile {
+            v.extend(["--profile".to_string(), p.to_string()]);
+        }
+        return Ok(v);
+    };
+    let command = hint
+        .split(';')
+        .map(str::trim)
+        .find(|c| {
+            let t: Vec<&str> = c.split_whitespace().collect();
+            t.windows(2).any(|w| w == ["auth", "login"])
+        })
+        .ok_or_else(|| format!("`{cli}`'s login hint `{hint}` has no `auth login`"))?;
+    let mut tokens = command.split_whitespace();
+    if tokens.next() != Some(cli) {
+        return Err(format!(
+            "`{cli}`'s login hint `{hint}` runs another program"
+        ));
     }
+    let value = |name: &str| match name {
+        "NAME" | "PROFILE" => fill.profile,
+        "ORG" | "ORGANIZATION" | "PRACTICE" => fill.org,
+        "LABEL" | "WHO" => fill.label,
+        _ => None,
+    };
+    // Each `<X>` in a token, filled; None when one cannot be.
+    let filled = |t: &str| -> Option<String> {
+        let mut out = String::new();
+        let mut rest = t;
+        while let Some(open) = rest.find('<') {
+            let close = rest[open..].find('>')? + open;
+            out.push_str(&rest[..open]);
+            out.push_str(value(&rest[open + 1..close])?);
+            rest = &rest[close + 1..];
+        }
+        out.push_str(rest);
+        Some(out)
+    };
+    let mut args = Vec::new();
+    let mut group: Option<Vec<&str>> = None;
+    for t in tokens {
+        if let Some(g) = &mut group {
+            let end = t.strip_suffix(']');
+            g.push(end.unwrap_or(t));
+            if end.is_some() {
+                let g = group.take().expect("in a group");
+                let parts: Option<Vec<String>> = g.iter().map(|t| filled(t)).collect();
+                args.extend(parts.unwrap_or_default());
+            }
+            continue;
+        }
+        if let Some(t) = t.strip_prefix('[') {
+            match t.strip_suffix(']') {
+                Some(one) => args.extend(filled(one)),
+                None => group = Some(vec![t]),
+            }
+            continue;
+        }
+        args.push(filled(t).ok_or_else(|| {
+            format!("cannot fill `{t}` in `{cli}`'s login hint `{hint}` for this source")
+        })?);
+    }
+    if group.is_some() {
+        return Err(format!("`{cli}`'s login hint `{hint}` leaves a `[` open"));
+    }
+    if let Some(p) = fill.profile {
+        if !args.windows(2).any(|w| w[0] == "--profile" && w[1] == p) {
+            args.extend(["--profile".to_string(), p.to_string()]);
+        }
+    }
+    Ok(args)
+}
+
+/// Whether the provider's `auth login` takes `--overwrite` (the family's
+/// flag for replacing a stored sign-in), from its `auth login --help`.
+pub fn login_overwrites(provider: &Provider) -> bool {
+    Bounded::new(&provider.path)
+        .args(["auth", "login", "--help"])
+        .timeout(Duration::from_secs(15))
+        .max_stdout(256 * 1024)
+        .run()
+        .is_ok_and(|r| lists_overwrite(&String::from_utf8_lossy(&r.stdout)))
+}
+
+/// Whether a `--help` text lists `--overwrite` as a flag: on an option line
+/// (`      --overwrite`, `  -o, --overwrite`), not in prose about it.
+fn lists_overwrite(help: &str) -> bool {
+    help.lines().any(|l| {
+        let l = l.trim_start();
+        l.starts_with('-')
+            && l.split(|c: char| c.is_whitespace() || c == ',')
+                .take_while(|t| t.is_empty() || t.starts_with('-'))
+                .any(|t| t == "--overwrite")
+    })
+}
+
+/// `<cli> <args>` in the person's terminal: its prompts, browser and codes
+/// are theirs. Its exit code.
+pub fn login(provider: &Provider, args: &[String]) -> Result<i32, pk_cli_core::CliError> {
+    let mut cmd = std::process::Command::new(&provider.path);
+    cmd.args(args);
     for (k, _) in std::env::vars_os() {
         if k.to_string_lossy().starts_with("MEDREC_") {
             cmd.env_remove(&k);
@@ -130,6 +245,117 @@ pub fn login(provider: &Provider, profile: Option<&str>) -> Result<i32, pk_cli_c
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_login_hint_becomes_the_providers_own_sign_in_for_one_login() {
+        let fill = Fill {
+            profile: Some("p1"),
+            org: Some("org-1"),
+            label: Some("kid one"),
+        };
+        let args = |cli: &str, hint: &str, fill: Fill| login_args(cli, Some(hint), fill);
+        assert_eq!(
+            args("uhc", "uhc auth login --browser --profile <NAME>", fill).unwrap(),
+            ["auth", "login", "--browser", "--profile", "p1"]
+        );
+        assert_eq!(
+            args(
+                "athena",
+                "athena --profile <NAME> auth login --org <ORG> [--label <LABEL>]",
+                fill
+            )
+            .unwrap(),
+            [
+                "--profile",
+                "p1",
+                "auth",
+                "login",
+                "--org",
+                "org-1",
+                "--label",
+                "kid one"
+            ]
+        );
+        // The optional part goes when nothing fills it.
+        let no_label = Fill {
+            label: None,
+            ..fill
+        };
+        assert_eq!(
+            args(
+                "athena",
+                "athena --profile <NAME> auth login --org <ORG> [--label <LABEL>]",
+                no_label
+            )
+            .unwrap(),
+            ["--profile", "p1", "auth", "login", "--org", "org-1"]
+        );
+        assert_eq!(
+            args(
+                "mychart",
+                "mychart profiles add <NAME>; mychart auth login --profile <NAME> --org <ORG> --label <WHO>",
+                fill
+            )
+            .unwrap(),
+            ["auth", "login", "--profile", "p1", "--org", "org-1", "--label", "kid one"]
+        );
+        // A hint without the profile still signs in that login.
+        assert_eq!(
+            args("x", "x auth login --browser", fill).unwrap(),
+            ["auth", "login", "--browser", "--profile", "p1"]
+        );
+        let no_org = Fill { org: None, ..fill };
+        assert!(args("athena", "athena auth login --org <ORG>", no_org).is_err());
+        assert!(args("uhc", "uhc auth login --code <CODE>", fill).is_err());
+        assert!(args("uhc", "sh -c auth login", fill).is_err());
+        assert!(args("uhc", "uhc auth status", fill).is_err());
+        assert_eq!(
+            login_args("fakeprov", None, fill).unwrap(),
+            ["auth", "login", "--profile", "p1"]
+        );
+        // A group goes whole: one placeholder it cannot fill drops all of it.
+        assert_eq!(
+            args(
+                "x",
+                "x auth login [--org <ORG> --label <LABEL>] --browser",
+                no_org
+            )
+            .unwrap(),
+            ["auth", "login", "--browser", "--profile", "p1"]
+        );
+        assert_eq!(
+            args("x", "x auth login [--org <ORG> --label <LABEL>]", fill).unwrap(),
+            [
+                "auth",
+                "login",
+                "--org",
+                "org-1",
+                "--label",
+                "kid one",
+                "--profile",
+                "p1"
+            ]
+        );
+        assert!(args("x", "x auth login [--label <LABEL>", fill)
+            .unwrap_err()
+            .contains("leaves a `[` open"));
+    }
+
+    #[test]
+    fn overwrite_is_known_from_its_option_line_whatever_the_layout() {
+        assert!(lists_overwrite(
+            "Options:\n      --overwrite\n          Replace it\n"
+        ));
+        assert!(lists_overwrite(
+            "  -o, --overwrite    Replace a stored sign-in\n"
+        ));
+        assert!(lists_overwrite("  --overwrite, -o\n"));
+        assert!(!lists_overwrite("      --overwrite-all\n"));
+        assert!(!lists_overwrite(
+            "A stored session is kept; pass --overwrite to replace it.\n"
+        ));
+        assert!(!lists_overwrite("  --stdin   read it; see --overwrite\n"));
+    }
 
     #[test]
     fn auth_status_reads_as_medrecs_sign_in_state() {

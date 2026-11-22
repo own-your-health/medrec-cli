@@ -403,7 +403,7 @@ the month (UTC) the attempt started.
 | `requests` | The `_requests/` ids the attempt served; empty otherwise. |
 | `outcome` | `ok`, `failed`, `needs_person`, `skipped_interval` (imported less than `min_interval_secs` ago, or still waiting after a failure: see `failures`) or `skipped_paused`. `running` appears only in `status.json`. |
 | `exit_code` | The import's exit code (Import, below); `null` for a skip, and for a `needs_person` found before the import ran. |
-| `error` | `null`, or `{"code", "message", "remedy"}` from the failing command's `--json` error (the family's error shape). `message` is at most 300 characters. medrec's own codes are `timeout` (a call outlived its limit), `interrupted` (the pass running it stopped before it finished) and `needs_person`. |
+| `error` | `null`, or `{"code", "message", "remedy"}` from the failing command's `--json` error (the family's error shape). `message` is at most 300 characters. A profile name in `message` or `remedy` is replaced, a provider profile's by `<provider profile>` and a medrec profile's by `<profile>`, so the folder holds none. medrec's own codes are `timeout` (a call outlived its limit), `interrupted` (the pass running it stopped before it finished) and `needs_person`. |
 | `import` | The `ImportRun` id in the person's `index.json`, when `ok`. |
 | `counts` | When `ok`, the import report's counts: `records_added`, `records_updated`, `records_unchanged`, `records_older`, `resources_written`, `resources_unchanged`, `documents_added`, `documents_duplicate`, `documents_unchanged`, `documents_same_statement`. A count the import report gains later is added here too. |
 

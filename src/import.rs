@@ -74,6 +74,9 @@ pub struct Provider {
     pub login_profiles: bool,
     /// Its export also reads downloaded files (`--from-files`).
     pub records_files: bool,
+    /// `info.auth.login_hint`: its own sign-in command.
+    #[serde(skip)]
+    pub login_hint: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
 }
@@ -95,6 +98,7 @@ pub fn probe(cli: &str) -> Provider {
         profiles: Vec::new(),
         login_profiles: false,
         records_files: false,
+        login_hint: None,
         note: None,
     };
     let Some(path) = which(cli) else {
@@ -149,6 +153,10 @@ pub fn probe(cli: &str) -> Provider {
             .is_some_and(|a| a.iter().any(|c| c.as_str() == Some(capability)))
     };
     p.login_profiles = has(LOGIN_PROFILES);
+    p.login_hint = v
+        .pointer("/auth/login_hint")
+        .and_then(Value::as_str)
+        .map(str::to_string);
     p.records_files = has(RECORDS_FILES);
     let signs_in = v
         .pointer("/auth/required")

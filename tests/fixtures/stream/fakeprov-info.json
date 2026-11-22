@@ -5,7 +5,8 @@
   "repository": "https://example.org/fakeprov",
   "auth": {
     "required": true,
-    "method": "oauth"
+    "method": "oauth",
+    "login_hint": "fakeprov profiles add <NAME>; fakeprov auth login --browser --profile <NAME> --org <ORG> [--label <LABEL>]"
   },
   "capabilities": [
     "login-profiles"
