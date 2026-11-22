@@ -329,6 +329,7 @@ and a field or count that is missing as unknown, not as zero or false.
       "auto": true,
       "paused": null,
       "min_interval_secs": 86400,
+      "failures": 0,
       "next_run_at": "2026-11-23T20:04:31Z",
       "sign_in": {
         "state": "ok",
@@ -368,7 +369,7 @@ and a field or count that is missing as unknown, not as zero or false.
 |---|---|
 | `format` | `1`. A reader that finds a larger number stops and says to update, as for `household.json`. Within a format, fields and enum values are only added. |
 | `updated_at` | When medrec last wrote the file. |
-| `refresher.machine` | The machine that refreshes this folder: a random id it keeps in its own cache, `h_` and 20 base32 characters. A pass on another machine, and `medrec refresh --install` there, refuse while this one's `last_pass_at` is within the offline window (next row), and say to run `medrec refresh --install --take-over` on the new machine. Once that machine has written its own id, the old one's passes refuse in turn. |
+| `refresher.machine` | The machine that refreshes this folder: a random id it keeps in its own cache, `h_` and 20 base32 characters. A pass on another machine, and `medrec refresh --install` there, refuse while this one's `last_pass_at` is within the offline window (next row), and say to run `medrec refresh --install --take-over` on the new machine. Once that machine has written its own id, the old one's passes refuse in turn. Every write to `status.json` or `attempts/` first reads `status.json` again, and a pass whose machine is no longer the one named there stops without writing. `--take-over` writes its id, waits one `pass_every_secs`, and serves requests only once its id is still in place. |
 | `refresher.last_pass_at` | The latest pass of `medrec refresh`. A pass that runs an attempt or handles a request writes it; otherwise it is written at least every `heartbeat_every_secs`. A reader takes the refreshing machine as offline when it is older than `heartbeat_every_secs + pass_every_secs`. |
 | `refresher.next_pass_at` | When the next pass is due. |
 | `refresher.pass_every_secs` | How often a pass looks at `_requests/`. |
@@ -377,6 +378,7 @@ and a field or count that is missing as unknown, not as zero or false.
 | `auto` | `true`: imported on its schedule. `false`: imported only when a request or a terminal `medrec refresh` asks. |
 | `paused` | `null`, or `{"reason": "consent" \| "user", "note": "…", "since": "…"}`. Nothing imports a paused source, neither the schedule, a request nor a terminal `medrec refresh`, until `medrec refresh resume <source>`. A source whose provider terms wait on the household's consent is paused with `consent`. |
 | `min_interval_secs` | The shortest time between two of its imports: never shorter than its CLI documents, and at least a day (`86400`) for a member site. It is measured from the source's latest `ImportRun` in the person's `index.json` (its `imported_at`), which the import writes under the folder's lock and `rev` check, so an import is counted even when the pass that ran it stopped before updating this file. A request does not shorten it. |
+| `failures` | `failed` attempts in a row since the last `ok`. After one, the source waits before it is tried again: 30 minutes after the first failure, doubling with each one after, never longer than `min_interval_secs`, measured from the failed attempt's `started_at`. So a provider that keeps failing is contacted no more often than its interval allows. |
 | `next_run_at` | The next scheduled import; `null` when `auto` is `false`, the source is paused, or it needs a person. |
 | `sign_in.state` | medrec's reading of the provider's `auth status --json` (`auth-status/v1`). `not_needed`: the provider signs in to nothing (`required: false`). `signed_out`: `authenticated` is false. `expired`: `session_valid` is false, or `expires_at` has passed. `expiring`: `expires_at` is within 72 hours. `ok`: signed in otherwise. `unknown`: not read yet, or the read failed or timed out. |
 | `sign_in.expires_at` | The sign-in's end, where auth status gives one; else `null`. |
@@ -476,15 +478,18 @@ How medrec handles one:
    is imported at most once, and every request that covers it gets that
    attempt. While it runs, `status.json` names them in `last_attempt.requests`.
 3. **A request does not bypass a source's limits.** A source imported less
-   than `min_interval_secs` ago answers `skipped_interval`. A paused source
-   answers `skipped_paused`. One that needs a person answers `needs_person`
-   without being tried.
+   than `min_interval_secs` ago, or still waiting after a failure
+   (`failures`), answers `skipped_interval`. A paused source answers
+   `skipped_paused`. One that needs a person answers `needs_person` without
+   being tried.
 4. **The outcome goes to `done/`.** Once every source of a request is done,
    medrec writes `done/<same name>`, and then deletes the pending file. A
    pending file means the request is not finished. A request left pending
-   by a pass that was cut short is answered by the next pass. Its sources
-   imported since it was requested answer from that `ImportRun`, and the
-   interval keeps them from importing twice.
+   by a pass that was cut short is answered by the next pass. A source
+   imported since the request's `requested_at` answers from that
+   `ImportRun`: `ok`, with `attempt` the attempt that recorded it (`null`
+   when none did) and `next_allowed_at` counted from its `imported_at`. The
+   interval keeps it from importing twice.
 5. **One refresh runs at a time** on the refreshing machine. A pass that
    finds a refresh running ends at once.
 6. **Old outcomes go.** medrec deletes a `done/` file 90 days after its
