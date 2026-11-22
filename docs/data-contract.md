@@ -431,7 +431,7 @@ listing of `_requests/`.
 ```text
 _requests/
   <YYYYMMDDTHHMMSSZ>_<id>.json    pending
-  done/<same name>                handled; kept 90 days
+  done/<same name>                handled; kept 90 days, or while its pending file stays
 ```
 
 A pending request:
@@ -498,7 +498,7 @@ How medrec handles one:
 5. **One refresh runs at a time** on the refreshing machine. A pass that
    finds a refresh running ends at once.
 6. **Old outcomes go.** medrec deletes a `done/` file 90 days after its
-   `finished_at`.
+   `finished_at`, unless its request file is still pending (rule 4).
 
 A `done/` file is written by medrec, not copied. It holds the request's
 `schema`, `id`, `requested_at`, `scope`, `requested_by` and `app`,
