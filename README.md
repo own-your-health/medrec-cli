@@ -12,7 +12,7 @@ Provider CLIs fetch records; `medrec` files them.
 
 Part of the `piekstra-cli/1` family. It is built on
 [cli-common](https://github.com/piekstra/cli-common) and
-[medical-common](https://github.com/piekstra/medical-common).
+[medical-common](https://github.com/own-your-health/medical-common).
 
 It is for anyone keeping their own or their family's records: there is no
 account, no server and no one else's copy. The folder is yours, in your own
@@ -29,15 +29,15 @@ A release, for macOS (Apple silicon or Intel) or Linux:
 
 ```sh
 T=aarch64-apple-darwin                # or x86_64-apple-darwin, x86_64-unknown-linux-gnu
-curl -LO https://github.com/piekstra/medrec-cli/releases/latest/download/medrec-$T.tar.gz
-curl -LO https://github.com/piekstra/medrec-cli/releases/latest/download/medrec-$T.tar.gz.sha256
+curl -LO https://github.com/own-your-health/medrec-cli/releases/latest/download/medrec-$T.tar.gz
+curl -LO https://github.com/own-your-health/medrec-cli/releases/latest/download/medrec-$T.tar.gz.sha256
 shasum -a 256 -c medrec-$T.tar.gz.sha256
 tar -xzf medrec-$T.tar.gz && install -m 0755 medrec ~/.local/bin/   # any directory on PATH
 medrec self-update                    # later releases
 ```
 
 Or from source (Rust 1.89 or later): `cargo install --git
-https://github.com/piekstra/medrec-cli --locked`, or `make install` from a
+https://github.com/own-your-health/medrec-cli --locked`, or `make install` from a
 checkout. medrec reads no Keychain item, so an unsigned build asks for no
 approval.
 
@@ -133,24 +133,24 @@ top, where they were before 0.2.0.
 
 medrec signs in nowhere: each source has its own CLI, which writes the
 `records-stream/v1` stream medrec imports
-([medical-common](https://github.com/piekstra/medical-common)'s
+([medical-common](https://github.com/own-your-health/medical-common)'s
 `health-records/v1` profile). `medrec providers list` probes these names;
 any other CLI on that profile is added with `medrec config set providers
 <cli>,<cli>`.
 
 | CLI | Source | What it reads | Before the first sign-in |
 |---|---|---|---|
-| [`mychart`](https://github.com/piekstra/mychart-cli) | Any Epic MyChart organization | Health records | A developer app at Epic ([registration](https://github.com/piekstra/mychart-cli/blob/main/docs/registration.md)) |
-| [`athena`](https://github.com/piekstra/athena-cli) | athenahealth practices | Health records | A developer app at athenahealth ([registration](https://github.com/piekstra/athena-cli/blob/main/docs/registration.md)) |
-| [`kp`](https://github.com/piekstra/kaiser-cli) | Kaiser Permanente, the health plan | Claims and coverage | A developer app at Kaiser ([registration](https://github.com/piekstra/kaiser-cli/blob/main/docs/registration.md)) |
-| [`modmed`](https://github.com/piekstra/modmed-cli) | ModMed practices | Health records | A developer app at ModMed ([registration](https://github.com/piekstra/modmed-cli/blob/main/docs/registration.md)) |
-| [`icanotes`](https://github.com/piekstra/icanotes-cli) | ICANotes practices | Health records | An API key the practice's patient portal generates ([setup](https://github.com/piekstra/icanotes-cli/blob/main/docs/registration.md)) |
-| [`uhc`](https://github.com/piekstra/uhc-cli) | UnitedHealthcare | Coverage, claims, EOBs | None: a member site ([README](https://github.com/piekstra/uhc-cli#readme)) |
-| [`caremark`](https://github.com/piekstra/caremark-cli) | CVS Caremark | Prescription fills, pharmacy claims | None: a member site ([README](https://github.com/piekstra/caremark-cli#readme)) |
-| [`labcorp`](https://github.com/piekstra/labcorp-cli) | Labcorp Patient | Lab results and report PDFs | None: a member site ([README](https://github.com/piekstra/labcorp-cli#readme)) |
-| [`oneblood`](https://github.com/piekstra/oneblood-cli) | OneBlood | A donor's blood type and readings | None: a member site ([README](https://github.com/piekstra/oneblood-cli#readme)) |
-| [`fertemr`](https://github.com/piekstra/fertemr-cli) | Fertility clinics on the FERT EMR | Results, visits, documents, messages | None: a member site ([README](https://github.com/piekstra/fertemr-cli#readme)) |
-| [`salve`](https://github.com/piekstra/salve-cli) | The Salve fertility app | Documents, forms, treatment records | None: a member site ([README](https://github.com/piekstra/salve-cli#readme)) |
+| [`mychart`](https://github.com/own-your-health/mychart-cli) | Any Epic MyChart organization | Health records | A developer app at Epic ([registration](https://github.com/own-your-health/mychart-cli/blob/main/docs/registration.md)) |
+| [`athena`](https://github.com/own-your-health/athena-cli) | athenahealth practices | Health records | A developer app at athenahealth ([registration](https://github.com/own-your-health/athena-cli/blob/main/docs/registration.md)) |
+| [`kp`](https://github.com/own-your-health/kaiser-cli) | Kaiser Permanente, the health plan | Claims and coverage | A developer app at Kaiser ([registration](https://github.com/own-your-health/kaiser-cli/blob/main/docs/registration.md)) |
+| [`modmed`](https://github.com/own-your-health/modmed-cli) | ModMed practices | Health records | A developer app at ModMed ([registration](https://github.com/own-your-health/modmed-cli/blob/main/docs/registration.md)) |
+| [`icanotes`](https://github.com/own-your-health/icanotes-cli) | ICANotes practices | Health records | An API key the practice's patient portal generates ([setup](https://github.com/own-your-health/icanotes-cli/blob/main/docs/registration.md)) |
+| [`uhc`](https://github.com/own-your-health/uhc-cli) | UnitedHealthcare | Coverage, claims, EOBs | None: a member site ([README](https://github.com/own-your-health/uhc-cli#readme)) |
+| [`caremark`](https://github.com/own-your-health/caremark-cli) | CVS Caremark | Prescription fills, pharmacy claims | None: a member site ([README](https://github.com/own-your-health/caremark-cli#readme)) |
+| [`labcorp`](https://github.com/own-your-health/labcorp-cli) | Labcorp Patient | Lab results and report PDFs | None: a member site ([README](https://github.com/own-your-health/labcorp-cli#readme)) |
+| [`oneblood`](https://github.com/own-your-health/oneblood-cli) | OneBlood | A donor's blood type and readings | None: a member site ([README](https://github.com/own-your-health/oneblood-cli#readme)) |
+| [`fertemr`](https://github.com/own-your-health/fertemr-cli) | Fertility clinics on the FERT EMR | Results, visits, documents, messages | None: a member site ([README](https://github.com/own-your-health/fertemr-cli#readme)) |
+| [`salve`](https://github.com/own-your-health/salve-cli) | The Salve fertility app | Documents, forms, treatment records | None: a member site ([README](https://github.com/own-your-health/salve-cli#readme)) |
 
 A developer app is free and registered once, by the person who uses the
 CLI; each registration doc walks through the vendor's form, and the CLI's
