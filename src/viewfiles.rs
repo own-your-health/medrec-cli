@@ -30,7 +30,10 @@ use crate::views::{self, Range};
 pub const DIR: &str = "views";
 /// What was written, and from which files; written last.
 pub const INDEX: &str = "views/views.json";
-pub const SCHEMA: &str = "medrec-views/v1";
+pub const SCHEMA: &str = "medrec-views/v2";
+/// The layout before content-addressed names, written only by the
+/// connector's own `npm run views`: its plain-named files are removed.
+const SCHEMA_V1: &str = "medrec-views/v1";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// A records or timeline shard closes once it holds this many bytes, never
@@ -41,6 +44,8 @@ const SHARD_BYTES: usize = 48_000;
 const PACK_BYTES: usize = 1_000_000;
 /// Rows per `search-labs-<n>.json`.
 const LAB_ROWS: usize = 256;
+/// Items per `search-hay-<n>.bin`.
+const HAY_ITEMS: usize = 512;
 /// The shard number `names-<kind>.json` and `tests.json` give the undated
 /// file.
 const UNDATED: i64 = -1;
@@ -321,6 +326,23 @@ pub fn sync(f: &Folder, all: bool) -> Result<Synced, CliError> {
         }
         if store.delete(rel)? {
             out.files_removed += 1;
+        }
+    }
+    // A v1 `views.json` named its views plainly; each is removed by the
+    // name it gave.
+    for (pid, v) in old
+        .iter()
+        .filter(|o| o.schema == SCHEMA_V1)
+        .flat_map(|o| &o.people)
+    {
+        for name in v.files.keys() {
+            let rel = format!("{DIR}/{pid}/{name}");
+            if name.contains('/') || wanted.contains(&rel) || !held.contains_key(&rel) {
+                continue;
+            }
+            if store.delete(&rel)? {
+                out.files_removed += 1;
+            }
         }
     }
     Ok(out)
@@ -785,7 +807,15 @@ pub(crate) fn person(
     }
     items.extend(metas);
     put("search-items.bin", items);
-    put("search-hay.bin", hay);
+    // The text in packs of a fixed count of items, so a changed item, or a
+    // new newest one, rewrites only its own pack.
+    for (k, first) in (0..n).step_by(HAY_ITEMS).enumerate() {
+        let (a, b) = (
+            hay_at[first] as usize,
+            hay_at[(first + HAY_ITEMS).min(n)] as usize,
+        );
+        put(&format!("search-hay-{k}.bin"), hay[a..b].to_vec());
+    }
     for (key, words) in &postings {
         put(&format!("search-{key}.json"), json(words));
     }
@@ -1057,7 +1087,7 @@ mod tests {
         let hay_at = |i: usize| {
             u32::from_le_bytes(items[4 * (1 + i)..4 * (2 + i)].try_into().unwrap()) as usize
         };
-        let hay = &files["views/p_test/search-hay.bin"];
+        let hay = &files["views/p_test/search-hay-0.bin"];
         let (ord, first) = (panel[0], panel[2]);
         assert_eq!(&hay[hay_at(ord) + first..hay_at(ord) + first + 5], b"panel");
     }
@@ -1070,8 +1100,8 @@ mod tests {
             "records-result-7.0a1b2c3d4e5f.json"
         );
         assert_eq!(
-            stored_name("search-hay.bin", md5),
-            "search-hay.0a1b2c3d4e5f.bin"
+            stored_name("search-hay-0.bin", md5),
+            "search-hay-0.0a1b2c3d4e5f.bin"
         );
         assert!(is_stored_name("records-result-7.0a1b2c3d4e5f.json"));
         for not_a_view in [
@@ -1084,6 +1114,28 @@ mod tests {
         ] {
             assert!(!is_stored_name(not_a_view), "{not_a_view}");
         }
+    }
+
+    #[test]
+    fn the_search_text_is_packed_512_items_to_a_file() {
+        let (files, v) = write(&index_of(history(1100)));
+        let n = v.search.items;
+        assert_eq!(n, 1100);
+        let items = &files["views/p_test/search-items.bin"];
+        let text_at = |i: usize| {
+            u32::from_le_bytes(items[4 * (1 + i)..4 * (2 + i)].try_into().unwrap()) as usize
+        };
+        let packs: Vec<&Vec<u8>> = (0..)
+            .map_while(|k| files.get(&format!("views/p_test/search-hay-{k}.bin")))
+            .collect();
+        assert_eq!(packs.len(), 3);
+        for (k, pack) in packs.iter().enumerate() {
+            let (first, last) = (512 * k, (512 * (k + 1)).min(n));
+            assert_eq!(pack.len(), text_at(last) - text_at(first), "pack {k}");
+        }
+        // Item 600 is in pack 1, at its offset less the pack's first item's.
+        let at = text_at(600) - text_at(512);
+        assert!(packs[1][at..].starts_with(b"Test "));
     }
 
     #[test]

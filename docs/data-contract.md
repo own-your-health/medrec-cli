@@ -634,7 +634,7 @@ file as found) and `handled`. A `done/` file is at most 8 KiB.
 | `message` | One line for a person, with no record content. |
 | `by` | The medrec that handled it. |
 
-## views/ (`medrec-views/v1`, 0.8.0 and later)
+## views/ (`medrec-views/v2`, 0.8.0 and later)
 
 The views hold each person's records again, cut into small files in the
 order a reader lists them. A reader that cannot parse a whole `index.json`
@@ -661,7 +661,7 @@ views/<person id>/text-<n>.bin
 views/<person id>/search-<hex>.json
 views/<person id>/search-1-<hex>.json
 views/<person id>/search-items.bin
-views/<person id>/search-hay.bin
+views/<person id>/search-hay-<n>.bin
 views/<person id>/search-labs-<n>.json
 ```
 
@@ -717,7 +717,7 @@ A reader decides freshness by MD5, as Drive reports it (`md5Checksum`):
 ### views.json
 
 ```json
-{"schema":"medrec-views/v1","medrec":"0.8.0","household":"<md5>",
+{"schema":"medrec-views/v2","medrec":"0.8.0","household":"<md5>",
  "people":{"p_…":{"index":"<md5>","text":"<md5>","row":{…},"records":{…},"timeline":{…},"search":{…},
                   "files":{"summary.json":"<md5>","records-result-0.json":"<md5>",…}}}}
 ```
@@ -734,9 +734,13 @@ A reader decides freshness by MD5, as Drive reports it (`md5Checksum`):
 | `files` | Every view in `views/<person id>/`, by name (without the MD5), with its MD5 (hex), from which its stored name follows. A search shard exists only for a character some word starts with, so one missing from `files` means no word matches. |
 
 `schema` names the layout. A change that a reader of the current layout
-would misread takes the next number (`medrec-views/v2`). A field readers may
-ignore does not. medrec moves to a new number only in a release whose notes
-name the connector version that reads it.
+would misread takes the next number (`medrec-views/v3` after this one). A
+field readers may ignore does not. medrec moves to a new number only in a
+release whose notes name the connector version that reads it. medrec has
+written v2 from its first views. v1, the same layout with plain names and
+one search text file, was only ever written by the connector's own `npm run
+views`. medrec removes a v1 `views.json`'s views by the names in its
+`files`.
 
 ### Shards: from the oldest end
 
@@ -840,12 +844,17 @@ newest, takes a new number.
   when it has one.
 - **`search-1-<hex>.json`:** the same postings keyed by the first character
   only, for one-character terms such as the "d" in "vitamin d".
-- **`search-items.bin`:** `n`, the number of items; then `n + 1` offsets of
-  each item's text in `search-hay.bin`; then `n + 1` offsets of each item's
-  details in the rest of the file; then each item's details, `[date or
-  null, kind, id, title]` as JSON, one after another.
-- **`search-hay.bin`:** every item's text, UTF-8, in item order, with no
-  separators, for snippets by byte range.
+- **`search-items.bin`:** `n`, the number of items; then `n + 1` offsets
+  of each item's text, counted over the `search-hay-<n>.bin` packs in
+  order; then `n + 1` offsets of each item's details in the rest of the
+  file; then each item's details, `[date or null, kind, id, title]` as
+  JSON, one after another.
+- **`search-hay-<n>.bin`:** the items' texts, UTF-8, in item order, with no
+  separators, 512 items to a pack: pack `n` holds items `512n` to
+  `512n + 511`, and there are ⌈items / 512⌉ packs. Item `i` starts at
+  `text[i] − text[512 · ⌊i / 512⌋]` in pack `⌊i / 512⌋`. A reader fetches
+  only the byte ranges its snippets need. A changed item rewrites only its
+  pack, and a new newest one only the last.
 - **`search-labs-<n>.json`:** for the lab queries (Readers, below), every
   `result` and `report` record and every claim with a `lab` line, as
   `[item, date, kind, id, title, detail line]`, by item number, 256 to a

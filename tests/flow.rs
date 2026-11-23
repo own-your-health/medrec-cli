@@ -2491,7 +2491,7 @@ fn the_views_follow_every_write_and_only_files_that_change_are_written() {
     let records = e.records();
     let read = |p: &Path| -> Value { serde_json::from_slice(&std::fs::read(p).unwrap()).unwrap() };
     let index = read(&records.join("views/views.json"));
-    assert_eq!(index["schema"], "medrec-views/v1");
+    assert_eq!(index["schema"], "medrec-views/v2");
     assert_eq!(index["medrec"], env!("CARGO_PKG_VERSION"));
     assert_eq!(index["household"], md5_of(&records.join("household.json")));
     let household = read(&records.join("household.json"));
@@ -2531,6 +2531,26 @@ fn the_views_follow_every_write_and_only_files_that_change_are_written() {
     assert!(index["people"][&robin]["records"]["result"]["shards"]
         .as_array()
         .is_some_and(|s| !s.is_empty()));
+
+    // Views of the v1 layout (plain names, from the connector's own writer)
+    // are removed by the names their views.json gave.
+    let current = std::fs::read(records.join("views/views.json")).unwrap();
+    for plain in ["summary.json", "records-result-0.json"] {
+        std::fs::write(dir.join(plain), "[]").unwrap();
+    }
+    let mut v1 = index.clone();
+    v1["schema"] = "medrec-views/v1".into();
+    v1["people"][&robin]["files"] =
+        serde_json::json!({"summary.json": "0", "records-result-0.json": "0"});
+    std::fs::write(records.join("views/views.json"), v1.to_string()).unwrap();
+    let upgraded = e.ok(&["views", "write"]);
+    assert_eq!(upgraded["files_removed"], 2, "{upgraded}");
+    assert_eq!(upgraded["files_written"], 0, "{upgraded}");
+    assert!(!dir.join("summary.json").exists());
+    assert_eq!(
+        std::fs::read(records.join("views/views.json")).unwrap(),
+        current
+    );
 
     // Nothing changed since: nothing is made or written.
     let w = e.ok(&["views", "write"]);
