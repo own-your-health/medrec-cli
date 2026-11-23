@@ -451,8 +451,12 @@ import of several members, does this once at the end. `views.json` records
 the MD5 of every file the views were made from, so a reader can tell when
 they are stale.
 
-The first build after upgrading to 0.8.0 writes every view (150 to 250
-files for an adult in medrec's synthetic test folders) and holds the folder
+On Drive, the views a pass replaces go to the trash, which keeps them for
+30 days against the storage quota. One new result replaces about 30 views
+(0.9 MB) for a person with about 1,600 results; SECURITY.md has more.
+
+The first build after upgrading to 0.8.0 writes every view (100 to 340
+files per person in medrec's synthetic test folders) and holds the folder
 while it uploads. On
 a Drive folder, run `medrec views write` once from a terminal right after
 upgrading, so a scheduled pass or the app's refresh does not wait on it.

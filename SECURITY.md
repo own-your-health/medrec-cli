@@ -95,8 +95,14 @@ The records folder is a plain, private Drive folder without encryption
 
 `views/` in the records folder (0.8.0 and later) holds the same records as
 each person's `index.json` and `text.json`, cut into small files for
-readers. It is inside the folder, so everything above covers it, and it
-adds no copy anywhere else.
+readers. It is inside the folder, so everything above covers it. On Drive,
+the views a pass replaces go to the account's trash, as every file medrec
+removes there does. They stay there until the trash is emptied or Drive
+removes them after 30 days, and they count against the storage quota. One
+new result for a person with about 1,600 replaces about 30 views, 0.9 MB,
+in medrec's large synthetic folder. `medrec views write --all`, or a large
+backfill, can send megabytes at once. Emptying the trash removes them for
+good; the views themselves are made again from `index.json` and `text.json`.
 
 `medrec cache clear` removes every copy on this Mac (the read cache and
 opened copies). It keeps the run locks and the refresh state. The records

@@ -668,7 +668,9 @@ enum ImagesCmd {
 #[derive(Subcommand, Debug)]
 enum ViewsCmd {
     /// Bring views/ up to date now: each person whose files changed since
-    /// the views were written, and only the files whose bytes differ.
+    /// the views were written. Only views not yet stored under their name
+    /// are written, and the views they replace are removed (on Drive, to
+    /// the trash).
     Write(ViewsWriteArgs),
 }
 

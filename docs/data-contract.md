@@ -693,7 +693,11 @@ last.
 - **`views.json` last.** It records the MD5 of every view, so a reader
   checks each view it reads and never mixes two passes, whatever order an
   uploader sends them in. Views that it no longer names, a person's who
-  left `household.json` among them, are deleted after it. medrec deletes
+  left `household.json` among them, are deleted after it; a left person's
+  directory may stay, empty, since readers list only the directories of
+  the people `household.json` names. On Drive, a deleted view goes to the
+  account's trash, like every file medrec removes there, until the trash
+  is emptied or 30 days pass. medrec deletes
   only files of a stored view's shape (`<name>.<12 hex>.json` or `.bin`) in
   the directory of a person the household or the last `views.json` names,
   and nothing else under `views/`.
