@@ -114,24 +114,58 @@ impl Env {
     /// Make the fake provider's last import two days old, so the interval
     /// allows another.
     fn age_imports(&self) {
-        let p = self.records().join("Robin Testperson/index.json");
-        let mut v: Value = serde_json::from_slice(&std::fs::read(&p).unwrap()).unwrap();
-        for r in v["imports"].as_array_mut().unwrap() {
-            r["imported_at"] = "2026-01-01T00:00:00Z".into();
+        self.loaded_at("2026-01-01T00:00:00Z");
+    }
+
+    /// Every import, and this machine's record of when each source last
+    /// ran its provider, put at `at`.
+    fn loaded_at(&self, at: &str) {
+        for person in std::fs::read_dir(self.records()).unwrap() {
+            let p = person.unwrap().path().join("index.json");
+            if !p.is_file() {
+                continue;
+            }
+            let mut v: Value = serde_json::from_slice(&std::fs::read(&p).unwrap()).unwrap();
+            for r in v["imports"].as_array_mut().unwrap() {
+                r["imported_at"] = at.into();
+            }
+            std::fs::write(&p, serde_json::to_vec_pretty(&v).unwrap()).unwrap();
         }
-        std::fs::write(&p, serde_json::to_vec_pretty(&v).unwrap()).unwrap();
+        let secs = medrec::refresh::time::parse(at).unwrap();
+        let cache = self.root.join("cache");
+        if !cache.is_dir() {
+            return;
+        }
+        walk(&cache, &mut |f| {
+            let in_refresh = f.parent().and_then(|d| d.file_name()) == Some("refresh".as_ref());
+            if !in_refresh || f.extension() != Some("json".as_ref()) {
+                return;
+            }
+            let mut local: Value = serde_json::from_slice(&std::fs::read(f).unwrap()).unwrap();
+            if let Some(m) = local.get_mut("ran_at").and_then(Value::as_object_mut) {
+                for t in m.values_mut() {
+                    *t = json!(secs);
+                }
+                std::fs::write(f, serde_json::to_vec(&local).unwrap()).unwrap();
+            }
+        });
     }
 
     fn request(&self, id: &str, scope: Value) {
+        self.request_at(id, scope, "2026-11-22T20:03:12Z");
+    }
+
+    fn request_at(&self, id: &str, scope: Value, at: &str) {
         let dir = self.records().join("_requests");
         std::fs::create_dir_all(&dir).unwrap();
-        let name = format!("20261122T200312Z_{id}.json");
+        let stamp: String = at.chars().filter(|c| *c != '-' && *c != ':').collect();
+        let name = format!("{stamp}_{id}.json");
         std::fs::write(
             dir.join(name),
             serde_json::to_vec(&json!({
                 "schema": "medrec-request/v1",
                 "id": id,
-                "requested_at": "2026-11-22T20:03:12Z",
+                "requested_at": at,
                 "requested_by": {"email": "alex@example.com", "name": "Alex Testperson"},
                 "scope": scope,
                 "app": {"name": "own-your-health-app", "version": "0.1.0"},
@@ -876,8 +910,21 @@ fn a_refused_export_signs_in_again_with_the_providers_own_command_and_names_no_p
     let s0 = &st["sources"][0];
     assert_eq!(s0["sign_in"]["state"], "ok", "{st}");
     assert_eq!(s0["sign_in"]["needs_person"]["reason"], "sign_in");
-    let message = s0["last_attempt"]["error"]["message"].as_str().unwrap();
-    assert!(message.contains("<provider profile>"), "{message}");
+    // The one instruction is medrec's; the provider's own words, with its
+    // own sign-in command, are kept apart.
+    let error = &s0["last_attempt"]["error"];
+    assert_eq!(error["code"], "needs_person", "{error}");
+    assert!(
+        error["remedy"]
+            .as_str()
+            .unwrap()
+            .contains("medrec refresh sign-in"),
+        "{error}"
+    );
+    let message = error["message"].as_str().unwrap();
+    assert!(!message.contains("auth login"), "{message}");
+    let provider = error["provider_message"].as_str().unwrap();
+    assert!(provider.contains("<provider profile>"), "{provider}");
     // No file in the folder names a profile, medrec's or the provider's.
     let mut named = Vec::new();
     walk(&e.records(), &mut |p| {
@@ -936,5 +983,234 @@ fn a_refused_export_signs_in_again_with_the_providers_own_command_and_names_no_p
     assert_eq!(after.lines().count(), lines + 1);
     assert!(!after.contains("adult1"), "{after}");
     assert!(after.contains("t_aaaaaaaaaaaaaaaaaaaa"));
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
+#[test]
+fn a_persons_request_waits_its_own_guard_not_the_schedules_floor() {
+    let e = Env::new("guard");
+    let src = setup(&e);
+    e.ok(&[
+        "--profile",
+        "home",
+        "refresh",
+        "add",
+        "--source",
+        &src,
+        "--provider-profile",
+        "adult1",
+    ]);
+    let now = medrec::refresh::time::now();
+    let at = |secs: i64| medrec::refresh::time::fmt(secs);
+
+    // Loaded 16 minutes ago: the schedule's day has not passed, the
+    // request's guard has.
+    e.loaded_at(&at(now - 16 * 60));
+    e.request_at("x_aaaaaaaaaaaaaaaaaaaa", json!({ "source": src }), &at(now));
+    let v = e.ok(&["refresh", "--scheduled"]);
+    assert_eq!(v["attempts"][0]["trigger"], "request", "{v}");
+    assert_eq!(v["attempts"][0]["outcome"], "ok", "{v}");
+    let st = e.json_at("_status/status.json");
+    let s0 = &st["sources"][0];
+    assert!(
+        s0["sign_in"].get("renews").is_none(),
+        "fakeprov is in no table: {s0}"
+    );
+
+    // Asked again at once: skipped, saying when it may load.
+    // A second after the load, so that load does not answer it.
+    let asked = medrec::refresh::time::now() + 1;
+    e.request_at(
+        "x_bbbbbbbbbbbbbbbbbbbb",
+        json!({ "source": src }),
+        &at(asked),
+    );
+    let v = e.ok(&["refresh", "--scheduled"]);
+    assert_eq!(v["attempts"][0]["outcome"], "skipped_interval", "{v}");
+    let mut done = None;
+    walk(&e.records().join("_requests/done"), &mut |p| {
+        if p.to_string_lossy().contains("x_bbbbbbbbbbbbbbbbbbbb") {
+            done = Some(serde_json::from_slice::<Value>(&std::fs::read(p).unwrap()).unwrap());
+        }
+    });
+    let done = done.expect("the second request's outcome");
+    let next = done["handled"]["sources"][0]["next_allowed_at"]
+        .as_str()
+        .unwrap();
+    let next = medrec::refresh::time::parse(next).unwrap();
+    assert!(
+        (asked + 14 * 60..=asked + 15 * 60 + 5).contains(&next),
+        "15 minutes from the load, not a day: {done}"
+    );
+
+    // A terminal refresh is a person asking too.
+    let v = e.ok(&["refresh", "--source", &src]);
+    assert_eq!(v["attempts"][0]["outcome"], "skipped_interval", "{v}");
+    e.loaded_at(&at(now - 16 * 60));
+    let v = e.ok(&["refresh", "--source", &src]);
+    assert_eq!(v["attempts"][0]["outcome"], "ok", "{v}");
+
+    // The schedule keeps its floor.
+    e.loaded_at(&at(now - 16 * 60));
+    let v = e.ok(&["refresh", "--scheduled"]);
+    assert!(v["attempts"].as_array().unwrap().is_empty(), "{v}");
+}
+
+#[test]
+fn a_providers_declared_sign_in_life_wins_over_the_table() {
+    let e = Env::new("declared");
+    let src = setup(&e);
+    e.ok(&[
+        "--profile",
+        "home",
+        "refresh",
+        "add",
+        "--source",
+        &src,
+        "--provider-profile",
+        "adult1",
+    ]);
+    e.age_imports();
+    let v = e.ok_env(
+        &["refresh", "--source", &src],
+        &[("FAKEPROV_AUTH", "short")],
+    );
+    assert_eq!(v["attempts"][0]["outcome"], "ok", "{v}");
+    let st = e.json_at("_status/status.json");
+    let s0 = &st["sources"][0]["sign_in"];
+    assert_eq!(
+        (s0["renews"].clone(), s0["lasts_secs"].clone()),
+        (json!(false), json!(1800)),
+        "{s0}"
+    );
+    // Kept between reads.
+    e.ok(&["refresh", "--scheduled"]);
+    let st = e.json_at("_status/status.json");
+    assert_eq!(st["sources"][0]["sign_in"]["renews"], false, "{st}");
+}
+
+#[test]
+fn a_pass_exports_every_source_before_it_files_any() {
+    let e = Env::new("spool");
+    let first = setup(&e);
+    // A second patient on the same site, as a household's two members are.
+    let other = medrec::testdata::STREAM.replace("pat-0001", "pat-0002");
+    std::fs::write(e.root.join("provider/synthetic-pat-0002.ndjson"), other).unwrap();
+    e.ok(&[
+        "import",
+        "--from",
+        "fakeprov",
+        "--from-profile",
+        "adult2",
+        "--patient",
+        "pat-0002",
+        "--person",
+        "Robin",
+    ]);
+    let h = e.json_at("household.json");
+    let second = h["sources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["id"].as_str().unwrap().to_string())
+        .find(|id| *id != first)
+        .unwrap();
+    for (src, login) in [(&first, "adult1"), (&second, "adult2")] {
+        e.ok(&[
+            "--profile",
+            "home",
+            "refresh",
+            "add",
+            "--source",
+            src,
+            "--provider-profile",
+            login,
+        ]);
+    }
+    e.age_imports();
+    let records = e.records();
+    let v = e.ok_env(
+        &["refresh"],
+        &[("FAKEPROV_WATCH", records.to_str().unwrap())],
+    );
+    let outcomes: Vec<_> = v["attempts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["outcome"].as_str().unwrap())
+        .collect();
+    assert_eq!(outcomes, ["ok", "ok"], "{v}");
+    // What each export saw of the people's indexes: the same, so neither
+    // was filed before the other was exported.
+    let log = std::fs::read_to_string(e.root.join("provider/export-log")).unwrap();
+    let seen: Vec<_> = log.lines().collect();
+    assert_eq!(seen.len(), 2, "{log}");
+    assert_eq!(seen[0], seen[1], "an import was filed between the exports");
+    let idx = e.json_at("Robin Testperson/index.json");
+    assert_eq!(idx["imports"].as_array().unwrap().len(), 4);
+}
+
+#[test]
+fn an_import_of_several_members_exports_them_all_before_filing() {
+    let e = Env::new("batch");
+    setup(&e);
+    let provider = e.root.join("provider");
+    let stream = medrec::testdata::STREAM;
+    std::fs::write(
+        provider.join("synthetic-pat-0002.ndjson"),
+        stream.replace("pat-0001", "pat-0002"),
+    )
+    .unwrap();
+    // Someone else's records: a birth date that is not Robin's.
+    std::fs::write(
+        provider.join("synthetic-pat-0003.ndjson"),
+        stream
+            .replace("pat-0001", "pat-0003")
+            .replace("2020-02-02", "1950-05-05"),
+    )
+    .unwrap();
+    let import = |patients: &[&str], people: &[&str]| {
+        let mut args = vec!["import", "--from", "fakeprov", "--from-profile", "adult1"];
+        for p in patients {
+            args.extend(["--patient", p]);
+        }
+        for p in people {
+            args.extend(["--person", p]);
+        }
+        let records = e.records();
+        e.doc(&args, &[("FAKEPROV_WATCH", records.to_str().unwrap())])
+    };
+
+    let (code, v) = import(&["pat-0001", "pat-0002"], &["Robin"]);
+    assert_eq!(code, Some(2), "{v}");
+    assert!(
+        !provider.join("export-log").exists(),
+        "nothing was exported"
+    );
+
+    let (code, v) = import(&["pat-0001", "pat-0002"], &["Robin", "Robin"]);
+    assert_eq!(code, Some(0), "{v}");
+    assert_eq!(v["schema"], "import-batch/v1", "{v}");
+    assert_eq!(v["ok"], true);
+    let items = v["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    assert!(items
+        .iter()
+        .all(|i| i["import"]["import"].as_str().unwrap().starts_with("i_")));
+    let log = std::fs::read_to_string(provider.join("export-log")).unwrap();
+    let seen: Vec<_> = log.lines().collect();
+    assert_eq!(seen.len(), 2, "{log}");
+    assert_eq!(
+        seen[0], seen[1],
+        "a member was filed before the next export"
+    );
+
+    // One member's records refused: the others are filed, and the exit is
+    // that member's.
+    let (code, v) = import(&["pat-0003", "pat-0002"], &["Robin", "Robin"]);
+    assert_eq!(code, Some(2), "{v}");
+    assert_eq!(v["ok"], false);
+    assert_eq!(v["items"][0]["error"]["code"], "usage", "{v}");
+    assert!(v["items"][1]["import"].is_object(), "{v}");
     let _ = std::fs::remove_dir_all(&e.root);
 }

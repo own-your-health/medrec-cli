@@ -474,12 +474,14 @@ and a field or count that is missing as unknown, not as zero or false.
 | `source`, `person`, `cli`, `organization` | The source's id in `household.json`, its person, its provider CLI and its organization. |
 | `auto` | `true`: imported on its schedule. `false`: imported only when a request or a terminal `medrec refresh` asks. |
 | `paused` | `null`, or `{"reason": "consent" \| "user", "note": "…", "since": "…"}`. Nothing imports a paused source, neither the schedule, a request nor a terminal `medrec refresh`, until `medrec refresh resume <source>`. A source whose provider terms wait on the household's consent is paused with `consent`. |
-| `min_interval_secs` | The shortest time between two of its imports: never shorter than its CLI documents, and at least a day (`86400`) for a member site. It is measured from the source's latest `ImportRun` in the person's `index.json` (its `imported_at`), which the import writes under the folder's lock and `rev` check, so an import is counted even when the pass that ran it stopped before updating this file. A request does not shorten it. |
-| `failures` | `failed` attempts in a row since the last `ok`. After one, the source waits before it is tried again: 30 minutes after the first failure, doubling with each one after, never longer than `min_interval_secs`, measured from the failed attempt's `started_at`. So a provider that keeps failing is contacted no more often than its interval allows. |
+| `min_interval_secs` | The shortest time between two of its scheduled imports: never shorter than its CLI documents, and at least a day (`86400`) for a member site. It is measured from the source's latest `ImportRun` in the person's `index.json` (its `imported_at`), which the import writes under the folder's lock and `rev` check, so an import is counted even when the pass that ran it stopped before updating this file. A person's request is held to its own guard instead (`_requests/`, rule 3). |
+| `failures` | `failed` attempts in a row since the last `ok`. After one, the schedule waits before it tries the source again: 30 minutes after the first failure, doubling with each one after, never longer than `min_interval_secs`, measured from the failed attempt's `started_at`. So a provider that keeps failing is contacted no more often than its interval allows. A person's request waits only its guard from the failed attempt (`_requests/`, rule 3). |
 | `next_run_at` | The next scheduled import, after any wait that follows a failure (`failures`); `null` when `auto` is `false`, the source is paused, or it needs a person. |
 | `sign_in.state` | medrec's reading of the provider's `auth status --json` (`auth-status/v1`). `not_needed`: the provider signs in to nothing (`required: false`). `signed_out`: `authenticated` is false. `expired`: `session_valid` is false, or `expires_at` has passed. `expiring`: `expires_at` is within 72 hours. `ok`: signed in otherwise. `unknown`: not read yet, or the read failed or timed out. |
 | `sign_in.expires_at` | The sign-in's end, where auth status gives one; else `null`. |
 | `sign_in.checked_at` | When auth status was last read. |
+| `sign_in.renews` | `true`: the provider CLI keeps its sign-in going unattended (a refresh token, a portal key). `false`: a member-site session that ends within hours and nothing renews, so the source loads only soon after someone signs in on the refreshing machine, and a `sign_in` `needs_person` is its normal state between sign-ins. Missing: unknown. It comes from the provider's auth status when that gives `renews` (0.6.0 and later read it; none does yet), else from medrec's table: `false` for `uhc`, `fertemr`, `caremark`, `oneblood`, `flywire` and `peryourhealth`; `true` for `mychart`, `athena`, `kp`, `modmed` and `icanotes`. |
+| `sign_in.lasts_secs` | About how long a fresh sign-in lasts, where measured: from the provider's auth status when it gives `lasts_secs`, else medrec's table (`uhc` 2400). Missing: unknown. |
 | `sign_in.needs_person` | `null` unless the source cannot be refreshed without a person: `{"reason": "sign_in" \| "keychain", "since": "…", "command": "medrec refresh sign-in <source>"}`. `sign_in`: the state is `signed_out` or `expired`, or the import itself answered that the provider needs a sign-in (exit 3). `keychain`: a scheduled pass's auth status read timed out waiting on an approval nobody gave, as a rebuilt provider CLI's first Keychain read does; the state is then `unknown`. `command` is what to run in a terminal on the refreshing machine. Until it has run, neither the schedule nor a request tries the source again. An `expiring` sign-in is still refreshed. |
 | `last_attempt` | The latest attempt: an `attempts/` line without `source`, `person`, `cli`, `organization` and `counts`. While it runs, `outcome` is `running` and `finished_at` is `null`. A pass that finds `running` left by an earlier pass (no refresh of the folder runs on this machine) records that attempt as `failed` with the error code `interrupted`, counts it in `failures`, and waits from its `started_at`, before it considers the source due. |
 | `last_success` | The latest attempt whose outcome was `ok`: its attempt, when it finished, its `ImportRun`, and the import report's counts and `withheld_types`. |
@@ -498,9 +500,9 @@ the month (UTC) the attempt started.
 | `attempt` | Its id, `t_` and 20 base32 characters. |
 | `trigger` | `schedule`; `request`, with the `requests` it served; or `manual`, a terminal `medrec refresh`. |
 | `requests` | The `_requests/` ids the attempt served; empty otherwise. |
-| `outcome` | `ok`, `failed`, `needs_person`, `skipped_interval` (imported less than `min_interval_secs` ago, or still waiting after a failure: see `failures`) or `skipped_paused`. `running` appears only in `status.json`. |
+| `outcome` | `ok`, `failed`, `needs_person`, `skipped_interval` (for the schedule: imported less than `min_interval_secs` ago, or still waiting after a failure, see `failures`; for a person: within the request guard, `_requests/` rule 3) or `skipped_paused`. `running` appears only in `status.json`. |
 | `exit_code` | The import's exit code (Import, below); `null` for a skip, and for a `needs_person` found before the import ran. |
-| `error` | `null`, or `{"code", "message", "remedy"}` from the failing command's `--json` error (the family's error shape). `message` is at most 300 characters. A profile name in `message` or `remedy` is replaced, a provider profile's by `<provider profile>` and a medrec profile's by `<profile>`, so the folder holds none. medrec's own codes are `timeout` (a call outlived its limit), `interrupted` (the pass running it stopped before it finished) and `needs_person`. |
+| `error` | `null`, or `{"code", "message", "remedy"}` from the failing command's `--json` error (the family's error shape). `message` is at most 300 characters. When the provider's export answered that its sign-in ended (exit 3), `code` is `needs_person`, `message` and `remedy` are medrec's own (the remedy runs `medrec refresh sign-in <source>`), and the provider's message, which names the provider's own sign-in command, is in `provider_message` (0.6.0 and later). Show `remedy` as the one thing to do. A profile name in `message` or `remedy` is replaced, a provider profile's by `<provider profile>` and a medrec profile's by `<profile>`, so the folder holds none. medrec's own codes are `timeout` (a call outlived its limit), `interrupted` (the pass running it stopped before it finished) and `needs_person`. |
 | `import` | The `ImportRun` id in the person's `index.json`, when `ok`. |
 | `counts` | When `ok`, the import report's counts: `records_added`, `records_updated`, `records_unchanged`, `records_older`, `resources_written`, `resources_unchanged`, `documents_added`, `documents_duplicate`, `documents_unchanged`, `documents_same_statement`. A count the import report gains later is added here too. |
 
@@ -574,11 +576,14 @@ How medrec handles one:
 2. **The pending requests a pass finds are served together.** Each source
    is imported at most once, and every request that covers it gets that
    attempt. While it runs, `status.json` names them in `last_attempt.requests`.
-3. **A request does not bypass a source's limits.** A source imported less
-   than `min_interval_secs` ago, or still waiting after a failure
-   (`failures`), answers `skipped_interval`. A paused source answers
-   `skipped_paused`. One that needs a person answers `needs_person` without
-   being tried.
+3. **A request has its own guard, not the schedule's floor** (0.6.0 and
+   later; before, a request waited `min_interval_secs` too). A person
+   asking imports a source at most once per 15 minutes: one imported,
+   attempted or failed less than 15 minutes ago answers `skipped_interval`,
+   with `next_allowed_at` 15 minutes after the latest of those. A
+   terminal `medrec refresh` is held to the same guard. A paused source
+   answers `skipped_paused`. One that needs a person answers
+   `needs_person` without being tried.
 4. **The outcome goes to `done/`.** Once every source of a request is done,
    medrec writes `done/<same name>`, and then deletes the pending file. A
    pending file means the request is not finished, unless its `done/` file
@@ -590,8 +595,8 @@ How medrec handles one:
    by a pass that was cut short is answered by the next pass. A source
    imported since the request's `requested_at` answers from that
    `ImportRun`: `ok`, with `attempt` the attempt that recorded it (`null`
-   when none did) and `next_allowed_at` counted from its `imported_at`. The
-   interval keeps it from importing twice.
+   when none did) and `next_allowed_at` 15 minutes after its
+   `imported_at`. The guard keeps it from importing twice.
 5. **One refresh runs at a time** on the refreshing machine. A pass that
    finds a refresh running ends at once.
 6. **Old outcomes go.** medrec deletes a `done/` file 90 days after its
@@ -621,7 +626,7 @@ file as found) and `handled`. A `done/` file is at most 8 KiB.
 | Field | Meaning |
 |---|---|
 | `outcome` | From the sources' outcomes. `ok`: at least one `ok`, none `failed` or `needs_person`. `partial`: at least one `ok`, and at least one `failed` or `needs_person`. `needs_person`: none `ok` or `failed`, at least one `needs_person`. `failed`: none `ok`, at least one `failed`. `skipped`: every source skipped. `invalid`: refused by rule 1, with `sources` empty and `message` saying why. |
-| `sources[]` | Each source the request covered: its outcome (an attempt outcome), the attempt that served it (`null` for a skip found without one), and `next_allowed_at`, the earliest time it may import again. |
+| `sources[]` | Each source the request covered: its outcome (an attempt outcome), the attempt that served it (`null` for a skip found without one), and `next_allowed_at`, the earliest time a request may import it again (rule 3). |
 | `message` | One line for a person, with no record content. |
 | `by` | The medrec that handled it. |
 

@@ -303,8 +303,27 @@ fn latest_import(
         .max_by_key(|(_, t)| *t))
 }
 
+/// `sign_in.renews` and `sign_in.lasts_secs` for a CLI: what its `auth
+/// status` last declared, over medrec's table (`policy::renews`).
+fn sign_in_life(
+    cli: &str,
+    declared: &BTreeMap<String, signin::Declared>,
+) -> (Option<bool>, Option<u64>) {
+    let d = declared.get(cli).copied().unwrap_or_default();
+    (
+        d.renews.or(policy::renews(cli)),
+        d.lasts_secs.or(policy::lasts_secs(cli)),
+    )
+}
+
 /// A source's entry, as kept or new.
-fn entry(prev: Option<&SourceStatus>, id: &str, src: Option<&Source>, b: &Binding) -> SourceStatus {
+fn entry(
+    prev: Option<&SourceStatus>,
+    id: &str,
+    src: Option<&Source>,
+    b: &Binding,
+    declared: &BTreeMap<String, signin::Declared>,
+) -> SourceStatus {
     let cli = b.cli.clone();
     let mut e = prev.cloned().unwrap_or(SourceStatus {
         source: id.into(),
@@ -331,6 +350,7 @@ fn entry(prev: Option<&SourceStatus>, id: &str, src: Option<&Source>, b: &Bindin
     e.auto = b.auto;
     e.paused = b.paused.clone();
     e.min_interval_secs = policy::min_interval(&cli);
+    (e.sign_in.renews, e.sign_in.lasts_secs) = sign_in_life(&cli, declared);
     e.next_run_at = next_run(&e, b);
     e
 }
@@ -433,6 +453,7 @@ fn error_info(e: &CliError) -> ErrorInfo {
         },
         message: clip(e.message(), MESSAGE_MAX),
         remedy: e.remedy().map(|r| clip(r, MESSAGE_MAX)),
+        provider_message: None,
     }
 }
 
@@ -537,7 +558,10 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
             .status
             .as_ref()
             .and_then(|s| s.sources.iter().find(|e| e.source == *id));
-        entries.insert(id.clone(), entry(prev, id, source_of(id), b));
+        entries.insert(
+            id.clone(),
+            entry(prev, id, source_of(id), b, &local.declared),
+        );
     }
 
     // Requests, untrusted.
@@ -686,6 +710,7 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
                     time::fmt(started)
                 ),
                 remedy: None,
+                ..ErrorInfo::default()
             }),
             import: None,
             counts: None,
@@ -699,6 +724,10 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
         report.attempts.push(AttemptRow::of(&a, e));
     }
 
+    // Every source due or asked for signs in and exports first, and only
+    // then are the exports filed: a short website session serves every
+    // member before uploads to the folder use it up.
+    let mut exported: Vec<Exported<'_>> = Vec::new();
     for (id, w) in &want {
         let Some(b) = bound.get(id) else { continue };
         let t = Try {
@@ -717,7 +746,7 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
         let mut e = entries
             .get(id)
             .cloned()
-            .unwrap_or_else(|| entry(None, id, source_of(id), b));
+            .unwrap_or_else(|| entry(None, id, source_of(id), b, &local.declared));
 
         let src = match source_of(id) {
             Some(s) if s.cli.as_deref() == Some(b.cli.as_str()) && plain_cli(&b.cli) => Some(s),
@@ -732,6 +761,7 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
                     remedy: Some(format!(
                         "check the source, then set it up again with `medrec --profile <NAME> refresh add --source {id}`"
                     )),
+                    ..ErrorInfo::default()
                 });
                 t.record(&writer, &mut e, &a, None, true, &mut report, &mut answers)?;
                 entries.insert(id.clone(), e);
@@ -747,6 +777,7 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
                 remedy: Some(format!(
                     "stop refreshing it with `medrec --profile <NAME> refresh remove {id}`"
                 )),
+                ..ErrorInfo::default()
             });
             t.record(
                 &writer,
@@ -800,6 +831,21 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
             .and_then(|a| time::parse(&a.started_at))
             .map(|x| x + backoff(e.failures, min as u64) as i64);
         let next_allowed = last.as_ref().map(|(_, x)| x + min).max(after_failure);
+        // A person's request waits only its own guard, from the latest
+        // import, run of the provider or failed attempt, whatever asked.
+        let guard = policy::REQUEST_GUARD as i64;
+        let ran_at = local.ran_at.get(id.as_str()).copied();
+        let failed_at = e
+            .last_attempt
+            .as_ref()
+            .filter(|a| a.outcome == "failed")
+            .and_then(|a| time::parse(&a.started_at));
+        let guard_until = last
+            .as_ref()
+            .map(|(_, x)| *x)
+            .max(ran_at)
+            .max(failed_at)
+            .map(|x| x + guard);
 
         // A request a cut-short pass left: answered by the import since.
         if !w.manual && !w.requests.is_empty() {
@@ -815,7 +861,7 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
                         Answer {
                             outcome: "ok".into(),
                             attempt,
-                            next_allowed_at: Some(time::fmt(imported + min)),
+                            next_allowed_at: Some(time::fmt(imported + guard)),
                         },
                     );
                     entries.insert(id.clone(), e);
@@ -824,13 +870,13 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
             }
         }
         if t.asked {
-            if next_allowed.is_some_and(|n| t.now < n) {
+            if guard_until.is_some_and(|n| t.now < n) {
                 let a = t.attempt(&e, "skipped_interval");
                 t.record(
                     &writer,
                     &mut e,
                     &a,
-                    next_allowed,
+                    guard_until,
                     true,
                     &mut report,
                     &mut answers,
@@ -857,7 +903,57 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
         writer.status(&entries, &mut local)?;
 
         let provider = import::probe(&b.cli);
-        let outcome = attempt(cfg, mode, &provider, src, b, &mut e, &mut a);
+        let ready = match prepare(
+            cfg,
+            mode,
+            &provider,
+            src,
+            b,
+            &mut e,
+            &mut a,
+            &mut local.declared,
+        ) {
+            Ok(req) => match import::export(&folder, cfg, &provider, &req) {
+                Ok(spooled) => Ok((req, spooled)),
+                Err(err) => Err(import_failed(&err, &provider, &src.id, &mut e, &mut a)),
+            },
+            Err(outcome) => Err(outcome),
+        };
+        exported.push(Exported {
+            id,
+            t,
+            b,
+            e,
+            a,
+            before,
+            min,
+            ready,
+        });
+    }
+
+    for x in exported {
+        let Exported {
+            id,
+            t,
+            b,
+            mut e,
+            mut a,
+            before,
+            min,
+            ready,
+        } = x;
+        let id = &id.to_string();
+        let guard = policy::REQUEST_GUARD as i64;
+        let ran = ready.is_ok();
+        let outcome = match ready {
+            Ok((req, spooled)) => file(cfg, &req, spooled, &mut e, &mut a),
+            Err(outcome) => outcome,
+        };
+        // An export counts toward a request's guard once it is filed or
+        // failed; one a busy folder threw away does not.
+        if ran && outcome != BUSY {
+            local.ran_at.insert(id.clone(), t.now);
+        }
         if outcome == BUSY {
             // Another writer held the folder: no attempt, and its requests
             // stay pending for the next pass.
@@ -879,6 +975,7 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
             _ => {}
         }
         let next = match outcome.as_str() {
+            "ok" | "failed" if t.asked => Some(t.now + guard),
             "ok" => Some(time::now() + min),
             "failed" => Some(time::now() + backoff(e.failures, min as u64) as i64),
             _ => None,
@@ -1105,10 +1202,24 @@ fn summarize(sources: &[HandledSource]) -> String {
     parts.join(", ")
 }
 
-/// Sign-in check, then the import: the attempt's outcome, with `a` and
-/// `e` filled in.
+/// A source a pass runs, between its export and its filing.
+struct Exported<'a> {
+    id: &'a str,
+    t: Try<'a>,
+    b: &'a Binding,
+    e: SourceStatus,
+    a: Attempt,
+    before: Option<AttemptSummary>,
+    min: i64,
+    /// Its request and spooled export, or the outcome that ended it
+    /// before filing.
+    ready: Result<(import::Request, import::Spooled), String>,
+}
+
+/// The provider's usability and sign-in, then the import's request; or the
+/// attempt's outcome when it ends here, with `a` and `e` filled in.
 #[allow(clippy::too_many_arguments)]
-fn attempt(
+fn prepare(
     cfg: &Config,
     mode: Mode,
     provider: &Provider,
@@ -1116,7 +1227,9 @@ fn attempt(
     b: &Binding,
     e: &mut SourceStatus,
     a: &mut Attempt,
-) -> String {
+    declared: &mut BTreeMap<String, signin::Declared>,
+) -> Result<import::Request, String> {
+    let _ = cfg;
     let command = sign_in_command(&src.id);
     let needs = |reason: &str, e: &mut SourceStatus| {
         e.sign_in.needs_person = Some(NeedsPerson {
@@ -1148,8 +1261,9 @@ fn attempt(
                 MESSAGE_MAX,
             ),
             remedy: None,
+            ..ErrorInfo::default()
         });
-        return "failed".into();
+        return Err("failed".into());
     }
     if provider.login_profiles {
         let wait = match mode {
@@ -1158,17 +1272,24 @@ fn attempt(
         };
         e.sign_in.checked_at = Some(time::fmt(time::now()));
         match signin::read(provider, b.provider_profile.as_deref(), wait) {
-            signin::Read::Read { state, expires_at } => {
+            signin::Read::Read {
+                state,
+                expires_at,
+                declared: said,
+            } => {
                 e.sign_in.state = state.into();
                 e.sign_in.expires_at = expires_at;
+                declared.insert(provider.cli.clone(), said);
+                (e.sign_in.renews, e.sign_in.lasts_secs) = sign_in_life(&provider.cli, declared);
                 if !signin::usable(state) {
                     needs("sign_in", e);
                     a.error = Some(ErrorInfo {
                         code: "needs_person".into(),
                         message: format!("{} needs a sign-in ({state})", provider.cli),
                         remedy: Some(format!("run `{command}` on this machine")),
+                        ..ErrorInfo::default()
                     });
-                    return "needs_person".into();
+                    return Err("needs_person".into());
                 }
                 e.sign_in.needs_person = None;
             }
@@ -1183,8 +1304,9 @@ fn attempt(
                         wait.as_secs()
                     ),
                     remedy: Some(format!("run `{command}` on this machine and approve it")),
+                    ..ErrorInfo::default()
                 });
-                return "needs_person".into();
+                return Err("needs_person".into());
             }
             signin::Read::Failed(msg) => {
                 e.sign_in.state = "unknown".into();
@@ -1192,8 +1314,9 @@ fn attempt(
                     code: "auth_status".into(),
                     message: clip(&msg, MESSAGE_MAX),
                     remedy: None,
+                    ..ErrorInfo::default()
                 });
-                return "failed".into();
+                return Err("failed".into());
             }
         }
     } else {
@@ -1211,8 +1334,9 @@ fn attempt(
                     MESSAGE_MAX,
                 ),
                 remedy: None,
+                ..ErrorInfo::default()
             });
-            return "failed".into();
+            return Err("failed".into());
         }
         None => None,
     };
@@ -1232,6 +1356,60 @@ fn attempt(
         org: b.org.clone(),
         allow_birth_date_mismatch: false,
     };
+    Ok(req)
+}
+
+/// An export or import that failed: `needs_person` when the provider
+/// answered that its sign-in ended, with medrec's own instruction; else
+/// `failed`.
+fn import_failed(
+    err: &CliError,
+    provider: &Provider,
+    source: &str,
+    e: &mut SourceStatus,
+    a: &mut Attempt,
+) -> String {
+    a.exit_code = Some(err.exit_code());
+    if !err.is_auth() {
+        a.error = Some(error_info(err));
+        return "failed".into();
+    }
+    let command = sign_in_command(source);
+    // The provider's remedy names its own sign-in command; the one to run is
+    // medrec's, which also binds the source.
+    a.error = Some(ErrorInfo {
+        code: "needs_person".into(),
+        message: format!(
+            "{} needs a sign-in: its export answered that the sign-in has ended",
+            provider.cli
+        ),
+        remedy: Some(format!("run `{command}` on this machine")),
+        provider_message: Some(clip(err.message(), MESSAGE_MAX)),
+    });
+    e.sign_in.needs_person = Some(NeedsPerson {
+        reason: "sign_in".into(),
+        since: e
+            .sign_in
+            .needs_person
+            .as_ref()
+            .filter(|n| n.reason == "sign_in")
+            .map(|n| n.since.clone())
+            .unwrap_or_else(|| time::fmt(time::now())),
+        command,
+    });
+    "needs_person".into()
+}
+
+/// File a spooled export: the attempt's outcome, with `a` and `e` filled
+/// in.
+fn file(
+    cfg: &Config,
+    req: &import::Request,
+    spooled: import::Spooled,
+    e: &mut SourceStatus,
+    a: &mut Attempt,
+) -> String {
+    let provider = import::probe(&req.from);
     let folder = match Folder::open(cfg, Access::Fresh) {
         Ok(f) => f,
         Err(err) => {
@@ -1239,7 +1417,7 @@ fn attempt(
             return "failed".into();
         }
     };
-    match import::run(&folder, cfg, provider, &req) {
+    match import::file_spooled(&folder, cfg, req, spooled) {
         Err(err) if folder::is_lock_busy(&err) => {
             a.outcome = BUSY.into();
             BUSY.into()
@@ -1259,14 +1437,8 @@ fn attempt(
             "ok".into()
         }
         Err(err) => {
-            a.exit_code = Some(err.exit_code());
-            a.error = Some(error_info(&err));
-            if err.is_auth() {
-                needs("sign_in", e);
-                "needs_person".into()
-            } else {
-                "failed".into()
-            }
+            let source = a.source.clone();
+            import_failed(&err, &provider, &source, e, a)
         }
     }
 }
@@ -1402,7 +1574,13 @@ fn current_entries(
                 .and_then(|s| s.sources.iter().find(|e| e.source == *id));
             (
                 id.clone(),
-                entry(prev, id, h.sources.iter().find(|s| s.id == *id), b),
+                entry(
+                    prev,
+                    id,
+                    h.sources.iter().find(|s| s.id == *id),
+                    b,
+                    &local.declared,
+                ),
             )
         })
         .collect()
@@ -1706,6 +1884,7 @@ pub fn sign_in(cfg: &Config, source: &str) -> Result<SignedIn, CliError> {
         signin::Read::Read {
             state: "not_needed",
             expires_at: None,
+            declared: signin::Declared::default(),
         }
     };
     let e = entries.get_mut(source).ok_or_else(|| {
@@ -1713,9 +1892,18 @@ pub fn sign_in(cfg: &Config, source: &str) -> Result<SignedIn, CliError> {
     })?;
     e.sign_in.checked_at = Some(time::fmt(time::now()));
     let state_text = match &state {
-        signin::Read::Read { state, expires_at } => {
+        signin::Read::Read {
+            state,
+            expires_at,
+            declared: said,
+        } => {
             e.sign_in.state = (*state).into();
             e.sign_in.expires_at = expires_at.clone();
+            if *said != signin::Declared::default() {
+                local.declared.insert(e.cli.clone(), *said);
+            }
+            (e.sign_in.renews, e.sign_in.lasts_secs) =
+                sign_in_life(&e.cli.clone(), &local.declared);
             if signin::usable(state) && (!refused || logged_in) {
                 e.sign_in.needs_person = None;
             }

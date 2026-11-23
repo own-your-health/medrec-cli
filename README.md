@@ -195,6 +195,7 @@ medrec providers list                           # provider CLIs on PATH
 medrec import --from mychart --from-profile adult1 --patient <id> --person Robin
 medrec import --from mychart --from-profile adult1 --patient <id>   # later: the FHIR id or label
 medrec import --from uhc --from-files ~/Downloads/statements --patient <id>   # downloaded files
+medrec import --from uhc --from-profile adult1 --patient <a> --person Alex --patient <b> --person Robin
 
 medrec timeline --person Robin --since 2026-01-01
 medrec search hemoglobin
@@ -222,6 +223,15 @@ in but lists no `login-profiles` capability in its `info --json` predates
 profiles and is refused; one whose info says no login is needed takes no
 `--from-profile`. medrec writes no provider profile name into the records
 folder.
+
+`--patient` repeats for several members of one login, each with its
+`--person` in the same order (or none, for members imported before). Every
+member is exported first, each into an owner-only file on this machine,
+and only then filed, so a website session that ends within the hour serves
+them all before uploads to a Drive folder take their time. One member
+that fails leaves the others filed; the exit code is the first failure's,
+and `--json` prints one `import-batch` document with each member's import
+or error. `medrec refresh` does the same with every source a pass runs.
 
 `--from-files <DIR>` imports a provider's downloaded files (statements, an
 export the portal offered) instead of signing in. medrec passes the
@@ -267,8 +277,10 @@ medrec refresh --uninstall
 ```
 
 `refresh` imports each bound source on a schedule, on a reader's request (a
-file the own-your-health app writes in `_requests/`), or now, and records
-every attempt in `_status/` ([data contract](docs/data-contract.md)). A
+file [the own-your-health app](https://own-your-health.github.io/app/)
+writes in `_requests/` when someone presses Refresh), or now, and records
+every attempt in `_status/` ([data contract](docs/data-contract.md)). The
+app shows `_status/` and asks for refreshes from a phone. A
 scheduled pass lists `_requests/` once; when nothing is requested, nothing
 is due and the hourly heartbeat is not due, it stops there.
 
@@ -280,8 +292,20 @@ is due and the hourly heartbeat is not due, it stops there.
 `refresh add --every <DURATION>` sets the schedule, never below the least
 time; `--manual` imports only when asked. The interval is counted from the
 source's latest import in the person's `index.json`, so an import run by
-hand counts, and a request never shortens it. After a failure the source
-waits 30 minutes, doubling with each failure after, up to its least time.
+hand counts. After a failure the schedule waits 30 minutes, doubling with
+each failure after, up to its least time.
+
+A person asking (a request, or `medrec refresh` at the terminal) is not held
+to the schedule's least time. Its own guard imports a source at most once
+per 15 minutes, counted from the latest import, attempt or failure, so a
+Refresh pressed soon after a load is skipped only until 15 minutes have
+passed. The skip says when the next load is allowed.
+
+A pass signs in and exports every source it runs before it files any of
+them, so the members on one short website session (`uhc`, `fertemr`,
+`caremark`, `oneblood`, `peryourhealth`) are exported back to back while it
+is fresh. Each export waits in an owner-only file on this machine until it
+is filed.
 
 A scheduled pass never waits on a person. Before importing a source that
 signs in, it reads `<cli> auth status --json --profile <LOGIN>` with a

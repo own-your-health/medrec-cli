@@ -63,6 +63,9 @@ impl Names {
         if let Some(r) = &mut e.remedy {
             *r = self.scrub(r);
         }
+        if let Some(m) = &mut e.provider_message {
+            *m = self.scrub(m);
+        }
     }
 
     /// One line of an `attempts/` file, its error scrubbed. A line that

@@ -88,6 +88,16 @@ pub struct SignIn {
     pub expires_at: Option<String>,
     pub checked_at: Option<String>,
     pub needs_person: Option<NeedsPerson>,
+    /// `true`: the provider CLI keeps its sign-in going unattended (a
+    /// refresh token, a portal key). `false`: a member-site session that
+    /// ends within hours and nothing renews, so the source loads only soon
+    /// after someone signs in. Missing: unknown (`policy::renews`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub renews: Option<bool>,
+    /// About how long a fresh sign-in lasts, where measured
+    /// (`policy::lasts_secs`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lasts_secs: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -98,11 +108,16 @@ pub struct NeedsPerson {
     pub command: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ErrorInfo {
     pub code: String,
     pub message: String,
     pub remedy: Option<String>,
+    /// The provider's own message, where medrec's `message` and `remedy`
+    /// say what to do instead: its remedy is the provider's command, not
+    /// the one to run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_message: Option<String>,
 }
 
 /// One line of `attempts/<YYYY-MM>.ndjson`.

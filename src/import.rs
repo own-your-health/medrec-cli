@@ -397,17 +397,86 @@ struct Streamed {
     skipped: Vec<Skip>,
 }
 
-pub fn run(
+/// A provider's export, kept on this machine (an owner-only temporary
+/// file) until it is filed. `medrec refresh` exports every due source
+/// first and files them after, so a short website session serves every
+/// member before uploads to the folder use it up.
+pub struct Spooled {
+    dir: pk_cli_drive::TempDir,
+}
+
+impl Spooled {
+    fn path(&self) -> PathBuf {
+        self.dir.path().join("stream.ndjson")
+    }
+}
+
+/// Run the provider's export into a spool: nothing in the folder is
+/// written. Its exit is checked here, its stream when it is filed
+/// ([`file_spooled`]).
+pub fn export(
     folder: &Folder,
     cfg: &Config,
     provider: &Provider,
     req: &Request,
-) -> Result<Report, CliError> {
-    // A person who cannot be resolved fails before the provider runs; the
-    // resolution that counts is made again under the lock, below.
+) -> Result<Spooled, CliError> {
     who(&folder.household()?, req)?;
-    let max_binary = cfg.max_file_bytes();
+    let dir = pk_cli_drive::private_temp_dir("medrec-spool")?;
+    let spooled = Spooled { dir };
+    let mut file = std::fs::File::create(spooled.path())
+        .map_err(|e| CliError::Other(format!("creating a spool file: {e}")))?;
+    let mut child = export_command(cfg, provider, req).stream()?;
+    let mut tee = Tee {
+        inner: child.stdout(),
+        hasher: Sha256::new(),
+        bytes: 0,
+        max: cfg.import_max_bytes(),
+    };
+    if let Err(e) = std::io::copy(&mut tee, &mut file) {
+        let finished = child.finish_within(Duration::from_secs(5));
+        return Err(stream_failure(
+            &req.from,
+            ReadFailure::Other(e.to_string()),
+            finished,
+            req.org.as_deref(),
+        ));
+    }
+    let finished = child.finish()?;
+    if finished.status.code() != Some(0) {
+        return Err(provider_exit(
+            &req.from,
+            finished.status.code(),
+            &finished.stderr_tail,
+            req.org.as_deref(),
+        ));
+    }
+    Ok(spooled)
+}
 
+/// File an export [`export`] spooled, as [`run`] files one it streams.
+pub fn file_spooled(
+    folder: &Folder,
+    cfg: &Config,
+    req: &Request,
+    spooled: Spooled,
+) -> Result<Report, CliError> {
+    let file = std::fs::File::open(spooled.path())
+        .map_err(|e| CliError::Other(format!("reading the spooled export: {e}")))?;
+    let mut tee = Tee {
+        inner: file,
+        hasher: Sha256::new(),
+        bytes: 0,
+        max: cfg.import_max_bytes(),
+    };
+    let mut reader = RecordsReader::new(BufReader::with_capacity(256 * 1024, &mut tee));
+    let streamed =
+        read_stream(&mut reader, cfg.max_file_bytes()).map_err(|e| refused(&req.from, e))?;
+    let digest = (hash::hex(&tee.hasher.finalize()), tee.bytes);
+    file_streamed(folder, cfg, req, streamed, digest)
+}
+
+/// The provider's `records export` for a request.
+fn export_command(cfg: &Config, provider: &Provider, req: &Request) -> Bounded {
     let mut cmd = Bounded::new(&provider.path)
         .args([
             "records",
@@ -437,7 +506,20 @@ pub fn run(
             .args(["--profile", p.as_str()])
             .env_remove(format!("{prefix}_FILES"));
     }
-    let mut child = cmd.stream()?;
+    cmd
+}
+
+pub fn run(
+    folder: &Folder,
+    cfg: &Config,
+    provider: &Provider,
+    req: &Request,
+) -> Result<Report, CliError> {
+    // A person who cannot be resolved fails before the provider runs; the
+    // resolution that counts is made again under the lock, below.
+    who(&folder.household()?, req)?;
+    let max_binary = cfg.max_file_bytes();
+    let mut child = export_command(cfg, provider, req).stream()?;
     let mut tee = Tee {
         inner: child.stdout(),
         hasher: Sha256::new(),
@@ -456,7 +538,7 @@ pub fn run(
             return Err(stream_failure(&req.from, e, finished, req.org.as_deref()));
         }
     };
-    let (stream_sha, stream_bytes) = (hash::hex(&tee.hasher.finalize()), tee.bytes);
+    let digest = (hash::hex(&tee.hasher.finalize()), tee.bytes);
     let finished = child.finish()?;
     if finished.status.code() != Some(0) {
         return Err(provider_exit(
@@ -466,6 +548,18 @@ pub fn run(
             req.org.as_deref(),
         ));
     }
+    file_streamed(folder, cfg, req, streamed, digest)
+}
+
+/// Everything after the export: the folder's lock, the person, the raw
+/// layer, the records and the documents.
+fn file_streamed(
+    folder: &Folder,
+    cfg: &Config,
+    req: &Request,
+    streamed: Streamed,
+    (stream_sha, stream_bytes): (String, u64),
+) -> Result<Report, CliError> {
     let Streamed {
         header,
         trailer,
@@ -1300,16 +1394,19 @@ fn stream_failure(
             provider_exit(cli, f.status.code(), &f.stderr_tail, org)
         }
         Err(timeout) => timeout,
-        _ => {
-            let why = match e {
-                ReadFailure::Stream(s) => s.to_string(),
-                ReadFailure::Other(s) => s,
-            };
-            CliError::Upstream(format!(
-                "{cli}'s records stream was refused: {why}. Nothing was written."
-            ))
-        }
+        _ => refused(cli, e),
     }
+}
+
+/// A stream medrec could not read, from a provider that exited 0.
+fn refused(cli: &str, e: ReadFailure) -> CliError {
+    let why = match e {
+        ReadFailure::Stream(s) => s.to_string(),
+        ReadFailure::Other(s) => s,
+    };
+    CliError::Upstream(format!(
+        "{cli}'s records stream was refused: {why}. Nothing was written."
+    ))
 }
 
 /// A provider's exit code, read as the family contract defines it.
