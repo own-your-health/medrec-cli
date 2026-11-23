@@ -907,6 +907,7 @@ fn run(cli: &Cli) -> Result<(), CliError> {
                 // client set up without them fails at start, naming them.
                 let cfg = load(&store, cli)?;
                 cfg.folder_location()?;
+                medrec::mcp::MedrecTools::limit_staleness();
                 medrec::mcp::MedrecTools::new(cfg)
             };
             pk_cli_mcp::run(args, tools)

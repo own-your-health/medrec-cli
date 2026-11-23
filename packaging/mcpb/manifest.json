@@ -59,7 +59,7 @@
     },
     {
       "name": "medrec_records",
-      "description": "One kind of record, newest first: medications, conditions, allergies, immunizations, visits, results (one test over time), tests, claims, bills, documents, notes or the timeline."
+      "description": "One kind of record, newest first: medications, conditions, allergies, immunizations, visits, procedures, results (one test over time), tests (the latest of each), reports, claims, coverage, bills, documents, notes or the timeline."
     },
     {
       "name": "medrec_document",

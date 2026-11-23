@@ -425,7 +425,9 @@ What the server does and does not do:
 
 - It opens the folder to read on every call, as `timeline` and `search` do:
   no lock, no write, nothing changed in the folder. A Drive folder is read
-  through the read cache.
+  through the read cache, but no copy older than 15 minutes answers a call
+  (`MEDREC_CACHE_MAX_STALE` overrides), and one call's Drive reads stop
+  after 45 seconds with an `upstream` error.
 - It needs a profile at start (`--profile` or `MEDREC_PROFILE`). Without
   one it exits 2 and names the configured ones. `medrec mcp --list-tools`
   prints the tool definitions and reads nothing.

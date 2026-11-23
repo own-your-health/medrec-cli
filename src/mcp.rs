@@ -4,6 +4,8 @@
 //! writes to the folder, holds a credential, or reaches any network but the
 //! folder's own (a Drive folder is read through rclone).
 
+use std::time::Duration;
+
 use pk_cli_core::CliError;
 use pk_cli_mcp::{
     parse_args, ListArgs, Page, PageRequest, Server, ToolDef, ToolError, ToolOutput, Toolset,
@@ -35,6 +37,14 @@ const TEXT_CHUNK: usize = 16_000;
 const DOCUMENT_BUDGET: usize = 30_000;
 /// The longest note text a list carries.
 const NOTE_CLIP: usize = 2_000;
+/// How long one call's reads of a Drive folder may take in all. Claude's
+/// clients give up on a tool call within minutes; a stalled Drive read
+/// answers `upstream` well before that.
+pub const CALL_BUDGET: Duration = Duration::from_secs(45);
+/// How old a cached copy of a folder file may be and still answer a call:
+/// the cache's own freshness, so nothing older is served while a background
+/// refresh catches up.
+pub const MAX_STALE_SECS: &str = "900";
 
 /// The tools over one profile's records folder.
 pub struct MedrecTools {
@@ -52,12 +62,22 @@ impl MedrecTools {
         MedrecTools { cfg: None }
     }
 
+    /// Before serving: cached copies of a Drive folder's files answer only
+    /// while fresh, unless `MEDREC_CACHE_MAX_STALE` says otherwise. Call it
+    /// before any thread starts.
+    pub fn limit_staleness() {
+        if std::env::var_os("MEDREC_CACHE_MAX_STALE").is_none() {
+            std::env::set_var("MEDREC_CACHE_MAX_STALE", MAX_STALE_SECS);
+        }
+    }
+
     fn open(&self) -> Result<(Folder, Household), ToolError> {
         let cfg = self
             .cfg
             .as_ref()
             .ok_or_else(|| ToolError::other("no profile selected"))?;
-        let f = Folder::open(cfg, Access::Read)?;
+        let budget = cfg.rclone_budget().min(CALL_BUDGET);
+        let f = Folder::open_at(&cfg.folder_location()?, Access::Read, budget)?;
         let h = f.household()?;
         Ok((f, h))
     }
@@ -167,6 +187,32 @@ pub enum Kind {
 }
 
 impl Kind {
+    pub const ALL: [Kind; 15] = [
+        Kind::Medications,
+        Kind::Conditions,
+        Kind::Allergies,
+        Kind::Immunizations,
+        Kind::Visits,
+        Kind::Procedures,
+        Kind::Results,
+        Kind::Tests,
+        Kind::Reports,
+        Kind::Claims,
+        Kind::Coverage,
+        Kind::Bills,
+        Kind::Documents,
+        Kind::Notes,
+        Kind::Timeline,
+    ];
+
+    /// Its name in calls, `medications`.
+    pub fn name(self) -> String {
+        serde_json::to_value(self)
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_string))
+            .unwrap_or_default()
+    }
+
     /// The record kind it lists, for a kind of record.
     fn record_kind(self) -> Option<&'static str> {
         Some(match self {
@@ -969,6 +1015,37 @@ mod tests {
 mod conformance {
     use super::*;
     use pk_cli_mcp::conformance::{assert_conforms, definitions_size};
+
+    /// The Claude Desktop manifest names the same tools and every kind
+    /// `medrec_records` takes, at this version.
+    #[test]
+    fn the_desktop_manifest_matches_the_tools() {
+        let m: Value =
+            serde_json::from_str(include_str!("../packaging/mcpb/manifest.json")).unwrap();
+        assert_eq!(m["version"], env!("CARGO_PKG_VERSION"));
+        let listed: Vec<&str> = m["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        let served: Vec<String> = MedrecTools::listing_only()
+            .tools()
+            .into_iter()
+            .map(|t| t.name.to_string())
+            .collect();
+        assert_eq!(listed, served);
+        let records = m["tools"][2]["description"].as_str().unwrap();
+        let readme = include_str!("../README.md");
+        for k in Kind::ALL {
+            let name = k.name();
+            assert!(records.contains(&name), "manifest lacks `{name}`");
+            assert!(
+                readme.contains(&format!("`{name}`")),
+                "README lacks `{name}`"
+            );
+        }
+    }
 
     #[test]
     fn the_tools_conform_to_the_mcp_profile() {
