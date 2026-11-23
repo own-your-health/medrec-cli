@@ -286,10 +286,7 @@ pub fn sync(f: &Folder, all: bool) -> Result<Synced, CliError> {
             store.display_path(DIR)
         );
     }
-    for (rel, bytes) in uploads {
-        store.write_bytes(&rel, bytes)?;
-        out.files_written += 1;
-    }
+    out.files_written = upload(store, &uploads)?;
     let index_bytes = json(&index);
     if old_text.as_deref().map(str::as_bytes) != Some(index_bytes.as_slice()) {
         store.write_bytes(INDEX, &index_bytes)?;
@@ -346,6 +343,46 @@ pub fn sync(f: &Folder, all: bool) -> Result<Synced, CliError> {
         }
     }
     Ok(out)
+}
+
+/// Views uploaded at once: each is a request of its own, and a first build
+/// is hundreds per person.
+const UPLOADS_AT_ONCE: usize = 4;
+
+/// Upload every view, a few at a time, stopping at the first error; the
+/// caller writes `views.json` only once all are there. How many were sent.
+fn upload(store: &crate::store::Store, files: &[(String, &Vec<u8>)]) -> Result<usize, CliError> {
+    let next = AtomicUsize::new(0);
+    let sent = AtomicUsize::new(0);
+    let failed = std::sync::Mutex::new(None::<CliError>);
+    std::thread::scope(|s| {
+        for _ in 0..UPLOADS_AT_ONCE.min(files.len()) {
+            s.spawn(|| loop {
+                if failed.lock().map_or(true, |f| f.is_some()) {
+                    return;
+                }
+                let i = next.fetch_add(1, Ordering::SeqCst);
+                let Some((rel, bytes)) = files.get(i) else {
+                    return;
+                };
+                match store.write_bytes(rel, bytes) {
+                    Ok(()) => {
+                        sent.fetch_add(1, Ordering::SeqCst);
+                    }
+                    Err(e) => {
+                        if let Ok(mut f) = failed.lock() {
+                            f.get_or_insert(e);
+                        }
+                        return;
+                    }
+                }
+            });
+        }
+    });
+    match failed.into_inner().ok().flatten() {
+        Some(e) => Err(e),
+        None => Ok(sent.into_inner()),
+    }
 }
 
 fn parse<T: serde::de::DeserializeOwned>(text: &str, rel: &str) -> Result<T, CliError> {
@@ -920,6 +957,40 @@ mod tests {
 
     fn days(d: &[Option<&str>]) -> Vec<Option<String>> {
         d.iter().map(|x| x.map(str::to_string)).collect()
+    }
+
+    #[test]
+    fn views_upload_a_few_at_a_time_and_stop_at_the_first_failure() {
+        use crate::store::{Location, Reads, Store};
+        let dir = std::env::temp_dir().join(format!("medrec-upload-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let st = Store::open(
+            &Location::Dir(dir.clone()),
+            Reads::Fresh,
+            Duration::from_secs(60),
+        )
+        .unwrap();
+        let bytes: Vec<Vec<u8>> = (0..40).map(|i| format!("view {i}").into_bytes()).collect();
+        let files: Vec<(String, &Vec<u8>)> = bytes
+            .iter()
+            .enumerate()
+            .map(|(i, b)| (format!("views/p_x/v-{i}.json"), b))
+            .collect();
+        assert_eq!(upload(&st, &files).unwrap(), 40);
+        for (i, b) in bytes.iter().enumerate() {
+            assert_eq!(
+                &std::fs::read(dir.join(format!("views/p_x/v-{i}.json"))).unwrap(),
+                b
+            );
+        }
+        // A file where a directory must go: that upload fails, and so does
+        // the whole, so views.json would not be written.
+        std::fs::write(dir.join("views/p_y"), "not a directory").unwrap();
+        let mut bad = files.clone();
+        bad.insert(5, ("views/p_y/v.json".to_string(), &bytes[0]));
+        assert!(upload(&st, &bad).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
