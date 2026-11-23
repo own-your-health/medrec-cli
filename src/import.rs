@@ -24,7 +24,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io::{BufReader, Read};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use base64::Engine;
@@ -397,17 +397,154 @@ struct Streamed {
     skipped: Vec<Skip>,
 }
 
-pub fn run(
+/// The prefix of a spool's directory under the system temp dir:
+/// `medrec-spool-<pid>-<nanos>-<seq>` (`pk_cli_drive::private_temp_dir`).
+const SPOOL_PREFIX: &str = "medrec-spool";
+/// The file in a spool's directory naming the pid of the medrec that owns it.
+const SPOOL_OWNER: &str = "owner.pid";
+
+/// A provider's export, kept on this machine (an owner-only `0600` file in
+/// a `0700` temporary directory) until it is filed, and removed when it is
+/// dropped. `medrec refresh` exports every due source first and files them
+/// after, so a short website session serves every member before uploads to
+/// the folder use it up.
+pub struct Spooled {
+    dir: pk_cli_drive::TempDir,
+}
+
+impl Spooled {
+    fn path(&self) -> PathBuf {
+        self.dir.path().join("stream.ndjson")
+    }
+}
+
+/// Run the provider's export into a spool: nothing in the folder is
+/// written. Its exit is checked here, its stream when it is filed
+/// ([`file_spooled`]).
+pub fn export(
     folder: &Folder,
     cfg: &Config,
     provider: &Provider,
     req: &Request,
-) -> Result<Report, CliError> {
-    // A person who cannot be resolved fails before the provider runs; the
-    // resolution that counts is made again under the lock, below.
+) -> Result<Spooled, CliError> {
     who(&folder.household()?, req)?;
-    let max_binary = cfg.max_file_bytes();
+    sweep_spools(&std::env::temp_dir());
+    let dir = pk_cli_drive::private_temp_dir(SPOOL_PREFIX)?;
+    // The owner, for `sweep_spools`, which reads this rather than the
+    // directory's name.
+    std::fs::write(dir.path().join(SPOOL_OWNER), std::process::id().to_string())
+        .map_err(|e| CliError::Other(format!("creating a spool: {e}")))?;
+    let spooled = Spooled { dir };
+    let mut file = {
+        use std::os::unix::fs::OpenOptionsExt;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(spooled.path())
+            .map_err(|e| CliError::Other(format!("creating a spool file: {e}")))?
+    };
+    let mut child = export_command(cfg, provider, req).stream()?;
+    let mut tee = Tee {
+        inner: child.stdout(),
+        hasher: Sha256::new(),
+        bytes: 0,
+        max: cfg.import_max_bytes(),
+    };
+    if let Err(e) = std::io::copy(&mut tee, &mut file) {
+        let finished = child.finish_within(Duration::from_secs(5));
+        return Err(stream_failure(
+            &req.from,
+            ReadFailure::Other(e.to_string()),
+            finished,
+            req.org.as_deref(),
+        ));
+    }
+    let finished = child.finish()?;
+    if finished.status.code() != Some(0) {
+        return Err(provider_exit(
+            &req.from,
+            finished.status.code(),
+            &finished.stderr_tail,
+            req.org.as_deref(),
+        ));
+    }
+    Ok(spooled)
+}
 
+/// Remove the spools a killed medrec left in `dir`: this user's, whose
+/// owner (`owner.pid`) is gone, which have had no owner file for a minute,
+/// or which are a day old. A command that ends removes its own; one stopped
+/// by a signal or a logout cannot.
+pub fn sweep_spools(dir: &Path) {
+    use std::os::unix::fs::MetadataExt;
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    // SAFETY: getuid has no preconditions and cannot fail.
+    let uid = unsafe { libc::getuid() };
+    let prefix = format!("{SPOOL_PREFIX}-");
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !name.starts_with(&prefix) {
+            continue;
+        }
+        let Ok(meta) = std::fs::symlink_metadata(entry.path()) else {
+            continue;
+        };
+        if !meta.is_dir() || meta.uid() != uid {
+            continue;
+        }
+        let age = meta.modified().ok().and_then(|m| m.elapsed().ok());
+        let older = |secs: u64| age.is_some_and(|a| a > Duration::from_secs(secs));
+        let owner: Option<i32> = std::fs::read_to_string(entry.path().join(SPOOL_OWNER))
+            .ok()
+            .and_then(|p| p.trim().parse().ok());
+        let gone = match owner {
+            Some(p) if p == std::process::id() as i32 => false,
+            Some(p) if p > 0 => {
+                // SAFETY: signal 0 delivers nothing; kill only checks that
+                // the process exists. errno is read straight after the call,
+                // before anything else can set it. EPERM (a live process of
+                // another user) counts as not gone.
+                let probe = unsafe { libc::kill(p, 0) };
+                probe != 0 && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+            }
+            // The owner file is written as the spool is made, so one
+            // without it a minute on was cut short in the making.
+            _ => older(60),
+        };
+        let old = older(24 * 3600);
+        if gone || old {
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
+    }
+}
+
+/// File an export [`export`] spooled, as [`run`] files one it streams.
+pub fn file_spooled(
+    folder: &Folder,
+    cfg: &Config,
+    req: &Request,
+    spooled: Spooled,
+) -> Result<Report, CliError> {
+    let file = std::fs::File::open(spooled.path())
+        .map_err(|e| CliError::Other(format!("reading the spooled export: {e}")))?;
+    let mut tee = Tee {
+        inner: file,
+        hasher: Sha256::new(),
+        bytes: 0,
+        max: cfg.import_max_bytes(),
+    };
+    let mut reader = RecordsReader::new(BufReader::with_capacity(256 * 1024, &mut tee));
+    let streamed =
+        read_stream(&mut reader, cfg.max_file_bytes()).map_err(|e| refused(&req.from, e))?;
+    let digest = (hash::hex(&tee.hasher.finalize()), tee.bytes);
+    file_streamed(folder, cfg, req, streamed, digest)
+}
+
+/// The provider's `records export` for a request.
+fn export_command(cfg: &Config, provider: &Provider, req: &Request) -> Bounded {
     let mut cmd = Bounded::new(&provider.path)
         .args([
             "records",
@@ -437,7 +574,20 @@ pub fn run(
             .args(["--profile", p.as_str()])
             .env_remove(format!("{prefix}_FILES"));
     }
-    let mut child = cmd.stream()?;
+    cmd
+}
+
+pub fn run(
+    folder: &Folder,
+    cfg: &Config,
+    provider: &Provider,
+    req: &Request,
+) -> Result<Report, CliError> {
+    // A person who cannot be resolved fails before the provider runs; the
+    // resolution that counts is made again under the lock, below.
+    who(&folder.household()?, req)?;
+    let max_binary = cfg.max_file_bytes();
+    let mut child = export_command(cfg, provider, req).stream()?;
     let mut tee = Tee {
         inner: child.stdout(),
         hasher: Sha256::new(),
@@ -456,7 +606,7 @@ pub fn run(
             return Err(stream_failure(&req.from, e, finished, req.org.as_deref()));
         }
     };
-    let (stream_sha, stream_bytes) = (hash::hex(&tee.hasher.finalize()), tee.bytes);
+    let digest = (hash::hex(&tee.hasher.finalize()), tee.bytes);
     let finished = child.finish()?;
     if finished.status.code() != Some(0) {
         return Err(provider_exit(
@@ -466,6 +616,18 @@ pub fn run(
             req.org.as_deref(),
         ));
     }
+    file_streamed(folder, cfg, req, streamed, digest)
+}
+
+/// Everything after the export: the folder's lock, the person, the raw
+/// layer, the records and the documents.
+fn file_streamed(
+    folder: &Folder,
+    cfg: &Config,
+    req: &Request,
+    streamed: Streamed,
+    (stream_sha, stream_bytes): (String, u64),
+) -> Result<Report, CliError> {
     let Streamed {
         header,
         trailer,
@@ -1300,16 +1462,19 @@ fn stream_failure(
             provider_exit(cli, f.status.code(), &f.stderr_tail, org)
         }
         Err(timeout) => timeout,
-        _ => {
-            let why = match e {
-                ReadFailure::Stream(s) => s.to_string(),
-                ReadFailure::Other(s) => s,
-            };
-            CliError::Upstream(format!(
-                "{cli}'s records stream was refused: {why}. Nothing was written."
-            ))
-        }
+        _ => refused(cli, e),
     }
+}
+
+/// A stream medrec could not read, from a provider that exited 0.
+fn refused(cli: &str, e: ReadFailure) -> CliError {
+    let why = match e {
+        ReadFailure::Stream(s) => s.to_string(),
+        ReadFailure::Other(s) => s,
+    };
+    CliError::Upstream(format!(
+        "{cli}'s records stream was refused: {why}. Nothing was written."
+    ))
 }
 
 /// A provider's exit code, read as the family contract defines it.
@@ -2151,6 +2316,39 @@ fn record_source(h: &mut Household, pid: &str, cli: &str, header: &Header) {
         if !p.identifiers.contains(&ident) {
             p.identifiers.push(ident);
         }
+    }
+}
+
+#[cfg(test)]
+mod spool_tests {
+    use super::*;
+
+    #[test]
+    fn a_spool_whose_process_is_gone_is_swept_and_a_live_one_kept() {
+        let dir = pk_cli_drive::private_temp_dir("medrec-sweep-test").unwrap();
+        // Names that say nothing of the owner: only `owner.pid` does.
+        let mine = dir.path().join(format!("{SPOOL_PREFIX}-a"));
+        let gone = dir.path().join(format!("{SPOOL_PREFIX}-b"));
+        let other = dir.path().join("medrec-other-c");
+        // A pid far above any macOS or Linux pid_max: no such process.
+        let owners = [
+            (&mine, std::process::id()),
+            (&gone, 99_999_999),
+            (&other, 99_999_999),
+        ];
+        for (d, pid) in owners {
+            std::fs::create_dir(d).unwrap();
+            std::fs::write(d.join("stream.ndjson"), b"{}").unwrap();
+            std::fs::write(d.join(SPOOL_OWNER), pid.to_string()).unwrap();
+        }
+        // Just made, its owner file not yet written: kept.
+        let making = dir.path().join(format!("{SPOOL_PREFIX}-d"));
+        std::fs::create_dir(&making).unwrap();
+        sweep_spools(dir.path());
+        assert!(mine.is_dir(), "this process's spool is kept");
+        assert!(!gone.exists(), "a spool whose process is gone is removed");
+        assert!(other.is_dir(), "only spools are touched");
+        assert!(making.is_dir(), "a spool being made is kept");
     }
 }
 

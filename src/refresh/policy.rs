@@ -25,6 +25,34 @@ pub fn reach(cli: &str) -> Reach {
     }
 }
 
+/// How often a person's request (`_requests/`, or `medrec refresh` in a
+/// terminal) may import a source: once per this many seconds, whatever its
+/// schedule's floor. A person asking is a person at the provider, as when
+/// they sign in themselves.
+pub const REQUEST_GUARD: u64 = 15 * 60;
+
+/// Whether a CLI's sign-in renews itself unattended: `false` for member
+/// sites whose cookie session ends within hours (measured), `true` for the
+/// API sources, which hold a refresh token or a portal key; `None` when not
+/// known. A provider whose `auth status` gives `renews` overrides it.
+pub fn renews(cli: &str) -> Option<bool> {
+    match cli {
+        "uhc" | "fertemr" | "caremark" | "oneblood" | "flywire" | "peryourhealth" => Some(false),
+        "mychart" | "athena" | "kp" | "modmed" | "icanotes" => Some(true),
+        _ => None,
+    }
+}
+
+/// About how long a fresh sign-in lasts, where measured: uhc's survived 40
+/// minutes idle and ended at about 45. A provider whose `auth status`
+/// gives `lasts_secs` overrides it.
+pub fn lasts_secs(cli: &str) -> Option<u64> {
+    match cli {
+        "uhc" => Some(2400),
+        _ => None,
+    }
+}
+
 /// The shortest time between two imports of a source from `cli`.
 pub fn min_interval(cli: &str) -> u64 {
     match reach(cli) {
@@ -42,6 +70,26 @@ pub fn every(cli: &str, setting: Option<u64>) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn short_sessions_are_marked_as_not_renewing() {
+        for cli in [
+            "uhc",
+            "fertemr",
+            "caremark",
+            "oneblood",
+            "flywire",
+            "peryourhealth",
+        ] {
+            assert_eq!(renews(cli), Some(false), "{cli}");
+        }
+        for cli in ["mychart", "athena", "kp", "modmed", "icanotes"] {
+            assert_eq!(renews(cli), Some(true), "{cli}");
+        }
+        assert_eq!(renews("labcorp"), None);
+        assert_eq!(lasts_secs("uhc"), Some(2400));
+        assert_eq!(lasts_secs("mychart"), None);
+    }
 
     #[test]
     fn member_sites_are_imported_at_most_daily() {

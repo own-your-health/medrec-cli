@@ -440,12 +440,15 @@ struct ImportArgs {
     /// `records-files`.
     #[arg(long, value_name = "DIR", conflicts_with = "from_profile")]
     from_files: Option<PathBuf>,
-    /// The patient (or member) id at that provider.
+    /// The patient (or member) id at that provider. Repeat it for several
+    /// members of one login: each is exported in turn and only then filed,
+    /// so a short website session serves them all.
+    #[arg(long, required = true)]
+    patient: Vec<String>,
+    /// Whose records they are (remembered for the next import): one per
+    /// `--patient`, in the same order, or none.
     #[arg(long)]
-    patient: String,
-    /// Whose records they are (remembered for the next import).
-    #[arg(long)]
-    person: Option<String>,
+    person: Vec<String>,
     /// The provider's organization, for a CLI that serves several.
     #[arg(long)]
     org: Option<String>,
@@ -1641,6 +1644,18 @@ fn import_cmd(cli: &Cli, a: &ImportArgs, store: &ConfigStore) -> Result<(), CliE
     if let Some(s) = &a.since {
         pk_cli_core::dates::parse_iso(s)?;
     }
+    if !a.person.is_empty() && a.person.len() != a.patient.len() {
+        return Err(CliError::Usage(format!(
+            "{} --patient and {} --person: give one --person per --patient, in the same order, or none",
+            a.patient.len(),
+            a.person.len()
+        )));
+    }
+    if a.patient.len() > 1 && a.from_files.is_some() {
+        return Err(CliError::Usage(
+            "--from-files is one member's downloaded files: give one --patient".into(),
+        ));
+    }
     // Absolute, so the provider reads the same directory and never takes a
     // path that starts with `-` for a flag.
     let from_files = match &a.from_files {
@@ -1692,24 +1707,88 @@ fn import_cmd(cli: &Cli, a: &ImportArgs, store: &ConfigStore) -> Result<(), CliE
     // Read fresh without the lock: `import::run` takes it after the
     // provider's export.
     let f = Folder::open(&cfg, Access::Fresh)?;
-    note(cli, &format!("importing from {} ...", a.from));
-    let r = import::run(
-        &f,
-        &cfg,
-        &provider,
-        &import::Request {
+    let reqs: Vec<import::Request> = a
+        .patient
+        .iter()
+        .enumerate()
+        .map(|(i, patient)| import::Request {
             from: a.from.clone(),
-            from_profile,
-            files: from_files,
-            patient: a.patient.clone(),
-            person: a.person.clone(),
+            from_profile: from_profile.clone(),
+            files: from_files.clone(),
+            patient: patient.clone(),
+            person: a.person.get(i).cloned(),
             since: a.since.clone(),
             org: a.org.clone(),
             allow_birth_date_mismatch: a.allow_birth_date_mismatch,
+        })
+        .collect();
+    if let [req] = reqs.as_slice() {
+        note(cli, &format!("importing from {} ...", a.from));
+        let r = import::run(&f, &cfg, &provider, req)?;
+        output::emit(json, "import", to_value(&r), |_| print_import(&r));
+        return Ok(());
+    }
+    // Every member's export first, each spooled on this machine, and only
+    // then the filing, which uploads to the folder.
+    let n = reqs.len();
+    let mut exported = Vec::new();
+    for (i, req) in reqs.into_iter().enumerate() {
+        note(
+            cli,
+            &format!("exporting member {} of {n} from {} ...", i + 1, a.from),
+        );
+        let spooled = import::export(&f, &cfg, &provider, &req);
+        exported.push((req, spooled));
+    }
+    let mut results = Vec::new();
+    for (i, (req, spooled)) in exported.into_iter().enumerate() {
+        note(cli, &format!("filing member {} of {n} ...", i + 1));
+        let r = spooled.and_then(|s| import::file_spooled(&f, &cfg, &req, s));
+        results.push((req.patient, r));
+    }
+    let code = results
+        .iter()
+        .find_map(|(_, r)| r.as_ref().err().map(CliError::exit_code))
+        .unwrap_or(0);
+    let items: Vec<Value> = results
+        .iter()
+        .map(|(patient, r)| match r {
+            Ok(r) => json!({ "patient": patient, "import": to_value(r) }),
+            Err(e) => json!({ "patient": patient, "error": e.to_json()["error"] }),
+        })
+        .collect();
+    output::emit(
+        json,
+        "import-batch",
+        json!({ "ok": code == 0, "items": items }),
+        |_| {
+            for (patient, r) in &results {
+                match r {
+                    Ok(r) => print_import(r),
+                    Err(e) => {
+                        eprintln!("error: {}: {e}", medrec::printable(patient));
+                        if let Some(remedy) = e.remedy() {
+                            eprintln!("  {remedy}");
+                        }
+                    }
+                }
+            }
         },
-    )?;
+    );
+    // The one document is printed, so a failure exits here rather than
+    // printing a second (the family's rule). Every spool was consumed
+    // above; `results` is the last value holding anything.
+    drop(results);
+    if code != 0 {
+        std::process::exit(code);
+    }
+    Ok(())
+}
+
+/// One import's lines for a person reading the terminal.
+fn print_import(r: &import::Report) {
     let organization = medrec::printable(&r.organization);
-    output::emit(json, "import", to_value(&r), |_| {
+    {
         println!(
             "{} resources from {} for {}: {} records added, {} updated, {} unchanged; {} documents added",
             r.resources, organization, r.person_name, r.records_added, r.records_updated, r.records_unchanged, r.documents_added
@@ -1756,8 +1835,7 @@ fn import_cmd(cli: &Cli, a: &ImportArgs, store: &ConfigStore) -> Result<(), CliE
                 println!("  {}: {reason}", w.resource_types.join(", "));
             }
         }
-    });
-    Ok(())
+    }
 }
 
 fn records_cmd(

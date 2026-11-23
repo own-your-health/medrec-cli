@@ -222,7 +222,11 @@ pub fn write_dicom(dicom: &Path) {
 /// no `--profile`. It writes the export's arguments to `export-args`, and
 /// the `FAKEPROV_PROFILE` and `FAKEPROV_FILES` it saw to `export-env`. With
 /// `FAKEPROV_HOLD=<DIR>` its export writes `<DIR>/exporting` and waits, up to
-/// 30 seconds, for `<DIR>/go` before it prints the stream.
+/// 30 seconds, for `<DIR>/go` before it prints the stream. An export for
+/// `--patient <P>` prints `synthetic-<P>.ndjson` when the directory has one.
+/// With `FAKEPROV_WATCH=<DIR>` each export appends the checksum of
+/// `<DIR>/*/index.json` to `export-log`; with `FAKEPROV_EXIT_FOR=<P>` the
+/// export for `--patient <P>` answers that its session expired (exit 3).
 pub fn write_provider(provider: &Path, stream: &str) -> PathBuf {
     std::fs::create_dir_all(provider).unwrap();
     std::fs::write(provider.join("synthetic.ndjson"), stream).unwrap();
@@ -269,6 +273,7 @@ case "$1" in
           hang) sleep 600 ;;
           expired) printf '%s\n' '{{"schema":"auth-status/v1","required":true,"authenticated":true,"session_valid":false}}' ;;
           signed-out) printf '%s\n' '{{"schema":"auth-status/v1","required":true,"authenticated":false}}' ;;
+          short) printf '%s\n' '{{"schema":"auth-status/v1","required":true,"authenticated":true,"session_valid":true,"renews":false,"lasts_secs":1800}}' ;;
           *) printf '%s\n' '{{"schema":"auth-status/v1","required":true,"authenticated":true,"session_valid":true,"expires_at":"2099-01-01T00:00:00Z"}}' ;;
         esac ;;
       login)
@@ -279,10 +284,11 @@ case "$1" in
   records)
     printf '%s\n' "$*" > "$d/export-args"
     printf 'profile=%s files=%s\n' "${{FAKEPROV_PROFILE:-}}" "${{FAKEPROV_FILES:-}}" > "$d/export-env"
-    profile=''; files=''; prev=''
+    profile=''; files=''; patient=''; prev=''
     for a in "$@"; do
       [ "$prev" = --profile ] && profile="$a"
       [ "$prev" = --files ] && files="$a"
+      [ "$prev" = --patient ] && patient="$a"
       prev="$a"
     done
     if [ -n "$files" ]; then
@@ -295,11 +301,21 @@ case "$1" in
         *) echo "fakeprov: this command needs a profile; configured: adult1, adult2" >&2; exit 2 ;;
       esac
     fi
+    if [ -n "$FAKEPROV_EXIT_FOR" ] && [ "$patient" = "$FAKEPROV_EXIT_FOR" ]; then
+      echo "error: the session for profile $profile has expired; sign in again" >&2; exit 3
+    fi
+    if [ -n "$FAKEPROV_WATCH" ]; then
+      cat "$FAKEPROV_WATCH"/*/index.json | cksum >> "$d/export-log"
+    fi
     if [ -n "$FAKEPROV_HOLD" ]; then
       : > "$FAKEPROV_HOLD/exporting"; n=0
       while [ ! -e "$FAKEPROV_HOLD/go" ] && [ $n -lt 300 ]; do sleep 0.1; n=$((n + 1)); done
     fi
-    cat "$d/synthetic.ndjson"
+    if [ -n "$patient" ] && [ -f "$d/synthetic-$patient.ndjson" ]; then
+      cat "$d/synthetic-$patient.ndjson"
+    else
+      cat "$d/synthetic.ndjson"
+    fi
     [ -n "$FAKEPROV_STDERR" ] && printf '%s\n' "$FAKEPROV_STDERR" >&2
     exit "${{FAKEPROV_EXIT:-0}}" ;;
   *) echo "fakeprov: unknown command $1" >&2; exit 2 ;;

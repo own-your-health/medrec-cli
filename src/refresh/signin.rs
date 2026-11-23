@@ -30,12 +30,24 @@ pub fn wait_or(default: Duration) -> Duration {
 /// How long a person at the terminal has to approve one.
 pub const PERSON_WAIT: Duration = Duration::from_secs(600);
 
+/// What a provider's `auth status` says of its sign-in's life, beyond
+/// `auth-status/v1`'s required fields.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Declared {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub renews: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lasts_secs: Option<u64>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Read {
     /// `state` and `expires_at`, as `status.json` holds them.
     Read {
         state: &'static str,
         expires_at: Option<String>,
+        /// `renews` and `lasts_secs`, where the provider gives them.
+        declared: Declared,
     },
     /// The call outlived its wait.
     TimedOut,
@@ -92,7 +104,14 @@ pub fn read(provider: &Provider, profile: Option<&str>, wait: Duration) -> Read 
     match v {
         Some(v) if v.get("schema").and_then(Value::as_str) == Some("auth-status/v1") => {
             let (state, expires_at) = state_of(&v, time::now());
-            Read::Read { state, expires_at }
+            Read::Read {
+                state,
+                expires_at,
+                declared: Declared {
+                    renews: v.get("renews").and_then(Value::as_bool),
+                    lasts_secs: v.get("lasts_secs").and_then(Value::as_u64),
+                },
+            }
         }
         _ if ran.code != Some(0) => Read::Failed(format!(
             "`{} auth status --json` exited {}",
@@ -153,10 +172,12 @@ pub fn read_drive(profile: &str, wait: Duration) -> Read {
         Ok(_) => Read::Read {
             state: "ok",
             expires_at: None,
+            declared: Declared::default(),
         },
         Err(e) if e.exit_code() == 3 => Read::Read {
             state: "signed_out",
             expires_at: None,
+            declared: Declared::default(),
         },
         Err(e) => Read::Failed(e.to_string()),
     }
