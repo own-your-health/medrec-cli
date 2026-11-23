@@ -248,17 +248,20 @@ pub(crate) fn record_detail(r: &Record) -> Option<String> {
                 .is_some_and(|a| a.as_object().is_some_and(|o| !o.is_empty())) =>
         {
             let a = &f["amounts"];
-            let parts: Vec<String> = [
-                ("billed", "billed"),
-                ("plan_paid", "plan paid"),
-                ("you_owe", "you owe"),
-            ]
-            .iter()
-            .filter_map(|(k, label)| {
-                let v = a.get(*k).map(value_text).filter(|s| !s.is_empty())?;
-                Some(format!("{label} {v}"))
-            })
-            .collect();
+            let mut parts: Vec<String> = [("billed", "billed"), ("plan_paid", "plan paid")]
+                .iter()
+                .filter_map(|(k, label)| {
+                    let v = a.get(*k).map(value_text).filter(|s| !s.is_empty())?;
+                    Some(format!("{label} {v}"))
+                })
+                .collect();
+            if let Some((v, summed)) = crate::claims::member_share(a) {
+                let v = value_text(&v);
+                if !v.is_empty() {
+                    let label = if summed { "your share" } else { "you owe" };
+                    parts.push(format!("{label} {v}"));
+                }
+            }
             (!parts.is_empty())
                 .then(|| parts.join(", "))
                 .or_else(|| r.status.clone())

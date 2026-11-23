@@ -247,6 +247,22 @@ fn add(a: &Value, b: &Value) -> Option<Value> {
     Some(json!({"amount": decimal(amt(a)? + amt(b)?), "currency": cur(a)}))
 }
 
+/// The member's share of a claim's or line's `amounts`, for a reader: the
+/// payer's `you_owe`, else `deductible` + `copay` + `coinsurance` +
+/// `not_covered` of those given (never `discount`), and whether it is that
+/// sum. Never written into `amounts`, where a missing name stays unknown.
+pub fn member_share(amounts: &Value) -> Option<(Value, bool)> {
+    if let Some(v) = amounts.get("you_owe") {
+        return Some((v.clone(), false));
+    }
+    let mut parts = ["deductible", "copay", "coinsurance", "not_covered"]
+        .iter()
+        .filter_map(|k| amounts.get(*k));
+    let first = parts.next()?.clone();
+    let sum = parts.try_fold(first, |acc, v| add(&acc, v))?;
+    Some((sum, true))
+}
+
 /// Amounts under fixed names from `(raw category, money)` pairs: of a
 /// name's entries those of the best rank, summed. A sum that cannot be
 /// made (two currencies) leaves the name out, as unknown.
@@ -675,6 +691,19 @@ mod tests {
             .unwrap()
             .fields
             .clone()
+    }
+
+    #[test]
+    fn the_members_share_is_the_payers_figure_else_its_parts() {
+        let usd = |a: &str| json!({"amount": a, "currency": "USD"});
+        let a = json!({"you_owe": usd("12.00"), "copay": usd("30.00")});
+        assert_eq!(member_share(&a), Some((usd("12.00"), false)));
+        let a = json!({"deductible": usd("100.00"), "copay": usd("30.50"),
+                       "coinsurance": usd("4.25"), "discount": usd("50.00")});
+        assert_eq!(member_share(&a), Some((usd("134.75"), true)));
+        assert_eq!(member_share(&json!({"discount": usd("5.00")})), None);
+        let a = json!({"copay": usd("1.00"), "deductible": {"amount": "1.00", "currency": "EUR"}});
+        assert_eq!(member_share(&a), None, "two currencies: unknown");
     }
 
     #[test]

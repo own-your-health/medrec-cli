@@ -245,9 +245,12 @@ are inclusive; descriptors come from the source.
 | `other` | anything else, CPT Category II and III codes and other HCPCS letters included |
 
 Amounts are `{amount, currency}`, `amount` a decimal string. `you_owe` is
-the payer's own figure for what the member owes. When it is missing, the
-member's share is `deductible` + `copay` + `coinsurance` + `not_covered`,
-of those given. `discount` is never part of it. A line's come
+only ever the payer's own figure for what the member owes; medrec never
+fills it in. A reader that needs the member's share when it is missing
+adds `deductible`, `copay`, `coinsurance` and `not_covered`, of those
+given, and never `discount`. medrec's own readers do (`search`, `records`
+and the MCP tools), labelling the sum "your share" and the payer's
+figure "you owe". A line's come
 from its `adjudication` entries, a claim's from its `total` entries. Each
 entry's category maps to a name by its code, and only failing that by the
 payer's words. Of one name's entries, those of the best rank count, summed,

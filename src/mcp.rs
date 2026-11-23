@@ -956,8 +956,8 @@ fn record_item(h: &Household, person: &str, r: Record, detailed: bool) -> Item {
 /// What a claim leaves the member to pay: its `amounts.you_owe`, or, on a
 /// claim imported by an earlier medrec, its total named for the member's share.
 fn member_owes(fields: &Map<String, Value>) -> Option<String> {
-    if let Some(a) = fields.get("amounts").and_then(|a| a.get("you_owe")) {
-        return Some(views::value_text(a)).filter(|s| !s.is_empty());
+    if let Some((v, _)) = fields.get("amounts").and_then(crate::claims::member_share) {
+        return Some(views::value_text(&v)).filter(|s| !s.is_empty());
     }
     fields
         .get("total")

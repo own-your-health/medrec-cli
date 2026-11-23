@@ -577,8 +577,8 @@ fn an_import_files_records_and_documents_and_is_idempotent() {
     );
     let claims = e.ok(&["timeline", "--kind", "claim"]);
     assert_eq!(
-        claims["items"][0]["detail"],
-        "billed 150.0 USD, plan paid 110.0 USD"
+        claims["items"][0]["detail"], "billed 150.0 USD, plan paid 110.0 USD, your share 25.0 USD",
+        "the payer gives no member liability, so the share is its parts"
     );
     let hits = e.ok(&["search", "hemo"]);
     assert!(hits["items"]
