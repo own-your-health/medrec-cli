@@ -489,6 +489,7 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
     let started = time::now();
     let exe = signin::exe_id();
     if let (Mode::Scheduled, Location::Drive(spec)) = (mode, &location) {
+        crate::store::bound_key_reads(signin::scheduled_wait());
         let blocked = local.drive_blocked.clone();
         let gate = drive_gate(cfg, spec, &mut local, &exe)?;
         if local.drive_blocked != blocked {

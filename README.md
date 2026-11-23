@@ -502,8 +502,9 @@ installed one. Its binary is a separate copy, so its first read of a Drive
 folder asks macOS once to let it use the Keychain item `piekstra.medrec`.
 A dialog left unanswered for 45 seconds ends that call with `auth`, and the
 next call waits on the same dialog rather than raising another. Once
-answered, the server reads nothing more from the Keychain; "Always Allow"
-also spares the next server it starts.
+answered, the server reads the Keychain again only if the key is replaced
+(a reset and a new sign-in in a terminal), with the same 45-second limit.
+"Always Allow" also spares the next server it starts.
 
 ```sh
 d=$(mktemp -d) && gh release download -R own-your-health/medrec-cli -p 'medrec-*.mcpb' -D "$d" && open "$d"/medrec-*.mcpb

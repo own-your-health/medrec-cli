@@ -108,24 +108,53 @@ pub fn shared_vault() -> Result<Arc<Vault>, CliError> {
     if let Some(v) = held.as_ref() {
         return Ok(Arc::clone(v));
     }
-    let v = Arc::new(Vault::new(
+    let mut v = Vault::new(
         Keys(pk_cli_auth::vault::keychain_for(BIN)),
         pk_cli_auth::vault::default_dir(BIN)?,
-    ));
+    );
+    if let Some(wait) = KEY_READ_BOUND.get() {
+        v = v.bound_key_reads(*wait);
+    }
+    let v = Arc::new(v);
     *held = Some(Arc::clone(&v));
     Ok(v)
 }
 
-/// medrec's Keychain item, with two hooks for its tests.
-/// `MEDREC_TEST_KEYCHAIN_LOG` makes it a keychain holding no key, which
-/// writes a line to that file for each read and never reaches the real
-/// Keychain. `MEDREC_TEST_KEYCHAIN_DELAY_SECS` holds the process's first
-/// such read that long, as a dialog holds it until someone answers.
+static KEY_READ_BOUND: std::sync::OnceLock<Duration> = std::sync::OnceLock::new();
+
+/// Hold every Keychain read of the vault's key in this process to `wait`
+/// (`Vault::bound_key_reads`): for a process nobody may be watching, the
+/// MCP server and a scheduled pass. Call it before the first Drive read;
+/// a later call changes nothing. A read past it is exit 3 naming the
+/// dialog, and the vault's other calls fail at once until it is answered,
+/// rather than wait behind it. A command at the terminal waits for the
+/// person's answer.
+pub fn bound_key_reads(wait: Duration) {
+    let _ = KEY_READ_BOUND.set(wait);
+}
+
+/// A test hook's value: the variable `name` in a debug build, which is what
+/// `cargo test` runs; never in a release build, so a stray variable cannot
+/// reach a shipped binary's Keychain or timing.
+pub(crate) fn test_hook(name: &str) -> Option<std::ffi::OsString> {
+    if cfg!(debug_assertions) {
+        std::env::var_os(name).filter(|v| !v.is_empty())
+    } else {
+        None
+    }
+}
+
+/// medrec's Keychain item, with two hooks for its tests, read in debug
+/// builds only ([`test_hook`]). `MEDREC_TEST_KEYCHAIN_LOG` makes it a
+/// keychain holding no key, which writes a line to that file for each read
+/// and never reaches the real Keychain. `MEDREC_TEST_KEYCHAIN_DELAY_SECS`
+/// holds the process's first such read that long, as a dialog holds it
+/// until someone answers.
 struct Keys(CredentialStore);
 
 impl Keys {
     fn test_log() -> Option<std::ffi::OsString> {
-        std::env::var_os("MEDREC_TEST_KEYCHAIN_LOG").filter(|p| !p.is_empty())
+        test_hook("MEDREC_TEST_KEYCHAIN_LOG")
     }
 }
 
@@ -143,9 +172,8 @@ impl KeyStore for Keys {
         {
             let _ = writeln!(f, "read");
         }
-        let delay = std::env::var("MEDREC_TEST_KEYCHAIN_DELAY_SECS")
-            .ok()
-            .and_then(|s| s.parse::<u64>().ok());
+        let delay = test_hook("MEDREC_TEST_KEYCHAIN_DELAY_SECS")
+            .and_then(|s| s.to_str()?.parse::<u64>().ok());
         if let Some(secs) = delay {
             if !DELAYED.swap(true, std::sync::atomic::Ordering::SeqCst) {
                 std::thread::sleep(Duration::from_secs(secs));

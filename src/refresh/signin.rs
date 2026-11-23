@@ -19,11 +19,10 @@ pub fn scheduled_wait() -> Duration {
     wait_or(SCHEDULED_WAIT)
 }
 
-/// `default`, or `MEDREC_TEST_AUTH_WAIT_SECS` (tests only).
+/// `default`, or `MEDREC_TEST_AUTH_WAIT_SECS` (debug builds only).
 pub fn wait_or(default: Duration) -> Duration {
-    std::env::var("MEDREC_TEST_AUTH_WAIT_SECS")
-        .ok()
-        .and_then(|s| s.parse().ok())
+    crate::store::test_hook("MEDREC_TEST_AUTH_WAIT_SECS")
+        .and_then(|s| s.to_str()?.parse().ok())
         .map(Duration::from_secs)
         .unwrap_or(default)
 }
@@ -111,11 +110,11 @@ pub fn read(provider: &Provider, profile: Option<&str>, wait: Duration) -> Read 
 
 /// The medrec binary running: its path, size and modification time, which
 /// change when it is rebuilt or updated, as its Keychain approval does.
-/// `MEDREC_TEST_EXE` (tests only) stands in for it.
+/// `MEDREC_TEST_EXE` (debug builds only) stands in for it.
 pub fn exe_id() -> Option<String> {
-    let exe = match std::env::var_os("MEDREC_TEST_EXE") {
-        Some(p) if !p.is_empty() => std::path::PathBuf::from(p),
-        _ => std::env::current_exe().ok()?,
+    let exe = match crate::store::test_hook("MEDREC_TEST_EXE") {
+        Some(p) => std::path::PathBuf::from(p),
+        None => std::env::current_exe().ok()?,
     };
     let meta = std::fs::metadata(&exe).ok()?;
     let mtime = meta

@@ -58,6 +58,9 @@ pub struct MedrecTools {
 
 impl MedrecTools {
     pub fn new(cfg: Config) -> Self {
+        // A server nobody may be watching: a key another process replaced
+        // is read again with the same bound as the first read.
+        crate::store::bound_key_reads(signin::wait_or(CALL_BUDGET));
         MedrecTools {
             cfg: Some(cfg),
             keychain_read: Default::default(),
