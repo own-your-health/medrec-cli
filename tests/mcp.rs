@@ -251,7 +251,13 @@ fn the_tools_answer_from_the_folder_within_their_schemas() {
         RECORDS,
         json!({"kind": "claims", "response_format": "detailed"}),
     );
-    assert!(assert_fits(&t, RECORDS, &r)["items"][0]["fields"].is_object());
+    let v = assert_fits(&t, RECORDS, &r);
+    assert!(v["items"][0]["fields"].is_object());
+    // The member's share once, labelled as medrec's sum: the payer gave
+    // no figure of its own.
+    let detail = v["items"][0]["detail"].as_str().unwrap();
+    assert!(detail.contains("your share"), "{detail}");
+    assert!(!detail.contains("member owes"), "{detail}");
 
     let r = call(&t, RECORDS, json!({"kind": "documents"}));
     let v = assert_fits(&t, RECORDS, &r);

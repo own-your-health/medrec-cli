@@ -191,8 +191,105 @@ contained in the fill (`#<id>`) or one the same source serves
 under the source, filed by an earlier import). A pharmacy `claim`
 (an ExplanationOfBenefit of type pharmacy) also has `days_supply`,
 `refill_number`, `refills_authorized` and `brand_generic`, from its
-`supportingInfo`. Each of its `items` has a `quantity`. It is named for
-what was filled (its first item's product).
+`supportingInfo`. Each of its `items` has a `quantity`.
+
+A `claim` (an ExplanationOfBenefit) is shaped for costs (0.5.0 and later).
+An earlier import's claims take this shape when their source serves them
+again, or all at once with `medrec reindex`, which shapes every claim again
+from the raw file filed for it, reading nothing but the folder. A claim
+with no `amounts` and no `category` was filed by an earlier medrec. Every
+machine that imports into one folder must run 0.5.0 or later: an earlier
+medrec files the claims it imports again in the earlier shape.
+
+- `display`: what it paid for and who. That is its lines' service names
+  (`A`, `A and B`, `A, B and 2 more`), a pharmacy claim's drug (RxNorm,
+  else NDC), or failing those its category's label (`Lab work`), then
+  ` · ` and its `provider`. The FHIR claim type stays in `type`
+  (`professional`, `institutional`, `pharmacy`, `oral`).
+- `category`: its lines' one category, `mixed` when they have several,
+  `pharmacy` for a pharmacy claim.
+- `amounts`: the claim's, by the names below. A name its `total` gives
+  comes from there. Otherwise it is the sum of its lines that give it, and
+  `plan_paid` failing both is its `payment`.
+- `benefit_period` (`{start, end}`): `benefitPeriod` as the payer wrote
+  it, the plan year the claim counts toward.
+- `billable_period`, `provider`, `insurer`, `facility`, `outcome`, `use`,
+  `total`, `payment` and `benefit_balance` (deductible and out-of-pocket
+  used and allowed) as the resource gives them.
+- `diagnoses`: `[{sequence, code}]` from `diagnosis`, `code` a
+  `{system, code, display}` with ICD-10 preferred; an entry without a code
+  is left out.
+- `items`, one per line: `sequence`, `category`, `amounts`, `service`
+  (`{system, code, display}`), `serviced` (a date or `{start, end}`),
+  `quantity`, `net`, `adjudication` (`[{category, amount, reason}]` as the
+  payer wrote them) and `records`.
+- links, below: `visit`, `results` and each line's `records`.
+
+A field that is missing is unknown, never zero.
+
+A line's category is the first row whose rule holds for its codes. Ranges
+are inclusive; descriptors come from the source.
+
+| `category` | Rule |
+|---|---|
+| `pharmacy` | a pharmacy claim, or a line coded NDC or RxNorm |
+| `visit` | CPT 99202–99499 |
+| `lab` | CPT 80047–89398 and 36415–36416; CPT PLA and MAAA codes (`0001U`, `0002M`) |
+| `imaging` | CPT 70010–79999 |
+| `vaccine` | CPT 90460–90756 |
+| `medicine` | other CPT 90281–99199 and 99500–99607 |
+| `procedure` | CPT 10004–69990 |
+| `anesthesia` | CPT 00100–01999 |
+| `drug` | HCPCS J-codes |
+| `supply` | HCPCS A-, E- and L-codes |
+| `dental` | CDT D-codes |
+| `facility` | a line with a revenue code and no CPT, HCPCS or CDT code |
+| `other` | anything else, CPT Category II and III codes and other HCPCS letters included |
+
+Amounts are `{amount, currency}`, `amount` a decimal string. `you_owe` is
+only ever the payer's own figure for what the member owes; medrec never
+fills it in. A reader that needs the member's share when it is missing
+adds `deductible`, `copay`, `coinsurance` and `not_covered`, of those
+given, and never `discount`. medrec's own readers do (`search`, `records`
+and the MCP tools), labelling the sum "your share" and the payer's
+figure "you owe". A line's come
+from its `adjudication` entries, a claim's from its `total` entries. Each
+entry's category maps to a name by its code, and only failing that by the
+payer's words. Of one name's entries, those of the best rank count, summed,
+so a payer that sends both `benefit` and `paidtoprovider` is not counted
+twice. Two currencies under one name leave it out.
+
+| Name | Codes (CARIN Blue Button, HL7), rank 0 unless noted | Words, rank 2 |
+|---|---|---|
+| `billed` | `submitted` | submitted, billed |
+| `allowed` | `eligible` | allowed, eligible |
+| `plan_paid` | `benefit`; `paidtoprovider` and `paidtopatient` at rank 1 | plan paid, paid by plan, plan pays |
+| `deductible` | `deductible` | deductible |
+| `copay` | `copay` | copay |
+| `coinsurance` | `coinsurance` | coinsurance |
+| `not_covered` | `noncovered` | not covered, non covered |
+| `discount` | `discount` | discount |
+| `you_owe` | `memberliability` | member liability, patient responsibility, you owe, your share |
+
+A claim's links are guesses by date and name, recomputed on every write of
+the person's index, so a visit imported after its claim is linked then:
+
+- `visit`: the record id of the one `encounter` dated on one of the
+  claim's dates of service, leaving out encounters whose `status` is
+  `planned`, `cancelled` or `entered-in-error` (each line's `serviced`, else the claim's date
+  for a line with none, or for a claim with no lines). Of several, it is
+  the one that shares a word of four or more letters between its
+  `service_provider`, `location` or `practitioner` and the claim's
+  `provider` or `facility`. When that leaves no single
+  encounter, there is no `visit`.
+- `results`: the ids of the `result` and `report` records dated on a `lab`
+  line's date of service, leaving out those `cancelled` or
+  `entered-in-error`.
+- a line's `records`: the claim's `visit` for a `visit` line, its date's
+  results and reports for a `lab` line.
+
+An import compares a claim without its links, so re-importing one whose
+links have changed counts it unchanged.
 
 A fill and a claim are each one event, so their `key` names the event:
 `medication-dispense|<identity>|<date>` and `claim|<identity>|<date>`. The
@@ -556,6 +653,14 @@ ship with medrec:
     `due_date` is before today. Whether a bill was paid is not recorded.
   - a document's text is its `text.json` entry. Pages are the form feeds
     between `pdftotext` pages, shown as `--- page N ---`.
+
+Both search the same way: every item whose text holds all the query's
+words, as word prefixes, with case, accents and punctuation ignored. A
+query that names lab tests and nothing else (`blood test`, `blood tests`,
+`bloodwork`, `blood work`, `labs`, `lab work`, `lab test`, `lab tests`,
+`lab results`) also finds every `result` and `report` record and every
+claim with a `lab` line, after the items whose text holds the words: lab
+results never say "blood test".
 
 ## Import input: `records-stream/v1`
 

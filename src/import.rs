@@ -55,8 +55,20 @@ use crate::version::{self, Filing};
 
 /// Provider CLIs medrec looks for without being told.
 pub const KNOWN_PROVIDERS: &[&str] = &[
-    "mychart", "kp", "athena", "modmed", "icanotes", "uhc", "caremark", "labcorp", "oneblood",
-    "fertemr", "salve",
+    "mychart",
+    "kp",
+    "athena",
+    "modmed",
+    "icanotes",
+    "uhc",
+    "caremark",
+    "labcorp",
+    "oneblood",
+    "fertemr",
+    "salve",
+    "peryourhealth",
+    "flywire",
+    "embryooptions",
 ];
 const INFO_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -1583,9 +1595,16 @@ fn refresh_provenance(
 }
 
 /// Whether two records say the same thing.
+/// A claim's links (`claims::link`) follow from other records and are left
+/// out.
 fn same_content(a: &Record, b: &Record) -> bool {
+    let fields = if a.kind == "claim" {
+        crate::claims::without_links(&a.fields) == crate::claims::without_links(&b.fields)
+    } else {
+        a.fields == b.fields
+    };
     a.key == b.key
-        && a.fields == b.fields
+        && fields
         && a.display == b.display
         && a.status == b.status
         && a.code == b.code

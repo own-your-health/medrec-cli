@@ -169,7 +169,10 @@ impl Folder {
         Ok(())
     }
 
+    /// Write a person's index, its claims' links recomputed first
+    /// (`claims::link`).
     pub fn save_index(&self, p: &Person, idx: &mut PersonIndex) -> Result<(), CliError> {
+        crate::claims::link(&mut idx.records);
         let rel = index_rel(p);
         let current: Option<PersonIndex> = self.read_json(&rel)?;
         if current.map(|c| c.rev).unwrap_or(0) != idx.rev {
