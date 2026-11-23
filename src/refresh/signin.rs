@@ -16,11 +16,16 @@ pub const SCHEDULED_WAIT: Duration = Duration::from_secs(30);
 /// [`SCHEDULED_WAIT`], or `MEDREC_TEST_AUTH_WAIT_SECS` (tests only, so a
 /// hang is seen in a second).
 pub fn scheduled_wait() -> Duration {
+    wait_or(SCHEDULED_WAIT)
+}
+
+/// `default`, or `MEDREC_TEST_AUTH_WAIT_SECS` (tests only).
+pub fn wait_or(default: Duration) -> Duration {
     std::env::var("MEDREC_TEST_AUTH_WAIT_SECS")
         .ok()
         .and_then(|s| s.parse().ok())
         .map(Duration::from_secs)
-        .unwrap_or(SCHEDULED_WAIT)
+        .unwrap_or(default)
 }
 
 /// How long a person at the terminal has to approve one.

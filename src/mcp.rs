@@ -19,7 +19,8 @@ use crate::folder::{Access, Folder};
 use crate::intake::classify;
 use crate::model::{today, Household, Record};
 use crate::people;
-use crate::store::BIN;
+use crate::refresh::signin;
+use crate::store::{Location, BIN};
 use crate::summary::{self, clip, day, PersonRow, ResultRow, CLIP};
 use crate::views::{self, first_line, is_ended, label, record_detail, record_source, Range};
 
@@ -50,16 +51,25 @@ pub const MAX_STALE_SECS: &str = "900";
 pub struct MedrecTools {
     /// `None` only to list the tools, which reads nothing.
     cfg: Option<Config>,
+    /// This process has read the Drive sign-in from the Keychain once
+    /// without waiting on a dialog, so a call reads it in place.
+    keychain_read: std::sync::atomic::AtomicBool,
 }
 
 impl MedrecTools {
     pub fn new(cfg: Config) -> Self {
-        MedrecTools { cfg: Some(cfg) }
+        MedrecTools {
+            cfg: Some(cfg),
+            keychain_read: Default::default(),
+        }
     }
 
     /// For `mcp --list-tools`: no profile, and a call is refused.
     pub fn listing_only() -> Self {
-        MedrecTools { cfg: None }
+        MedrecTools {
+            cfg: None,
+            keychain_read: Default::default(),
+        }
     }
 
     /// Before serving: cached copies of a Drive folder's files answer only
@@ -77,9 +87,49 @@ impl MedrecTools {
             .as_ref()
             .ok_or_else(|| ToolError::other("no profile selected"))?;
         let budget = cfg.store_budget().min(CALL_BUDGET);
-        let f = Folder::open_at(&cfg.folder_location()?, Access::Read, budget)?;
+        let location = cfg.folder_location()?;
+        if let Location::Drive(spec) = &location {
+            self.read_keychain(spec.profile().as_str())?;
+        }
+        let f = Folder::open_at(&location, Access::Read, budget)?;
         let h = f.household()?;
         Ok((f, h))
+    }
+
+    /// The first call's read of the Drive sign-in, in a child stopped after
+    /// [`CALL_BUDGET`]: an in-process Keychain read cannot be stopped, and
+    /// this copy of medrec (the extension's own) asks macOS once before it
+    /// may read the item. A dialog nobody answers ends the call with `auth`
+    /// instead of holding it.
+    fn read_keychain(&self, profile: &str) -> Result<(), ToolError> {
+        use std::sync::atomic::Ordering;
+        if self.keychain_read.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+        let wait = signin::wait_or(CALL_BUDGET);
+        match signin::read_drive(profile, wait) {
+            signin::Read::Read { state, .. } if signin::usable(state) => {
+                self.keychain_read.store(true, Ordering::Relaxed);
+                Ok(())
+            }
+            signin::Read::Read { .. } => Err(ToolError::from(CliError::Auth(format!(
+                "the records folder's Drive profile `{profile}` is not signed in on this computer"
+            )))
+            .with_fix(format!(
+                "Ask the user to run `{BIN} drive login --drive-profile {profile}` in a \
+                 terminal, then call the tool again"
+            ))),
+            signin::Read::TimedOut => Err(ToolError::from(CliError::Auth(format!(
+                "macOS asked whether medrec may use its Keychain item, and nobody answered \
+                 within {} s",
+                wait.as_secs()
+            )))
+            .with_fix(
+                "Call the tool again and ask the user to choose Always Allow when macOS asks; \
+                 this copy of medrec asks once",
+            )),
+            signin::Read::Failed(m) => Err(CliError::Upstream(m).into()),
+        }
     }
 }
 
@@ -353,7 +403,7 @@ pub struct DocumentOut {
 impl Toolset for MedrecTools {
     fn server(&self) -> Server {
         Server::new(BIN, env!("CARGO_PKG_VERSION"), "medical records", "medrec")
-            .sign_in_command(format!("{BIN} --profile <NAME> doctor"))
+            .sign_in_command(format!("{BIN} --profile <NAME> auth status"))
             .instructions(
                 "medrec keeps the household's medical records, imported from patient portals \
                  and insurers and filed from scans, in one folder; these tools read it and \

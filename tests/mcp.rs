@@ -431,3 +431,97 @@ fn the_binary_serves_over_stdio_and_writes_nothing() {
     assert!(before == after, "a file in the records folder changed");
     let _ = std::fs::remove_dir_all(&e.root);
 }
+
+/// Serves `mcp` with `env`, calls medrec_summary once and returns the
+/// answer and how long it took.
+fn call_summary(e: &Env, env: &[(&str, &str)]) -> (Value, std::time::Duration) {
+    let bin = assert_cmd::cargo::cargo_bin("medrec");
+    let mut cmd = std::process::Command::new(bin);
+    cmd.env("XDG_CONFIG_HOME", e.root.join("config"))
+        .env("XDG_CACHE_HOME", e.root.join("cache"))
+        .env("HOME", &e.root)
+        .env("PATH", &e.path)
+        .env("MEDREC_PROFILE", "home")
+        .env("MEDREC_KEYCHAIN_SERVICE", "piekstra.medrec.hermetic-tests")
+        .env_remove("MEDREC_DRIVE_PROFILE");
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    let mut child = cmd
+        .arg("mcp")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    rpc(
+        &mut stdin,
+        &mut stdout,
+        json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+            "protocolVersion": "2025-06-18", "capabilities": {},
+            "clientInfo": {"name": "medrec-test", "version": "0"}}}),
+    )
+    .unwrap();
+    rpc(
+        &mut stdin,
+        &mut stdout,
+        json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
+    );
+    let started = std::time::Instant::now();
+    let r = rpc(
+        &mut stdin,
+        &mut stdout,
+        json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+               "params": {"name": SUMMARY, "arguments": {}}}),
+    )
+    .unwrap();
+    let took = started.elapsed();
+    drop(stdin);
+    let _ = child.wait();
+    (r, took)
+}
+
+/// A stand-in for `medrec drive-keychain-probe`: hangs, as a Keychain
+/// dialog nobody answers does, or exits 3, as a missing sign-in does.
+fn probe(e: &Env, name: &str, body: &str) -> String {
+    let path = e.root.join(name);
+    std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    path.to_string_lossy().into_owned()
+}
+
+#[test]
+fn a_drive_folders_keychain_dialog_nobody_answers_ends_the_call_with_auth() {
+    let e = Env::new("keychain");
+    e.ok(&[
+        "config",
+        "set",
+        "folder",
+        "gdrive:home-drive/1Synthetic_folder",
+    ]);
+    let hang = probe(&e, "hang", "sleep 30");
+    let (r, took) = call_summary(
+        &e,
+        &[
+            ("MEDREC_TEST_DRIVE_PROBE", &hang),
+            ("MEDREC_TEST_AUTH_WAIT_SECS", "1"),
+        ],
+    );
+    assert_eq!(r["result"]["isError"], true, "{r}");
+    let text = r.to_string();
+    assert!(text.contains("Always Allow"), "{r}");
+    assert!(took < std::time::Duration::from_secs(10), "{took:?}");
+    // No sign-in on this machine: the call says how to sign in.
+    let none = probe(&e, "signed-out", "exit 3");
+    let (r, _) = call_summary(&e, &[("MEDREC_TEST_DRIVE_PROBE", &none)]);
+    assert_eq!(r["result"]["isError"], true, "{r}");
+    assert!(
+        r.to_string()
+            .contains("medrec drive login --drive-profile home-drive"),
+        "{r}"
+    );
+    let _ = std::fs::remove_dir_all(&e.root);
+}

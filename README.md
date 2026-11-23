@@ -491,6 +491,8 @@ name when asked. The extension carries its own medrec binary and reads the
 same `~/.config/medrec/config.json`, Drive sign-in and folder as the
 installed one. Its binary is a separate copy, so its first read of a Drive
 folder asks macOS once to let it use the Keychain item `piekstra.medrec`.
+A dialog left unanswered for 45 seconds ends that call with `auth`; the
+next call asks again.
 
 ```sh
 gh release download v0.5.0 -R own-your-health/medrec-cli -p 'medrec-*.mcpb' -D /tmp
