@@ -193,22 +193,31 @@ register and a sign-in per Google account. It runs no rclone.
 
   0. On every machine that refreshes the folder, stop its agent with the
      release it runs: `medrec --profile <NAME> refresh --uninstall`. An
-     agent left running would keep importing into the old folder.
+     agent left running would keep importing into the old folder. Then
+     wait for any medrec command still running on that profile to finish,
+     a manual `import` or `intake` included: it writes too, and a copy
+     taken meanwhile misses or splits what it writes.
   1. With the medrec release before this one, back the folder up to a
      local directory: `medrec backup --to ~/records-copy`.
-  2. With this release, sign in and make a folder: `medrec drive login …`,
+  2. In the Drive web app, rename the old folder (for example to
+     `Medical Records (moved)`). A binary before 0.6.0 that still names it
+     then stops on a missing `household.json` instead of writing there.
+     Do it before the next step: two folders with one name in My Drive's
+     root make an rclone path such as `remote:Medical Records` name
+     either of them.
+  3. With this release, sign in and make a folder: `medrec drive login …`,
      then `medrec drive folder create "Medical Records"`.
-  3. Point a profile at the copy, and back it up into the new folder:
+  4. Point a profile at the copy, and back it up into the new folder:
      `medrec profiles add move`,
      `medrec --profile move config set folder ~/records-copy`, then
      `medrec --profile move backup --to gdrive:<drive profile>/<folder id>`.
      The backup compares every file's MD5 on both sides.
-  4. Set the household's profile to the new folder
-     (`config set folder gdrive:<drive profile>/<folder id>`), run
-     `medrec verify`, and remove the `move` profile and the local copy.
-  5. In the Drive web app, rename the old folder (for example to
-     `Medical Records (moved)`). A binary before 0.6.0 that still names it then
-     stops on a missing `household.json` instead of writing there. Install
+  5. Set the household's profile to the new folder (`medrec --profile
+     <NAME> config set folder gdrive:<drive profile>/<folder id>`), run
+     `medrec --profile <NAME> verify`, and remove the `move` profile and
+     the local copy.
+  6. Build the views once (`medrec --profile <NAME> views write`; see
+     Views), then install
      the agent again with this release: `medrec --profile <NAME> refresh
      --install`.
 
