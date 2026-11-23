@@ -1043,9 +1043,14 @@ fn a_persons_request_waits_its_own_guard_not_the_schedules_floor() {
         "15 minutes from the load, not a day: {done}"
     );
 
-    // A terminal refresh is a person asking too.
+    // A terminal refresh is a person asking too. Its skip leaves the
+    // schedule's next run a day from the load, not now.
     let v = e.ok(&["refresh", "--source", &src]);
     assert_eq!(v["attempts"][0]["outcome"], "skipped_interval", "{v}");
+    let st = e.json_at("_status/status.json");
+    let next = st["sources"][0]["next_run_at"].as_str().unwrap();
+    let next = medrec::refresh::time::parse(next).unwrap();
+    assert!(next > asked + 23 * 3600, "{st}");
     e.loaded_at(&at(now - 16 * 60));
     let v = e.ok(&["refresh", "--source", &src]);
     assert_eq!(v["attempts"][0]["outcome"], "ok", "{v}");
@@ -1264,4 +1269,31 @@ fn an_import_of_several_members_exports_them_all_before_filing() {
         "{v}"
     );
     let _ = std::fs::remove_dir_all(&e.root);
+}
+
+#[test]
+fn a_skipped_request_counts_an_import_run_by_hand_in_the_next_run() {
+    let e = Env::new("next-run");
+    let src = setup(&e);
+    e.ok(&[
+        "--profile",
+        "home",
+        "refresh",
+        "add",
+        "--source",
+        &src,
+        "--provider-profile",
+        "adult1",
+    ]);
+    // Imported by hand a moment ago; refresh itself has never run it.
+    let v = e.ok(&["refresh", "--source", &src]);
+    assert_eq!(v["attempts"][0]["outcome"], "skipped_interval", "{v}");
+    let st = e.json_at("_status/status.json");
+    let next = st["sources"][0]["next_run_at"].as_str().unwrap();
+    let next = medrec::refresh::time::parse(next).unwrap();
+    let now = medrec::refresh::time::now();
+    assert!(
+        next > now + 23 * 3600,
+        "a day from the import, not now: {st}"
+    );
 }

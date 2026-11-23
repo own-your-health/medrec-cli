@@ -835,6 +835,8 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
                 .and_then(|a| time::parse(&a.started_at))
                 .map(|x| x + backoff(e.failures, min as u64) as i64);
             let next_allowed = last.as_ref().map(|(_, x)| x + min).max(after_failure);
+            // The schedule's next import, counting one run by hand.
+            let due_at = last.as_ref().map(|(_, x)| x + every_src).max(next_allowed);
             // A person's request waits only its own guard, from the latest
             // import, run of the provider or failed attempt, whatever asked.
             let guard = policy::REQUEST_GUARD as i64;
@@ -885,13 +887,15 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
                         &mut report,
                         &mut answers,
                     )?;
+                    if let Some(n) = e.next_run_at.as_deref().and_then(time::parse) {
+                        e.next_run_at = due_at.max(Some(n)).map(time::fmt);
+                    }
                     entries.insert(id.clone(), e);
                     continue;
                 }
             } else {
                 // On its schedule: not due after all when an import the local
                 // record missed, or a failure's wait, says later.
-                let due_at = last.as_ref().map(|(_, x)| x + every_src).max(next_allowed);
                 if due_at.is_some_and(|d| t.now < d) {
                     e.next_run_at = due_at.map(time::fmt);
                     entries.insert(id.clone(), e);
