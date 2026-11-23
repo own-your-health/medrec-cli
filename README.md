@@ -70,8 +70,11 @@ copy a study.
 
    The login opens a browser for Google's consent. The client and the
    tokens go into medrec's vault, sealed with its Keychain key, so the
-   downloaded JSON can be deleted. A
-   local directory works too, with no sign-in.
+   downloaded JSON can be deleted. Every client in one Cloud project shares
+   its `drive.file` access, and Google ends them together: a revoke, or
+   removing the app in the Google Account, signs out every client of the
+   project, a web app's too (SECURITY.md). A local directory works too,
+   with no sign-in.
 2. **A records folder and the people in it.**
 
    ```sh
@@ -173,8 +176,8 @@ register and a sign-in per Google account. It runs no rclone.
   A folder whose Drive profile is not signed in on this machine is exit 2,
   naming `medrec drive login`.
 - **Scope.** `drive login` asks for `drive.file` unless given
-  `--scope full`. Under `drive.file`, medrec sees only the files its own
-  OAuth client created. A folder made in the Drive web app, or by rclone,
+  `--scope full`. Under `drive.file`, medrec sees only the files a client
+  of the same Cloud project created. A folder made in the Drive web app, or by rclone,
   is invisible to it, and so are files another app adds: an upload in the
   Drive web app, a file copied in through Drive for desktop, a scan another
   tool uploads. That covers the inbox and `intake --drive`. Point `inbox` at
@@ -202,13 +205,14 @@ register and a sign-in per Google account. It runs no rclone.
      (`config set folder gdrive:<drive profile>/<folder id>`), run
      `medrec verify`, and remove the `move` profile and the local copy.
   5. In the Drive web app, rename the old folder (for example to
-     `Medical Records (moved)`). A 0.3 binary that still names it then
+     `Medical Records (moved)`). A binary before 0.6.0 that still names it then
      stops on a missing `household.json` instead of writing there. Install
      the agent again with this release: `medrec --profile <NAME> refresh
      --install`.
 
-  Going back to 0.3 means setting `folder` to the rclone remote again; a
-  0.3 binary reads a `gdrive:` spec as an rclone path.
+  Going back to a release before 0.6.0 means setting `folder` to the
+  rclone remote again; such a binary reads a `gdrive:` spec as an rclone
+  path.
 
 ## Provider CLIs
 
@@ -361,13 +365,14 @@ session `auth status` still reads as valid. `medrec refresh` at the terminal
 waits up to 10 minutes for an approval. `--scheduled` runs a pass as the
 LaunchAgent does.
 
-medrec's own Drive sign-in is held to the same rule. A scheduled pass by a
-binary not yet known to read it without an approval (a new build, an
-update) first reads it in a child process limited to 30 seconds, which
-reads the Keychain and sends nothing to Google. A read that outlives the
-limit ends the pass as `needs_person`, and the log names
-`medrec --profile <NAME> refresh`. No scheduled pass by that binary asks
-again until a person has run a pass. Such a pass cannot reach the folder,
+medrec's own Drive sign-in is held to the same rule. A scheduled pass reads
+it first, waiting at most 30 seconds for the Keychain and sending nothing to
+Google. A read that does not answer in time (a new build or an update that
+macOS has not yet been allowed to let read the key) ends the pass as
+`needs_person`, and the log names `medrec --profile <NAME> refresh`. No
+scheduled pass by that binary asks again until a person has run a pass.
+Choose "Always Allow" in the Keychain dialog, so later passes by that
+binary read the key without one. Such a pass cannot reach the folder,
 so it writes nothing there: `refresher.last_pass_at` stops moving, and the
 folder's readers see the refreshing machine as offline.
 
@@ -495,8 +500,10 @@ name when asked. The extension carries its own medrec binary and reads the
 same `~/.config/medrec/config.json`, Drive sign-in and folder as the
 installed one. Its binary is a separate copy, so its first read of a Drive
 folder asks macOS once to let it use the Keychain item `piekstra.medrec`.
-A dialog left unanswered for 45 seconds ends that call with `auth`; the
-next call asks again.
+A dialog left unanswered for 45 seconds ends that call with `auth`, and the
+next call waits on the same dialog rather than raising another. Once
+answered, the server reads nothing more from the Keychain; "Always Allow"
+also spares the next server it starts.
 
 ```sh
 d=$(mktemp -d) && gh release download -R own-your-health/medrec-cli -p 'medrec-*.mcpb' -D "$d" && open "$d"/medrec-*.mcpb

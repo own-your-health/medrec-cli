@@ -3,8 +3,9 @@
 The records folder is one directory tree, normally a private Google Drive
 folder reached through medrec's own Drive sign-in
 (`gdrive:<drive profile>/<folder id>`), or a local directory. Under the
-`drive.file` scope, medrec sees only the files in it that its own OAuth
-client created (README, "Google Drive"). medrec reads and writes it only through this contract.
+`drive.file` scope, medrec sees only the files in it that a client of the
+household's Cloud project created (README, "Google Drive"). medrec reads and
+writes it only through this contract.
 Every file is plain: PDFs, images and DICOM as received, JSON, and Markdown.
 A person can open any of it in the Drive app without medrec.
 

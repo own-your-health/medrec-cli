@@ -118,14 +118,6 @@ enum Command {
     Completions { shell: Shell },
     /// Machine-readable capability discovery (cli-info/v1).
     Info,
-    /// The scheduled refresh's check that this binary reads its Drive
-    /// sign-in from the Keychain without an approval: one Keychain read,
-    /// no request to Google. Exit 0 when it is there, 3 when it is not.
-    #[command(hide = true)]
-    DriveKeychainProbe {
-        #[arg(long = "drive-profile", value_name = "NAME")]
-        drive_profile: String,
-    },
     /// Serve the records folder to Claude Desktop and Claude Code as
     /// read-only MCP tools over stdio.
     Mcp(pk_cli_mcp::McpArgs),
@@ -968,17 +960,6 @@ fn run(cli: &Cli) -> Result<(), CliError> {
                 Ok(())
             }
         },
-        Command::DriveKeychainProbe { drive_profile } => {
-            let profile = ProfileName::parse(drive_profile)?;
-            store::drive_cli()?.account(&profile).stored()?;
-            output::emit(
-                json,
-                "drive-keychain-probe",
-                json!({ "drive_profile": profile.as_str(), "signed_in": true }),
-                |_| println!("Drive profile `{profile}` is signed in"),
-            );
-            Ok(())
-        }
         Command::Drive(a) => {
             // --drive-profile, else MEDREC_DRIVE_PROFILE (read by the Drive
             // commands), else the records folder's.

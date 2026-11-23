@@ -96,11 +96,13 @@ impl MedrecTools {
         Ok((f, h))
     }
 
-    /// The first call's read of the Drive sign-in, in a child stopped after
-    /// [`CALL_BUDGET`]: an in-process Keychain read cannot be stopped, and
-    /// this copy of medrec (the extension's own) asks macOS once before it
-    /// may read the item. A dialog nobody answers ends the call with `auth`
-    /// instead of holding it.
+    /// The first call's read of the Drive sign-in, bounded by
+    /// [`CALL_BUDGET`] ([`signin::read_drive`]). This copy of medrec (the
+    /// extension's own) asks macOS before it may read the item. A dialog
+    /// nobody answers ends the call with `auth` instead of holding it, and
+    /// the next call waits on the same dialog rather than raising another.
+    /// Once read, the key stays in the process's one vault, so no later call
+    /// asks again.
     fn read_keychain(&self, profile: &str) -> Result<(), ToolError> {
         use std::sync::atomic::Ordering;
         if self.keychain_read.load(Ordering::Relaxed) {
@@ -125,8 +127,8 @@ impl MedrecTools {
                 wait.as_secs()
             )))
             .with_fix(
-                "Call the tool again and ask the user to choose Always Allow when macOS asks; \
-                 this copy of medrec asks once",
+                "Ask the user to answer the macOS Keychain dialog for medrec, choosing Always \
+                 Allow so it does not ask again, then call the tool again",
             )),
             signin::Read::Failed(m) => Err(CliError::Upstream(m).into()),
         }

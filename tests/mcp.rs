@@ -438,9 +438,9 @@ fn the_binary_serves_over_stdio_and_writes_nothing() {
     let _ = std::fs::remove_dir_all(&e.root);
 }
 
-/// Serves `mcp` with `env`, calls medrec_summary once and returns the
-/// answer and how long it took.
-fn call_summary(e: &Env, env: &[(&str, &str)]) -> (Value, std::time::Duration) {
+/// Serves `mcp` with `env`, calls medrec_summary `calls` times in that one
+/// server and returns each answer with how long it took.
+fn call_summary(e: &Env, env: &[(&str, &str)], calls: usize) -> Vec<(Value, std::time::Duration)> {
     let bin = assert_cmd::cargo::cargo_bin("medrec");
     let mut cmd = std::process::Command::new(bin);
     cmd.env("XDG_CONFIG_HOME", e.root.join("config"))
@@ -475,28 +475,21 @@ fn call_summary(e: &Env, env: &[(&str, &str)]) -> (Value, std::time::Duration) {
         &mut stdout,
         json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
     );
-    let started = std::time::Instant::now();
-    let r = rpc(
-        &mut stdin,
-        &mut stdout,
-        json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
-               "params": {"name": SUMMARY, "arguments": {}}}),
-    )
-    .unwrap();
-    let took = started.elapsed();
+    let mut answers = Vec::new();
+    for id in 0..calls {
+        let started = std::time::Instant::now();
+        let r = rpc(
+            &mut stdin,
+            &mut stdout,
+            json!({"jsonrpc": "2.0", "id": 2 + id, "method": "tools/call",
+                   "params": {"name": SUMMARY, "arguments": {}}}),
+        )
+        .unwrap();
+        answers.push((r, started.elapsed()));
+    }
     drop(stdin);
     let _ = child.wait();
-    (r, took)
-}
-
-/// A stand-in for `medrec drive-keychain-probe`: hangs, as a Keychain
-/// dialog nobody answers does, or exits 3, as a missing sign-in does.
-fn probe(e: &Env, name: &str, body: &str) -> String {
-    let path = e.root.join(name);
-    std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-    path.to_string_lossy().into_owned()
+    answers
 }
 
 #[test]
@@ -508,26 +501,39 @@ fn a_drive_folders_keychain_dialog_nobody_answers_ends_the_call_with_auth() {
         "folder",
         "gdrive:home-drive/1Synthetic_folder",
     ]);
-    let hang = probe(&e, "hang", "sleep 30");
-    let (r, took) = call_summary(
+    // A sealed entry in medrec's vault, so reading the sign-in needs the
+    // vault's key; the test keychain holds none.
+    let vault = e.root.join(".config/medrec/vault");
+    std::fs::create_dir_all(&vault).unwrap();
+    std::fs::write(vault.join("another-entry.pkv"), b"sealed").unwrap();
+    let log = e.root.join("keychain-reads");
+    // The first read waits 5 s on a dialog; each call waits 2 s for it.
+    let calls = call_summary(
         &e,
         &[
-            ("MEDREC_TEST_DRIVE_PROBE", &hang),
-            ("MEDREC_TEST_AUTH_WAIT_SECS", "1"),
+            ("MEDREC_TEST_KEYCHAIN_DELAY_SECS", "5"),
+            ("MEDREC_TEST_KEYCHAIN_LOG", log.to_str().unwrap()),
+            ("MEDREC_TEST_AUTH_WAIT_SECS", "2"),
         ],
+        3,
     );
-    assert_eq!(r["result"]["isError"], true, "{r}");
-    let text = r.to_string();
-    assert!(text.contains("Always Allow"), "{r}");
-    assert!(took < std::time::Duration::from_secs(10), "{took:?}");
-    // No sign-in on this machine: the call says how to sign in.
-    let none = probe(&e, "signed-out", "exit 3");
-    let (r, _) = call_summary(&e, &[("MEDREC_TEST_DRIVE_PROBE", &none)]);
+    // The first two calls end with `auth` while the dialog is open. The
+    // second waited on the same dialog, never raising another.
+    for (r, took) in &calls[..2] {
+        assert_eq!(r["result"]["isError"], true, "{r}");
+        assert!(r.to_string().contains("Always Allow"), "{r}");
+        assert!(*took < std::time::Duration::from_secs(4), "{took:?}");
+    }
+    // Answered during the third: there is no sign-in on this machine, so
+    // the call says how to sign in.
+    let (r, _) = &calls[2];
     assert_eq!(r["result"]["isError"], true, "{r}");
     assert!(
         r.to_string()
             .contains("medrec drive login --drive-profile home-drive"),
         "{r}"
     );
+    let reads = std::fs::read_to_string(&log).unwrap().lines().count();
+    assert_eq!(reads, 1, "one read, which every call waited on");
     let _ = std::fs::remove_dir_all(&e.root);
 }

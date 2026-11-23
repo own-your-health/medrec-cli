@@ -1363,10 +1363,11 @@ dependencies = [
  "md-5 0.10.6",
  "pk-cli-auth",
  "pk-cli-config",
- "pk-cli-core 0.35.1",
+ "pk-cli-core 0.36.0",
  "pk-cli-documents",
  "pk-cli-drive",
  "pk-cli-mcp",
+ "pk-cli-secrets 0.36.0",
  "pk-cli-selfupdate",
  "pk-med-dicom",
  "pk-med-records",
@@ -1578,14 +1579,14 @@ dependencies = [
 
 [[package]]
 name = "pk-cli-auth"
-version = "0.35.1"
-source = "git+https://github.com/piekstra/cli-common?tag=v0.35.1#6621ac6f17556e9b2522a488cee03757844b9c6f"
+version = "0.36.0"
+source = "git+https://github.com/piekstra/cli-common?tag=v0.36.0#e4fcf9b163dab93ea93c1c58ac94bfa9d9c53cae"
 dependencies = [
  "chacha20poly1305",
  "clap",
  "getrandom 0.4.3",
- "pk-cli-core 0.35.1",
- "pk-cli-secrets 0.35.1",
+ "pk-cli-core 0.36.0",
+ "pk-cli-secrets 0.36.0",
  "serde",
  "serde_json",
  "sha2 0.11.1",
@@ -1594,10 +1595,10 @@ dependencies = [
 
 [[package]]
 name = "pk-cli-config"
-version = "0.35.1"
-source = "git+https://github.com/piekstra/cli-common?tag=v0.35.1#6621ac6f17556e9b2522a488cee03757844b9c6f"
+version = "0.36.0"
+source = "git+https://github.com/piekstra/cli-common?tag=v0.36.0#e4fcf9b163dab93ea93c1c58ac94bfa9d9c53cae"
 dependencies = [
- "pk-cli-core 0.35.1",
+ "pk-cli-core 0.36.0",
  "serde",
  "serde_json",
 ]
@@ -1615,8 +1616,8 @@ dependencies = [
 
 [[package]]
 name = "pk-cli-core"
-version = "0.35.1"
-source = "git+https://github.com/piekstra/cli-common?tag=v0.35.1#6621ac6f17556e9b2522a488cee03757844b9c6f"
+version = "0.36.0"
+source = "git+https://github.com/piekstra/cli-common?tag=v0.36.0#e4fcf9b163dab93ea93c1c58ac94bfa9d9c53cae"
 dependencies = [
  "clap",
  "libc",
@@ -1627,26 +1628,26 @@ dependencies = [
 
 [[package]]
 name = "pk-cli-documents"
-version = "0.35.1"
-source = "git+https://github.com/piekstra/cli-common?tag=v0.35.1#6621ac6f17556e9b2522a488cee03757844b9c6f"
+version = "0.36.0"
+source = "git+https://github.com/piekstra/cli-common?tag=v0.36.0#e4fcf9b163dab93ea93c1c58ac94bfa9d9c53cae"
 dependencies = [
- "pk-cli-core 0.35.1",
+ "pk-cli-core 0.36.0",
  "serde",
  "serde_json",
 ]
 
 [[package]]
 name = "pk-cli-drive"
-version = "0.35.1"
-source = "git+https://github.com/piekstra/cli-common?tag=v0.35.1#6621ac6f17556e9b2522a488cee03757844b9c6f"
+version = "0.36.0"
+source = "git+https://github.com/piekstra/cli-common?tag=v0.36.0#e4fcf9b163dab93ea93c1c58ac94bfa9d9c53cae"
 dependencies = [
  "clap",
  "md-5 0.11.0",
  "pk-cli-auth",
  "pk-cli-config",
- "pk-cli-core 0.35.1",
+ "pk-cli-core 0.36.0",
  "pk-cli-http",
- "pk-cli-secrets 0.35.1",
+ "pk-cli-secrets 0.36.0",
  "reqwest",
  "serde",
  "serde_json",
@@ -1655,22 +1656,22 @@ dependencies = [
 
 [[package]]
 name = "pk-cli-http"
-version = "0.35.1"
-source = "git+https://github.com/piekstra/cli-common?tag=v0.35.1#6621ac6f17556e9b2522a488cee03757844b9c6f"
+version = "0.36.0"
+source = "git+https://github.com/piekstra/cli-common?tag=v0.36.0#e4fcf9b163dab93ea93c1c58ac94bfa9d9c53cae"
 dependencies = [
  "clap",
- "pk-cli-core 0.35.1",
+ "pk-cli-core 0.36.0",
  "reqwest",
  "serde_json",
 ]
 
 [[package]]
 name = "pk-cli-mcp"
-version = "0.35.1"
-source = "git+https://github.com/piekstra/cli-common?tag=v0.35.1#6621ac6f17556e9b2522a488cee03757844b9c6f"
+version = "0.36.0"
+source = "git+https://github.com/piekstra/cli-common?tag=v0.36.0#e4fcf9b163dab93ea93c1c58ac94bfa9d9c53cae"
 dependencies = [
  "clap",
- "pk-cli-core 0.35.1",
+ "pk-cli-core 0.36.0",
  "rmcp",
  "schemars",
  "serde",
@@ -1694,12 +1695,12 @@ dependencies = [
 
 [[package]]
 name = "pk-cli-secrets"
-version = "0.35.1"
-source = "git+https://github.com/piekstra/cli-common?tag=v0.35.1#6621ac6f17556e9b2522a488cee03757844b9c6f"
+version = "0.36.0"
+source = "git+https://github.com/piekstra/cli-common?tag=v0.36.0#e4fcf9b163dab93ea93c1c58ac94bfa9d9c53cae"
 dependencies = [
  "clap",
  "keyring",
- "pk-cli-core 0.35.1",
+ "pk-cli-core 0.36.0",
  "rpassword",
  "serde",
  "serde_json",
@@ -1708,12 +1709,12 @@ dependencies = [
 
 [[package]]
 name = "pk-cli-selfupdate"
-version = "0.35.1"
-source = "git+https://github.com/piekstra/cli-common?tag=v0.35.1#6621ac6f17556e9b2522a488cee03757844b9c6f"
+version = "0.36.0"
+source = "git+https://github.com/piekstra/cli-common?tag=v0.36.0#e4fcf9b163dab93ea93c1c58ac94bfa9d9c53cae"
 dependencies = [
  "clap",
  "flate2",
- "pk-cli-core 0.35.1",
+ "pk-cli-core 0.36.0",
  "reqwest",
  "self-replace",
  "serde_json",

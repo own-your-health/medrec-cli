@@ -111,9 +111,12 @@ pub fn read(provider: &Provider, profile: Option<&str>, wait: Duration) -> Read 
 
 /// The medrec binary running: its path, size and modification time, which
 /// change when it is rebuilt or updated, as its Keychain approval does.
-/// `MEDREC_TEST_DRIVE_PROBE` (tests only) stands in for it.
+/// `MEDREC_TEST_EXE` (tests only) stands in for it.
 pub fn exe_id() -> Option<String> {
-    let exe = drive_probe_exe()?;
+    let exe = match std::env::var_os("MEDREC_TEST_EXE") {
+        Some(p) if !p.is_empty() => std::path::PathBuf::from(p),
+        _ => std::env::current_exe().ok()?,
+    };
     let meta = std::fs::metadata(&exe).ok()?;
     let mtime = meta
         .modified()
@@ -124,48 +127,39 @@ pub fn exe_id() -> Option<String> {
     Some(format!("{}:{}:{mtime}", exe.display(), meta.len()))
 }
 
-fn drive_probe_exe() -> Option<std::path::PathBuf> {
-    match std::env::var_os("MEDREC_TEST_DRIVE_PROBE") {
-        Some(p) if !p.is_empty() => Some(p.into()),
-        _ => std::env::current_exe().ok(),
-    }
-}
-
-/// medrec's own read of the Drive sign-in from the Keychain for `profile`
-/// (`medrec drive-keychain-probe`), as a bounded subprocess: an in-process
-/// Keychain read cannot be stopped, a child can. It sends no request, so a
-/// slow network never reads as an approval nobody gave: `TimedOut` is the
-/// Keychain alone. `ok` when the sign-in is there, `signed_out` when not.
+/// medrec's own read of the Drive sign-in for `profile`, in this process.
+/// The Keychain read is bounded by `wait` (`Vault::load_key` on the
+/// process's one vault, [`crate::store::shared_vault`]), so a dialog nobody
+/// answers is `TimedOut`, never a hang. Once the key is read, every later
+/// sign-in in this run uses it without asking macOS again, whether the
+/// person chose Allow or Always Allow. A call while a read still waits
+/// waits on that one, so a person never faces two dialogs. It sends no
+/// request, so a slow network never reads as an approval nobody gave. `ok`
+/// when the sign-in is there, `signed_out` when not.
 pub fn read_drive(profile: &str, wait: Duration) -> Read {
-    let Some(exe) = drive_probe_exe() else {
-        return Read::Failed("cannot find the medrec binary to check its Drive sign-in".into());
+    let vault = match crate::store::shared_vault() {
+        Ok(v) => v,
+        Err(e) => return Read::Failed(e.to_string()),
     };
-    let ran = match Bounded::new(&exe)
-        .args(["drive-keychain-probe", "--json", "--drive-profile", profile])
-        .timeout(wait)
-        .max_stdout(1024 * 1024)
-        .run()
-    {
-        Ok(r) => r,
-        Err(e) if crate::proc::is_timeout(&e) => return Read::TimedOut,
-        Err(e) => return Read::Failed(e.message().to_string()),
+    match vault.load_key(wait) {
+        Ok(pk_cli_auth::vault::KeyLoad::Waiting) => return Read::TimedOut,
+        Ok(_) => {}
+        Err(e) => return Read::Failed(e.to_string()),
+    }
+    let profile = match pk_cli_config::profile::ProfileName::parse(profile) {
+        Ok(p) => p,
+        Err(e) => return Read::Failed(e.to_string()),
     };
-    match ran.code {
-        Some(0) => Read::Read {
+    match crate::store::drive_cli().and_then(|cli| cli.account(&profile).stored()) {
+        Ok(_) => Read::Read {
             state: "ok",
             expires_at: None,
         },
-        Some(3) => Read::Read {
+        Err(e) if e.exit_code() == 3 => Read::Read {
             state: "signed_out",
             expires_at: None,
         },
-        _ => Read::Failed(format!(
-            "`medrec drive-keychain-probe` exited {}: {}",
-            ran.code
-                .map(|c| c.to_string())
-                .unwrap_or_else(|| "on a signal".into()),
-            ran.stderr_tail.lines().last().unwrap_or("no answer")
-        )),
+        Err(e) => Read::Failed(e.to_string()),
     }
 }
 

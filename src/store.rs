@@ -6,6 +6,10 @@
 //! cache; `medrec drive`), or a local directory (a test folder, a disk).
 //! medrec runs no rclone.
 
+use std::sync::{Arc, Mutex};
+
+use pk_cli_auth::vault::{KeyStore, Vault};
+use pk_cli_secrets::{CredentialStore, Secret};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -88,8 +92,81 @@ pub fn drive_cli() -> Result<DriveCli, CliError> {
         return Ok(cli);
     }
     Ok(DriveCli::new(BIN, VERSION, DRIVE_COMMAND)?
+        .with_vault(shared_vault()?)
         .profile_flag(DRIVE_PROFILE_FLAG)
         .default_scopes(&[Scope::File]))
+}
+
+/// One vault for the process. A vault reads its key from the Keychain once
+/// and keeps it, so a run that opens its folder more than once (a refresh
+/// pass, the MCP server) asks macOS at most once, whether the person chose
+/// Allow or Always Allow. `Vault::load_key` on it bounds that read
+/// ([`crate::refresh::signin::read_drive`]).
+pub fn shared_vault() -> Result<Arc<Vault>, CliError> {
+    static VAULT: Mutex<Option<Arc<Vault>>> = Mutex::new(None);
+    let mut held = VAULT.lock().unwrap_or_else(|p| p.into_inner());
+    if let Some(v) = held.as_ref() {
+        return Ok(Arc::clone(v));
+    }
+    let v = Arc::new(Vault::new(
+        Keys(pk_cli_auth::vault::keychain_for(BIN)),
+        pk_cli_auth::vault::default_dir(BIN)?,
+    ));
+    *held = Some(Arc::clone(&v));
+    Ok(v)
+}
+
+/// medrec's Keychain item, with two hooks for its tests.
+/// `MEDREC_TEST_KEYCHAIN_LOG` makes it a keychain holding no key, which
+/// writes a line to that file for each read and never reaches the real
+/// Keychain. `MEDREC_TEST_KEYCHAIN_DELAY_SECS` holds the process's first
+/// such read that long, as a dialog holds it until someone answers.
+struct Keys(CredentialStore);
+
+impl Keys {
+    fn test_log() -> Option<std::ffi::OsString> {
+        std::env::var_os("MEDREC_TEST_KEYCHAIN_LOG").filter(|p| !p.is_empty())
+    }
+}
+
+impl KeyStore for Keys {
+    fn get(&self, account: &str) -> Result<Option<Secret>, CliError> {
+        let Some(log) = Self::test_log() else {
+            return self.0.get(account);
+        };
+        use std::io::Write;
+        static DELAYED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(log)
+        {
+            let _ = writeln!(f, "read");
+        }
+        let delay = std::env::var("MEDREC_TEST_KEYCHAIN_DELAY_SECS")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok());
+        if let Some(secs) = delay {
+            if !DELAYED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_secs(secs));
+            }
+        }
+        Ok(None)
+    }
+
+    fn set(&self, account: &str, value: &Secret) -> Result<(), CliError> {
+        if Self::test_log().is_some() {
+            return Err(CliError::Keychain("a test's keychain takes no key".into()));
+        }
+        self.0.set(account, value)
+    }
+
+    fn delete(&self, account: &str) -> Result<bool, CliError> {
+        if Self::test_log().is_some() {
+            return Ok(false);
+        }
+        self.0.delete(account)
+    }
 }
 
 /// The Drive store at `spec`, every request bounded by `budget`.

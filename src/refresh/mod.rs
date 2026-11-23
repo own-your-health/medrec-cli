@@ -7,11 +7,12 @@
 //! that hangs (a Keychain approval nobody gives) is stopped after
 //! [`signin::SCHEDULED_WAIT`] and the source marked as needing a person,
 //! with the command to run. It is not tried again until that has run.
-//! medrec's own Drive sign-in is held to the same rule: a scheduled pass by
-//! a binary not yet known to read it without an approval (a new build, an
-//! update) reads it first in a bounded child (`medrec drive-keychain-probe`,
-//! the Keychain only, no request), and a read that hangs stops the pass,
-//! naming the command a person runs. A slow network is an ordinary error.
+//! medrec's own Drive sign-in is held to the same rule: a scheduled pass
+//! reads it first, waiting at most [`signin::SCHEDULED_WAIT`] for the
+//! Keychain (`Vault::load_key`, no request), and a read that hangs stops the
+//! pass, naming the command a person runs. The binary that hung is not asked again until
+//! that has run. The pass shares one vault, so the folder's later reads in
+//! it use the key already read. A slow network is an ordinary error.
 
 pub mod contract;
 pub mod launchd;
@@ -488,16 +489,17 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
     let started = time::now();
     let exe = signin::exe_id();
     if let (Mode::Scheduled, Location::Drive(spec)) = (mode, &location) {
-        if exe.is_none() || local.drive_ready != exe {
-            if let Some(command) = drive_gate(cfg, spec, &mut local, &exe)? {
-                state::save(&location, &local)?;
-                return Ok(PassReport {
-                    status: "needs_person".into(),
-                    command: Some(command),
-                    ..PassReport::default()
-                });
-            }
+        let blocked = local.drive_blocked.clone();
+        let gate = drive_gate(cfg, spec, &mut local, &exe)?;
+        if local.drive_blocked != blocked {
             state::save(&location, &local)?;
+        }
+        if let Some(command) = gate {
+            return Ok(PassReport {
+                status: "needs_person".into(),
+                command: Some(command),
+                ..PassReport::default()
+            });
         }
     }
     let store = Store::open(&location, Reads::Fresh, cfg.store_budget())?;
@@ -1024,9 +1026,8 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
     }
     report.status_written = writer.wrote;
     if mode == Mode::Manual && matches!(location, Location::Drive(_)) {
-        // A person's pass read the Drive sign-in in this process: this
-        // binary needs no approval for it from now on.
-        local.drive_ready = exe;
+        // A person's pass read the Drive sign-in: a scheduled pass may ask
+        // again, still bounded.
         local.drive_blocked = None;
     }
     state::save(&location, &local)?;
@@ -1053,19 +1054,12 @@ fn drive_gate(
     }
     let profile = spec.profile().as_str();
     match signin::read_drive(profile, signin::scheduled_wait()) {
-        signin::Read::Read { state, .. } if signin::usable(state) => {
-            local.drive_ready = exe.clone();
+        // Signed in or not, the read answered: the pass goes on, and a
+        // missing sign-in is reported where the folder is opened.
+        signin::Read::Read { .. } => {
             local.drive_blocked = None;
             Ok(None)
         }
-        signin::Read::Read { state, .. } => Err(CliError::Auth(format!(
-            "the records folder's Drive sign-in (`{profile}`) is {state}"
-        ))
-        .with_remedy(format!(
-            "sign in again with `{} login {} {profile}`",
-            crate::store::DRIVE_COMMAND,
-            crate::store::DRIVE_PROFILE_FLAG
-        ))),
         signin::Read::TimedOut => {
             local.drive_blocked = exe.clone();
             Ok(Some(command))

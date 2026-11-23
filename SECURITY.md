@@ -35,8 +35,9 @@ them as bounded subprocesses and passes only a patient id, an organization
 and a date.
 
 The sign-in asks Google for `drive.file` unless given `--scope full`. Under
-`drive.file` its token reaches only the files medrec's own OAuth client
-created, not the rest of the Drive. The OAuth client is the household's
+`drive.file` its token reaches only the files a client of the household's
+Cloud project created, not the rest of the Drive: every OAuth client in one
+Cloud project shares that access. The OAuth client is the household's
 own, a Desktop app client in its Cloud project; Google treats such a
 client's secret as not confidential, and PKCE protects each sign-in.
 
@@ -56,12 +57,15 @@ client's secret as not confidential, and PKCE protects each sign-in.
   hangs on a Keychain approval is stopped after 30 seconds, and the source is
   not tried again in the background until a person runs `medrec refresh
   sign-in <id>`, so the LaunchAgent never piles up dialogs. medrec's own
-  Drive sign-in is held to the same rule: a scheduled pass by a binary not
-  yet known to read it without an approval (a new build, an update) first
-  reads it in a child process stopped after 30 seconds, which reads the
-  Keychain and sends nothing to Google. A read that hangs
-  ends the pass, and no scheduled pass by that binary asks again until a
-  person runs `medrec --profile <NAME> refresh` at the screen.
+  Drive sign-in is held to the same rule: a scheduled pass reads it first,
+  waiting at most 30 seconds for the Keychain and sending nothing to
+  Google. A read that does not answer in time (a new build or an update
+  that macOS has not yet been allowed to let read the key) ends the pass,
+  and no scheduled pass by that binary asks again until a person runs
+  `medrec --profile <NAME> refresh` at the screen. One process reads the
+  key once: every later sign-in in that run uses it, so a person's "Allow"
+  covers the whole run, and "Always Allow" covers that binary from then
+  on.
 - It never runs a disc's bundled viewer. `images open` hands the viewer a
   local folder (Weasis through `weasis://$dicom:get -l <folder>`), and makes no
   network call with study data. Weasis's own update check is a Weasis setting;
