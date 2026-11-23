@@ -286,10 +286,7 @@ pub fn sync(f: &Folder, all: bool) -> Result<Synced, CliError> {
             store.display_path(DIR)
         );
     }
-    for (rel, bytes) in uploads {
-        store.write_bytes(&rel, bytes)?;
-        out.files_written += 1;
-    }
+    out.files_written = upload(store, &uploads)?;
     let index_bytes = json(&index);
     if old_text.as_deref().map(str::as_bytes) != Some(index_bytes.as_slice()) {
         store.write_bytes(INDEX, &index_bytes)?;
@@ -346,6 +343,17 @@ pub fn sync(f: &Folder, all: bool) -> Result<Synced, CliError> {
         }
     }
     Ok(out)
+}
+
+/// Upload every view, stopping at the first error; the caller writes
+/// `views.json` only once all are there. On Drive, pk-cli-drive sends a few
+/// at a time within its own limit. How many were sent.
+fn upload(store: &crate::store::Store, files: &[(String, &Vec<u8>)]) -> Result<usize, CliError> {
+    let batch: Vec<(&str, &[u8])> = files
+        .iter()
+        .map(|(rel, bytes)| (rel.as_str(), bytes.as_slice()))
+        .collect();
+    store.write_many(&batch)
 }
 
 fn parse<T: serde::de::DeserializeOwned>(text: &str, rel: &str) -> Result<T, CliError> {
@@ -920,6 +928,40 @@ mod tests {
 
     fn days(d: &[Option<&str>]) -> Vec<Option<String>> {
         d.iter().map(|x| x.map(str::to_string)).collect()
+    }
+
+    #[test]
+    fn views_upload_every_file_and_stop_at_the_first_failure() {
+        use crate::store::{Location, Reads, Store};
+        let dir = std::env::temp_dir().join(format!("medrec-upload-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let st = Store::open(
+            &Location::Dir(dir.clone()),
+            Reads::Fresh,
+            Duration::from_secs(60),
+        )
+        .unwrap();
+        let bytes: Vec<Vec<u8>> = (0..40).map(|i| format!("view {i}").into_bytes()).collect();
+        let files: Vec<(String, &Vec<u8>)> = bytes
+            .iter()
+            .enumerate()
+            .map(|(i, b)| (format!("views/p_x/v-{i}.json"), b))
+            .collect();
+        assert_eq!(upload(&st, &files).unwrap(), 40);
+        for (i, b) in bytes.iter().enumerate() {
+            assert_eq!(
+                &std::fs::read(dir.join(format!("views/p_x/v-{i}.json"))).unwrap(),
+                b
+            );
+        }
+        // A file where a directory must go: that upload fails, and so does
+        // the whole, so views.json would not be written.
+        std::fs::write(dir.join("views/p_y"), "not a directory").unwrap();
+        let mut bad = files.clone();
+        bad.insert(5, ("views/p_y/v.json".to_string(), &bytes[0]));
+        assert!(upload(&st, &bad).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

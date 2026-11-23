@@ -1,7 +1,7 @@
 [package]
 name = "medrec-cli"
 description = "A household's medical records in a plain Drive folder: people, intake of scans and files with local OCR, imaging studies, provider and insurer imports, timelines, search and notes."
-version = "0.8.0"
+version = "0.8.1"
 edition = "2021"
 # pk-cli-drive needs 1.89 (`File::lock`).
 rust-version = "1.89"
@@ -19,16 +19,16 @@ name = "medrec"
 path = "src/main.rs"
 
 [dependencies]
-pk-cli-core = { git = "https://github.com/piekstra/cli-common", tag = "v0.36.1" }
-pk-cli-config = { git = "https://github.com/piekstra/cli-common", tag = "v0.36.1" }
-pk-cli-selfupdate = { git = "https://github.com/piekstra/cli-common", tag = "v0.36.1" }
-pk-cli-auth = { git = "https://github.com/piekstra/cli-common", tag = "v0.36.1" }
-pk-cli-secrets = { git = "https://github.com/piekstra/cli-common", tag = "v0.36.1" }
-pk-cli-documents = { git = "https://github.com/piekstra/cli-common", tag = "v0.36.1" }
-pk-cli-drive = { git = "https://github.com/piekstra/cli-common", tag = "v0.36.1", features = ["google"] }
+pk-cli-core = { git = "https://github.com/piekstra/cli-common", tag = "v0.37.6" }
+pk-cli-config = { git = "https://github.com/piekstra/cli-common", tag = "v0.37.6" }
+pk-cli-selfupdate = { git = "https://github.com/piekstra/cli-common", tag = "v0.37.6" }
+pk-cli-auth = { git = "https://github.com/piekstra/cli-common", tag = "v0.37.6" }
+pk-cli-secrets = { git = "https://github.com/piekstra/cli-common", tag = "v0.37.6" }
+pk-cli-documents = { git = "https://github.com/piekstra/cli-common", tag = "v0.37.6" }
+pk-cli-drive = { git = "https://github.com/piekstra/cli-common", tag = "v0.37.6", features = ["google"] }
 # `medrec mcp`: read-only tools over stdio for Claude Desktop and Claude Code.
 # No `http` feature: the records are served to a local client only.
-pk-cli-mcp = { git = "https://github.com/piekstra/cli-common", tag = "v0.36.1", features = ["stdio"] }
+pk-cli-mcp = { git = "https://github.com/piekstra/cli-common", tag = "v0.37.6", features = ["stdio"] }
 schemars = "1"
 pk-med-records = { git = "https://github.com/own-your-health/medical-common", tag = "v0.6.6" }
 # test-util: the synthetic study writer, which testdata.rs and the synth
@@ -47,8 +47,8 @@ regex = "1"
 
 [dev-dependencies]
 # The fake Google Drive server the store tests run against; no network.
-pk-cli-drive = { git = "https://github.com/piekstra/cli-common", tag = "v0.36.1", features = ["fake-google"] }
-pk-cli-mcp = { git = "https://github.com/piekstra/cli-common", tag = "v0.36.1", features = ["test-util"] }
+pk-cli-drive = { git = "https://github.com/piekstra/cli-common", tag = "v0.37.6", features = ["fake-google"] }
+pk-cli-mcp = { git = "https://github.com/piekstra/cli-common", tag = "v0.37.6", features = ["test-util"] }
 assert_cmd = "2"
 predicates = "3"
 # Follows the fake Drive server's consent in the store tests' sign-in.

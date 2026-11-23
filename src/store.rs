@@ -337,6 +337,20 @@ impl Store {
         self.backend.put_file(&local, rel)
     }
 
+    /// Write several files (binary-safe), each replacing any file at its
+    /// `rel`, stopping at the first failure. On a local directory one after
+    /// another, owner-only; on Drive a few at a time within pk-cli-drive's
+    /// limit, skipping a file whose MD5 already matches. How many were sent.
+    pub fn write_many(&self, files: &[(&str, &[u8])]) -> Result<usize, CliError> {
+        if let Location::Dir(_) = &self.location {
+            for (rel, bytes) in files {
+                self.write_bytes(rel, bytes)?;
+            }
+            return Ok(files.len());
+        }
+        self.backend.write_many(files)
+    }
+
     /// Upload a local file (binary-safe), replacing any file at `rel`. On a
     /// local directory the file is owner-only (0600) in owner-only folders.
     pub fn put_file(&self, local: &Path, rel: &str) -> Result<(), CliError> {
