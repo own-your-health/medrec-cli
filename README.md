@@ -112,7 +112,9 @@ consent. How long a provider's sign-in lasts is in its README. Everything
 else runs without you.
 
 `init` adopts an existing medrec folder, and refuses a folder that holds
-other files unless given `--allow-other-files`. The folder's layout and every file format
+other files unless given `--allow-other-files`. A folder that holds a
+`views` folder, even an empty one, is refused either way: medrec writes its
+views there. The folder's layout and every file format
 are in [docs/data-contract.md](docs/data-contract.md).
 
 ### Profiles

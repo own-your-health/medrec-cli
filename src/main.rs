@@ -269,7 +269,8 @@ struct InitArgs {
     /// `gdrive:<drive profile>/<folder id>` (canonical; `medrec drive folder
     /// create` makes one) or a local directory.
     location: String,
-    /// Set up medrec in a folder that already holds other files.
+    /// Set up medrec in a folder that already holds other files, except a
+    /// `views` folder, where medrec writes its views.
     #[arg(long)]
     allow_other_files: bool,
 }
