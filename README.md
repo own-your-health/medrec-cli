@@ -165,6 +165,9 @@ any other CLI on that profile is added with `medrec config set providers
 | [`oneblood`](https://github.com/own-your-health/oneblood-cli) | OneBlood | A donor's blood type and readings | None: a member site ([README](https://github.com/own-your-health/oneblood-cli#readme)) |
 | [`fertemr`](https://github.com/own-your-health/fertemr-cli) | Fertility clinics on the FERT EMR | Results, visits, documents, messages | None: a member site ([README](https://github.com/own-your-health/fertemr-cli#readme)) |
 | [`salve`](https://github.com/own-your-health/salve-cli) | The Salve fertility app | Documents, forms, treatment records | None: a member site ([README](https://github.com/own-your-health/salve-cli#readme)) |
+| [`peryourhealth`](https://github.com/own-your-health/peryourhealth-cli) | PerYourHealth (Optum) | Medical bills | None: a member site ([README](https://github.com/own-your-health/peryourhealth-cli#readme)) |
+| [`flywire`](https://github.com/own-your-health/flywire-cli) | Flywire patient portals | Medical bills | None: a member site ([README](https://github.com/own-your-health/flywire-cli#readme)) |
+| [`embryooptions`](https://github.com/own-your-health/embryooptions-cli) | Embryo Options | Embryo and egg storage bills | None: a member site ([README](https://github.com/own-your-health/embryooptions-cli#readme)) |
 
 A developer app is free and registered once, by the person who uses the
 CLI; each registration doc walks through the vendor's form, and the CLI's
@@ -200,6 +203,7 @@ medrec meds --active
 medrec note add Robin "Ask about the recheck" --tag question --about <record id>
 
 medrec verify                                   # every indexed file against the index
+medrec reindex                                  # claims shaped again from their raw files, after an upgrade
 medrec backup --to "/Volumes/Backup/Medical Records"
 ```
 
@@ -404,7 +408,7 @@ supported.
 | Tool | What it answers |
 |---|---|
 | `medrec_summary` | The household's people. With `person`: their current medicines, conditions and allergies, immunizations, the latest result of each test with the lab's range and flag, recent visits, and bills with an amount due |
-| `medrec_search` | Documents, records, imaging studies and notes holding every word of a query |
+| `medrec_search` | Documents, records, imaging studies and notes holding every word of a query; a query naming lab tests (`blood tests`, `labs`) also finds every lab result, report and lab claim |
 | `medrec_records` | One kind, newest first: `medications`, `conditions`, `allergies`, `immunizations`, `visits`, `procedures`, `results` (with `name`, one test over time), `tests` (the latest result of each), `reports`, `claims`, `coverage`, `bills`, `documents`, `notes` or `timeline`; `active` keeps current ones |
 | `medrec_document` | A filed document's extracted text, in parts of up to 16,000 characters, with page breaks marked |
 
@@ -415,8 +419,7 @@ name when asked. The extension carries its own medrec binary, reads the same
 `rclone` in `/opt/homebrew/bin`, `/usr/local/bin` and `/usr/bin`.
 
 ```sh
-gh release download v0.4.0 -R own-your-health/medrec-cli -p 'medrec-*.mcpb' -D /tmp
-open /tmp/medrec-0.4.0.mcpb
+d=$(mktemp -d) && gh release download -R own-your-health/medrec-cli -p 'medrec-*.mcpb' -D "$d" && open "$d"/medrec-*.mcpb
 ```
 
 Claude Code: `claude mcp add medrec -- medrec --profile <NAME> mcp`.

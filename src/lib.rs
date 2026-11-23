@@ -3,6 +3,7 @@
 //! the tests can reach them.
 
 pub mod bill;
+pub mod claims;
 pub mod config;
 pub mod dicom;
 pub mod documents;
@@ -22,6 +23,7 @@ pub mod people;
 pub mod proc;
 pub mod prompt;
 pub mod refresh;
+pub mod reindex;
 pub mod review;
 pub mod store;
 pub mod stream;

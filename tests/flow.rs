@@ -577,8 +577,8 @@ fn an_import_files_records_and_documents_and_is_idempotent() {
     );
     let claims = e.ok(&["timeline", "--kind", "claim"]);
     assert_eq!(
-        claims["items"][0]["detail"],
-        "billed 150.0 USD, plan paid 110.0 USD"
+        claims["items"][0]["detail"], "billed 150.0 USD, plan paid 110.0 USD, your share 25.0 USD",
+        "the payer gives no member liability, so the share is its parts"
     );
     let hits = e.ok(&["search", "hemo"]);
     assert!(hits["items"]
@@ -2281,4 +2281,182 @@ fn a_statement_filed_by_hand_and_the_portals_copy_are_one_statement() {
         "{again}"
     );
     let _ = std::fs::remove_dir_all(&base.root);
+}
+
+/// The synthetic stream with a second, lab line on the claim (CPT 80053,
+/// dated the day of the visit and its results), a member-liability total,
+/// a benefit period and a diagnosis.
+fn with_lab_line() -> String {
+    medrec::testdata::STREAM
+        .lines()
+        .map(|l| {
+            let mut v: Value = serde_json::from_str(l).unwrap();
+            if v["resourceType"] == "ExplanationOfBenefit" {
+                let usd = |a: f64| serde_json::json!({"value": a, "currency": "USD"});
+                let adj = |code: &str, text: &str, a: f64| {
+                    serde_json::json!({"category": {"coding": [{"code": code}], "text": text}, "amount": usd(a)})
+                };
+                v["item"].as_array_mut().unwrap().push(serde_json::json!({
+                    "sequence": 2,
+                    "productOrService": {"coding": [{"system": "http://www.ama-assn.org/go/cpt", "code": "80053", "display": "Metabolic panel"}]},
+                    "servicedDate": "2026-03-04",
+                    "adjudication": [adj("submitted", "Billed", 40.0), adj("benefit", "Plan paid", 30.0), adj("copay", "Copay", 5.5)],
+                }));
+                v["total"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(adj("memberliability", "You owe", 30.5));
+                v["benefitPeriod"] = serde_json::json!({"start": "2026-01-01", "end": "2026-12-31"});
+                v["diagnosis"] = serde_json::json!([{
+                    "sequence": 1,
+                    "diagnosisCodeableConcept": {"coding": [{"system": "http://hl7.org/fhir/sid/icd-10-cm", "code": "Z00.00", "display": "General adult examination"}]},
+                }]);
+            }
+            format!("{}\n", serde_json::to_string(&v).unwrap())
+        })
+        .collect()
+}
+
+#[test]
+fn a_claim_is_titled_priced_by_category_and_linked_to_its_visit_and_results() {
+    let base = Env::new("claims");
+    setup(&base);
+    let e = provider_env(&base, &with_lab_line());
+    let import = || {
+        e.ok(&[
+            "import",
+            "--from",
+            "fakeprov",
+            "--from-profile",
+            "adult1",
+            "--patient",
+            "pat-0001",
+            "--person",
+            "Robin",
+        ])
+    };
+    import();
+    let index: Value = serde_json::from_str(
+        &std::fs::read_to_string(e.records().join("Robin Testperson/index.json")).unwrap(),
+    )
+    .unwrap();
+    let records = index["records"].as_array().unwrap();
+    let id_of = |kind: &str| -> Vec<String> {
+        records
+            .iter()
+            .filter(|r| r["kind"] == kind)
+            .map(|r| r["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let claim = records.iter().find(|r| r["kind"] == "claim").unwrap();
+    let f = &claim["fields"];
+    assert_eq!(
+        claim["display"],
+        "Office visit and Metabolic panel · Example Health"
+    );
+    assert_eq!(f["type"], "professional", "the type stays in fields.type");
+    assert_eq!(f["category"], "mixed");
+    assert_eq!(f["items"][0]["category"], "visit");
+    assert_eq!(f["items"][1]["category"], "lab");
+    assert_eq!(f["items"][0]["amounts"]["copay"]["amount"], "25.0");
+    let amount = |k: &str| f["amounts"][k]["amount"].as_str().unwrap_or("").to_string();
+    assert_eq!(amount("billed"), "150.0", "a total wins over the lines");
+    assert_eq!(amount("plan_paid"), "140.00", "no total: the lines' sum");
+    assert_eq!(amount("copay"), "30.50");
+    assert_eq!(amount("you_owe"), "30.5");
+    assert_eq!(amount("allowed"), "", "missing means unknown");
+    assert_eq!(f["benefit_period"]["start"], "2026-01-01");
+    assert_eq!(f["diagnoses"][0]["code"]["code"], "Z00.00");
+    assert_eq!(f["visit"], id_of("encounter")[0].as_str());
+    let mut labs = id_of("result");
+    labs.extend(id_of("report"));
+    let mut linked: Vec<String> = f["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
+    labs.sort();
+    linked.sort();
+    assert_eq!(linked, labs);
+    assert_eq!(f["items"][0]["records"][0], f["visit"]);
+    assert_eq!(
+        f["items"][1]["records"].as_array().unwrap().len(),
+        labs.len()
+    );
+
+    // The links are not the claim's own content: importing again leaves it
+    // unchanged.
+    let again = import();
+    assert_eq!(again["records_updated"], 0, "{again}");
+
+    let claims = e.ok(&["timeline", "--kind", "claim"]);
+    assert_eq!(
+        claims["items"][0]["detail"],
+        "billed 150.0 USD, plan paid 140.00 USD, you owe 30.5 USD"
+    );
+    // "blood tests" is in no record's text, and names the lab results and
+    // the claim for them.
+    let hits = e.ok(&["search", "blood tests"]);
+    let kinds: Vec<&str> = hits["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|h| h["kind"].as_str().unwrap())
+        .collect();
+    assert!(
+        kinds.contains(&"result") && kinds.contains(&"claim"),
+        "{kinds:?}"
+    );
+    assert!(!kinds.contains(&"encounter"), "{kinds:?}");
+
+    // A claim filed in an earlier shape, which no source serves again, is
+    // shaped again from its raw file.
+    let path = e.records().join("Robin Testperson/index.json");
+    let mut old: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let want = old.clone();
+    for r in old["records"].as_array_mut().unwrap() {
+        if r["kind"] == "claim" {
+            r["display"] = serde_json::json!("Professional");
+            let f = r["fields"].as_object_mut().unwrap();
+            for k in [
+                "amounts",
+                "category",
+                "benefit_period",
+                "diagnoses",
+                "visit",
+                "results",
+            ] {
+                f.remove(k);
+            }
+        }
+    }
+    std::fs::write(&path, serde_json::to_string(&old).unwrap()).unwrap();
+    let r = e.ok(&["reindex"]);
+    assert_eq!(
+        (r["claims"].as_u64(), r["reshaped"].as_u64()),
+        (Some(1), Some(1)),
+        "{r}"
+    );
+    let now: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let claim_of = |v: &Value| {
+        v["records"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["kind"] == "claim")
+            .cloned()
+            .unwrap()
+    };
+    assert_eq!(claim_of(&now)["display"], claim_of(&want)["display"]);
+    assert_eq!(
+        claim_of(&now)["fields"],
+        claim_of(&want)["fields"],
+        "links included"
+    );
+    assert_eq!(
+        e.ok(&["reindex"])["reshaped"],
+        0,
+        "a second run changes nothing"
+    );
 }

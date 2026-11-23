@@ -381,7 +381,7 @@ impl Toolset for MedrecTools {
                 SEARCH,
                 "Search records",
                 "Finds documents, records, studies and notes holding every word of query, best \
-                 first. Use it when a question names a doctor, test, medicine or clinic. \
+                 first; labs or blood tests also finds every lab result. Use it when a question names a doctor, test, medicine or clinic. \
                  Returns items with person, kind, id, date, title and snippet.",
             )
             .input::<SearchArgs>()
@@ -953,9 +953,18 @@ fn record_item(h: &Household, person: &str, r: Record, detailed: bool) -> Item {
     item
 }
 
-/// What a claim leaves the member to pay: its total in CARIN's
-/// `memberliability` category, or one named for the patient's share.
+/// What a claim imported by an earlier medrec, with no `amounts`, leaves the
+/// member to pay: its total named for the member's share. A claim with
+/// `amounts` says it in its detail already, as "you owe" for the payer's
+/// own figure or "your share" for medrec's sum of its parts.
 fn member_owes(fields: &Map<String, Value>) -> Option<String> {
+    if fields
+        .get("amounts")
+        .and_then(Value::as_object)
+        .is_some_and(|a| !a.is_empty())
+    {
+        return None;
+    }
     fields
         .get("total")
         .and_then(Value::as_array)
@@ -1008,6 +1017,13 @@ mod tests {
         .unwrap();
         assert_eq!(member_owes(&fields).as_deref(), Some("40.00 USD"));
         assert_eq!(member_owes(&Map::new()), None);
+        // A claim with amounts says it in its own detail, labelled.
+        let mut shaped = fields.clone();
+        shaped.insert(
+            "amounts".into(),
+            serde_json::json!({"copay": {"amount": "30.00", "currency": "USD"}}),
+        );
+        assert_eq!(member_owes(&shaped), None);
     }
 }
 
