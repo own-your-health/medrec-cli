@@ -588,6 +588,15 @@ answered, the server reads the Keychain again only if the key is replaced
 d=$(mktemp -d) && gh release download -R own-your-health/medrec-cli -p 'medrec-*.mcpb' -D "$d" && open "$d"/medrec-*.mcpb
 ```
 
+Claude Desktop can refuse the extension: "Extension
+local.mcpb.own-your-health.medrec is blocked by a security blocklist: Could
+not verify extension with allowlist service". Desktop checks a local
+extension against Anthropic's allowlist service where that check is on, and
+medrec's extension is not on the list. There, use a claude.ai custom
+connector that reads the folder, such as
+[own-your-health/connector](https://github.com/own-your-health/connector),
+which Desktop lists too, or Claude Code below.
+
 Claude Code: `claude mcp add medrec -- medrec --profile <NAME> mcp`.
 
 What the server does and does not do:
