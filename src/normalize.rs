@@ -5,6 +5,7 @@
 
 use serde_json::{json, Map, Value};
 
+use crate::claims;
 use crate::model::{Code, Provenance, Record};
 
 pub const LOINC: &str = "http://loinc.org";
@@ -286,6 +287,11 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
                 "billable_period",
                 r.get("billablePeriod").cloned(),
             );
+            put(
+                &mut fields,
+                "benefit_period",
+                r.get("benefitPeriod").cloned(),
+            );
             let totals: Vec<Value> = r
                 .get("total")
                 .and_then(Value::as_array)
@@ -305,7 +311,25 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
             put(&mut fields, "type", r.get("type").map(concept_text));
             put_str(&mut fields, "use", path_str(r, "use"));
             put_str(&mut fields, "facility", path_str(r, "facility.display"));
-            put(&mut fields, "items", eob_items(r));
+            let pharmacy = is_pharmacy(r);
+            let items = eob_items(r, pharmacy);
+            let lines = items
+                .as_ref()
+                .and_then(Value::as_array)
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
+            put_str(
+                &mut fields,
+                "category",
+                claims::claim_category(lines, pharmacy),
+            );
+            let totals = claims::amounts(eob_entries(r.get("total")));
+            let amounts = claims::claim_amounts(totals, lines, money(path(r, "payment.amount")));
+            if !amounts.is_empty() {
+                fields.insert("amounts".into(), Value::Object(amounts));
+            }
+            put(&mut fields, "items", items);
+            put(&mut fields, "diagnoses", eob_diagnoses(r));
             // A pharmacy claim (CARIN's Pharmacy EOB) carries the fill on
             // `supportingInfo`.
             for (key, code) in [
@@ -328,13 +352,12 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
         }
         _ => {}
     }
-    // A pharmacy claim is named for what was filled, not "Pharmacy".
-    let filled = (rt == "ExplanationOfBenefit"
-        && code.as_ref().and_then(|c| c.code.as_deref()) == Some("pharmacy"))
-    .then(|| path(r, "item.0.productOrService").and_then(|c| codeable(c, &[RXNORM, NDC])))
-    .flatten()
-    .and_then(|c| c.display);
-    let display = filled
+    // A claim is named for what it paid for and who: a fill for its drug,
+    // other claims for their lines' services, else their category.
+    let claim_title = (rt == "ExplanationOfBenefit")
+        .then(|| claim_title(r, &fields))
+        .flatten();
+    let display = claim_title
         .or_else(|| code.as_ref().and_then(|c| c.display.clone()))
         .or_else(|| match rt {
             "MedicationRequest" | "MedicationStatement" | "MedicationDispense" => {
@@ -575,8 +598,64 @@ fn supporting_value(r: &Value, code: &str) -> Option<Value> {
         .cloned()
 }
 
-/// Each claim line: its service code, dates and adjudication amounts.
-fn eob_items(r: &Value) -> Option<Value> {
+/// A pharmacy claim: of type `pharmacy` (CARIN's Pharmacy EOB).
+fn is_pharmacy(r: &Value) -> bool {
+    r.get("type")
+        .and_then(|t| t.get("coding"))
+        .and_then(Value::as_array)
+        .is_some_and(|cs| {
+            cs.iter()
+                .any(|k| k.get("code").and_then(Value::as_str) == Some("pharmacy"))
+        })
+}
+
+/// An EOB's or a line's `total` or `adjudication` entries as (raw
+/// category, money) pairs, for `claims::amounts`.
+fn eob_entries(list: Option<&Value>) -> impl Iterator<Item = (&Value, Option<Value>)> {
+    list.and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|e| Some((e.get("category")?, money(e.get("amount")))))
+}
+
+/// A claim's title (`claims::title`): a fill by its drug (RxNorm or NDC
+/// display), other claims by their lines' services.
+fn claim_title(r: &Value, fields: &Map<String, Value>) -> Option<String> {
+    let lines = r
+        .get("item")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+    let prefer: &[&str] = if is_pharmacy(r) { &[RXNORM, NDC] } else { &[] };
+    let names: Vec<String> = lines
+        .iter()
+        .filter_map(|l| l.get("productOrService").and_then(|c| codeable(c, prefer)))
+        .filter_map(|c| c.display)
+        .collect();
+    claims::title(
+        names.iter().map(String::as_str),
+        fields.get("category").and_then(Value::as_str),
+        fields.get("provider").and_then(Value::as_str),
+    )
+}
+
+/// A claim's diagnoses: `[{sequence, code}]`, ICD-10 preferred.
+fn eob_diagnoses(r: &Value) -> Option<Value> {
+    let list: Vec<Value> = r
+        .get("diagnosis")
+        .and_then(Value::as_array)?
+        .iter()
+        .filter_map(|d| {
+            let code = codeable(d.get("diagnosisCodeableConcept")?, &[ICD10])?;
+            Some(json!({"sequence": d.get("sequence"), "code": code}))
+        })
+        .collect();
+    (!list.is_empty()).then(|| Value::Array(list))
+}
+
+/// Each claim line: its service code, category, dates and amounts, with
+/// its adjudication entries as the payer wrote them.
+fn eob_items(r: &Value, pharmacy: bool) -> Option<Value> {
     let items: Vec<Value> = r
         .get("item")
         .and_then(Value::as_array)?
@@ -595,8 +674,11 @@ fn eob_items(r: &Value) -> Option<Value> {
                     })
                 })
                 .collect();
+            let amounts = claims::amounts(eob_entries(it.get("adjudication")));
             json!({
                 "sequence": it.get("sequence"),
+                "category": claims::item_category(it, pharmacy),
+                "amounts": (!amounts.is_empty()).then_some(amounts),
                 "service": it.get("productOrService").and_then(|c| codeable(c, &[])),
                 "serviced": it.get("servicedDate").or_else(|| it.get("servicedPeriod")),
                 "quantity": quantity(it.get("quantity")),
@@ -854,8 +936,13 @@ mod tests {
         assert_eq!(item["service"]["code"], "00000-0001-01");
         assert_eq!(item["quantity"], json!({"value": 30, "unit": "TAB"}));
         assert_eq!(f["payment"]["amount"], "32.5");
-        // Named for the fill.
-        assert_eq!(rec.display, "Synthetic tablet 10 mg, bottle of 30");
+        // Named for the fill and the pharmacy.
+        assert_eq!(
+            rec.display,
+            "Synthetic tablet 10 mg, bottle of 30 · Example Mail Pharmacy"
+        );
+        assert_eq!(f["category"], "pharmacy");
+        assert_eq!(f["items"][0]["category"], "pharmacy");
 
         // Two claims of a type on one day are two records; the same claim
         // from another source, by its identifier, is one.

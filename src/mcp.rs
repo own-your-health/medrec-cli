@@ -953,9 +953,12 @@ fn record_item(h: &Household, person: &str, r: Record, detailed: bool) -> Item {
     item
 }
 
-/// What a claim leaves the member to pay: its total in CARIN's
-/// `memberliability` category, or one named for the patient's share.
+/// What a claim leaves the member to pay: its `amounts.you_owe`, or, on a
+/// claim imported by an earlier medrec, its total named for the member's share.
 fn member_owes(fields: &Map<String, Value>) -> Option<String> {
+    if let Some(a) = fields.get("amounts").and_then(|a| a.get("you_owe")) {
+        return Some(views::value_text(a)).filter(|s| !s.is_empty());
+    }
     fields
         .get("total")
         .and_then(Value::as_array)

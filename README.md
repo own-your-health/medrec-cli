@@ -165,6 +165,9 @@ any other CLI on that profile is added with `medrec config set providers
 | [`oneblood`](https://github.com/own-your-health/oneblood-cli) | OneBlood | A donor's blood type and readings | None: a member site ([README](https://github.com/own-your-health/oneblood-cli#readme)) |
 | [`fertemr`](https://github.com/own-your-health/fertemr-cli) | Fertility clinics on the FERT EMR | Results, visits, documents, messages | None: a member site ([README](https://github.com/own-your-health/fertemr-cli#readme)) |
 | [`salve`](https://github.com/own-your-health/salve-cli) | The Salve fertility app | Documents, forms, treatment records | None: a member site ([README](https://github.com/own-your-health/salve-cli#readme)) |
+| [`peryourhealth`](https://github.com/own-your-health/peryourhealth-cli) | PerYourHealth (Optum) | Medical bills | None: a member site ([README](https://github.com/own-your-health/peryourhealth-cli#readme)) |
+| [`flywire`](https://github.com/own-your-health/flywire-cli) | Flywire patient portals | Medical bills | None: a member site ([README](https://github.com/own-your-health/flywire-cli#readme)) |
+| [`embryooptions`](https://github.com/own-your-health/embryooptions-cli) | Embryo Options | Embryo and egg storage bills | None: a member site ([README](https://github.com/own-your-health/embryooptions-cli#readme)) |
 
 A developer app is free and registered once, by the person who uses the
 CLI; each registration doc walks through the vendor's form, and the CLI's
@@ -415,8 +418,7 @@ name when asked. The extension carries its own medrec binary, reads the same
 `rclone` in `/opt/homebrew/bin`, `/usr/local/bin` and `/usr/bin`.
 
 ```sh
-gh release download v0.4.0 -R own-your-health/medrec-cli -p 'medrec-*.mcpb' -D /tmp
-open /tmp/medrec-0.4.0.mcpb
+d=$(mktemp -d) && gh release download -R own-your-health/medrec-cli -p 'medrec-*.mcpb' -D "$d" && open "$d"/medrec-*.mcpb
 ```
 
 Claude Code: `claude mcp add medrec -- medrec --profile <NAME> mcp`.

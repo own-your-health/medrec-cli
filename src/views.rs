@@ -243,6 +243,27 @@ pub(crate) fn record_detail(r: &Record) -> Option<String> {
                 .or_else(|| r.status.clone())
         }
         "medication" => text("dosage").or_else(|| r.status.clone()),
+        "claim"
+            if f.get("amounts")
+                .is_some_and(|a| a.as_object().is_some_and(|o| !o.is_empty())) =>
+        {
+            let a = &f["amounts"];
+            let parts: Vec<String> = [
+                ("billed", "billed"),
+                ("plan_paid", "plan paid"),
+                ("you_owe", "you owe"),
+            ]
+            .iter()
+            .filter_map(|(k, label)| {
+                let v = a.get(*k).map(value_text).filter(|s| !s.is_empty())?;
+                Some(format!("{label} {v}"))
+            })
+            .collect();
+            (!parts.is_empty())
+                .then(|| parts.join(", "))
+                .or_else(|| r.status.clone())
+        }
+        // A claim imported by an earlier medrec, with no `amounts`.
         "claim" => {
             let billed = f
                 .get("total")
@@ -452,8 +473,42 @@ pub struct Hit {
     pub score: usize,
 }
 
+/// Queries that name a kind of record rather than words in one: "blood
+/// tests" finds the lab results, which never say so. Folded, words joined
+/// by one space.
+const LAB_QUERIES: &[&str] = &[
+    "blood test",
+    "blood tests",
+    "bloodwork",
+    "blood work",
+    "labs",
+    "lab work",
+    "lab test",
+    "lab tests",
+    "lab results",
+];
+
+/// Whether a record is one a lab query names: a result, a report, or a
+/// claim with a lab line.
+fn is_lab(r: &Record) -> bool {
+    match r.kind.as_str() {
+        "result" | "report" => true,
+        "claim" => r
+            .fields
+            .get("items")
+            .and_then(Value::as_array)
+            .is_some_and(|a| {
+                a.iter()
+                    .any(|i| i.get("category").and_then(Value::as_str) == Some("lab"))
+            }),
+        _ => false,
+    }
+}
+
 /// Every item whose text holds all the query's words (case, accents and
-/// punctuation ignored), best first.
+/// punctuation ignored), best first. A query naming lab tests
+/// (`LAB_QUERIES`) also finds every result, report and claim for lab work,
+/// after the items whose text holds it.
 pub fn search(
     folder: &Folder,
     h: &Household,
@@ -471,16 +526,23 @@ pub fn search(
     if terms.is_empty() {
         return Err(CliError::Usage("search needs at least one word".into()));
     }
+    let labs = LAB_QUERIES.contains(&terms.join(" ").as_str());
     let mut hits = Vec::new();
     for p in people::selected(h, person)? {
         let idx = folder.index(p)?;
         let texts = folder.text(p)?;
-        let mut consider = |kind: &str, id: &str, date: Option<&str>, title: String, body: &str| {
+        let mut consider = |kind: &str,
+                            id: &str,
+                            date: Option<&str>,
+                            title: String,
+                            body: &str,
+                            named: Option<String>| {
             if !range.holds(date) {
                 return;
             }
             let hay = format!("{title}\n{body}");
-            if let Some((score, snippet)) = matches(&hay, &terms) {
+            let found = matches(&hay, &terms).or_else(|| named.map(|snippet| (0, snippet)));
+            if let Some((score, snippet)) = found {
                 hits.push(Hit {
                     person: p.id.clone(),
                     person_name: p.name.clone(),
@@ -511,12 +573,21 @@ pub fn search(
                 d.date.as_deref(),
                 title,
                 &format!("{meta}\n{body}"),
+                None,
             );
         }
         for r in &idx.records {
             let mut body = String::new();
             flat_text(&Value::Object(r.fields.clone()), &mut body);
-            consider(&r.kind, &r.id, r.date.as_deref(), r.display.clone(), &body);
+            let named = (labs && is_lab(r)).then(|| record_detail(r).unwrap_or_default());
+            consider(
+                &r.kind,
+                &r.id,
+                r.date.as_deref(),
+                r.display.clone(),
+                &body,
+                named,
+            );
         }
         for s in &idx.studies {
             let body = format!(
@@ -538,13 +609,21 @@ pub fn search(
                     .clone()
                     .unwrap_or_else(|| "Imaging study".into()),
                 &body,
+                None,
             );
         }
         for n in folder.notes(p)? {
             // The title is the text's first line; the rest is the body.
             let rest: String = n.text.trim().lines().skip(1).collect::<Vec<_>>().join("\n");
             let body = format!("{}\n{rest}", n.tags.join(" "));
-            consider("note", &n.id, Some(&n.date), first_line(&n.text, 80), &body);
+            consider(
+                "note",
+                &n.id,
+                Some(&n.date),
+                first_line(&n.text, 80),
+                &body,
+                None,
+            );
         }
     }
     hits.sort_by(|a, b| b.score.cmp(&a.score).then(b.date.cmp(&a.date)));
