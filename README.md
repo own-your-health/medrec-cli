@@ -8,8 +8,8 @@ conditions, allergies, immunizations and notes, at the terminal or, through
 `medrec mcp`, in Claude.
 
 `medrec` holds no provider credentials and makes no network calls of its
-own, except to Google Drive through `rclone` and to GitHub for `self-update`.
-Provider CLIs fetch records; `medrec` files them.
+own, except to Google Drive, through its own sign-in, and to GitHub for
+`self-update`. Provider CLIs fetch records; `medrec` files them.
 
 Part of the `piekstra-cli/1` family. It is built on
 [cli-common](https://github.com/piekstra/cli-common) and
@@ -39,14 +39,15 @@ medrec self-update                    # later releases
 
 Or from source (Rust 1.89 or later): `cargo install --git
 https://github.com/own-your-health/medrec-cli --locked`, or `make install` from a
-checkout. medrec reads no Keychain item, so an unsigned build asks for no
-approval.
+checkout. medrec keeps its Google Drive sign-ins sealed under
+`~/.config/medrec/vault/`, with the key in one Keychain item
+(`piekstra.medrec`). macOS asks to approve each newly built binary's first
+read of it, once.
 
 The tools it runs, all local (Homebrew on macOS; on Linux, your package
-manager's `rclone`, `poppler-utils` and `tesseract-ocr`):
+manager's `poppler-utils` and `tesseract-ocr`):
 
 ```sh
-brew install rclone                   # the Drive folder
 brew install poppler tesseract        # text extraction and OCR
 ```
 
@@ -56,18 +57,33 @@ copy a study.
 
 ## Quick start
 
-1. **A Drive remote.** `rclone config` adds one (here `gdrive`); it opens a
-   browser for Google's sign-in, and rclone keeps and refreshes the token.
-   A local directory works too, with no remote.
+1. **A Google Drive sign-in.** Register an OAuth client once: a Desktop
+   app client in your own Google Cloud project, as [cli-common's Drive
+   guide](https://github.com/piekstra/cli-common/blob/main/crates/pk-cli-drive/docs/google-drive.md#registering-the-oauth-client)
+   describes. Then sign in, and make the records folder:
+
+   ```sh
+   medrec drive login --drive-profile home-drive --client-file ~/Downloads/client_secret.json
+   medrec drive folder create "Medical Records" --drive-profile home-drive
+   # prints the folder's spec: gdrive:home-drive/<folder id>
+   ```
+
+   The login opens a browser for Google's consent. The client and the
+   tokens go into medrec's vault, sealed with its Keychain key, so the
+   downloaded JSON can be deleted. Every client in one Cloud project shares
+   its `drive.file` access, and Google ends them together: a revoke, or
+   removing the app in the Google Account, signs out every client of the
+   project, a web app's too (SECURITY.md). A local directory works too,
+   with no sign-in.
 2. **A records folder and the people in it.**
 
    ```sh
    medrec profiles add home                        # one profile per records folder
    export MEDREC_PROFILE=home                      # or --profile home on each command
-   medrec init "gdrive:Medical Records"            # creates the folder layout
+   medrec init gdrive:home-drive/<folder id>       # creates the folder layout
    medrec people add "Alex Example" --birth-date 1990-01-01 --adult
    medrec people add "Robin Example" --birth-date 2020-02-02 --guardian Alex
-   medrec doctor                                   # FileVault, rclone, free space, tools
+   medrec doctor                                   # FileVault, the Drive sign-in, free space, tools
    ```
 
 3. **Documents you already have.** `medrec intake ~/Downloads/lab.pdf`
@@ -90,7 +106,7 @@ copy a study.
 5. **Check the folder.** `medrec verify` reads every indexed file back
    against the index.
 
-What needs you: Google's sign-in in step 1, and at each provider its
+What needs you: the OAuth client and Google's consent in step 1, and at each provider its
 one-time registration (the CLIs that need one) and every sign-in, code and
 consent. How long a provider's sign-in lasts is in its README. Everything
 else runs without you.
@@ -101,7 +117,7 @@ are in [docs/data-contract.md](docs/data-contract.md).
 
 ### Profiles
 
-A records folder is a login (its rclone remote), so it belongs to a profile,
+A records folder is a login (the Drive profile its spec names), so it belongs to a profile,
 named by the household and kept in this machine's config only. Every command
 that reaches a records folder needs `--profile <NAME>`, or `MEDREC_PROFILE`;
 there is no default, and a lone profile is never picked: without one the
@@ -142,6 +158,61 @@ machine's settings at the top and each profile's under `profiles.<NAME>`.
 With a profile named, it and `config set|unset` of a profile key also give
 `profile` and that profile's `folder`, `mount`, `inbox` and `me` at the
 top, where they were before 0.2.0.
+
+### Google Drive
+
+medrec reaches Drive itself, through the Drive API, with an OAuth client you
+register and a sign-in per Google account. It runs no rclone.
+
+- **Drive profiles.** A Drive profile is one Google account, named on
+  `medrec drive …` by `--drive-profile` (or `MEDREC_DRIVE_PROFILE`). There is
+  no default; with `--profile`, the Drive commands use the records folder's.
+  `medrec drive profiles list` shows them. `medrec drive status` checks a
+  sign-in (`--local` reads no Keychain), `logout [--revoke]` ends one, and
+  `about` prints the account and its storage.
+- **The folder is a spec**, `gdrive:<drive profile>/<folder id>`, where the
+  folder id is the last part of the folder's Drive URL. A store at a path
+  under it is `gdrive:<drive profile>/<folder id>/<path>`, as the inbox is.
+  A folder whose Drive profile is not signed in on this machine is exit 2,
+  naming `medrec drive login`.
+- **Scope.** `drive login` asks for `drive.file` unless given
+  `--scope full`. Under `drive.file`, medrec sees only the files a client
+  of the same Cloud project created. A folder made in the Drive web app, or by rclone,
+  is invisible to it, and so are files another app adds: an upload in the
+  Drive web app, a file copied in through Drive for desktop, a scan another
+  tool uploads. That covers the inbox and `intake --drive`. Point `inbox` at
+  a local directory (the inbox as Drive for desktop mounts it) for files
+  that arrive that way, or sign in with `--scope full`. `drive` is a
+  restricted scope: Google shows its "unverified app" warning at consent.
+- **Moving a folder off rclone.** medrec no longer reads an rclone remote
+  (`remote:path` is exit 2, naming the move). Under `drive.file` the old
+  folder is not visible to the new sign-in, so the records are copied once
+  into a folder medrec makes:
+
+  0. On every machine that refreshes the folder, stop its agent with the
+     release it runs: `medrec --profile <NAME> refresh --uninstall`. An
+     agent left running would keep importing into the old folder.
+  1. With the medrec release before this one, back the folder up to a
+     local directory: `medrec backup --to ~/records-copy`.
+  2. With this release, sign in and make a folder: `medrec drive login …`,
+     then `medrec drive folder create "Medical Records"`.
+  3. Point a profile at the copy, and back it up into the new folder:
+     `medrec profiles add move`,
+     `medrec --profile move config set folder ~/records-copy`, then
+     `medrec --profile move backup --to gdrive:<drive profile>/<folder id>`.
+     The backup compares every file's MD5 on both sides.
+  4. Set the household's profile to the new folder
+     (`config set folder gdrive:<drive profile>/<folder id>`), run
+     `medrec verify`, and remove the `move` profile and the local copy.
+  5. In the Drive web app, rename the old folder (for example to
+     `Medical Records (moved)`). A binary before 0.6.0 that still names it then
+     stops on a missing `household.json` instead of writing there. Install
+     the agent again with this release: `medrec --profile <NAME> refresh
+     --install`.
+
+  Going back to a release before 0.6.0 means setting `folder` to the
+  rclone remote again; such a binary reads a `gdrive:` spec as an rclone
+  path.
 
 ## Provider CLIs
 
@@ -321,6 +392,17 @@ session `auth status` still reads as valid. `medrec refresh` at the terminal
 waits up to 10 minutes for an approval. `--scheduled` runs a pass as the
 LaunchAgent does.
 
+medrec's own Drive sign-in is held to the same rule. A scheduled pass reads
+it first, waiting at most 30 seconds for the Keychain and sending nothing to
+Google. A read that does not answer in time (a new build or an update that
+macOS has not yet been allowed to let read the key) ends the pass as
+`needs_person`, and the log names `medrec --profile <NAME> refresh`. No
+scheduled pass by that binary asks again until a person has run a pass.
+Choose "Always Allow" in the Keychain dialog, so later passes by that
+binary read the key without one. Such a pass cannot reach the folder,
+so it writes nothing there: `refresher.last_pass_at` stops moving, and the
+folder's readers see the refreshing machine as offline.
+
 `refresh sign-in <id>` runs the provider's own sign-in command, built from
 the `login_hint` its `info` gives (`uhc auth login --browser --profile
 <NAME>`) with the source's login, organization and patient label filled
@@ -358,15 +440,15 @@ this machine's:
 
 | Key | What it sets | Default |
 |---|---|---|
-| `folder` | the profile's records folder, `<remote>:<path>` or a local directory | set by `init` |
+| `folder` | the profile's records folder, `gdrive:<drive profile>/<folder id>` or a local directory | set by `init` |
 | `mount` | where Drive for desktop mounts the folder, for `doctor` to compare | none |
-| `inbox` | the inbox `--inbox` drains | `inbox/` in the folder |
+| `inbox` | the inbox `--inbox` drains: a Drive spec or a local directory | `inbox/` in the folder |
 | `me` | the person id who writes notes on this machine | none |
 | `viewer` | the DICOM viewer, or `none` | Weasis |
 | `ocr_languages`, `ocr_max_pages` | tesseract languages, and pages read per document | `eng`, 20 |
 | `max_file_mb` | the largest file intake or import keeps, MiB | 200 |
 | `import_max_mb` | the largest records stream one import reads, MiB; an import holds it until the trailer | 4096 |
-| `import_timeout_secs`, `rclone_budget_secs` | how long one provider export, and all of one command's rclone calls, may take | 1800, 1800 |
+| `import_timeout_secs`, `store_budget_secs` | how long one provider export, and all of one command's Drive requests, may take (`rclone_budget_secs` is read as `store_budget_secs`) | 1800, 1800 |
 | `providers` | provider CLIs to consider besides the known ones | none |
 
 ### What intake copies and what it moves
@@ -390,8 +472,8 @@ text, their hashes and the upload all come from it. A cloud folder's
 online-only placeholder that serves other bytes while it downloads, or a
 file still being written, is skipped with a reason rather than filed as
 bytes the file does not hold. A moved source is kept, not removed, when it
-no longer has the bytes filed, checked by its MD5 (a remote that lists none
-is downloaded again and hashed; 0.2.10 and later).
+no longer has the bytes filed, checked by its MD5 (a file the store reports
+no MD5 for is downloaded again and hashed; 0.2.10 and later).
 
 ### How a document is filed
 
@@ -441,9 +523,15 @@ supported.
 
 Claude Desktop: install the release's `medrec-<version>.mcpb` (open the
 file, or Settings > Extensions > Install Extension) and enter the profile's
-name when asked. The extension carries its own medrec binary, reads the same
-`~/.config/medrec/config.json` and folder as the installed one, and looks for
-`rclone` in `/opt/homebrew/bin`, `/usr/local/bin` and `/usr/bin`.
+name when asked. The extension carries its own medrec binary and reads the
+same `~/.config/medrec/config.json`, Drive sign-in and folder as the
+installed one. Its binary is a separate copy, so its first read of a Drive
+folder asks macOS once to let it use the Keychain item `piekstra.medrec`.
+A dialog left unanswered for 45 seconds ends that call with `auth`, and the
+next call waits on the same dialog rather than raising another. Once
+answered, the server reads the Keychain again only if the key is replaced
+(a reset and a new sign-in in a terminal), with the same 45-second limit.
+"Always Allow" also spares the next server it starts.
 
 ```sh
 d=$(mktemp -d) && gh release download -R own-your-health/medrec-cli -p 'medrec-*.mcpb' -D "$d" && open "$d"/medrec-*.mcpb
@@ -478,7 +566,7 @@ What the server does and does not do:
 ## Docs
 
 - [SECURITY.md](SECURITY.md): the threat model (Google, this Mac, a lost
-  laptop, a lost rclone token or Google account).
+  laptop, a lost Drive sign-in or Google account).
 - [PRIVACY.md](PRIVACY.md): what this public repo may and may not contain.
 - [docs/data-contract.md](docs/data-contract.md): the folder layout and
   formats.

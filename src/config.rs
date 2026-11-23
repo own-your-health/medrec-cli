@@ -1,7 +1,7 @@
 //! Non-secret, per-machine settings (`~/.config/medrec/config.json`).
 //!
-//! A records folder is a login (its rclone remote), so its settings belong
-//! to a profile (cli-common `pk_cli_config::profile`): `--profile <NAME>`,
+//! A records folder is a login (the Drive profile its spec names), so its
+//! settings belong to a profile (cli-common `pk_cli_config::profile`): `--profile <NAME>`,
 //! or `MEDREC_PROFILE`, names the one a command uses, with no default. The
 //! rest are this machine's, whatever the profile.
 
@@ -20,13 +20,13 @@ pub const PROFILE_KEYS: &[&str] = &["folder", "mount", "inbox", "me"];
 
 pub const KEYS: &str = "folder, mount, inbox, me (a profile's); viewer, ocr_languages, \
                         ocr_max_pages, max_file_mb, providers, import_timeout_secs, import_max_mb, \
-                        rclone_budget_secs (this machine's)";
+                        store_budget_secs (this machine's)";
 
 /// What a profile holds: one records folder and how this machine reaches it.
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FolderSettings {
-    /// The records folder: `<rclone remote>:<path>` (canonical) or a local
-    /// directory.
+    /// The records folder: `gdrive:<drive profile>/<folder id>` (canonical)
+    /// or a local directory.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub folder: Option<String>,
     /// Where the records folder is mounted locally (Google Drive for
@@ -34,7 +34,8 @@ pub struct FolderSettings {
     /// remote, and `doctor` only checks that the mount shows the same folder.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mount: Option<String>,
-    /// The inbox `--inbox` drains: `<remote>:<path>` or a local directory.
+    /// The inbox `--inbox` drains: `gdrive:<drive profile>/<folder id>[/<path>]`
+    /// or a local directory.
     /// Default: `inbox/` in the records folder. Files there are moved.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inbox: Option<String>,
@@ -144,9 +145,15 @@ pub struct Config {
     /// import holds the stream until its trailer, so this bounds memory.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub import_max_mb: Option<u64>,
-    /// How long all of one command's rclone calls may take (default 1800 s).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rclone_budget_secs: Option<u64>,
+    /// How long all of one command's store requests may take (default
+    /// 1800 s). Read from `rclone_budget_secs` too, its name before medrec
+    /// reached Drive itself.
+    #[serde(
+        default,
+        alias = "rclone_budget_secs",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub store_budget_secs: Option<u64>,
 }
 
 impl Config {
@@ -220,6 +227,7 @@ impl Config {
             .folder
             .as_deref()
             .map(Location::parse)
+            .transpose()?
             .ok_or_else(|| {
                 let name = self
                     .profile
@@ -228,8 +236,8 @@ impl Config {
                     .unwrap_or("<NAME>");
                 CliError::Usage(format!("profile `{name}` has no records folder")).with_remedy(
                     format!(
-                        "run `{BIN} --profile {name} init <remote:path|dir>` or `{BIN} --profile \
-                     {name} config set folder <remote:path|dir>`"
+                        "run `{BIN} --profile {name} init <gdrive:PROFILE/FOLDER-ID|dir>` or \
+                     `{BIN} --profile {name} config set folder <gdrive:PROFILE/FOLDER-ID|dir>`"
                     ),
                 )
             })
@@ -238,15 +246,9 @@ impl Config {
     /// The inbox: configured, else `inbox/` in the records folder.
     pub fn inbox_location(&self) -> Result<Location, CliError> {
         if let Some(i) = &self.active.inbox {
-            return Ok(Location::parse(i));
+            return Location::parse(i);
         }
-        Ok(match self.folder_location()? {
-            Location::Remote(s) if s.ends_with(':') => {
-                Location::Remote(format!("{s}{}", crate::folder::INBOX))
-            }
-            Location::Remote(s) => Location::Remote(format!("{s}/{}", crate::folder::INBOX)),
-            Location::Dir(d) => Location::Dir(d.join(crate::folder::INBOX)),
-        })
+        self.folder_location()?.join(crate::folder::INBOX)
     }
 
     pub fn ocr_languages(&self) -> String {
@@ -269,8 +271,8 @@ impl Config {
         std::time::Duration::from_secs(self.import_timeout_secs.unwrap_or(1800).clamp(10, 86_400))
     }
 
-    pub fn rclone_budget(&self) -> std::time::Duration {
-        std::time::Duration::from_secs(self.rclone_budget_secs.unwrap_or(1800).clamp(10, 86_400))
+    pub fn store_budget(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.store_budget_secs.unwrap_or(1800).clamp(10, 86_400))
     }
 
     pub fn extra_providers(&self) -> Vec<String> {
@@ -297,9 +299,16 @@ impl Config {
                 .map_err(|_| CliError::Usage(format!("`{key}` takes a whole number, not `{v}`")))
         };
         match key {
-            "folder" => self.active.folder = Some(value.into()),
+            // A folder named the rclone way is refused here, not on first use.
+            "folder" => {
+                Location::parse(value)?;
+                self.active.folder = Some(value.into())
+            }
             "mount" => self.active.mount = Some(value.into()),
-            "inbox" => self.active.inbox = Some(value.into()),
+            "inbox" => {
+                Location::parse(value)?;
+                self.active.inbox = Some(value.into())
+            }
             "me" => {
                 if !crate::ids::is_valid("p", value) {
                     return Err(CliError::Usage(format!(
@@ -326,7 +335,9 @@ impl Config {
             "providers" => self.providers = Some(value.into()),
             "import_timeout_secs" => self.import_timeout_secs = Some(num(value)?),
             "import_max_mb" => self.import_max_mb = Some(num(value)?),
-            "rclone_budget_secs" => self.rclone_budget_secs = Some(num(value)?),
+            "store_budget_secs" | "rclone_budget_secs" => {
+                self.store_budget_secs = Some(num(value)?)
+            }
             other => {
                 return Err(CliError::Usage(format!(
                     "unknown config key `{other}` (known: {KEYS})"
@@ -349,7 +360,7 @@ impl Config {
             "providers" => self.providers = None,
             "import_timeout_secs" => self.import_timeout_secs = None,
             "import_max_mb" => self.import_max_mb = None,
-            "rclone_budget_secs" => self.rclone_budget_secs = None,
+            "store_budget_secs" | "rclone_budget_secs" => self.store_budget_secs = None,
             other => {
                 return Err(CliError::Usage(format!(
                     "unknown config key `{other}` (known: {KEYS})"
@@ -389,7 +400,7 @@ mod tests {
     #[test]
     fn a_folder_from_before_profiles_names_migrate_and_moves_once() {
         let mut c = Config::default();
-        c.unprofiled.folder = Some("gdrive:Records".into());
+        c.unprofiled.folder = Some("gdrive:home-drive/1Records_synthetic".into());
         c.unprofiled.me = Some("p_aaaaaaaaaaaaaaaaaaaa".into());
         let e = c.select_from(None, None).unwrap_err();
         assert!(e.remedy().unwrap_or("").contains("profiles migrate"), "{e}");
@@ -398,23 +409,48 @@ mod tests {
         assert!(c.unprofiled.is_empty());
         assert!(!c.migrate(&home).unwrap());
         c.select_from(Some("home"), None).unwrap();
-        assert_eq!(c.active.folder.as_deref(), Some("gdrive:Records"));
+        assert_eq!(
+            c.active.folder.as_deref(),
+            Some("gdrive:home-drive/1Records_synthetic")
+        );
         assert_eq!(c.active.me.as_deref(), Some("p_aaaaaaaaaaaaaaaaaaaa"));
         // A profile that has a different records folder keeps it.
-        c.unprofiled.folder = Some("gdrive:Other".into());
+        c.unprofiled.folder = Some("gdrive:home-drive/1Other_synthetic".into());
         assert!(c.migrate(&home).is_err());
-        assert_eq!(c.unprofiled.folder.as_deref(), Some("gdrive:Other"));
+        assert_eq!(
+            c.unprofiled.folder.as_deref(),
+            Some("gdrive:home-drive/1Other_synthetic")
+        );
+    }
+
+    #[test]
+    fn the_budget_set_as_rclone_budget_secs_is_still_read_and_set() {
+        // A config written by 0.3 names it rclone_budget_secs.
+        let c: Config = serde_json::from_str(r#"{"rclone_budget_secs": 90}"#).unwrap();
+        assert_eq!(c.store_budget(), std::time::Duration::from_secs(90));
+        let v = serde_json::to_value(&c).unwrap();
+        assert_eq!(v["store_budget_secs"], 90, "{v}");
+        assert!(v.get("rclone_budget_secs").is_none(), "{v}");
+        let mut c = Config::default();
+        c.set("rclone_budget_secs", "120").unwrap();
+        assert_eq!(c.store_budget(), std::time::Duration::from_secs(120));
+        c.unset("rclone_budget_secs").unwrap();
+        assert_eq!(c.store_budget(), std::time::Duration::from_secs(1800));
     }
 
     #[test]
     fn a_profile_setting_is_saved_in_its_profile_only() {
         let mut c = with(&["home"]);
         c.select_from(Some("home"), None).unwrap();
-        c.set("folder", "gdrive:Records").unwrap();
+        c.set("folder", "gdrive:home-drive/1Records_synthetic")
+            .unwrap();
         c.set("viewer", "none").unwrap();
         c.keep_active().unwrap();
         let v = serde_json::to_value(&c).unwrap();
-        assert_eq!(v["profiles"]["home"]["folder"], "gdrive:Records");
+        assert_eq!(
+            v["profiles"]["home"]["folder"],
+            "gdrive:home-drive/1Records_synthetic"
+        );
         assert_eq!(v["viewer"], "none");
         assert!(v.get("folder").is_none(), "{v}");
         assert!(

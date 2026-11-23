@@ -45,7 +45,7 @@ fn xml(s: &str) -> String {
 }
 
 /// The variables the agent runs with: this shell's `PATH`, so it finds
-/// rclone and the provider CLIs, and `XDG_CONFIG_HOME` and `XDG_CACHE_HOME`
+/// the provider CLIs and poppler, and `XDG_CONFIG_HOME` and `XDG_CACHE_HOME`
 /// when set, so it reads the config and cache the install used.
 pub fn agent_env() -> Vec<(String, String)> {
     let mut env = vec![(

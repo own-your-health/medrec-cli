@@ -1,8 +1,11 @@
 # Data contract: the records folder
 
 The records folder is one directory tree, normally a private Google Drive
-folder reached through an rclone remote (`gdrive:Medical Records`), or a
-local directory. medrec reads and writes it only through this contract.
+folder reached through medrec's own Drive sign-in
+(`gdrive:<drive profile>/<folder id>`), or a local directory. Under the
+`drive.file` scope, medrec sees only the files in it that a client of the
+household's Cloud project created (README, "Google Drive"). medrec reads and
+writes it only through this contract.
 Every file is plain: PDFs, images and DICOM as received, JSON, and Markdown.
 A person can open any of it in the Drive app without medrec.
 
@@ -482,7 +485,7 @@ and a field or count that is missing as unknown, not as zero or false.
 | `sign_in.checked_at` | When auth status was last read. |
 | `sign_in.renews` | `true`: the provider CLI keeps its sign-in going unattended (a refresh token, a portal key). `false`: a member-site session that ends within hours and nothing renews, so the source loads only soon after someone signs in on the refreshing machine, and a `sign_in` `needs_person` is its normal state between sign-ins. Missing: unknown. It comes from the provider's auth status when that gives `renews` (0.7.0 and later read it; none does yet), else from medrec's table: `false` for `uhc`, `fertemr`, `caremark`, `oneblood`, `flywire` and `peryourhealth`; `true` for `mychart`, `athena`, `kp`, `modmed` and `icanotes`. |
 | `sign_in.lasts_secs` | About how long a fresh sign-in lasts, where measured: from the provider's auth status when it gives `lasts_secs`, else medrec's table (`uhc` 2400). Missing: unknown. |
-| `sign_in.needs_person` | `null` unless the source cannot be refreshed without a person: `{"reason": "sign_in" \| "keychain", "since": "…", "command": "medrec refresh sign-in <source>"}`. `sign_in`: the state is `signed_out` or `expired`, or the import itself answered that the provider needs a sign-in (exit 3). `keychain`: a scheduled pass's auth status read timed out waiting on an approval nobody gave, as a rebuilt provider CLI's first Keychain read does; the state is then `unknown`. `command` is what to run in a terminal on the refreshing machine. Until it has run, neither the schedule nor a request tries the source again. An `expiring` sign-in is still refreshed. |
+| `sign_in.needs_person` | `null` unless the source cannot be refreshed without a person: `{"reason": "sign_in" \| "keychain", "since": "…", "command": "medrec refresh sign-in <source>"}`. `sign_in`: the state is `signed_out` or `expired`, or the import itself answered that the provider needs a sign-in (exit 3). `keychain`: a scheduled pass's auth status read timed out waiting on an approval nobody gave, as a rebuilt provider CLI's first Keychain read does; the state is then `unknown`. medrec's own Drive sign-in never appears here: a pass that cannot read it without an approval cannot reach the folder either, so it writes nothing, and `refresher.last_pass_at` goes stale. `command` is what to run in a terminal on the refreshing machine. Until it has run, neither the schedule nor a request tries the source again. An `expiring` sign-in is still refreshed. |
 | `last_attempt` | The latest attempt: an `attempts/` line without `source`, `person`, `cli`, `organization` and `counts`. While it runs, `outcome` is `running` and `finished_at` is `null`. A pass that finds `running` left by an earlier pass (no refresh of the folder runs on this machine) records that attempt as `failed` with the error code `interrupted`, counts it in `failures`, and waits from its `started_at`, before it considers the source due. |
 | `last_success` | The latest attempt whose outcome was `ok`: its attempt, when it finished, its `ImportRun`, and the import report's counts and `withheld_types`. |
 

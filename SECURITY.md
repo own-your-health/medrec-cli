@@ -8,10 +8,12 @@ each place, and what medrec does and does not do with them.
 
 | Where | What | Who reads it |
 |---|---|---|
-| The records folder in Google Drive (`<remote>:Medical Records/`) | Every document, study, raw record, the index and extracted text, notes | The Google account, anyone it shares the folder with, and Google |
-| `~/.config/rclone/rclone.conf` | rclone's OAuth token for that Google account | Anyone who can read the file |
+| The records folder in Google Drive (`gdrive:<drive profile>/<folder id>`) | Every document, study, raw record, the index and extracted text, notes | The Google account, anyone it shares the folder with, and Google |
+| The macOS Keychain item `piekstra.medrec` | A random 256-bit key, the vault's: nothing else | This Mac's user, through the Keychain's approval for each binary |
+| `~/.config/medrec/vault/` | medrec's Drive sign-ins, per Drive profile the OAuth client (id and secret) and the token set (access and refresh), each in its own file sealed with the Keychain item's key (XChaCha20-Poly1305). A file is named by a hash, so no profile name is on disk in the clear | This Mac's user: an owner-only (0700) directory of 0600 files, unreadable without the key. A copy taken elsewhere (a backup, a dotfiles sync) holds the sign-ins sealed; it opens only with this Mac's Keychain item |
+| `~/.config/medrec/drive.json` | Each Drive profile's account email, the scopes Google granted, the client id and when it signed in; no secret. Owner-only (0600) | This Mac's user |
 | `~/.cache/medrec/` (or `$XDG_CACHE_HOME/medrec`) | The read cache (`household.json`, `index.json`, `text.json` and files read recently) and opened copies (`open/`, removed after 12 hours) | This Mac's user; mode 0700 directories and 0600 files |
-| A private temporary directory per command | A document or study being staged before upload; a provider's records stream spooled between its export and its filing (`medrec-spool-*`), for as long as a `refresh` pass or a several-member `import` runs | This Mac's user (directory `0700`, spool file `0600`); removed when the command ends, and a spool whose command was killed is removed by the next export |
+| A private temporary directory per command | A document or study being staged before upload; in a backup from Drive to Drive, the one file being copied; a provider's records stream spooled between its export and its filing (`medrec-spool-*`), for as long as a `refresh` pass or a several-member `import` runs | This Mac's user (directory `0700`, spool file `0600`); removed when the command ends (a backup's, once each file is uploaded), and a spool whose command was killed is removed by the next export |
 | `~/.config/medrec/config.json` | Each profile's records folder location and settings, and this machine's settings; no secret. Written owner-only (0600). `config.json.pre-profiles` beside it, also 0600, is the file as it was before `profiles migrate` | This Mac's user |
 | A records folder or backup on a local disk (`init <dir>`, `backup --to <dir>`) | Everything the Drive folder holds | This Mac's user: medrec creates its folders 0700 and its files 0600, and `medrec doctor` warns when anything under the records folder can be read by other users |
 | A study exported with `images export` | That study's DICOM files | This Mac's user; 0700 folders and 0600 files |
@@ -20,10 +22,24 @@ each place, and what medrec does and does not do with them.
 | `~/Library/Logs/medrec/refresh-<profile>.log` | One line per scheduled pass that did something: source ids, outcomes, error codes, counts and the command a person should run; never a name or record content | This Mac's user |
 | A Claude Desktop or Claude Code conversation that uses `medrec mcp` | What a tool returned for a question: names, results, medicines, document text | Anthropic, under the user's Claude account and its retention settings |
 
-medrec holds **no credentials**. Provider and insurer CLIs keep their own
-logins in the macOS Keychain under their own names. medrec runs them as
-bounded subprocesses and passes only a patient id, an organization and a
-date. It reads Drive through `rclone`, which owns the Drive token.
+medrec holds **one kind of credential**: its Google Drive sign-in, sealed in
+its vault with a key only the Keychain holds, never in the clear in a file,
+argv or a log. One Keychain item serves every sign-in, so a new build asks
+for one approval, however many Drive profiles there are. A vault whose key
+is gone (the Keychain item deleted) cannot be read and is not replaced
+while sealed files remain: remove each Drive profile (`medrec drive
+profiles remove <NAME> --force`, which deletes its files without the key),
+then sign in again with the client's JSON (`drive login --client-file`). Provider and insurer CLIs keep
+their own logins in the macOS Keychain under their own names. medrec runs
+them as bounded subprocesses and passes only a patient id, an organization
+and a date.
+
+The sign-in asks Google for `drive.file` unless given `--scope full`. Under
+`drive.file` its token reaches only the files a client of the household's
+Cloud project created, not the rest of the Drive: every OAuth client in one
+Cloud project shares that access. The OAuth client is the household's
+own, a Desktop app client in its Cloud project; Google treats such a
+client's secret as not confidential, and PKCE protects each sign-in.
 
 ## What medrec never does
 
@@ -33,13 +49,23 @@ date. It reads Drive through `rclone`, which owns the Drive token.
 - `medrec mcp` answers only the Claude client the user adds on this Mac
   (Claude Desktop or Claude Code). What a tool returns goes to Anthropic in
   that conversation; no other AI service is connected. Its four tools read
-  and never write: no lock is taken, nothing in the folder changes, and it
-  holds no credential.
+  and never write: no lock is taken and nothing in the folder changes. A
+  folder on Google Drive is read through medrec's own Drive sign-in; it holds
+  no other credential.
 - It never prints or logs a credential, and never takes one on argv.
 - A scheduled refresh never waits on a person. A provider's `auth status` that
   hangs on a Keychain approval is stopped after 30 seconds, and the source is
   not tried again in the background until a person runs `medrec refresh
-  sign-in <id>`, so the LaunchAgent never piles up dialogs.
+  sign-in <id>`, so the LaunchAgent never piles up dialogs. medrec's own
+  Drive sign-in is held to the same rule: a scheduled pass reads it first,
+  waiting at most 30 seconds for the Keychain and sending nothing to
+  Google. A read that does not answer in time (a new build or an update
+  that macOS has not yet been allowed to let read the key) ends the pass,
+  and no scheduled pass by that binary asks again until a person runs
+  `medrec --profile <NAME> refresh` at the screen. One process reads the
+  key once: every later sign-in in that run uses it, so a person's "Allow"
+  covers the whole run, and "Always Allow" covers that binary from then
+  on.
 - It never runs a disc's bundled viewer. `images open` hands the viewer a
   local folder (Weasis through `weasis://$dicom:get -l <folder>`), and makes no
   network call with study data. Weasis's own update check is a Weasis setting;
@@ -59,11 +85,11 @@ The records folder is a plain, private Drive folder without encryption
 |---|---|---|
 | **Google** (the company, its systems, a legal request to it) | The whole folder | Google's terms and law. medrec adds no encryption. Keep the folder private and unshared. |
 | **The Google account** (password, session or recovery taken over) | The whole folder, and the rest of the Drive | 2-Step Verification or a passkey on the account; review "Sharing" on the folder |
-| **The rclone token** (`rclone.conf` copied off the Mac) | The whole Drive, read and write, until revoked; its scope is Drive, not just this folder | Revoke rclone's access in the Google account's third-party connections. `medrec doctor` checks the file is owner-only. `rclone config` can encrypt the file with a password, at the cost of typing it for every command. |
-| **This Mac, unlocked** (malware or someone at the keyboard) | Everything above: the token, the cache, the mounted Drive if Drive for desktop is used | macOS's own protections; lock the screen |
-| **A lost or stolen laptop, powered off or locked** | Nothing while FileVault is on and the account is locked | `medrec doctor` checks FileVault. On loss, revoke the rclone token and sign out of the Google account's sessions. |
+| **medrec's Drive sign-in** (the vault files under `~/.config/medrec/vault/` and the key in the Keychain item) | Under `drive.file`, the files the household's Cloud project's clients created, read and write, the records folder included; under `drive`, the whole Drive. Until revoked, or six months unused | The vault files alone open nothing: they are sealed with the Keychain item's key, and the Keychain asks before a new binary reads it. `medrec drive logout --revoke`, or removing the app in the Google account's third-party connections, revokes the grant for every client of the project, so it signs the own-your-health app out too. |
+| **This Mac, unlocked** (malware or someone at the keyboard) | Everything above: the sign-in, the cache, the mounted Drive if Drive for desktop is used | macOS's own protections; lock the screen |
+| **A lost or stolen laptop, powered off or locked** | Nothing while FileVault is on and the account is locked | `medrec doctor` checks FileVault. On loss, revoke medrec's access in the Google account's third-party connections and sign out of the account's sessions. |
 | **A backup copy** (`medrec backup --to`) | The whole folder, as of that backup | It is a second copy with the same contents. Keep it on an encrypted disk, or in a remote as private as the first. |
-| **The own-your-health app's Drive token** (a browser tab signed in to it) | What the household's own Google OAuth client grants: at least the whole folder, read. The app writes only `_requests/`, and only pending requests, but Drive cannot hold a token to one folder: with a scope that can write, its holder can change or delete any file the scope reaches. | The token lives in the tab's memory and expires within the hour; the app keeps nothing secret in browser storage. Register the client with the narrowest Drive scope that can read the folder and create requests, in Testing mode with only the household as test users, and remove the app in the Google account's third-party connections to revoke it. A request can only ask for an import the refreshing Mac already has set up (data-contract.md, `_requests/`). `medrec verify` reports a filed file that changed or vanished (by MD5) and any file no index names, but it cannot tell an edited `household.json` or `index.json` from one medrec wrote. |
+| **The own-your-health app's Drive token** (a browser tab signed in to it) | What the household's own Google OAuth client grants: at least the whole folder, read. The app writes only `_requests/`, and only pending requests, but Drive cannot hold a token to one folder: with a scope that can write, its holder can change or delete any file the scope reaches. | The token lives in the tab's memory and expires within the hour; the app keeps nothing secret in browser storage. Register the client with the narrowest Drive scope that can read the folder and create requests, in Testing mode with only the household as test users, and remove the app in the Google account's third-party connections to revoke it (which revokes medrec's sign-in too: Google keeps one grant per project). A request can only ask for an import the refreshing Mac already has set up (data-contract.md, `_requests/`). `medrec verify` reports a filed file that changed or vanished (by MD5) and any file no index names, but it cannot tell an edited `household.json` or `index.json` from one medrec wrote. |
 | **The user's Claude account** (with `medrec mcp` added) | What the tools returned in its conversations | The account's own security and Anthropic's retention settings. Remove the extension (or `claude mcp remove medrec`) to stop; past conversations keep what they were given until deleted. |
 | **This repository** (public) | No personal data | [PRIVACY.md](PRIVACY.md) and the tests that enforce it |
 

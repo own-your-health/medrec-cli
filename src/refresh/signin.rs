@@ -16,11 +16,15 @@ pub const SCHEDULED_WAIT: Duration = Duration::from_secs(30);
 /// [`SCHEDULED_WAIT`], or `MEDREC_TEST_AUTH_WAIT_SECS` (tests only, so a
 /// hang is seen in a second).
 pub fn scheduled_wait() -> Duration {
-    std::env::var("MEDREC_TEST_AUTH_WAIT_SECS")
-        .ok()
-        .and_then(|s| s.parse().ok())
+    wait_or(SCHEDULED_WAIT)
+}
+
+/// `default`, or `MEDREC_TEST_AUTH_WAIT_SECS` (debug builds only).
+pub fn wait_or(default: Duration) -> Duration {
+    crate::store::test_hook("MEDREC_TEST_AUTH_WAIT_SECS")
+        .and_then(|s| s.to_str()?.parse().ok())
         .map(Duration::from_secs)
-        .unwrap_or(SCHEDULED_WAIT)
+        .unwrap_or(default)
 }
 
 /// How long a person at the terminal has to approve one.
@@ -120,6 +124,62 @@ pub fn read(provider: &Provider, profile: Option<&str>, wait: Duration) -> Read 
             "`{} auth status --json` printed no auth-status/v1",
             provider.cli
         )),
+    }
+}
+
+/// The medrec binary running: its path, size and modification time, which
+/// change when it is rebuilt or updated, as its Keychain approval does.
+/// `MEDREC_TEST_EXE` (debug builds only) stands in for it.
+pub fn exe_id() -> Option<String> {
+    let exe = match crate::store::test_hook("MEDREC_TEST_EXE") {
+        Some(p) => std::path::PathBuf::from(p),
+        None => std::env::current_exe().ok()?,
+    };
+    let meta = std::fs::metadata(&exe).ok()?;
+    let mtime = meta
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_nanos();
+    Some(format!("{}:{}:{mtime}", exe.display(), meta.len()))
+}
+
+/// medrec's own read of the Drive sign-in for `profile`, in this process.
+/// The Keychain read is bounded by `wait` (`Vault::load_key` on the
+/// process's one vault, [`crate::store::shared_vault`]), so a dialog nobody
+/// answers is `TimedOut`, never a hang. Once the key is read, every later
+/// sign-in in this run uses it without asking macOS again, whether the
+/// person chose Allow or Always Allow. A call while a read still waits
+/// waits on that one, so a person never faces two dialogs. It sends no
+/// request, so a slow network never reads as an approval nobody gave. `ok`
+/// when the sign-in is there, `signed_out` when not.
+pub fn read_drive(profile: &str, wait: Duration) -> Read {
+    let vault = match crate::store::shared_vault() {
+        Ok(v) => v,
+        Err(e) => return Read::Failed(e.to_string()),
+    };
+    match vault.load_key(wait) {
+        Ok(pk_cli_auth::vault::KeyLoad::Waiting) => return Read::TimedOut,
+        Ok(_) => {}
+        Err(e) => return Read::Failed(e.to_string()),
+    }
+    let profile = match pk_cli_config::profile::ProfileName::parse(profile) {
+        Ok(p) => p,
+        Err(e) => return Read::Failed(e.to_string()),
+    };
+    match crate::store::drive_cli().and_then(|cli| cli.account(&profile).stored()) {
+        Ok(_) => Read::Read {
+            state: "ok",
+            expires_at: None,
+            declared: Declared::default(),
+        },
+        Err(e) if e.exit_code() == 3 => Read::Read {
+            state: "signed_out",
+            expires_at: None,
+            declared: Declared::default(),
+        },
+        Err(e) => Read::Failed(e.to_string()),
     }
 }
 

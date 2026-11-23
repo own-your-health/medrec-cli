@@ -99,6 +99,11 @@ pub struct Local {
     /// sign-in's life (`signin::Declared`), over medrec's table.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub declared: std::collections::BTreeMap<String, super::signin::Declared>,
+    /// The medrec binary ([`super::signin::exe_id`]) whose read of the Drive
+    /// sign-in hung on an approval nobody gave. No scheduled pass by it
+    /// reads the sign-in again until a person runs a pass.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drive_blocked: Option<String>,
 }
 
 fn local_path(location: &Location) -> Result<PathBuf, CliError> {

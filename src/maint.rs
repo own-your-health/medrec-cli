@@ -34,7 +34,7 @@ pub fn init(
     allow_other_files: bool,
     budget: Duration,
 ) -> Result<Init, CliError> {
-    let st = Store::open(location, Reads::Fresh, budget);
+    let st = Store::open(location, Reads::Fresh, budget)?;
     let _lock = folder::FolderLock::acquire(location)?;
     let (h, status) = match folder::read_household(&st)? {
         Some(h) => (h, "existing"),
@@ -111,31 +111,15 @@ fn version_of(prog: &str, args: &[&str]) -> Option<String> {
     Some(first_line(&out))
 }
 
-/// Every check `doctor` runs. None reads a credential or the Keychain;
-/// rclone reads its own config file, whose mode is checked but whose
-/// contents are never read here.
+/// Every check `doctor` runs. Only the folder check reaches a credential:
+/// on Google Drive it reads the folder through the Drive profile's sign-in,
+/// from the Keychain, as every command on the folder does.
 pub fn doctor(cfg: &Config) -> Vec<Check> {
     let mut out = Vec::new();
     out.push(filevault());
-    let rclone = which("rclone");
-    out.push(match &rclone {
-        Some(_) => check(
-            "rclone",
-            "ok",
-            version_of("rclone", &["version"]).unwrap_or_default(),
-        ),
-        None => check(
-            "rclone",
-            "fail",
-            "rclone is not installed (`brew install rclone`)",
-        ),
-    });
-    if rclone.is_some() {
-        out.push(rclone_conf_mode());
-    }
     match cfg.folder_location() {
         Err(e) => out.push(check("folder", "fail", e.to_string())),
-        Ok(loc) => folder_checks(cfg, &loc, rclone.is_some(), &mut out),
+        Ok(loc) => folder_checks(cfg, &loc, &mut out),
     }
     if let Some(m) = &cfg.active.mount {
         out.push(mount_check(cfg, m));
@@ -210,79 +194,39 @@ fn filevault() -> Check {
     }
 }
 
-fn rclone_conf_mode() -> Check {
-    use std::os::unix::fs::PermissionsExt;
-    let Some(r) = which("rclone").and_then(|p| {
-        Bounded::new(p)
-            .args(["config", "file"])
-            .timeout(PROBE_TIMEOUT)
-            .max_stdout(4096)
-            .run()
-            .ok()
-    }) else {
-        return check(
-            "rclone.conf",
-            "warn",
-            "could not ask rclone where its config is",
-        );
-    };
-    let text = String::from_utf8_lossy(&r.stdout);
-    let Some(path) = text.lines().map(str::trim).find(|l| l.starts_with('/')) else {
-        return check("rclone.conf", "warn", "rclone named no config file");
-    };
-    match std::fs::metadata(path) {
-        Ok(m) if m.permissions().mode() & 0o077 == 0 => {
-            check("rclone.conf", "ok", format!("{path} is owner-only"))
+fn folder_checks(cfg: &Config, loc: &Location, out: &mut Vec<Check>) {
+    if let Location::Drive(spec) = loc {
+        // The profile's record only: no Keychain read, no request.
+        let signed_in = store::drive_cli()
+            .and_then(|cli| cli.profiles().get(spec.profile()))
+            .map(|p| p.is_some_and(|p| p.signed_in_at.is_some()));
+        match signed_in {
+            Ok(true) => out.push(check(
+                "drive",
+                "ok",
+                format!("Drive profile `{}` is signed in", spec.profile()),
+            )),
+            Ok(false) => {
+                out.push(check(
+                    "drive",
+                    "fail",
+                    format!(
+                        "Drive profile `{}` is not signed in on this machine: run `{} login {} {}`",
+                        spec.profile(),
+                        store::DRIVE_COMMAND,
+                        store::DRIVE_PROFILE_FLAG,
+                        spec.profile()
+                    ),
+                ));
+                return;
+            }
+            Err(e) => {
+                out.push(check("drive", "fail", e.to_string()));
+                return;
+            }
         }
-        Ok(m) => check(
-            "rclone.conf",
-            "fail",
-            format!(
-                "{path} is mode {:o}; it holds the Drive token: run `chmod 600 {path}`",
-                m.permissions().mode() & 0o777
-            ),
-        ),
-        Err(_) => check("rclone.conf", "warn", format!("{path} does not exist yet")),
     }
-}
-
-fn folder_checks(cfg: &Config, loc: &Location, have_rclone: bool, out: &mut Vec<Check>) {
-    if let Location::Remote(spec) = loc {
-        if !have_rclone {
-            out.push(check("remote", "fail", format!("{spec} needs rclone")));
-            return;
-        }
-        let name = spec.split(':').next().unwrap_or(spec);
-        let listed = which("rclone").and_then(|p| {
-            Bounded::new(p)
-                .arg("listremotes")
-                .timeout(PROBE_TIMEOUT)
-                .max_stdout(64 * 1024)
-                .run()
-                .ok()
-        });
-        let known = listed
-            .map(|r| {
-                String::from_utf8_lossy(&r.stdout)
-                    .lines()
-                    .any(|l| l.trim() == format!("{name}:"))
-            })
-            .unwrap_or(false);
-        if !known {
-            out.push(check(
-                "remote",
-                "fail",
-                format!("rclone has no remote `{name}`; set it up with `rclone config` (Google Drive, scope drive)"),
-            ));
-            return;
-        }
-        out.push(check(
-            "remote",
-            "ok",
-            format!("rclone remote `{name}` is configured"),
-        ));
-    }
-    let folder = match Folder::open_at(loc, Access::Write, cfg.rclone_budget()) {
+    let folder = match Folder::open_at(loc, Access::Write, cfg.store_budget()) {
         Ok(f) => f,
         Err(e) => {
             out.push(check("folder", "fail", e.to_string()));
@@ -368,7 +312,7 @@ fn mount_check(cfg: &Config, mount: &str) -> Check {
     let remote = cfg
         .folder_location()
         .ok()
-        .map(|l| Store::open(&l, Reads::Cached, cfg.rclone_budget()))
+        .and_then(|l| Store::open(&l, Reads::Cached, cfg.store_budget()).ok())
         .and_then(|s| folder::read_household(&s).ok().flatten());
     match (mounted, remote) {
         (Some(m), Some(r)) if m.folder_id == r.folder_id => check(
@@ -655,8 +599,13 @@ pub struct Backup {
     pub mismatched: Vec<String>,
 }
 
-/// Copy the whole records folder to another rclone remote or directory,
-/// then compare every file's MD5 on both sides.
+/// Copy the whole records folder to another Google Drive folder or a
+/// directory, then compare every file's MD5 on both sides. A file the
+/// backup already holds with other bytes is replaced by the folder's
+/// current copy; one with the same bytes is left, and files only the
+/// backup holds are kept. From Drive to Drive the files pass through this
+/// machine one at a time, each in a private temporary directory removed
+/// once it is uploaded.
 pub fn backup(folder: &Folder, to: &Location, budget: Duration) -> Result<Backup, CliError> {
     let from = folder.store.location().clone();
     if from.display() == to.display() {
@@ -673,36 +622,33 @@ pub fn backup(folder: &Folder, to: &Location, budget: Duration) -> Result<Backup
         std::fs::set_permissions(b, std::fs::Permissions::from_mode(0o700))
             .map_err(|e| CliError::Other(format!("restricting {}: {e}", b.display())))?;
     }
+    let target = Store::open(to, Reads::Fresh, budget)?;
     match (&from, to) {
         (Location::Dir(a), Location::Dir(b)) => copy_dir(a, b)?,
-        _ => {
-            let rclone = which("rclone")
-                .ok_or_else(|| CliError::Other("backup to a remote needs rclone".into()))?;
-            let (src, dst) = (
-                folder.store.rclone_spec(),
-                Store::open(to, Reads::Fresh, budget).rclone_spec(),
-            );
-            let r = Bounded::new(rclone)
-                .args(["--log-level=ERROR", "copy", src.as_str(), dst.as_str()])
-                .timeout(budget)
-                .max_stdout(1024 * 1024)
-                .run()?;
-            if r.code != Some(0) {
-                return Err(CliError::Upstream(format!(
-                    "rclone copy: {}",
-                    r.stderr_tail
-                        .lines()
-                        .rev()
-                        .find(|l| !l.trim().is_empty())
-                        .unwrap_or("failed")
-                )));
+        (Location::Drive(_), Location::Dir(b)) => folder.store.fetch_tree("", b)?,
+        (Location::Dir(a), Location::Drive(_)) => {
+            target.mkdir("")?;
+            target.put_tree_replacing(a, "")?
+        }
+        (Location::Drive(_), Location::Drive(_)) => {
+            target.mkdir("")?;
+            let theirs: HashMap<String, Option<String>> = target
+                .hashes("")?
+                .into_iter()
+                .map(|f| (f.rel, f.md5))
+                .collect();
+            for f in folder.store.hashes("")? {
+                if f.md5.is_some() && theirs.get(&f.rel) == Some(&f.md5) {
+                    continue;
+                }
+                let copy = folder.store.fetch(&f.rel)?;
+                target.put_file(&copy.path, &f.rel)?;
             }
         }
     }
     if let Location::Dir(b) = to {
         store::restrict_tree(b)?;
     }
-    let target = Store::open(to, Reads::Fresh, budget);
     let theirs: HashMap<String, Option<String>> = target
         .hashes("")?
         .into_iter()

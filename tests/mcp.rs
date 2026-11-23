@@ -2,7 +2,7 @@
 //! (`medrec::testdata`): the tools in process, each answer checked against
 //! its output schema and size budget, then the binary itself over stdio as
 //! Claude Desktop runs it, which must leave every file of the folder as it
-//! was. Offline; no Keychain; rclone is not used.
+//! was. Offline, on a local folder; the Keychain service is an empty one.
 
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Write};
@@ -37,6 +37,8 @@ impl Env {
             .env("HOME", &self.root)
             .env("PATH", &self.path)
             .env("MEDREC_PROFILE", "home")
+            .env("MEDREC_KEYCHAIN_SERVICE", "piekstra.medrec.hermetic-tests")
+            .env_remove("MEDREC_DRIVE_PROFILE")
             .env_remove("NO_COLOR");
         c
     }
@@ -367,6 +369,8 @@ fn the_binary_serves_over_stdio_and_writes_nothing() {
         .env("HOME", &e.root)
         .env("PATH", &e.path)
         .env("MEDREC_PROFILE", "home")
+        .env("MEDREC_KEYCHAIN_SERVICE", "piekstra.medrec.hermetic-tests")
+        .env_remove("MEDREC_DRIVE_PROFILE")
         .arg("mcp")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -431,5 +435,105 @@ fn the_binary_serves_over_stdio_and_writes_nothing() {
         after.keys().collect::<Vec<_>>()
     );
     assert!(before == after, "a file in the records folder changed");
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
+/// Serves `mcp` with `env`, calls medrec_summary `calls` times in that one
+/// server and returns each answer with how long it took.
+fn call_summary(e: &Env, env: &[(&str, &str)], calls: usize) -> Vec<(Value, std::time::Duration)> {
+    let bin = assert_cmd::cargo::cargo_bin("medrec");
+    let mut cmd = std::process::Command::new(bin);
+    cmd.env("XDG_CONFIG_HOME", e.root.join("config"))
+        .env("XDG_CACHE_HOME", e.root.join("cache"))
+        .env("HOME", &e.root)
+        .env("PATH", &e.path)
+        .env("MEDREC_PROFILE", "home")
+        .env("MEDREC_KEYCHAIN_SERVICE", "piekstra.medrec.hermetic-tests")
+        .env_remove("MEDREC_DRIVE_PROFILE");
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    let mut child = cmd
+        .arg("mcp")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    rpc(
+        &mut stdin,
+        &mut stdout,
+        json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+            "protocolVersion": "2025-06-18", "capabilities": {},
+            "clientInfo": {"name": "medrec-test", "version": "0"}}}),
+    )
+    .unwrap();
+    rpc(
+        &mut stdin,
+        &mut stdout,
+        json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
+    );
+    let mut answers = Vec::new();
+    for id in 0..calls {
+        let started = std::time::Instant::now();
+        let r = rpc(
+            &mut stdin,
+            &mut stdout,
+            json!({"jsonrpc": "2.0", "id": 2 + id, "method": "tools/call",
+                   "params": {"name": SUMMARY, "arguments": {}}}),
+        )
+        .unwrap();
+        answers.push((r, started.elapsed()));
+    }
+    drop(stdin);
+    let _ = child.wait();
+    answers
+}
+
+#[test]
+fn a_drive_folders_keychain_dialog_nobody_answers_ends_the_call_with_auth() {
+    let e = Env::new("keychain");
+    e.ok(&[
+        "config",
+        "set",
+        "folder",
+        "gdrive:home-drive/1Synthetic_folder",
+    ]);
+    // A sealed entry in medrec's vault, so reading the sign-in needs the
+    // vault's key; the test keychain holds none.
+    let vault = e.root.join(".config/medrec/vault");
+    std::fs::create_dir_all(&vault).unwrap();
+    std::fs::write(vault.join("another-entry.pkv"), b"sealed").unwrap();
+    let log = e.root.join("keychain-reads");
+    // The first read waits 5 s on a dialog; each call waits 2 s for it.
+    let calls = call_summary(
+        &e,
+        &[
+            ("MEDREC_TEST_KEYCHAIN_DELAY_SECS", "5"),
+            ("MEDREC_TEST_KEYCHAIN_LOG", log.to_str().unwrap()),
+            ("MEDREC_TEST_AUTH_WAIT_SECS", "2"),
+        ],
+        3,
+    );
+    // The first two calls end with `auth` while the dialog is open. The
+    // second waited on the same dialog, never raising another.
+    for (r, took) in &calls[..2] {
+        assert_eq!(r["result"]["isError"], true, "{r}");
+        assert!(r.to_string().contains("Always Allow"), "{r}");
+        assert!(*took < std::time::Duration::from_secs(4), "{took:?}");
+    }
+    // Answered during the third: there is no sign-in on this machine, so
+    // the call says how to sign in.
+    let (r, _) = &calls[2];
+    assert_eq!(r["result"]["isError"], true, "{r}");
+    assert!(
+        r.to_string()
+            .contains("medrec drive login --drive-profile home-drive"),
+        "{r}"
+    );
+    let reads = std::fs::read_to_string(&log).unwrap().lines().count();
+    assert_eq!(reads, 1, "one read, which every call waited on");
     let _ = std::fs::remove_dir_all(&e.root);
 }

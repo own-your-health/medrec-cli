@@ -9,7 +9,9 @@ It files scans, documents, imaging studies and provider records into one
 plain records folder ([docs/data-contract.md](docs/data-contract.md)) and
 answers questions over them. It conforms to `piekstra-cli/1`
 (`~/Dev/cli-common/DESIGN.md`) with `info.auth.required = false`: it holds no
-credentials. Provider CLIs (the README's provider table) fetch records; medrec files
+provider credentials. Its one credential is its Google Drive sign-in, which
+only a folder on Drive needs; `auth status --profile <NAME>` reports it.
+Provider CLIs (the README's provider table) fetch records; medrec files
 them.
 
 ## Invariant 1: never read a real record
@@ -56,7 +58,8 @@ quick-xml, lopdf), and so are local tools (poppler, tesseract, bsdtar).
 |---|---|
 | `src/main.rs` | The clap tree, output and exit codes, and the `profiles` commands |
 | `src/config.rs` | This machine's settings, and the profiles that hold each records folder's (cli-common's `pk_cli_config::profile`) |
-| `src/store.rs` | The records folder's backend: an rclone remote behind the read cache, or a local directory |
+| `src/store.rs` | The records folder's backend: a Google Drive folder through cli-common's Drive API store, behind the read cache, or a local directory; `drive_cli()` is medrec's Drive sign-ins (`medrec drive`, `--drive-profile`) |
+| `src/drive_tests.rs` | The store, `init` and `backup` on Drive, against cli-common's fake Drive server |
 | `src/folder.rs` | The folder layout, file naming, read-back writes, the lock and `rev` checks |
 | `src/model.rs` | Every JSON format in the folder |
 | `src/intake/` | Document intake: file types, text and OCR, detection with scores and evidence, duplicates |
@@ -82,8 +85,9 @@ are built.
 ## Rules of the code
 
 - A filed document, DICOM file or raw resource is never modified. Changes
-  are new files, and an upload never replaces a file (`store::Existing::Keep`,
-  `rclone copy --immutable`).
+  are new files, and an upload never replaces a file (`store::Existing::Keep`;
+  on Drive, `put_tree` with `Existing::Keep` refuses the whole copy before
+  uploading anything). Only `backup` replaces, and only in its target.
 - On a local folder, medrec's folders are 0700 and its files 0600
   (`store::private_dirs`, `store::private_copy`).
 - Every write is read back by MD5 before the index points at it. A moved
@@ -95,8 +99,8 @@ are built.
   waiting up to `import_timeout_secs` for the lock), checks the `folder_id`
   is the one it started with, and reads the household again before it
   resolves the person and writes anything.
-- Arguments are validated before any rclone call or subprocess, so `--help`
-  and bad input never touch the folder.
+- Arguments are validated before any Drive request, Keychain read or
+  subprocess, so `--help` and bad input never touch the folder.
 - One JSON document per invocation. A command that has printed its result
   and still fails (doctor, verify, backup, a partial intake) exits 1
   directly.
@@ -111,7 +115,9 @@ make install     # signed release build into ~/.cargo/bin
 cargo test --test flow   # the end-to-end flow on synthetic data
 ```
 
-Tests never read the Keychain, never use the network and never use rclone.
+Tests never read the Keychain and never use the network. The black-box tests
+set `MEDREC_KEYCHAIN_SERVICE` to an empty service; the Drive tests sign in to
+cli-common's fake Drive server with keys in memory (`store::testing`).
 OCR and poppler assertions are skipped when those tools are missing.
 
 ## Process

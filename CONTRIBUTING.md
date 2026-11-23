@@ -3,7 +3,7 @@
 ## Setup
 
 ```sh
-brew install poppler tesseract rclone    # Linux: poppler-utils tesseract-ocr rclone libarchive-tools
+brew install poppler tesseract           # Linux: poppler-utils tesseract-ocr libarchive-tools
 make verify                              # fmt-check, clippy, tests, smoke
 ```
 

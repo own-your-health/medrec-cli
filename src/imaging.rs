@@ -981,7 +981,8 @@ mod tests {
         let root = crate::testutil::temp_dir(tag);
         let loc = Location::Dir(root.join("records"));
         let st =
-            crate::store::Store::open(&loc, crate::store::Reads::Fresh, Duration::from_secs(60));
+            crate::store::Store::open(&loc, crate::store::Reads::Fresh, Duration::from_secs(60))
+                .unwrap();
         let _: Household = folder::create(&st).unwrap();
         let f = Folder::open_at(&loc, folder::Access::Write, Duration::from_secs(60)).unwrap();
         (root, f)

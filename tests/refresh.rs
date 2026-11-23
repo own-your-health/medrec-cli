@@ -51,6 +51,7 @@ impl Env {
             .env("HOME", &self.root)
             .env("PATH", &self.path)
             .env("MEDREC_PROFILE", "home")
+            .env("MEDREC_KEYCHAIN_SERVICE", "piekstra.medrec.hermetic-tests")
             .env("MEDREC_LAUNCH_AGENTS_DIR", self.root.join("LaunchAgents"))
             .env("MEDREC_LAUNCHCTL", self.root.join("launchctl"))
             .env("MEDREC_TEST_AUTH_WAIT_SECS", "1")
@@ -1296,4 +1297,82 @@ fn a_skipped_request_counts_an_import_run_by_hand_in_the_next_run() {
         next > now + 23 * 3600,
         "a day from the import, not now: {st}"
     );
+}
+
+/// A sealed entry in medrec's vault, so a read of the sign-in needs the
+/// vault's key: what is in it does not matter, as the test keychain holds
+/// no key to open it.
+fn vault_entry(e: &Env) {
+    let dir = e.root.join(".config/medrec/vault");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("another-entry.pkv"), b"sealed").unwrap();
+}
+
+/// How many times medrec read its Drive sign-in (`MEDREC_TEST_KEYCHAIN_LOG`).
+fn keychain_reads(log: &std::path::Path) -> usize {
+    std::fs::read_to_string(log)
+        .map(|s| s.lines().count())
+        .unwrap_or(0)
+}
+
+#[test]
+fn a_scheduled_pass_never_waits_on_the_drive_sign_ins_keychain_approval() {
+    let e = Env::new("drive-gate");
+    e.ok(&[
+        "config",
+        "set",
+        "folder",
+        "gdrive:home-drive/1Synthetic_folder",
+    ]);
+    vault_entry(&e);
+    let log = e.root.join("keychain-reads");
+    let log_s = log.to_str().unwrap();
+    // Two binaries, as a build and its update are.
+    let first = e.root.join("medrec-first");
+    let second = e.root.join("medrec-second");
+    std::fs::write(&first, "1").unwrap();
+    std::fs::write(&second, "22").unwrap();
+    let env = [
+        ("MEDREC_TEST_EXE", first.to_str().unwrap()),
+        ("MEDREC_TEST_KEYCHAIN_DELAY_SECS", "30"),
+        ("MEDREC_TEST_KEYCHAIN_LOG", log_s),
+        ("MEDREC_TEST_AUTH_WAIT_SECS", "1"),
+    ];
+    let started = std::time::Instant::now();
+    let out = e.run_env(&["--json", "refresh", "--scheduled"], &env);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(started.elapsed() < std::time::Duration::from_secs(10));
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["status"], "needs_person", "{v}");
+    assert_eq!(v["command"], "medrec --profile home refresh");
+    // The same binary is not asked again: no second dialog.
+    let out = e.run_env(&["--json", "refresh", "--scheduled"], &env);
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["status"], "needs_person");
+    assert_eq!(keychain_reads(&log), 1);
+    // Another binary asks; a read that answers lets the pass go on to the
+    // folder, which here has no sign-in on this machine.
+    let env = [
+        ("MEDREC_TEST_EXE", second.to_str().unwrap()),
+        ("MEDREC_TEST_KEYCHAIN_LOG", log_s),
+        ("MEDREC_TEST_AUTH_WAIT_SECS", "1"),
+    ];
+    for reads in [2, 3] {
+        let out = e.run_env(&["--json", "refresh", "--scheduled"], &env);
+        assert_eq!(
+            out.status.code(),
+            Some(2),
+            "{}",
+            String::from_utf8_lossy(&out.stdout)
+        );
+        assert!(String::from_utf8_lossy(&out.stderr)
+            .contains("medrec drive login --drive-profile home-drive"));
+        // Every scheduled pass reads it first, bounded.
+        assert_eq!(keychain_reads(&log), reads);
+    }
+    let _ = std::fs::remove_dir_all(&e.root);
 }

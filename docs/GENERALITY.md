@@ -33,7 +33,7 @@ a row below, and a change that removes one deletes its row.
 
   | Missing | What still works |
   |---|---|
-  | rclone | A local directory as the records folder (`medrec init <dir>`), such as a Drive for desktop mount or an encrypted disk |
+  | Google Drive | A local directory as the records folder (`medrec init <dir>`), such as an encrypted disk |
   | `pdftotext` (poppler) | Intake files by hand-given values; detection reads only file names |
   | `tesseract` | Text PDFs are read; scanned pages go to `_review/` |
   | `bsdtar` | Studies from folders and DICOMDIRs; `.zip` and `.iso` are refused |
@@ -51,6 +51,6 @@ a row below, and a change that removes one deletes its row.
 | Documents are in English | Document-type phrases and labels in `src/intake/classify.rs`, a statement's labels in `src/bill.rs`; `ocr_languages` defaults to `eng` | Phrases per language, chosen by `ocr_languages`, and the tesseract language packs |
 | Numeric dates are month first (`03/04/2026` is March 4) | `all_dates` in `src/intake/classify.rs` | A day-first setting, used when both orders are valid dates |
 | Payer documents are US explanations of benefits, bills and receipts | The `eob`, `bill` and `receipt` types, `Claims/`, the EOB fields, a statement's labels in `src/bill.rs` | Other payer document types, mapped to the same FHIR `ExplanationOfBenefit` fields |
-| The records folder's remote reports MD5 | Every write is checked by MD5 (`check_md5` in `src/folder.rs`) | Remotes without MD5 (OneDrive, Dropbox, Box) fail the read-back. Comparing SHA-256 after a download would serve them at the cost of a download per write. |
+| The records folder is in Google Drive, which reports MD5, or a local directory | Every write is checked by MD5 (`check_md5` in `src/folder.rs`); the store is cli-common's Drive API store | Another provider (OneDrive, Dropbox, Box) needs a store of its own in cli-common. One without MD5 would need SHA-256 compared after a download, at the cost of a download per write. |
 | The machine is a Mac, or Linux with the same tools | `doctor`'s FileVault check, `open` and `xdg-open` for viewers, `/usr/bin/bsdtar` | A Windows build would need its own viewer launch, archive reader and disk-encryption check |
 | Document organizations are matched by the names in `household.json` | Organization detection | Nothing more: add each organization's names as aliases |
