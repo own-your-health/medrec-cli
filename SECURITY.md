@@ -18,6 +18,7 @@ each place, and what medrec does and does not do with them.
 | `~/.cache/medrec/refresh/` | This machine's refresher id (`h_…`, random) and, per folder, the `status.json` it last wrote and when; ids, outcomes and counts, no names. The run lock is in `~/.cache/medrec/locks/`. `medrec cache clear` leaves both, so this Mac stays its folder's refresher | This Mac's user; 0700 directory, 0600 files |
 | `~/Library/LaunchAgents/io.github.own-your-health.medrec.refresh.<profile>.plist` | The command `refresh --install` set up: medrec's path, the profile name, the pass interval, and the `PATH`, `XDG_CONFIG_HOME` and `XDG_CACHE_HOME` (when set) at install time; no secret | This Mac's user; launchd runs it in the user's own session, never as root |
 | `~/Library/Logs/medrec/refresh-<profile>.log` | One line per scheduled pass that did something: source ids, outcomes, error codes, counts and the command a person should run; never a name or record content | This Mac's user |
+| A Claude Desktop or Claude Code conversation that uses `medrec mcp` | What a tool returned for a question: names, results, medicines, document text | Anthropic, under the user's Claude account and its retention settings |
 
 medrec holds **no credentials**. Provider and insurer CLIs keep their own
 logins in the macOS Keychain under their own names. medrec runs them as
@@ -27,10 +28,13 @@ date. It reads Drive through `rclone`, which owns the Drive token.
 ## What medrec never does
 
 - It never sends a record, a document or extracted text to a third-party
-  service. Text extraction and OCR run locally (`pdftotext`, `tesseract`).
-  There is no telemetry, no cloud OCR and no AI service.
-- It has no MCP server and is not registered in `cli-mcp`. An MCP tool returns
-  records to the model that calls it, which is a third-party service.
+  service on its own. Text extraction and OCR run locally (`pdftotext`,
+  `tesseract`). There is no telemetry, no cloud OCR and no AI service.
+- `medrec mcp` answers only the Claude client the user adds on this Mac
+  (Claude Desktop or Claude Code). What a tool returns goes to Anthropic in
+  that conversation; no other AI service is connected. Its four tools read
+  and never write: no lock is taken, nothing in the folder changes, and it
+  holds no credential.
 - It never prints or logs a credential, and never takes one on argv.
 - A scheduled refresh never waits on a person. A provider's `auth status` that
   hangs on a Keychain approval is stopped after 30 seconds, and the source is
@@ -60,6 +64,7 @@ The records folder is a plain, private Drive folder without encryption
 | **A lost or stolen laptop, powered off or locked** | Nothing while FileVault is on and the account is locked | `medrec doctor` checks FileVault. On loss, revoke the rclone token and sign out of the Google account's sessions. |
 | **A backup copy** (`medrec backup --to`) | The whole folder, as of that backup | It is a second copy with the same contents. Keep it on an encrypted disk, or in a remote as private as the first. |
 | **The own-your-health app's Drive token** (a browser tab signed in to it) | What the household's own Google OAuth client grants: at least the whole folder, read. The app writes only `_requests/`, and only pending requests, but Drive cannot hold a token to one folder: with a scope that can write, its holder can change or delete any file the scope reaches. | The token lives in the tab's memory and expires within the hour; the app keeps nothing secret in browser storage. Register the client with the narrowest Drive scope that can read the folder and create requests, in Testing mode with only the household as test users, and remove the app in the Google account's third-party connections to revoke it. A request can only ask for an import the refreshing Mac already has set up (data-contract.md, `_requests/`). `medrec verify` reports a filed file that changed or vanished (by MD5) and any file no index names, but it cannot tell an edited `household.json` or `index.json` from one medrec wrote. |
+| **The user's Claude account** (with `medrec mcp` added) | What the tools returned in its conversations | The account's own security and Anthropic's retention settings. Remove the extension (or `claude mcp remove medrec`) to stop; past conversations keep what they were given until deleted. |
 | **This repository** (public) | No personal data | [PRIVACY.md](PRIVACY.md) and the tests that enforce it |
 
 `medrec cache clear` removes every copy on this Mac (the read cache and

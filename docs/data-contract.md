@@ -528,6 +528,33 @@ file as found) and `handled`. A `done/` file is at most 8 KiB.
 | `message` | One line for a person, with no record content. |
 | `by` | The medrec that handled it. |
 
+## Readers
+
+Anything that only reads the folder follows the files above and writes
+nothing but `_requests/` (the app, by that section's rules). Two readers
+ship with medrec:
+
+- **The commands** (`timeline`, `search`, `results`, `meds`, `documents
+  list` and the rest) read `household.json`, each person's `index.json`,
+  `text.json` and `notes.md`.
+- **`medrec mcp`**, for Claude Desktop and Claude Code, reads the same files
+  through the same views, per call, with no lock. It writes nothing,
+  `_requests/` included. Its answers are computed, not stored:
+  - a person's summary takes medicines, conditions and allergies whose
+    `status` is not ended (`completed`, `stopped`, `inactive`, `resolved`,
+    `remission`, `entered-in-error`, `cancelled`, `refuted`). It keeps one
+    per code (with its system), or per name with case and accents folded
+    when uncoded: the newest.
+  - the latest result of each test is grouped the same way. A test's
+    series is every `result` record whose code is the one asked for, or
+    whose name holds the words asked for.
+  - a bill is a `bill` document with a `statement`, not `same_statement_as`
+    another. The newest statement per organization and account is shown
+    when its `amount_due` is over zero, and is `past_due` when its
+    `due_date` is before today. Whether a bill was paid is not recorded.
+  - a document's text is its `text.json` entry. Pages are the form feeds
+    between `pdftotext` pages, shown as `--- page N ---`.
+
 ## Import input: `records-stream/v1`
 
 `medrec import --from <cli> [--from-profile <name> | --from-files <dir>] --patient <id> [--org <org>] [--since <date>]`

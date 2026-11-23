@@ -8,6 +8,10 @@ name: release
 # draft only once every expected asset is there, so `self-update` never finds
 # a half release.
 #
+# Beside the tarballs it publishes `medrec-<version>.mcpb`, the Claude
+# Desktop extension (`medrec mcp`), holding one universal macOS binary and
+# the Linux one; Desktop picks a binary by OS, not by CPU.
+#
 # A pull request that changes how releases are built, or the dependencies
 # and version, runs every job but `publish` as a dry run.
 on:
@@ -19,6 +23,7 @@ on:
       - ".github/workflows/release.yml"
       - "Cargo.toml"
       - "Cargo.lock"
+      - "packaging/mcpb/**"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -41,6 +46,11 @@ jobs:
           version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
           if [ "${GITHUB_REF_TYPE:-}" = "tag" ] && [ "${GITHUB_REF_NAME#v}" != "$version" ]; then
             echo "::error::tag $GITHUB_REF_NAME does not match Cargo.toml version $version"
+            exit 1
+          fi
+          manifest_version=$(jq -r .version packaging/mcpb/manifest.json)
+          if [ "$manifest_version" != "$version" ]; then
+            echo "::error::packaging/mcpb/manifest.json is $manifest_version but Cargo.toml is $version"
             exit 1
           fi
 
@@ -67,7 +77,8 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
       # Asset names are the contract `medrec self-update` resolves against:
-      # medrec-<target>.tar.gz plus a sibling .sha256.
+      # medrec-<target>.tar.gz plus a sibling .sha256. The bare binaries also
+      # go to bin/<target>/ for the .mcpb job.
       - name: Build and package each target
         run: |
           set -euo pipefail
@@ -77,6 +88,8 @@ jobs:
             cargo build --release --locked --target "$t"
             tar -C "target/$t/release" -czf "medrec-$t.tar.gz" medrec
             sha256 "medrec-$t.tar.gz" > "medrec-$t.tar.gz.sha256"
+            mkdir -p "bin/$t"
+            cp "target/$t/release/medrec" "bin/$t/"
           done
       # A binary that builds and then fails at startup is not published.
       # The x86_64 macOS slice cannot run on this arm64 runner.
@@ -89,6 +102,20 @@ jobs:
           esac
           "$b" --version
           "$b" info --json > /dev/null
+          "$b" mcp --list-tools > /dev/null
+      - name: Universal macOS binary
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p bin/universal-apple-darwin
+          lipo -create -output bin/universal-apple-darwin/medrec \
+            bin/aarch64-apple-darwin/medrec bin/x86_64-apple-darwin/medrec
+          lipo -info bin/universal-apple-darwin/medrec
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bin-${{ runner.os }}
+          path: bin/
+          retention-days: 3
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
           name: dist-${{ runner.os }}
@@ -98,9 +125,49 @@ jobs:
           retention-days: 3
           if-no-files-found: error
 
+  mcpb:
+    name: pack the Claude Desktop extension
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bin-*
+          path: bin
+          merge-multiple: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # The `versions` job has already held the manifest to Cargo.toml and
+      # the tag.
+      - name: Assemble, validate and pack
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
+          stage="$RUNNER_TEMP/medrec"
+          mkdir -p "$stage/server/linux"
+          cp packaging/mcpb/manifest.json LICENSE-MIT "$stage/"
+          cp bin/universal-apple-darwin/medrec "$stage/server/medrec"
+          cp bin/x86_64-unknown-linux-gnu/medrec "$stage/server/linux/medrec"
+          # Artifacts drop the executable bit; the .mcpb keeps what it is given.
+          chmod +x "$stage/server/medrec" "$stage/server/linux/medrec"
+          npx -y @anthropic-ai/mcpb@2.1.2 validate "$stage/manifest.json"
+          npx -y @anthropic-ai/mcpb@2.1.2 pack "$stage" "medrec-$version.mcpb"
+          sha256sum "medrec-$version.mcpb" > "medrec-$version.mcpb.sha256"
+          unzip -Z "medrec-$version.mcpb"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-mcpb
+          path: medrec-*.mcpb*
+          retention-days: 7
+          if-no-files-found: error
+
   publish:
     name: publish the release
-    needs: [versions, build]
+    needs: [versions, build, mcpb]
     if: ${{ !cancelled() && needs.versions.result == 'success' && startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-latest
     permissions:
@@ -118,6 +185,8 @@ jobs:
           files: |
             dist/medrec-*.tar.gz
             dist/medrec-*.tar.gz.sha256
+            dist/medrec-*.mcpb
+            dist/medrec-*.mcpb.sha256
           generate_release_notes: true
       - name: Every expected asset was attached
         run: |
@@ -127,6 +196,10 @@ jobs:
             for f in "medrec-$t.tar.gz" "medrec-$t.tar.gz.sha256"; do
               [ -f "dist/$f" ] || { echo "::error::missing $f"; missing=1; }
             done
+          done
+          version="${GITHUB_REF_NAME#v}"
+          for f in "medrec-$version.mcpb" "medrec-$version.mcpb.sha256"; do
+            [ -f "dist/$f" ] || { echo "::error::missing $f"; missing=1; }
           done
           exit "$missing"
       - name: Publish the release

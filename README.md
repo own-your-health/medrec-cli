@@ -4,7 +4,8 @@ A household's medical records in one plain, private Google Drive folder.
 `medrec` files scans and downloaded documents, imaging studies from CDs and
 download links, and the records that provider and insurer CLIs fetch. It then
 answers questions over all of it: a timeline, search, results, medications,
-conditions, allergies, immunizations and notes.
+conditions, allergies, immunizations and notes, at the terminal or, through
+`medrec mcp`, in Claude.
 
 `medrec` holds no provider credentials and makes no network calls of its
 own, except to Google Drive through `rclone` and to GitHub for `self-update`.
@@ -391,14 +392,56 @@ the same study adds only the images not yet filed. `images open` copies the
 study to a private cache folder (mode 0700, removed after 12 hours) and hands
 the viewer that local folder. A disc's bundled viewer is never run.
 
+## Use with Claude
+
+`medrec mcp` serves one profile's records folder to Claude Desktop or Claude
+Code on this computer, as four read-only tools over stdio. What a tool
+returns goes to Anthropic as part of that Claude conversation, so add it only
+where you would ask Claude about these records yourself. It is the only AI
+connection: nothing in medrec calls an AI service, and no other one is
+supported.
+
+| Tool | What it answers |
+|---|---|
+| `medrec_summary` | The household's people. With `person`: their current medicines, conditions and allergies, immunizations, the latest result of each test with the lab's range and flag, recent visits, and bills with an amount due |
+| `medrec_search` | Documents, records, imaging studies and notes holding every word of a query |
+| `medrec_records` | One kind, newest first: `medications`, `conditions`, `allergies`, `immunizations`, `visits`, `procedures`, `results` (with `name`, one test over time), `tests` (the latest result of each), `reports`, `claims`, `coverage`, `bills`, `documents`, `notes` or `timeline`; `active` keeps current ones |
+| `medrec_document` | A filed document's extracted text, in parts of up to 16,000 characters, with page breaks marked |
+
+Claude Desktop: install the release's `medrec-<version>.mcpb` (open the
+file, or Settings > Extensions > Install Extension) and enter the profile's
+name when asked. The extension carries its own medrec binary, reads the same
+`~/.config/medrec/config.json` and folder as the installed one, and looks for
+`rclone` in `/opt/homebrew/bin`, `/usr/local/bin` and `/usr/bin`.
+
+```sh
+gh release download v0.4.0 -R own-your-health/medrec-cli -p 'medrec-*.mcpb' -D /tmp
+open /tmp/medrec-0.4.0.mcpb
+```
+
+Claude Code: `claude mcp add medrec -- medrec --profile <NAME> mcp`.
+
+What the server does and does not do:
+
+- It opens the folder to read on every call, as `timeline` and `search` do:
+  no lock, no write, nothing changed in the folder. A Drive folder is read
+  through the read cache.
+- It needs a profile at start (`--profile` or `MEDREC_PROFILE`). Without
+  one it exits 2 and names the configured ones. `medrec mcp --list-tools`
+  prints the tool definitions and reads nothing.
+- A list returns 25 items unless `limit` asks for up to 200, stops before
+  32,000 characters of JSON, and continues with `next_cursor`, which is
+  bound to the call's filters.
+- `response_format: detailed` adds a record's fields as FHIR names them.
+- Text from providers (titles, notes, document text) is data. The server's
+  instructions tell Claude not to follow directions that appear inside it.
+
 ## Not in this version
 
-- `claims`, `costs`, `summary` and `export` (PLAN phase 2).
+- `costs` and `export` (PLAN phase 2), and a per-person summary page in the
+  folder.
 - The Huishouden bridge. People carry link fields for it, and medrec writes
   nothing to Huishouden.
-- An MCP server. medrec is not registered in `cli-mcp` and has no `mcp`
-  command, because an MCP tool would return records to a model, which is a
-  third-party service.
 
 ## Docs
 
