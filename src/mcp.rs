@@ -1,8 +1,8 @@
 //! `medrec mcp`: the records folder as four read-only MCP tools, for Claude
 //! Desktop and Claude Code on this machine (pk-cli-mcp, the family's MCP
 //! profile). Each tool reads through the views the commands use; none
-//! writes to the folder, holds a credential, or reaches any network but the
-//! folder's own (a Drive folder is read through rclone).
+//! writes to the folder or reaches any network but the folder's own: a
+//! Drive folder is read through medrec's own Drive sign-in, from its vault.
 
 use std::time::Duration;
 
@@ -19,7 +19,8 @@ use crate::folder::{Access, Folder};
 use crate::intake::classify;
 use crate::model::{today, Household, Record};
 use crate::people;
-use crate::store::BIN;
+use crate::refresh::signin;
+use crate::store::{Location, BIN};
 use crate::summary::{self, clip, day, PersonRow, ResultRow, CLIP};
 use crate::views::{self, first_line, is_ended, label, record_detail, record_source, Range};
 
@@ -50,16 +51,28 @@ pub const MAX_STALE_SECS: &str = "900";
 pub struct MedrecTools {
     /// `None` only to list the tools, which reads nothing.
     cfg: Option<Config>,
+    /// This process has read the Drive sign-in from the Keychain once
+    /// without waiting on a dialog, so a call reads it in place.
+    keychain_read: std::sync::atomic::AtomicBool,
 }
 
 impl MedrecTools {
     pub fn new(cfg: Config) -> Self {
-        MedrecTools { cfg: Some(cfg) }
+        // A server nobody may be watching: a key another process replaced
+        // is read again with the same bound as the first read.
+        crate::store::bound_key_reads(signin::wait_or(CALL_BUDGET));
+        MedrecTools {
+            cfg: Some(cfg),
+            keychain_read: Default::default(),
+        }
     }
 
     /// For `mcp --list-tools`: no profile, and a call is refused.
     pub fn listing_only() -> Self {
-        MedrecTools { cfg: None }
+        MedrecTools {
+            cfg: None,
+            keychain_read: Default::default(),
+        }
     }
 
     /// Before serving: cached copies of a Drive folder's files answer only
@@ -76,16 +89,58 @@ impl MedrecTools {
             .cfg
             .as_ref()
             .ok_or_else(|| ToolError::other("no profile selected"))?;
-        let budget = cfg.rclone_budget().min(CALL_BUDGET);
-        let f = Folder::open_at(&cfg.folder_location()?, Access::Read, budget)?;
+        let budget = cfg.store_budget().min(CALL_BUDGET);
+        let location = cfg.folder_location()?;
+        if let Location::Drive(spec) = &location {
+            self.read_keychain(spec.profile().as_str())?;
+        }
+        let f = Folder::open_at(&location, Access::Read, budget)?;
         let h = f.household()?;
         Ok((f, h))
+    }
+
+    /// The first call's read of the Drive sign-in, bounded by
+    /// [`CALL_BUDGET`] ([`signin::read_drive`]). This copy of medrec (the
+    /// extension's own) asks macOS before it may read the item. A dialog
+    /// nobody answers ends the call with `auth` instead of holding it, and
+    /// the next call waits on the same dialog rather than raising another.
+    /// Once read, the key stays in the process's one vault, so no later call
+    /// asks again.
+    fn read_keychain(&self, profile: &str) -> Result<(), ToolError> {
+        use std::sync::atomic::Ordering;
+        if self.keychain_read.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+        let wait = signin::wait_or(CALL_BUDGET);
+        match signin::read_drive(profile, wait) {
+            signin::Read::Read { state, .. } if signin::usable(state) => {
+                self.keychain_read.store(true, Ordering::Relaxed);
+                Ok(())
+            }
+            signin::Read::Read { .. } => Err(ToolError::from(CliError::Auth(format!(
+                "the records folder's Drive profile `{profile}` is not signed in on this computer"
+            )))
+            .with_fix(format!(
+                "Ask the user to run `{BIN} drive login --drive-profile {profile}` in a \
+                 terminal, then call the tool again"
+            ))),
+            signin::Read::TimedOut => Err(ToolError::from(CliError::Auth(format!(
+                "macOS asked whether medrec may use its Keychain item, and nobody answered \
+                 within {} s",
+                wait.as_secs()
+            )))
+            .with_fix(
+                "Ask the user to answer the macOS Keychain dialog for medrec, choosing Always \
+                 Allow so it does not ask again, then call the tool again",
+            )),
+            signin::Read::Failed(m) => Err(CliError::Upstream(m).into()),
+        }
     }
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SummaryArgs {
-    /// Whose summary: a name, alias or id. Omit for the people only.
+    /// A name, alias or id; omit for the people only.
     #[serde(default)]
     pub person: Option<String>,
 }
@@ -353,7 +408,7 @@ pub struct DocumentOut {
 impl Toolset for MedrecTools {
     fn server(&self) -> Server {
         Server::new(BIN, env!("CARGO_PKG_VERSION"), "medical records", "medrec")
-            .sign_in_command(format!("{BIN} --profile <NAME> doctor"))
+            .sign_in_command(format!("{BIN} --profile <NAME> auth status"))
             .instructions(
                 "medrec keeps the household's medical records, imported from patient portals \
                  and insurers and filed from scans, in one folder; these tools read it and \
@@ -370,19 +425,18 @@ impl Toolset for MedrecTools {
             ToolDef::read(
                 SUMMARY,
                 "Household and person summary",
-                "Lists the household's people, and with person a summary of their records. Use \
-                 it first. Returns people (name, birth_date, counts) and summary: counts, \
-                 sources, and sections of current medications, conditions, allergies, \
-                 immunizations, latest results, recent visits and bills due.",
+                "Lists the household's people, and with person their summary. Use it first. \
+                 A summary has current medications, conditions, allergies, immunizations, \
+                 latest results, visits and bills due.",
             )
             .input::<SummaryArgs>()
             .output::<SummaryOut>(),
             ToolDef::read(
                 SEARCH,
                 "Search records",
-                "Finds documents, records, studies and notes holding every word of query, best \
-                 first; labs or blood tests also finds every lab result. Use it when a question names a doctor, test, medicine or clinic. \
-                 Returns items with person, kind, id, date, title and snippet.",
+                "Finds documents, records, studies and notes with every word of query, best \
+                 first; labs or blood tests also finds every lab result. Use it for a named \
+                 doctor, test, medicine or clinic. Filter by person and dates.",
             )
             .input::<SearchArgs>()
             .output::<Page<SearchItem>>(),
@@ -390,19 +444,17 @@ impl Toolset for MedrecTools {
                 RECORDS,
                 "List records by kind",
                 "Lists one kind of record, newest first; results with name is one test over \
-                 time. Use active for current medicines or conditions. Returns items with kind, \
-                 person, date, title, detail, status, source and id, plus value, unit, range \
-                 and flag for results, amount_due and due_date for bills, and has_text for \
-                 documents.",
+                 time. Use active for current medicines or conditions. Results carry value, \
+                 unit, range and flag; bills amount_due and due_date; documents has_text.",
             )
             .input::<RecordsArgs>()
             .output::<Page<Item>>(),
             ToolDef::read(
                 DOCUMENT,
                 "Read a document's text",
-                "Returns a filed document's extracted text (PDF text or a scan's OCR) with its \
+                "Returns a filed document's extracted text, with its \
                  title, date, type and organization. Use it to read a visit summary, lab \
-                 report, letter or bill. Long text comes in parts: pass next_offset back as \
+                 report, letter or bill. Long text comes in parts: pass next_offset as \
                  offset, or page to jump.",
             )
             .input::<DocumentArgs>()

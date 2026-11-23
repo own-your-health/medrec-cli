@@ -12,6 +12,7 @@ use pk_cli_config::profile::ProfileName;
 use pk_cli_config::ConfigStore;
 use pk_cli_core::info::{AuthInfo, CliInfo};
 use pk_cli_core::{confirm, output, CliError, CommonArgs};
+use pk_cli_drive::google::{DriveCommand, StatusArgs};
 use pk_cli_selfupdate::{SelfUpdateArgs, Updater};
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -97,13 +98,18 @@ enum Command {
     /// Shape every claim again from its filed raw resource, as this
     /// medrec's import does: once after an upgrade that changes claims.
     Reindex(ReindexArgs),
-    /// Copy the whole records folder to another rclone remote or folder,
-    /// then compare every file.
+    /// Copy the whole records folder to another Google Drive folder or a
+    /// directory, then compare every file. A file the backup already holds
+    /// with other bytes is replaced; files only the backup holds are kept.
     Backup(BackupArgs),
+    /// Google Drive sign-ins: one Drive profile per Google account, through
+    /// medrec's own OAuth client, tokens in the Keychain.
+    Drive(DriveArgs),
     /// Non-secret settings.
     #[command(subcommand)]
     Config(ConfigCmd),
-    /// medrec holds no credentials (auth-status/v1).
+    /// The records folder's Google Drive sign-in (auth-status/v1); none for
+    /// a folder on a local disk.
     #[command(subcommand)]
     Auth(AuthCmd),
     /// Update to the latest release from GitHub.
@@ -255,7 +261,8 @@ fn duration(s: &str) -> Result<u64, String> {
 
 #[derive(Args, Debug)]
 struct InitArgs {
-    /// `<rclone remote>:<path>` (canonical) or a local directory.
+    /// `gdrive:<drive profile>/<folder id>` (canonical; `medrec drive folder
+    /// create` makes one) or a local directory.
     location: String,
     /// Set up medrec in a folder that already holds other files.
     #[arg(long)]
@@ -370,7 +377,7 @@ struct IntakeArgs {
     #[arg(long)]
     inbox: bool,
     /// File everything in a Drive folder or directory (copied, not moved).
-    #[arg(long, value_name = "REMOTE:PATH|DIR")]
+    #[arg(long, value_name = "gdrive:PROFILE/FOLDER-ID|DIR")]
     drive: Option<String>,
     #[command(flatten)]
     given: GivenArgs,
@@ -666,9 +673,19 @@ struct VerifyArgs {
 
 #[derive(Args, Debug)]
 struct BackupArgs {
-    /// `<rclone remote>:<path>` or a local directory.
+    /// `gdrive:<drive profile>/<folder id>` or a local directory.
     #[arg(long)]
     to: String,
+}
+
+#[derive(Args, Debug)]
+struct DriveArgs {
+    /// The Drive profile, one per Google account (env MEDREC_DRIVE_PROFILE).
+    /// Default: the one the `--profile` records folder names.
+    #[arg(long = "drive-profile", global = true, value_name = "NAME")]
+    drive_profile: Option<String>,
+    #[command(subcommand)]
+    command: DriveCommand,
 }
 
 #[derive(Subcommand, Debug)]
@@ -685,7 +702,8 @@ enum ConfigCmd {
 
 #[derive(Subcommand, Debug)]
 enum AuthCmd {
-    /// Report credential state: none is needed.
+    /// The records folder's Drive sign-in, as `medrec drive status` reports
+    /// it; none is needed for a folder on a local disk.
     Status,
 }
 
@@ -742,6 +760,15 @@ fn load(store: &ConfigStore, cli: &Cli) -> Result<Config, CliError> {
     Ok(cfg)
 }
 
+/// The Drive profile the `--profile` records folder is in; `None` for a
+/// folder on a local disk.
+fn folder_drive_profile(store: &ConfigStore, cli: &Cli) -> Result<Option<String>, CliError> {
+    Ok(match load(store, cli)?.folder_location()? {
+        Location::Drive(spec) => Some(spec.profile().to_string()),
+        Location::Dir(_) => None,
+    })
+}
+
 /// `--profile`, checked as clap parses it and kept as text for
 /// [`Config::select`].
 fn profile_name_text(s: &str) -> Result<String, String> {
@@ -760,8 +787,8 @@ fn run(cli: &Cli) -> Result<(), CliError> {
         Command::Profiles(cmd) => profiles_cmd(cli, cmd, &store),
         Command::Init(a) => {
             let mut cfg = load(&store, cli)?;
-            let loc = Location::parse(&a.location);
-            let budget = cfg.rclone_budget();
+            let loc = Location::parse(&a.location)?;
+            let budget = cfg.store_budget();
             let r = maint::init(&mut cfg, &loc, a.allow_other_files, budget)?;
             cfg.keep_active()?;
             store.save(&cfg)?;
@@ -890,7 +917,7 @@ fn run(cli: &Cli) -> Result<(), CliError> {
         Command::Backup(a) => {
             let cfg = load(&store, cli)?;
             let f = Folder::open(&cfg, Access::Read)?;
-            let r = maint::backup(&f, &Location::parse(&a.to), cfg.rclone_budget())?;
+            let r = maint::backup(&f, &Location::parse(&a.to)?, cfg.store_budget())?;
             let clean = r.mismatched.is_empty();
             output::emit(json, "backup", to_value(&r), |_| {
                 println!(
@@ -907,9 +934,47 @@ fn run(cli: &Cli) -> Result<(), CliError> {
             Ok(())
         }
         Command::Config(cmd) => config_cmd(cli, cmd, &store),
-        Command::Auth(AuthCmd::Status) => {
+        Command::Auth(AuthCmd::Status)
+            if cli.profile.is_none()
+                && std::env::var(medrec::config::PROFILE_ENV).map_or(true, |v| v.is_empty()) =>
+        {
+            // No records folder named: none is needed until one is.
             AuthStatus::not_required().emit(json);
+            if !json {
+                eprintln!(
+                    "name a records profile (`--profile <NAME>`) for its folder's Drive sign-in; \
+                     `medrec drive profiles list` lists the Drive profiles"
+                );
+            }
             Ok(())
+        }
+        Command::Auth(AuthCmd::Status) => match folder_drive_profile(&store, cli)? {
+            Some(profile) => store::drive_cli()?.run(
+                &DriveCommand::Status(StatusArgs::default()),
+                Some(&profile),
+                json,
+                cli.common.interactive(),
+            ),
+            None => {
+                AuthStatus::not_required().emit(json);
+                Ok(())
+            }
+        },
+        Command::Drive(a) => {
+            // --drive-profile, else MEDREC_DRIVE_PROFILE (read by the Drive
+            // commands), else the records folder's.
+            let env_set = std::env::var("MEDREC_DRIVE_PROFILE").is_ok_and(|v| !v.is_empty());
+            let profile = match &a.drive_profile {
+                Some(p) => Some(p.clone()),
+                None if env_set || cli.profile.is_none() => None,
+                None => folder_drive_profile(&store, cli)?,
+            };
+            store::drive_cli()?.run(
+                &a.command,
+                profile.as_deref(),
+                json,
+                cli.common.interactive(),
+            )
         }
         Command::SelfUpdate(args) => Updater {
             repo: REPO.into(),
@@ -941,9 +1006,17 @@ fn run(cli: &Cli) -> Result<(), CliError> {
                 env!("CARGO_PKG_VERSION"),
                 &format!("https://github.com/{REPO}"),
                 AuthInfo {
+                    // Not required: a records folder on a local disk needs
+                    // none, and `info` names no folder. One on Google Drive
+                    // is reached through a Drive profile's sign-in;
+                    // `auth status --profile <NAME>` reports it.
                     required: false,
-                    method: "none".into(),
-                    login_hint: None,
+                    method: "browser-session".into(),
+                    login_hint: Some(format!(
+                        "{} login {} <NAME>",
+                        store::DRIVE_COMMAND,
+                        store::DRIVE_PROFILE_FLAG
+                    )),
                 },
                 // Its records-folder commands take --profile.
                 &[pk_med_records::LOGIN_PROFILES],
@@ -974,12 +1047,11 @@ fn run(cli: &Cli) -> Result<(), CliError> {
             };
             let spec = match (remote_spec, cfg.folder_location()) {
                 (Some(s), _) => s.clone(),
-                (None, Ok(Location::Remote(s))) => s,
+                (None, Ok(Location::Drive(s))) => s.to_string(),
                 (None, Err(e)) => return Err(e),
                 _ => {
                     return Err(CliError::Usage(
-                        "the records folder is not an rclone remote, so it has no read cache"
-                            .into(),
+                        "the records folder is not on Google Drive, so it has no read cache".into(),
                     ))
                 }
             };
@@ -988,7 +1060,7 @@ fn run(cli: &Cli) -> Result<(), CliError> {
                 .map(|r| (false, r))
                 .or(revalidate_listing.as_ref().map(|r| (true, r)))
             {
-                let outcome = store::revalidate(&spec, listing, rel, cfg.rclone_budget())?;
+                let outcome = store::revalidate(&spec, listing, rel, cfg.store_budget())?;
                 output::emit(
                     json,
                     "cache-sync",
@@ -1124,7 +1196,7 @@ fn intake_cmd(cli: &Cli, a: &IntakeArgs, store: &ConfigStore) -> Result<(), CliE
     let req = intake::Request {
         files: a.files.clone(),
         inbox,
-        drive: a.drive.as_deref().map(Location::parse),
+        drive: a.drive.as_deref().map(Location::parse).transpose()?,
         given,
         keep: a.keep,
         move_files: a.move_files,
@@ -1309,6 +1381,11 @@ fn refresh_cmd(cli: &Cli, a: &RefreshArgs, store: &ConfigStore) -> Result<(), Cl
             }
             for q in &r.requests {
                 println!("  request {} {}", q.request, q.outcome);
+            }
+            if let Some(c) = &r.command {
+                println!(
+                    "  the Drive sign-in waits on a Keychain approval; run `{c}` at the screen"
+                );
             }
         });
         if mode == Mode::Manual && failed {
@@ -2122,7 +2199,7 @@ fn profiles_cmd(cli: &Cli, cmd: &ProfilesCmd, store: &ConfigStore) -> Result<(),
                 json!({ "name": name, "status": status }),
                 |_| {
                     if added {
-                        println!("added profile {name}; give it a records folder with `{BIN} --profile {name} init <remote:path|dir>`")
+                        println!("added profile {name}; give it a records folder with `{BIN} --profile {name} init <gdrive:PROFILE/FOLDER-ID|dir>`")
                     } else {
                         println!("profile {name} already exists")
                     }
