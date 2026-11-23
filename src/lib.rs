@@ -13,6 +13,7 @@ pub mod imaging;
 pub mod import;
 pub mod intake;
 pub mod maint;
+pub mod mcp;
 pub mod model;
 pub mod normalize;
 pub mod notes;
@@ -24,6 +25,7 @@ pub mod refresh;
 pub mod review;
 pub mod store;
 pub mod stream;
+pub mod summary;
 #[doc(hidden)]
 pub mod testdata;
 pub mod version;

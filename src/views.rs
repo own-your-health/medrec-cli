@@ -27,7 +27,7 @@ impl Range {
     }
 
     /// An undated item shows only when no range is asked for.
-    fn holds(&self, date: Option<&str>) -> bool {
+    pub(crate) fn holds(&self, date: Option<&str>) -> bool {
         match date {
             None => self.since.is_none() && self.until.is_none(),
             Some(d) => {
@@ -194,13 +194,13 @@ pub fn timeline(
     Ok(out)
 }
 
-fn label(doc_type: Option<&str>) -> &'static str {
+pub(crate) fn label(doc_type: Option<&str>) -> &'static str {
     doc_type
         .and_then(classify::doc_type_label)
         .unwrap_or("Document")
 }
 
-fn first_line(s: &str, max: usize) -> String {
+pub(crate) fn first_line(s: &str, max: usize) -> String {
     let line = s
         .lines()
         .find(|l| !l.trim().is_empty())
@@ -279,7 +279,7 @@ fn flat_text(v: &Value, out: &mut String) {
     }
 }
 
-fn value_text(v: &Value) -> String {
+pub(crate) fn value_text(v: &Value) -> String {
     match v {
         Value::String(s) => s.clone(),
         Value::Number(n) => n.to_string(),
@@ -302,7 +302,7 @@ fn value_text(v: &Value) -> String {
     }
 }
 
-fn record_source(h: &Household, r: &Record) -> Option<String> {
+pub(crate) fn record_source(h: &Household, r: &Record) -> Option<String> {
     let p = r.provenance.first()?;
     let base = p.source.fhir_base.as_deref();
     h.organizations
@@ -368,7 +368,7 @@ pub fn records(
 
 /// `q` is the record's code (`718-7`, `J45.909`), or words of its name
 /// (`hemoglobin`), case-insensitive.
-fn matches_code(r: &Record, q: &str) -> bool {
+pub(crate) fn matches_code(r: &Record, q: &str) -> bool {
     let q = q.trim().to_lowercase();
     if q.is_empty() {
         return true;
@@ -390,7 +390,7 @@ fn matches_code(r: &Record, q: &str) -> bool {
         .any(|n| n.to_lowercase().contains(&q))
 }
 
-fn is_ended(status: Option<&str>) -> bool {
+pub(crate) fn is_ended(status: Option<&str>) -> bool {
     matches!(
         status,
         Some(
