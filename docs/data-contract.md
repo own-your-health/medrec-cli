@@ -266,10 +266,11 @@ A claim's links are guesses by date and name, recomputed on every write of
 the person's index, so a visit imported after its claim is linked then:
 
 - `visit`: the record id of the one `encounter` dated on one of the
-  claim's dates of service (its lines' `serviced`, else the claim's
-  date). Of several, it is the one that shares a word of four or more
-  letters between its `service_provider`, `location` or `practitioner`
-  and the claim's `provider` or `facility`. When that leaves no single
+  claim's dates of service (each line's `serviced`, else the claim's date
+  for a line with none, or for a claim with no lines). Of several, it is
+  the one that shares a word of four or more letters between its
+  `service_provider`, `location` or `practitioner` and the claim's
+  `provider` or `facility`. When that leaves no single
   encounter, there is no `visit`.
 - `results`: the ids of the `result` and `report` records dated on a `lab`
   line's date of service.

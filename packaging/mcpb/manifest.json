@@ -55,7 +55,7 @@
     },
     {
       "name": "medrec_search",
-      "description": "Documents, records, studies and notes holding every word of a query."
+      "description": "Documents, records, studies and notes holding every word of a query; a query naming lab tests (blood tests, labs) also finds every lab result, report and lab claim."
     },
     {
       "name": "medrec_records",
