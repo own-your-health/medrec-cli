@@ -109,6 +109,9 @@ enum Command {
     Completions { shell: Shell },
     /// Machine-readable capability discovery (cli-info/v1).
     Info,
+    /// Serve the records folder to Claude Desktop and Claude Code as
+    /// read-only MCP tools over stdio.
+    Mcp(pk_cli_mcp::McpArgs),
     /// This machine's copies of records-folder files: the read cache and
     /// opened documents and studies
     #[command(subcommand)]
@@ -895,6 +898,19 @@ fn run(cli: &Cli) -> Result<(), CliError> {
         Command::Completions { shell } => {
             clap_complete::generate(*shell, &mut Cli::command(), BIN, &mut std::io::stdout());
             Ok(())
+        }
+        Command::Mcp(args) => {
+            let tools = if args.list_tools {
+                medrec::mcp::MedrecTools::listing_only()
+            } else {
+                // The profile and its folder are checked before serving, so a
+                // client set up without them fails at start, naming them.
+                let cfg = load(&store, cli)?;
+                cfg.folder_location()?;
+                medrec::mcp::MedrecTools::limit_staleness();
+                medrec::mcp::MedrecTools::new(cfg)
+            };
+            pk_cli_mcp::run(args, tools)
         }
         Command::Info => {
             let info = CliInfo::new(

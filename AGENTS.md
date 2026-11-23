@@ -29,8 +29,12 @@ session is a third-party service.
   (`medrec profiles add dog`, then `MEDREC_PROFILE=dog`).
 - A check against real data reports counts, statuses and exit codes only,
   or is left to the user in their own terminal.
-- No MCP server, and no registration in `cli-mcp` (the family-cli shipping
-  step is skipped on purpose): an MCP tool returns records to a model.
+- `medrec mcp` (src/mcp.rs) is the one route by which records reach a
+  model: the user's own Claude client, by the user's decision of
+  2026-11-22. Its tools stay read-only (`ToolDef::read`, `Access::Read`).
+  Nothing in medrec calls an AI service. Develop and test it on synthetic
+  data (tests/mcp.rs); never call it against the real folder from an agent
+  session.
 
 ## Invariant 2: this repo is public
 
