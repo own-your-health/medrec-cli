@@ -7,6 +7,10 @@
 //! that hangs (a Keychain approval nobody gives) is stopped after
 //! [`signin::SCHEDULED_WAIT`] and the source marked as needing a person,
 //! with the command to run. It is not tried again until that has run.
+//! medrec's own Drive sign-in is held to the same rule: a scheduled pass by
+//! a binary not yet known to read it without an approval (a new build, an
+//! update) checks it first in a bounded `medrec drive status`, and a check
+//! that hangs stops the pass, naming the command a person runs.
 
 pub mod contract;
 pub mod launchd;
@@ -27,7 +31,7 @@ use crate::config::{Binding, Config};
 use crate::folder::{self, Access, Folder};
 use crate::import::{self, Provider};
 use crate::model::{Household, Source};
-use crate::store::{Reads, Store};
+use crate::store::{Location, Reads, Store};
 use contract::*;
 use requests::{Parsed, Scope};
 
@@ -54,8 +58,12 @@ pub enum Pick {
 /// counts, never a name or record content.
 #[derive(Debug, Default, Serialize)]
 pub struct PassReport {
-    /// `idle`, `busy`, `ran` or `waiting` (a take-over not yet settled).
+    /// `idle`, `busy`, `ran`, `waiting` (a take-over not yet settled) or
+    /// `needs_person` (medrec's Drive sign-in waits on an approval).
     pub status: String,
+    /// What a person runs, for `needs_person`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
     pub attempts: Vec<AttemptRow>,
     pub requests: Vec<RequestRow>,
     pub status_written: bool,
@@ -477,7 +485,21 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
     let machine = state::machine()?;
     let mut local = state::load(&location)?;
     let started = time::now();
-    let store = Store::open(&location, Reads::Fresh, cfg.rclone_budget());
+    let exe = signin::exe_id();
+    if let (Mode::Scheduled, Location::Drive(spec)) = (mode, &location) {
+        if exe.is_none() || local.drive_ready != exe {
+            if let Some(command) = drive_gate(cfg, spec, &mut local, &exe)? {
+                state::save(&location, &local)?;
+                return Ok(PassReport {
+                    status: "needs_person".into(),
+                    command: Some(command),
+                    ..PassReport::default()
+                });
+            }
+            state::save(&location, &local)?;
+        }
+    }
+    let store = Store::open(&location, Reads::Fresh, cfg.store_budget())?;
     let every = pass_every(cfg);
     let mut report = PassReport {
         status: "ran".into(),
@@ -527,7 +549,7 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
         )));
     }
 
-    let folder = Folder::open_at(&location, Access::Fresh, cfg.rclone_budget())?;
+    let folder = Folder::open_at(&location, Access::Fresh, cfg.store_budget())?;
     let h = folder.household()?;
     let source_of = |id: &str| h.sources.iter().find(|s| s.id == id);
 
@@ -1000,8 +1022,55 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
         local.took_over_at = None;
     }
     report.status_written = writer.wrote;
+    if mode == Mode::Manual && matches!(location, Location::Drive(_)) {
+        // A person's pass read the Drive sign-in in this process: this
+        // binary needs no approval for it from now on.
+        local.drive_ready = exe;
+        local.drive_blocked = None;
+    }
     state::save(&location, &local)?;
     Ok(report)
+}
+
+/// Whether a scheduled pass may read the Drive sign-in: `None` when it may,
+/// or the command a person runs when the check waits on an approval.
+fn drive_gate(
+    cfg: &Config,
+    spec: &pk_cli_drive::google::DriveSpec,
+    local: &mut state::Local,
+    exe: &Option<String>,
+) -> Result<Option<String>, CliError> {
+    let command = format!(
+        "medrec --profile {} refresh",
+        cfg.profile
+            .as_ref()
+            .map(ProfileName::as_str)
+            .unwrap_or("<NAME>")
+    );
+    if exe.is_some() && local.drive_blocked == *exe {
+        return Ok(Some(command));
+    }
+    let profile = spec.profile().as_str();
+    match signin::read_drive(profile, signin::scheduled_wait()) {
+        signin::Read::Read { state, .. } if signin::usable(state) => {
+            local.drive_ready = exe.clone();
+            local.drive_blocked = None;
+            Ok(None)
+        }
+        signin::Read::Read { state, .. } => Err(CliError::Auth(format!(
+            "the records folder's Drive sign-in (`{profile}`) is {state}"
+        ))
+        .with_remedy(format!(
+            "sign in again with `{} login {} {profile}`",
+            crate::store::DRIVE_COMMAND,
+            crate::store::DRIVE_PROFILE_FLAG
+        ))),
+        signin::Read::TimedOut => {
+            local.drive_blocked = exe.clone();
+            Ok(Some(command))
+        }
+        signin::Read::Failed(m) => Err(CliError::Upstream(m)),
+    }
 }
 
 /// One source's turn in a pass.
@@ -1295,9 +1364,9 @@ pub fn install(
         .clone()
         .ok_or_else(|| CliError::Other("no profile selected".into()))?;
     let location = cfg.folder_location()?;
-    let store = Store::open(&location, Reads::Fresh, cfg.rclone_budget());
+    let store = Store::open(&location, Reads::Fresh, cfg.store_budget())?;
     // The folder must be a records folder.
-    Folder::open_at(&location, Access::Fresh, cfg.rclone_budget())?;
+    Folder::open_at(&location, Access::Fresh, cfg.store_budget())?;
     let machine = state::machine()?;
     let now = time::now();
     let in_folder: Option<Status> = folder::read_json(&store, STATUS)?;
@@ -1323,7 +1392,7 @@ pub fn install(
     let entries = current_entries(
         cfg,
         &local,
-        &Folder::open_at(&location, Access::Fresh, cfg.rclone_budget())?.household()?,
+        &Folder::open_at(&location, Access::Fresh, cfg.store_budget())?.household()?,
     );
     let mut writer = Writer {
         store: &store,
@@ -1419,8 +1488,8 @@ pub fn publish(cfg: &Config) -> Result<bool, CliError> {
     let Some(_lock) = state::try_lock(&location)? else {
         return Ok(false);
     };
-    let store = Store::open(&location, Reads::Fresh, cfg.rclone_budget());
-    let h = Folder::open_at(&location, Access::Fresh, cfg.rclone_budget())?.household()?;
+    let store = Store::open(&location, Reads::Fresh, cfg.store_budget())?;
+    let h = Folder::open_at(&location, Access::Fresh, cfg.store_budget())?.household()?;
     let entries = current_entries(cfg, &local, &h);
     let mut writer = Writer {
         store: &store,
@@ -1643,7 +1712,7 @@ pub fn sign_in(cfg: &Config, source: &str) -> Result<SignedIn, CliError> {
             "a refresh of this folder is running on this machine; try again when it ends".into(),
         ));
     };
-    let h = Folder::open_at(&location, Access::Fresh, cfg.rclone_budget())?.household()?;
+    let h = Folder::open_at(&location, Access::Fresh, cfg.store_budget())?.household()?;
     let src = h
         .sources
         .iter()
@@ -1668,7 +1737,7 @@ pub fn sign_in(cfg: &Config, source: &str) -> Result<SignedIn, CliError> {
     }
     let pp = b.provider_profile.as_deref();
     let mut local = state::load(&location)?;
-    let store = Store::open(&location, Reads::Fresh, cfg.rclone_budget());
+    let store = Store::open(&location, Reads::Fresh, cfg.store_budget())?;
     let mut entries = current_entries(cfg, &local, &h);
     // The provider refused this login's last export, whatever its status
     // reads: a member site's session can read as valid on this Mac and be
@@ -1751,7 +1820,7 @@ pub fn sign_in(cfg: &Config, source: &str) -> Result<SignedIn, CliError> {
 
 /// `_status/status.json` as the folder holds it now.
 pub fn read_status(cfg: &Config) -> Result<Option<Status>, CliError> {
-    let store = Store::open(&cfg.folder_location()?, Reads::Fresh, cfg.rclone_budget());
+    let store = Store::open(&cfg.folder_location()?, Reads::Fresh, cfg.store_budget())?;
     let s: Option<Status> = folder::read_json(&store, STATUS)?;
     if let Some(s) = &s {
         check_format(s)?;

@@ -2,7 +2,7 @@
 //! synthetic data only (`medrec::testdata`): init, people, intake of scans
 //! (duplicates, near-duplicates, review, the organize-scans hand-off),
 //! imaging, an import from a fake provider, the views, notes, verify and
-//! backup. Offline; no Keychain; rclone is not used.
+//! backup. Offline; no Keychain; no Drive.
 
 use std::path::{Path, PathBuf};
 use std::process::Output;
@@ -37,6 +37,7 @@ impl Env {
             .env("HOME", &self.root)
             .env("PATH", &self.path)
             .env("MEDREC_PROFILE", "home")
+            .env("MEDREC_KEYCHAIN_SERVICE", "piekstra.medrec.hermetic-tests")
             .env_remove("NO_COLOR");
         for (k, v) in env {
             c.env(k, v);
@@ -1125,6 +1126,7 @@ fn held_import(e: &Env, hold: &Path) -> std::process::Child {
         .env("HOME", &e.root)
         .env("PATH", &e.path)
         .env("MEDREC_PROFILE", "home")
+        .env("MEDREC_KEYCHAIN_SERVICE", "piekstra.medrec.hermetic-tests")
         .env("FAKEPROV_HOLD", hold)
         .args([
             "--json",

@@ -18,6 +18,8 @@ fn medrec() -> Command {
     c.env("XDG_CONFIG_HOME", dir.join("config"))
         .env("XDG_CACHE_HOME", dir.join("cache"))
         .env("HOME", &dir)
+        .env("MEDREC_KEYCHAIN_SERVICE", "piekstra.medrec.hermetic-tests")
+        .env_remove("MEDREC_DRIVE_PROFILE")
         .env_remove("MEDREC_PROFILE")
         .env_remove("NO_COLOR");
     c
@@ -39,6 +41,8 @@ fn with_profile() -> impl Fn(&[&str]) -> std::process::Output {
         c.env("XDG_CONFIG_HOME", dir.join("config"))
             .env("XDG_CACHE_HOME", dir.join("cache"))
             .env("HOME", &dir)
+            .env("MEDREC_KEYCHAIN_SERVICE", "piekstra.medrec.hermetic-tests")
+            .env_remove("MEDREC_DRIVE_PROFILE")
             .env_remove("MEDREC_PROFILE")
             .env_remove("NO_COLOR");
         c.args(args).output().unwrap()
@@ -106,6 +110,16 @@ fn every_command_renders_its_help() {
         &["doctor"],
         &["verify"],
         &["backup"],
+        &["drive"],
+        &["drive", "login"],
+        &["drive", "status"],
+        &["drive", "logout"],
+        &["drive", "about"],
+        &["drive", "client", "import"],
+        &["drive", "folder", "create"],
+        &["drive", "folder", "list"],
+        &["drive", "profiles", "list"],
+        &["drive", "profiles", "remove"],
         &["cache"],
         &["cache", "clear"],
         &["config", "path"],
@@ -125,13 +139,17 @@ fn every_command_renders_its_help() {
 }
 
 #[test]
-fn info_says_no_credential_is_needed() {
+fn info_names_the_drive_sign_in() {
     let out = medrec().args(["info", "--json"]).output().unwrap();
     assert!(out.status.success());
     let v = json_of(&out);
     assert_eq!(v["schema"], "cli-info/v1");
     assert_eq!(v["name"], "medrec");
-    assert_eq!(v["auth"]["required"], false);
+    assert_eq!(v["auth"]["required"], true);
+    assert_eq!(
+        v["auth"]["login_hint"],
+        "medrec drive login --drive-profile <NAME>"
+    );
     // Its records-folder commands take --profile.
     assert!(v["capabilities"]
         .as_array()
@@ -366,6 +384,7 @@ fn config_round_trips() {
         let mut c = Command::cargo_bin("medrec").unwrap();
         c.env("XDG_CONFIG_HOME", dir.join("config"))
             .env("XDG_CACHE_HOME", dir.join("cache"))
+            .env("MEDREC_KEYCHAIN_SERVICE", "piekstra.medrec.hermetic-tests")
             .env_remove("MEDREC_PROFILE");
         c.args(args).output().unwrap()
     };
@@ -374,9 +393,14 @@ fn config_round_trips() {
     assert!(run(&["config", "set", "viewer", "none"]).status.success());
     // A records folder is a profile's.
     assert_eq!(
-        run(&["config", "set", "folder", "gdrive:Medical Records"])
-            .status
-            .code(),
+        run(&[
+            "config",
+            "set",
+            "folder",
+            "gdrive:home-drive/1AbCdEf_synthetic"
+        ])
+        .status
+        .code(),
         Some(2)
     );
     let set = json_of(&run(&[
@@ -386,16 +410,22 @@ fn config_round_trips() {
         "config",
         "set",
         "folder",
-        "gdrive:Medical Records",
+        "gdrive:home-drive/1AbCdEf_synthetic",
     ]));
     assert_eq!(set["profile"], "home");
-    assert_eq!(set["folder"], "gdrive:Medical Records");
+    assert_eq!(set["folder"], "gdrive:home-drive/1AbCdEf_synthetic");
     let v = json_of(&run(&["--json", "config", "show"]));
     assert_eq!(v["viewer"], "none");
     assert!(v.get("folder").is_none(), "{v}");
-    assert_eq!(v["profiles"]["home"]["folder"], "gdrive:Medical Records");
+    assert_eq!(
+        v["profiles"]["home"]["folder"],
+        "gdrive:home-drive/1AbCdEf_synthetic"
+    );
     let v = json_of(&run(&["--json", "profiles", "list"]));
-    assert_eq!(v["profiles"][0]["folder"], "gdrive:Medical Records");
+    assert_eq!(
+        v["profiles"][0]["folder"],
+        "gdrive:home-drive/1AbCdEf_synthetic"
+    );
     assert!(run(&["config", "unset", "viewer"]).status.success());
     let v = json_of(&run(&["--json", "config", "show"]));
     assert!(v.get("viewer").is_none());
@@ -419,4 +449,73 @@ fn intake_help_lists_every_document_type() {
         .map(|t| t.0)
         .collect();
     assert_eq!(listed, types);
+}
+
+#[test]
+fn a_folder_named_the_rclone_way_is_refused_with_the_move() {
+    let run = with_profile();
+    for args in [
+        &[
+            "--profile",
+            "home",
+            "config",
+            "set",
+            "folder",
+            "records:Medical Records",
+        ][..],
+        &["--profile", "home", "init", "records:Medical Records"][..],
+        &[
+            "--profile",
+            "home",
+            "config",
+            "set",
+            "inbox",
+            "records:Inbox",
+        ][..],
+    ] {
+        let out = run(args);
+        assert_eq!(out.status.code(), Some(2), "{args:?}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("medrec no longer uses rclone"), "{err}");
+        assert!(err.contains("medrec drive login --drive-profile"), "{err}");
+    }
+}
+
+#[test]
+fn drive_profiles_are_medrecs_own_and_none_is_a_default() {
+    let run = with_profile();
+    // No Drive profile yet: the list is empty and reads no keychain.
+    let v = json_of(&run(&["--json", "drive", "profiles", "list"]));
+    assert_eq!(v["profiles"].as_array().map(Vec::len), Some(0), "{v}");
+    // A Drive command with none named, and none in the folder, is exit 2.
+    let out = run(&["drive", "status", "--local"]);
+    assert_eq!(out.status.code(), Some(2));
+    // A folder on Drive whose profile is not signed in here: the command is
+    // refused before anything is read, naming the sign-in.
+    assert!(run(&[
+        "--profile",
+        "home",
+        "config",
+        "set",
+        "folder",
+        "gdrive:home-drive/1AbCdEf_synthetic"
+    ])
+    .status
+    .success());
+    let out = run(&["--profile", "home", "people", "list"]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("medrec drive login --drive-profile home-drive"),
+        "{err}"
+    );
+    // The records folder names the Drive profile its commands default to.
+    let out = run(&["--profile", "home", "--json", "drive", "status", "--local"]);
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    assert!(String::from_utf8_lossy(&out.stderr).contains("home-drive"));
 }

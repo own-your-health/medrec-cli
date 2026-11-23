@@ -1,5 +1,5 @@
 //! Bounded subprocesses: every external program medrec runs (poppler,
-//! tesseract, rclone, provider CLIs) goes through here.
+//! tesseract, bsdtar, provider CLIs) goes through here.
 //!
 //! - stdin is closed, so no child can wait on a terminal prompt;
 //! - the child leads its own process group, and at the deadline the whole
@@ -454,7 +454,7 @@ mod tests {
             Duration::from_secs(30)
         )));
         for other in [
-            "rclone lsjson: `x` gave no answer within 30 s; stopped (retrying)",
+            "pdftotext: `x` gave no answer within 30 s; stopped (retrying)",
             "provider said: gave no answer within 5 s; stopped",
             "`x` exited 1",
         ] {

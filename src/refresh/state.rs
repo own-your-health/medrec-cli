@@ -91,6 +91,15 @@ pub struct Local {
     /// not remove (another Google account's): passed over until they go.
     #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
     pub left: std::collections::BTreeSet<String>,
+    /// The medrec binary ([`super::signin::exe_id`]) whose read of the Drive
+    /// sign-in is known to need no approval: a person's pass, or a probe
+    /// that answered. A scheduled pass by another binary probes first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drive_ready: Option<String>,
+    /// The binary whose probe hung on an approval nobody gave. No scheduled
+    /// pass by it reads the sign-in again until a person runs a pass.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drive_blocked: Option<String>,
 }
 
 fn local_path(location: &Location) -> Result<PathBuf, CliError> {

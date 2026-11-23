@@ -61,7 +61,7 @@ pub struct Folder {
 
 impl Folder {
     pub fn open(cfg: &Config, access: Access) -> Result<Folder, CliError> {
-        Folder::open_at(&cfg.folder_location()?, access, cfg.rclone_budget())
+        Folder::open_at(&cfg.folder_location()?, access, cfg.store_budget())
     }
 
     /// Open to write, waiting up to `wait` for another writer to finish:
@@ -71,7 +71,7 @@ impl Folder {
         Folder::open_within(
             &cfg.folder_location()?,
             Access::Write,
-            cfg.rclone_budget(),
+            cfg.store_budget(),
             wait,
         )
     }
@@ -98,7 +98,7 @@ impl Folder {
             Access::Write | Access::Fresh => Reads::Fresh,
             Access::Read => Reads::Cached,
         };
-        let store = Store::open(location, reads, budget);
+        let store = Store::open(location, reads, budget)?;
         let h = read_household(&store)?.ok_or_else(|| {
             CliError::NotFound(format!(
                 "no medrec records folder at {} (no {HOUSEHOLD}); run `medrec init {}`",
@@ -665,7 +665,7 @@ mod tests {
     fn a_new_file_adopts_its_own_earlier_upload_and_never_replaces_another() {
         let root = crate::testutil::temp_dir("folder-put");
         let loc = crate::store::Location::Dir(root.join("records"));
-        let st = Store::open(&loc, crate::store::Reads::Fresh, Duration::from_secs(60));
+        let st = Store::open(&loc, crate::store::Reads::Fresh, Duration::from_secs(60)).unwrap();
         create(&st).unwrap();
         let f = Folder::open_at(&loc, Access::Write, Duration::from_secs(60)).unwrap();
         let (a, b) = (root.join("a.pdf"), root.join("b.pdf"));
@@ -757,7 +757,7 @@ mod tests {
     fn create_then_open_and_write_with_rev_checks() {
         let root = crate::testutil::temp_dir("folder");
         let loc = Location::Dir(root.clone());
-        let store = Store::open(&loc, Reads::Fresh, crate::store::DEFAULT_BUDGET);
+        let store = Store::open(&loc, Reads::Fresh, crate::store::DEFAULT_BUDGET).unwrap();
         let h = create(&store).unwrap();
         assert!(store
             .read_text(README)

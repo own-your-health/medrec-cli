@@ -1220,7 +1220,7 @@ fn gather(req: &Request, cfg: &Config, stores: &mut Vec<Store>) -> Result<Vec<It
         (req.drive.as_ref(), "drive", Policy::Copy),
     ] {
         let Some(loc) = loc else { continue };
-        let store = Store::open(loc, Reads::Fresh, cfg.rclone_budget());
+        let store = Store::open(loc, Reads::Fresh, cfg.store_budget())?;
         let entries: Vec<Hashed> = store.hashes("")?;
         let idx = stores.len();
         for e in entries {
@@ -1335,7 +1335,8 @@ mod tests {
             &crate::store::Location::Dir(dir.clone()),
             crate::store::Reads::Fresh,
             std::time::Duration::from_secs(5),
-        );
+        )
+        .unwrap();
         let file = dir.join("scan.pdf");
         std::fs::write(&file, b"the bytes read").unwrap();
         let read = crate::store::md5_file(&file).unwrap();

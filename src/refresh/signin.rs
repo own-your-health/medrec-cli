@@ -104,6 +104,59 @@ pub fn read(provider: &Provider, profile: Option<&str>, wait: Duration) -> Read 
     }
 }
 
+/// The medrec binary running: its path, size and modification time, which
+/// change when it is rebuilt or updated, as its Keychain approval does.
+/// `MEDREC_TEST_DRIVE_PROBE` (tests only) stands in for it.
+pub fn exe_id() -> Option<String> {
+    let exe = drive_probe_exe()?;
+    let meta = std::fs::metadata(&exe).ok()?;
+    let mtime = meta
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_nanos();
+    Some(format!("{}:{}:{mtime}", exe.display(), meta.len()))
+}
+
+fn drive_probe_exe() -> Option<std::path::PathBuf> {
+    match std::env::var_os("MEDREC_TEST_DRIVE_PROBE") {
+        Some(p) if !p.is_empty() => Some(p.into()),
+        _ => std::env::current_exe().ok(),
+    }
+}
+
+/// medrec's own `drive status --json` for `profile`, as a bounded
+/// subprocess: an in-process Keychain read cannot be stopped, a child can.
+pub fn read_drive(profile: &str, wait: Duration) -> Read {
+    let Some(exe) = drive_probe_exe() else {
+        return Read::Failed("cannot find the medrec binary to check its Drive sign-in".into());
+    };
+    let ran = match Bounded::new(&exe)
+        .args(["drive", "status", "--json", "--drive-profile", profile])
+        .timeout(wait)
+        .max_stdout(1024 * 1024)
+        .run()
+    {
+        Ok(r) => r,
+        Err(e) if crate::proc::is_timeout(&e) => return Read::TimedOut,
+        Err(e) => return Read::Failed(e.message().to_string()),
+    };
+    match serde_json::from_slice::<Value>(&ran.stdout).ok() {
+        Some(v) if v.get("schema").and_then(Value::as_str) == Some("auth-status/v1") => {
+            let (state, expires_at) = state_of(&v, time::now());
+            Read::Read { state, expires_at }
+        }
+        _ => Read::Failed(format!(
+            "`medrec drive status` exited {}: {}",
+            ran.code
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "on a signal".into()),
+            ran.stderr_tail.lines().last().unwrap_or("no answer")
+        )),
+    }
+}
+
 /// What fills a provider's `info.auth.login_hint` for one source.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Fill<'a> {

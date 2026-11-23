@@ -33,7 +33,7 @@ a row below, and a change that removes one deletes its row.
 
   | Missing | What still works |
   |---|---|
-  | rclone | A local directory as the records folder (`medrec init <dir>`), such as a Drive for desktop mount or an encrypted disk |
+  | Google Drive | A local directory as the records folder (`medrec init <dir>`), such as an encrypted disk |
   | `pdftotext` (poppler) | Intake files by hand-given values; detection reads only file names |
   | `tesseract` | Text PDFs are read; scanned pages go to `_review/` |
   | `bsdtar` | Studies from folders and DICOMDIRs; `.zip` and `.iso` are refused |

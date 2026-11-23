@@ -46,7 +46,7 @@ dev:
 	@$(SIGN)
 
 # Offline smoke test: no network, no Keychain, no records folder.
-SMOKE_HELP := init people intake review import providers timeline search results meds \
+SMOKE_HELP := init drive people intake review import providers timeline search results meds \
 	conditions allergies immunizations documents note images doctor verify backup cache config auth
 smoke: build
 	@./target/debug/$(BIN) --version >/dev/null

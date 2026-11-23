@@ -51,6 +51,7 @@ impl Env {
             .env("HOME", &self.root)
             .env("PATH", &self.path)
             .env("MEDREC_PROFILE", "home")
+            .env("MEDREC_KEYCHAIN_SERVICE", "piekstra.medrec.hermetic-tests")
             .env("MEDREC_LAUNCH_AGENTS_DIR", self.root.join("LaunchAgents"))
             .env("MEDREC_LAUNCHCTL", self.root.join("launchctl"))
             .env("MEDREC_TEST_AUTH_WAIT_SECS", "1")
@@ -937,4 +938,81 @@ fn a_refused_export_signs_in_again_with_the_providers_own_command_and_names_no_p
     assert!(!after.contains("adult1"), "{after}");
     assert!(after.contains("t_aaaaaaaaaaaaaaaaaaaa"));
     let _ = std::fs::remove_dir_all(&e.root);
+}
+
+/// A stand-in for `medrec drive status` that counts its runs, then hangs
+/// (a Keychain approval nobody gives) or answers signed in.
+fn drive_probe(e: &Env, name: &str, hang: bool) -> PathBuf {
+    let path = e.root.join(name);
+    let count = e.root.join(format!("{name}-runs"));
+    let body = if hang {
+        "sleep 30".to_string()
+    } else {
+        r#"printf '%s' '{"schema":"auth-status/v1","required":true,"authenticated":true,"session_valid":true}'"#.to_string()
+    };
+    std::fs::write(
+        &path,
+        format!("#!/bin/sh\necho run >> '{}'\n{body}\n", count.display()),
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    path
+}
+
+fn runs(e: &Env, name: &str) -> usize {
+    std::fs::read_to_string(e.root.join(format!("{name}-runs")))
+        .map(|s| s.lines().count())
+        .unwrap_or(0)
+}
+
+#[test]
+fn a_scheduled_pass_never_waits_on_the_drive_sign_ins_keychain_approval() {
+    let e = Env::new("drive-gate");
+    e.ok(&[
+        "config",
+        "set",
+        "folder",
+        "gdrive:home-drive/1Synthetic_folder",
+    ]);
+    let hang = drive_probe(&e, "hang", true);
+    let hang = hang.to_str().unwrap();
+    let env = [
+        ("MEDREC_TEST_DRIVE_PROBE", hang),
+        ("MEDREC_TEST_AUTH_WAIT_SECS", "1"),
+    ];
+    let out = e.run_env(&["--json", "refresh", "--scheduled"], &env);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["status"], "needs_person", "{v}");
+    assert_eq!(v["command"], "medrec --profile home refresh");
+    // The same binary is not checked again: no second approval is asked.
+    let out = e.run_env(&["--json", "refresh", "--scheduled"], &env);
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["status"], "needs_person");
+    assert_eq!(runs(&e, "hang"), 1);
+    // Another binary (an update) is checked; one that answers lets the pass
+    // go on to the folder, which here has no sign-in on this machine.
+    let ok = drive_probe(&e, "ok", false);
+    let env = [
+        ("MEDREC_TEST_DRIVE_PROBE", ok.to_str().unwrap()),
+        ("MEDREC_TEST_AUTH_WAIT_SECS", "1"),
+    ];
+    let out = e.run_env(&["--json", "refresh", "--scheduled"], &env);
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    assert!(String::from_utf8_lossy(&out.stderr)
+        .contains("medrec drive login --drive-profile home-drive"));
+    assert_eq!(runs(&e, "ok"), 1);
+    // Known now to read without an approval: not checked again.
+    e.run_env(&["--json", "refresh", "--scheduled"], &env);
+    assert_eq!(runs(&e, "ok"), 1);
 }

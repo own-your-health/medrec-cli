@@ -1,10 +1,10 @@
 //! The one seam between the records folder and where its bytes live.
 //!
 //! Every operation goes through [`Store`], which moves files under
-//! folder-relative paths. It is backed by `pk-cli-drive`: an rclone remote
-//! (canonical, behind the read cache) or a local directory (a test folder,
-//! a disk). What `pk-cli-drive` does not offer yet (hash listings, folder
-//! copies, deletes, free space) is one bounded `rclone` call here.
+//! folder-relative paths. It is backed by `pk-cli-drive`: a folder in Google
+//! Drive reached through medrec's own sign-in (canonical, behind the read
+//! cache; `medrec drive`), or a local directory (a test folder, a disk).
+//! medrec runs no rclone.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -12,42 +12,101 @@ use std::time::Duration;
 
 use md5::{Digest, Md5};
 use serde::Serialize;
-use serde_json::Value;
 
 use pk_cli_core::CliError;
-use pk_cli_drive::{cache, Backend, CachePolicy, CachedRemote, FileEntry, LocalCopy, Remote};
+use pk_cli_drive::google::{self as gdrive, Drive, DriveCli, DriveSpec, Scope};
+use pk_cli_drive::{cache, Backend, CachePolicy, CachedRemote, FileEntry, LocalCopy, RemoteStore};
 
 pub const BIN: &str = "medrec";
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// How medrec mounts the Drive commands, and the flag that names a Drive
+/// profile on them (`--profile` is a records profile), for remedies.
+pub const DRIVE_COMMAND: &str = "medrec drive";
+pub const DRIVE_PROFILE_FLAG: &str = "--drive-profile";
 
 /// How a command reaches the store.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Location {
-    /// `<remote>:<path>` through rclone.
-    Remote(String),
+    /// `gdrive:<drive profile>/<folder id>[/<path>]`: a folder in one Google
+    /// account, through medrec's own sign-in.
+    Drive(DriveSpec),
     /// A local directory.
     Dir(PathBuf),
 }
 
 impl Location {
-    /// `remote:path` is a remote; anything else (absolute, `./x`, `~/x`)
-    /// is a directory. A single-letter "remote" before a colon is never
-    /// taken as a remote, so a Windows-style `C:\x` is not misread.
-    pub fn parse(s: &str) -> Location {
+    /// `gdrive:<profile>/<folder id>[/<path>]` is a Drive folder; anything
+    /// else (absolute, `./x`, `~/x`) is a directory. Any other `name:path`
+    /// is an rclone remote, which medrec no longer reads: exit 2 naming the
+    /// move. A single-letter name before a colon is never taken as a
+    /// remote, so a Windows-style `C:\x` is not misread.
+    pub fn parse(s: &str) -> Result<Location, CliError> {
         let s = s.trim();
+        if DriveSpec::is_spec(s) {
+            return DriveSpec::parse(s)
+                .map(Location::Drive)
+                .map_err(|e| e.with_remedy(MOVE_OFF_RCLONE));
+        }
         if let Some((name, _)) = s.split_once(':') {
             if name.len() > 1 && !name.contains('/') && !s.starts_with('.') && !s.starts_with('~') {
-                return Location::Remote(s.trim_end_matches('/').to_string());
+                return Err(CliError::Usage(format!(
+                    "`{s}` is an rclone remote, and medrec no longer uses rclone"
+                ))
+                .with_remedy(MOVE_OFF_RCLONE));
             }
         }
-        Location::Dir(expand_home(s))
+        Ok(Location::Dir(expand_home(s)))
     }
 
     pub fn display(&self) -> String {
         match self {
-            Location::Remote(s) => s.clone(),
+            Location::Drive(spec) => spec.to_string(),
             Location::Dir(d) => d.display().to_string(),
         }
     }
+
+    /// The location of `rel` inside this one (the inbox of a records folder).
+    pub fn join(&self, rel: &str) -> Result<Location, CliError> {
+        match self {
+            Location::Drive(spec) => spec.join(rel).map(Location::Drive),
+            Location::Dir(d) => Ok(Location::Dir(d.join(rel))),
+        }
+    }
+}
+
+/// The remedy for a folder named the rclone way.
+pub const MOVE_OFF_RCLONE: &str = "sign a Drive profile in with `medrec drive login \
+     --drive-profile <NAME>`, then name the folder `gdrive:<NAME>/<folder id>` (README, \
+     \"Google Drive\")";
+
+/// medrec's Drive sign-ins (`medrec drive …`): its own OAuth client and
+/// tokens in its keychain item, `drive.file` unless a login asks for more.
+pub fn drive_cli() -> Result<DriveCli, CliError> {
+    #[cfg(test)]
+    if let Some(cli) = testing::cli() {
+        return Ok(cli);
+    }
+    Ok(DriveCli::new(BIN, VERSION, DRIVE_COMMAND)?
+        .profile_flag(DRIVE_PROFILE_FLAG)
+        .default_scopes(&[Scope::File]))
+}
+
+/// The Drive store at `spec`, every request bounded by `budget`.
+fn drive(spec: &DriveSpec, budget: Duration) -> Result<Drive, CliError> {
+    Ok(drive_cli()?
+        .drive(spec)?
+        .temp_prefix(BIN)
+        .with_budget(budget))
+}
+
+/// The read cache's directory for `spec`; none in a unit test.
+fn cache_dir(spec: &DriveSpec) -> Option<PathBuf> {
+    #[cfg(test)]
+    if testing::cli().is_some() {
+        return testing::cache_dir();
+    }
+    cache::cache_dir_for(BIN, &spec.to_string())
 }
 
 pub fn expand_home(s: &str) -> PathBuf {
@@ -74,37 +133,51 @@ pub struct Store {
     budget: Duration,
 }
 
-/// The rclone budget for one command: every rclone call it makes is killed
-/// once this much time has passed since the command started.
+/// The store budget for one command: every Drive request it makes is
+/// bounded by the time left of this much from the command's start.
 pub const DEFAULT_BUDGET: Duration = Duration::from_secs(1800);
 
-fn remote(spec: &str, budget: Duration) -> Remote {
-    Remote::new(spec).temp_prefix(BIN).with_budget(budget)
-}
-
 impl Store {
-    pub fn open(location: &Location, reads: Reads, budget: Duration) -> Store {
+    /// The store at `location`. A Drive folder whose profile is not signed
+    /// in on this machine is exit 2 naming `medrec drive login`; nothing is
+    /// read from Drive until the first operation.
+    pub fn open(location: &Location, reads: Reads, budget: Duration) -> Result<Store, CliError> {
         let backend = match location {
             Location::Dir(d) => Backend::Mount(d.clone()),
-            Location::Remote(spec) => match cache::cache_dir_for(BIN, spec) {
-                None => Backend::Remote(remote(spec, budget)),
-                Some(dir) => {
-                    let mut policy = CachePolicy::from_env(BIN);
-                    policy.bypass_reads |= reads == Reads::Fresh;
-                    let mut cached = CachedRemote::new(remote(spec, budget), dir, policy);
-                    if let Some(r) =
-                        cache::background_revalidator(&policy, &["cache", "sync"], spec)
-                    {
-                        cached = cached.with_revalidator(r);
+            Location::Drive(spec) => {
+                let remote = drive(spec, budget)?;
+                match cache_dir(spec) {
+                    None => Backend::Drive(remote),
+                    Some(dir) => {
+                        let mut policy = CachePolicy::from_env(BIN);
+                        policy.bypass_reads |= reads == Reads::Fresh;
+                        let mut cached = CachedRemote::new(remote, dir, policy);
+                        if let Some(r) = cache::background_revalidator(
+                            &policy,
+                            &["cache", "sync"],
+                            &spec.to_string(),
+                        ) {
+                            cached = cached.with_revalidator(r);
+                        }
+                        Backend::CachedDrive(cached)
                     }
-                    Backend::Cached(cached)
                 }
-            },
+            }
         };
-        Store {
+        Ok(Store {
             backend,
             location: location.clone(),
             budget,
+        })
+    }
+
+    /// The Drive store under a Drive location, uncached: listings with
+    /// hashes, tree copies and space.
+    fn remote(&self) -> &Drive {
+        match &self.backend {
+            Backend::Drive(d) => d,
+            Backend::CachedDrive(c) => c.remote(),
+            _ => unreachable!("a Drive location opens a Drive backend"),
         }
     }
 
@@ -191,42 +264,6 @@ pub struct Space {
 }
 
 impl Store {
-    fn spec_of(spec: &str, rel: &str) -> String {
-        let rel = rel.trim_matches('/');
-        if rel.is_empty() {
-            spec.to_string()
-        } else if spec.ends_with(':') {
-            format!("{spec}{rel}")
-        } else {
-            format!("{spec}/{rel}")
-        }
-    }
-
-    fn rclone(&self, args: &[&str], max_stdout: usize) -> Result<crate::proc::Ran, CliError> {
-        let mut all = vec!["--log-level=ERROR"];
-        all.extend_from_slice(args);
-        crate::proc::Bounded::new("rclone")
-            .args(all)
-            .timeout(self.budget)
-            .max_stdout(max_stdout)
-            .run()
-    }
-
-    fn rclone_ok(&self, what: &str, args: &[&str]) -> Result<crate::proc::Ran, CliError> {
-        let out = self.rclone(args, 256 * 1024 * 1024)?;
-        if out.code != Some(0) {
-            return Err(CliError::Upstream(format!(
-                "rclone {what}: {}",
-                out.stderr_tail
-                    .lines()
-                    .rev()
-                    .find(|l| !l.trim().is_empty())
-                    .unwrap_or("failed")
-            )));
-        }
-        Ok(out)
-    }
-
     /// Every file under the folder `rel` (recursively) with its MD5, in one
     /// listing. Use [`Store::md5`] for a single file.
     pub fn hashes(&self, rel: &str) -> Result<Vec<Hashed>, CliError> {
@@ -263,57 +300,16 @@ impl Store {
                 out.sort_by(|a, b| a.rel.cmp(&b.rel));
                 Ok(out)
             }
-            Location::Remote(spec) => {
-                let target = Self::spec_of(spec, rel);
-                let out = self.rclone(
-                    &[
-                        "lsjson",
-                        "-R",
-                        "--files-only",
-                        "--no-mimetype",
-                        "--hash",
-                        "--hash-type",
-                        "md5",
-                        target.as_str(),
-                    ],
-                    256 * 1024 * 1024,
-                )?;
-                match out.code {
-                    Some(0) => {}
-                    Some(3) => return Ok(Vec::new()),
-                    _ => {
-                        return Err(CliError::Upstream(format!(
-                            "rclone lsjson {target}: {}",
-                            out.stderr_tail.lines().next().unwrap_or("failed")
-                        )))
-                    }
-                }
-                let v: Vec<Value> = serde_json::from_slice(&out.stdout).map_err(|e| {
-                    CliError::Upstream(format!("rclone lsjson printed no JSON list: {e}"))
-                })?;
-                let mut files: Vec<Hashed> = v
-                    .iter()
-                    .filter_map(|e| {
-                        let path = e.get("Path")?.as_str()?;
-                        let rel_path = if rel.is_empty() {
-                            path.to_string()
-                        } else {
-                            format!("{rel}/{path}")
-                        };
-                        Some(Hashed {
-                            rel: rel_path,
-                            size: e.get("Size").and_then(Value::as_u64).unwrap_or(0),
-                            md5: e
-                                .get("Hashes")
-                                .and_then(|h| h.get("md5"))
-                                .and_then(Value::as_str)
-                                .map(str::to_ascii_lowercase),
-                        })
-                    })
-                    .collect();
-                files.sort_by(|a, b| a.rel.cmp(&b.rel));
-                Ok(files)
-            }
+            Location::Drive(_) => Ok(self
+                .remote()
+                .hashes(rel)?
+                .into_iter()
+                .map(|h| Hashed {
+                    rel: h.rel,
+                    size: h.size,
+                    md5: h.md5,
+                })
+                .collect()),
         }
     }
 
@@ -356,67 +352,27 @@ impl Store {
                         rel: entry.file_name().to_string_lossy().into_owned(),
                         size: Some(meta.len()),
                         modified,
+                        md5: None,
                     });
                 }
                 out.sort_by(|a, b| a.rel.cmp(&b.rel));
                 Ok(out)
             }
-            Location::Remote(spec) => {
-                let target = Self::spec_of(spec, rel);
-                let out = self.rclone(
-                    &[
-                        "lsjson",
-                        "--max-depth",
-                        "1",
-                        "--files-only",
-                        "--no-mimetype",
-                        target.as_str(),
-                    ],
-                    16 * 1024 * 1024,
-                )?;
-                match out.code {
-                    Some(0) => {}
-                    Some(3) => return Ok(Vec::new()),
-                    _ => {
-                        return Err(CliError::Upstream(format!(
-                            "rclone lsjson {target}: {}",
-                            out.stderr_tail.lines().next().unwrap_or("failed")
-                        )))
-                    }
-                }
-                let v: Vec<Value> = serde_json::from_slice(&out.stdout).map_err(|e| {
-                    CliError::Upstream(format!("rclone lsjson printed no JSON list: {e}"))
-                })?;
-                let mut files: Vec<FileEntry> = v
-                    .iter()
-                    .filter_map(|e| {
-                        let name = e.get("Path")?.as_str()?;
-                        Some(FileEntry {
-                            rel: name.to_string(),
-                            size: e.get("Size").and_then(Value::as_u64),
-                            modified: e
-                                .get("ModTime")
-                                .and_then(Value::as_str)
-                                .and_then(crate::refresh::time::parse),
-                        })
-                    })
-                    .collect();
-                files.sort_by(|a, b| a.rel.cmp(&b.rel));
-                Ok(files)
-            }
+            Location::Drive(_) => self.remote().list_here(rel),
         }
     }
 
     /// Make the folder `rel` (and its parents); owner-only on a directory.
+    /// On Drive, the one call that also makes a missing folder the
+    /// location's own path names (an inbox inside the records folder).
     pub fn mkdir(&self, rel: &str) -> Result<(), CliError> {
         let rel = rel.trim_matches('/');
         match &self.location {
             Location::Dir(root) => private_dirs(&root.join(rel)),
-            Location::Remote(spec) => {
-                let target = Self::spec_of(spec, rel);
-                self.rclone_ok("mkdir", &["mkdir", target.as_str()])
-                    .map(|_| ())
-            }
+            Location::Drive(_) => match &self.backend {
+                Backend::CachedDrive(c) => c.mkdir(rel),
+                _ => self.remote().mkdir(rel),
+            },
         }
     }
 
@@ -430,72 +386,41 @@ impl Store {
                 }
                 md5_file(&p).map(Some)
             }
-            Location::Remote(spec) => {
-                let (parent, name) = rel.rsplit_once('/').unwrap_or(("", rel));
-                let target = Self::spec_of(spec, parent);
-                let filter = format!("/{}", escape_filter(name));
-                let out = self.rclone(
-                    &[
-                        "lsjson",
-                        "--files-only",
-                        "--no-mimetype",
-                        "--hash",
-                        "--hash-type",
-                        "md5",
-                        "--include",
-                        filter.as_str(),
-                        target.as_str(),
-                    ],
-                    1024 * 1024,
-                )?;
-                if out.code == Some(3) {
-                    return Ok(None);
-                }
-                if out.code != Some(0) {
-                    return Err(CliError::Upstream(format!(
-                        "rclone lsjson {target}: {}",
-                        out.stderr_tail.lines().next().unwrap_or("failed")
-                    )));
-                }
-                let v: Vec<Value> = serde_json::from_slice(&out.stdout).unwrap_or_default();
-                Ok(v.iter()
-                    .find(|e| e.get("Name").and_then(Value::as_str) == Some(name))
-                    .and_then(|e| {
-                        e.get("Hashes")?
-                            .get("md5")?
-                            .as_str()
-                            .map(str::to_ascii_lowercase)
-                    }))
-            }
+            Location::Drive(_) => self.remote().md5(rel),
         }
     }
 
-    /// Copy a local directory's contents under `rel` (one rclone call).
-    /// Never replaces a file: one already there with the same bytes is left
-    /// as it is, and one with other bytes fails the copy (`--immutable`), so
-    /// a filed file cannot be overwritten by a later upload.
+    /// Copy a local directory's contents under `rel`. Never replaces a
+    /// file: one already there with the same bytes is left as it is, and one
+    /// with other bytes refuses the whole copy before anything is uploaded,
+    /// so a filed file cannot be overwritten by a later upload.
     pub fn put_tree(&self, local: &Path, rel: &str) -> Result<(), CliError> {
         match &self.location {
             Location::Dir(root) => copy_tree(local, &root.join(rel), Existing::Keep),
-            Location::Remote(spec) => {
-                let src = local.to_string_lossy().into_owned();
-                let dst = Self::spec_of(spec, rel);
-                self.rclone_ok("copy", &["copy", "--immutable", src.as_str(), dst.as_str()])
-                    .map(|_| ())
-            }
+            Location::Drive(_) => self
+                .remote()
+                .put_tree(local, rel, gdrive::Existing::Keep)
+                .map(|_| ()),
         }
     }
 
-    /// Copy everything under `rel` into a local directory.
+    /// Copy a local directory's contents under `rel`, replacing a file there
+    /// whose bytes differ (in place on Drive, keeping its id): a backup's.
+    pub fn put_tree_replacing(&self, local: &Path, rel: &str) -> Result<(), CliError> {
+        match &self.location {
+            Location::Dir(root) => copy_tree(local, &root.join(rel), Existing::Replace),
+            Location::Drive(_) => self
+                .remote()
+                .put_tree(local, rel, gdrive::Existing::Replace)
+                .map(|_| ()),
+        }
+    }
+
+    /// Copy everything under `rel` into a local directory (owner-only).
     pub fn fetch_tree(&self, rel: &str, local: &Path) -> Result<(), CliError> {
         match &self.location {
             Location::Dir(root) => copy_tree(&root.join(rel), local, Existing::Replace),
-            Location::Remote(spec) => {
-                let src = Self::spec_of(spec, rel);
-                let dst = local.to_string_lossy().into_owned();
-                self.rclone_ok("copy", &["copy", src.as_str(), dst.as_str()])
-                    .map(|_| ())
-            }
+            Location::Drive(_) => self.remote().fetch_tree(rel, local).map(|_| ()),
         }
     }
 
@@ -504,27 +429,26 @@ impl Store {
         self.backend.move_no_clobber(from, to)
     }
 
-    /// What rclone (or the file system) reports as total and free space.
+    /// The total and free space Google Drive (or the file system) reports.
     pub fn space(&self) -> Result<Space, CliError> {
         match &self.location {
             Location::Dir(root) => Ok(statvfs_space(root)),
-            Location::Remote(spec) => {
-                let remote = format!("{}:", spec.split(':').next().unwrap_or(spec));
-                let out = self.rclone_ok("about", &["about", "--json", remote.as_str()])?;
-                let v: Value = serde_json::from_slice(&out.stdout).unwrap_or(Value::Null);
+            Location::Drive(_) => {
+                let about = self.remote().about()?;
                 Ok(Space {
-                    total: v.get("total").and_then(Value::as_u64),
-                    free: v.get("free").and_then(Value::as_u64),
+                    total: about.limit,
+                    free: about.free(),
                 })
             }
         }
     }
 
-    /// The location as rclone names it (a remote spec, or a local path).
-    pub fn rclone_spec(&self) -> String {
+    /// The Google account a Drive folder is in, as Drive names it; `None`
+    /// for a directory.
+    pub fn account(&self) -> Result<Option<String>, CliError> {
         match &self.location {
-            Location::Remote(s) => s.clone(),
-            Location::Dir(d) => d.to_string_lossy().into_owned(),
+            Location::Dir(_) => Ok(None),
+            Location::Drive(_) => self.remote().about().map(|a| Some(a.email)),
         }
     }
 
@@ -541,7 +465,12 @@ pub fn revalidate(
     rel: &str,
     budget: Duration,
 ) -> Result<String, CliError> {
-    let dir = cache::cache_dir_for(BIN, spec).ok_or_else(|| {
+    let Location::Drive(spec) = Location::parse(spec)? else {
+        return Err(CliError::Usage(format!(
+            "`{spec}` is not a Google Drive folder, so it has no read cache"
+        )));
+    };
+    let dir = cache_dir(&spec).ok_or_else(|| {
         CliError::Other("cannot resolve a cache directory (is $HOME set?)".into())
     })?;
     let kind = if listing {
@@ -550,25 +479,13 @@ pub fn revalidate(
         cache::Kind::File
     };
     let outcome = cache::run_revalidation(
-        remote(spec, budget),
+        drive(&spec, budget)?,
         dir,
         CachePolicy::from_env(BIN),
         kind,
         rel,
     )?;
     Ok(outcome.as_str().to_string())
-}
-
-/// rclone filter syntax treats these as patterns; a file name is literal.
-fn escape_filter(name: &str) -> String {
-    let mut out = String::with_capacity(name.len());
-    for c in name.chars() {
-        if matches!(c, '*' | '?' | '[' | ']' | '{' | '}' | '\\') {
-            out.push('\\');
-        }
-        out.push(c);
-    }
-    out
 }
 
 pub fn md5_file(path: &Path) -> Result<String, CliError> {
@@ -629,8 +546,8 @@ pub fn copy_tree(from: &Path, to: &Path, existing: Existing) -> Result<(), CliEr
 }
 
 /// `dir` and every folder under it 0700, every file 0600: for a copy made
-/// by something that sets its own modes (rclone uses the umask). Symlinks
-/// are left alone.
+/// by something that sets its own modes from the umask. Symlinks are left
+/// alone.
 pub fn restrict_tree(dir: &Path) -> Result<(), CliError> {
     use std::os::unix::fs::PermissionsExt;
     let set = |p: &Path, mode: u32| {
@@ -754,19 +671,84 @@ fn create_parent(path: &Path) -> Result<(), CliError> {
     }
 }
 
+/// A unit test's Drive: its own sign-ins (a vault in memory) against a fake
+/// Drive server, set for the test's thread. No keychain, no network.
+#[cfg(test)]
+pub mod testing {
+    use std::cell::RefCell;
+    use std::path::PathBuf;
+    use std::rc::Rc;
+
+    use pk_cli_drive::google::DriveCli;
+
+    type Make = Rc<dyn Fn() -> DriveCli>;
+
+    thread_local! {
+        static DRIVE: RefCell<Option<(Make, Option<PathBuf>)>> = const { RefCell::new(None) };
+    }
+
+    /// Every store this thread opens on a Drive location uses `make`'s
+    /// sign-ins, with the read cache in `cache` (none when `None`), until
+    /// the guard drops.
+    pub fn use_drive(make: impl Fn() -> DriveCli + 'static, cache: Option<PathBuf>) -> Guard {
+        DRIVE.with(|d| *d.borrow_mut() = Some((Rc::new(make), cache)));
+        Guard
+    }
+
+    pub struct Guard;
+
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            DRIVE.with(|d| *d.borrow_mut() = None);
+        }
+    }
+
+    pub(super) fn cli() -> Option<DriveCli> {
+        DRIVE.with(|d| d.borrow().as_ref().map(|(make, _)| make()))
+    }
+
+    pub(super) fn cache_dir() -> Option<PathBuf> {
+        DRIVE.with(|d| d.borrow().as_ref().and_then(|(_, c)| c.clone()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn locations_parse_remotes_and_directories() {
-        assert!(
-            matches!(Location::parse("gdrive:Medical Records"), Location::Remote(s) if s == "gdrive:Medical Records")
+    fn locations_parse_drive_folders_and_directories_and_refuse_rclone_remotes() {
+        let Location::Drive(spec) = Location::parse("gdrive:adult1/1AbC_d-9/inbox/").unwrap()
+        else {
+            panic!("a Drive folder");
+        };
+        assert_eq!(spec.to_string(), "gdrive:adult1/1AbC_d-9/inbox");
+        assert_eq!(
+            Location::parse("gdrive:adult1/1AbC_d-9")
+                .unwrap()
+                .join("inbox")
+                .unwrap(),
+            Location::Drive(spec)
         );
-        assert!(matches!(Location::parse("gdrive:"), Location::Remote(_)));
-        assert!(matches!(Location::parse("/tmp/records"), Location::Dir(_)));
-        assert!(matches!(Location::parse("./a:b"), Location::Dir(_)));
-        assert!(matches!(Location::parse("C:\\x"), Location::Dir(_)));
+        for retired in [
+            "records:Medical Records",
+            "gdrive:Medical Records",
+            "gdrive:",
+        ] {
+            let err = Location::parse(retired).unwrap_err();
+            assert_eq!(err.exit_code(), 2, "{retired}");
+            assert!(
+                err.remedy()
+                    .is_some_and(|r| r.contains("medrec drive login")),
+                "{retired}"
+            );
+        }
+        assert!(matches!(
+            Location::parse("/tmp/records"),
+            Ok(Location::Dir(_))
+        ));
+        assert!(matches!(Location::parse("./a:b"), Ok(Location::Dir(_))));
+        assert!(matches!(Location::parse("C:\\x"), Ok(Location::Dir(_))));
     }
 
     fn mode(p: &Path) -> u32 {
@@ -819,7 +801,8 @@ mod tests {
     #[test]
     fn a_directory_store_writes_reads_lists_and_deletes() {
         let root = crate::testutil::temp_dir("store");
-        let store = Store::open(&Location::Dir(root.clone()), Reads::Fresh, DEFAULT_BUDGET);
+        let store =
+            Store::open(&Location::Dir(root.clone()), Reads::Fresh, DEFAULT_BUDGET).unwrap();
         store.write_text("a/b.txt", "hello").unwrap();
         assert_eq!(
             store.read_text("a/b.txt").unwrap().as_deref(),
@@ -836,7 +819,8 @@ mod tests {
     #[test]
     fn a_directory_store_hashes_copies_trees_and_moves_without_clobbering() {
         let root = crate::testutil::temp_dir("store-hash");
-        let store = Store::open(&Location::Dir(root.clone()), Reads::Fresh, DEFAULT_BUDGET);
+        let store =
+            Store::open(&Location::Dir(root.clone()), Reads::Fresh, DEFAULT_BUDGET).unwrap();
         store.write_text("p/a.txt", "abc").unwrap();
         assert_eq!(
             store.md5("p/a.txt").unwrap().as_deref(),
