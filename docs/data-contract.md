@@ -703,8 +703,8 @@ last.
   and nothing else under `views/`.
 - **`views` is medrec's.** No person folder is named `views` (in any case):
   a person named that way gets `Views (person)`. A folder whose person
-  folder is already `views` gets no views, and `init --allow-other-files`
-  refuses a folder that already holds one.
+  folder is already `views` gets no views, and `init` refuses a folder
+  that already holds one, even empty, with or without `--allow-other-files`.
 - **Each file whole.** On a local directory a file is written to a
   temporary name and renamed. On Drive it is one upload.
 - **A failure leaves them stale**, never wrong. medrec says so on stderr,

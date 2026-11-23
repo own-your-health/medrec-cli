@@ -2646,5 +2646,16 @@ fn init_refuses_to_adopt_a_folder_holding_a_views_folder() {
     assert_eq!(out.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&out.stdout).contains("where medrec writes its views"));
     assert!(d.join("Views/holiday.txt").is_file());
+
+    // An empty one too, flag or not: it lists no files.
+    let empty = e.root.join("empty");
+    std::fs::create_dir_all(empty.join("views")).unwrap();
+    for args in [vec!["--allow-other-files"], vec![]] {
+        let mut cmd = vec!["--json", "init", empty.to_str().unwrap()];
+        cmd.extend(args);
+        let out = e.run(&cmd);
+        assert_eq!(out.status.code(), Some(2), "{cmd:?}");
+        assert!(!empty.join("household.json").exists());
+    }
     let _ = std::fs::remove_dir_all(&e.root);
 }
