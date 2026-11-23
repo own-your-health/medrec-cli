@@ -345,44 +345,15 @@ pub fn sync(f: &Folder, all: bool) -> Result<Synced, CliError> {
     Ok(out)
 }
 
-/// Views uploaded at once: each is a request of its own, and a first build
-/// is hundreds per person.
-const UPLOADS_AT_ONCE: usize = 4;
-
-/// Upload every view, a few at a time, stopping at the first error; the
-/// caller writes `views.json` only once all are there. How many were sent.
+/// Upload every view, stopping at the first error; the caller writes
+/// `views.json` only once all are there. On Drive, pk-cli-drive sends a few
+/// at a time within its own limit. How many were sent.
 fn upload(store: &crate::store::Store, files: &[(String, &Vec<u8>)]) -> Result<usize, CliError> {
-    let next = AtomicUsize::new(0);
-    let sent = AtomicUsize::new(0);
-    let failed = std::sync::Mutex::new(None::<CliError>);
-    std::thread::scope(|s| {
-        for _ in 0..UPLOADS_AT_ONCE.min(files.len()) {
-            s.spawn(|| loop {
-                if failed.lock().map_or(true, |f| f.is_some()) {
-                    return;
-                }
-                let i = next.fetch_add(1, Ordering::SeqCst);
-                let Some((rel, bytes)) = files.get(i) else {
-                    return;
-                };
-                match store.write_bytes(rel, bytes) {
-                    Ok(()) => {
-                        sent.fetch_add(1, Ordering::SeqCst);
-                    }
-                    Err(e) => {
-                        if let Ok(mut f) = failed.lock() {
-                            f.get_or_insert(e);
-                        }
-                        return;
-                    }
-                }
-            });
-        }
-    });
-    match failed.into_inner().ok().flatten() {
-        Some(e) => Err(e),
-        None => Ok(sent.into_inner()),
-    }
+    let batch: Vec<(&str, &[u8])> = files
+        .iter()
+        .map(|(rel, bytes)| (rel.as_str(), bytes.as_slice()))
+        .collect();
+    store.write_many(&batch)
 }
 
 fn parse<T: serde::de::DeserializeOwned>(text: &str, rel: &str) -> Result<T, CliError> {
@@ -960,7 +931,7 @@ mod tests {
     }
 
     #[test]
-    fn views_upload_a_few_at_a_time_and_stop_at_the_first_failure() {
+    fn views_upload_every_file_and_stop_at_the_first_failure() {
         use crate::store::{Location, Reads, Store};
         let dir = std::env::temp_dir().join(format!("medrec-upload-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
