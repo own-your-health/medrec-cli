@@ -940,8 +940,8 @@ fn a_refused_export_signs_in_again_with_the_providers_own_command_and_names_no_p
     let _ = std::fs::remove_dir_all(&e.root);
 }
 
-/// A stand-in for `medrec drive status` that counts its runs, then hangs
-/// (a Keychain approval nobody gives) or answers signed in.
+/// A stand-in for `medrec drive-keychain-probe` that counts its runs, then
+/// hangs (a Keychain approval nobody gives) or answers signed in.
 fn drive_probe(e: &Env, name: &str, hang: bool) -> PathBuf {
     let path = e.root.join(name);
     let count = e.root.join(format!("{name}-runs"));

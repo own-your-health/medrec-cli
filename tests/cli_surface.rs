@@ -145,7 +145,8 @@ fn info_names_the_drive_sign_in() {
     let v = json_of(&out);
     assert_eq!(v["schema"], "cli-info/v1");
     assert_eq!(v["name"], "medrec");
-    assert_eq!(v["auth"]["required"], true);
+    assert_eq!(v["auth"]["required"], false);
+    assert_eq!(v["auth"]["method"], "browser-session");
     assert_eq!(
         v["auth"]["login_hint"],
         "medrec drive login --drive-profile <NAME>"
@@ -490,6 +491,18 @@ fn drive_profiles_are_medrecs_own_and_none_is_a_default() {
     // A Drive command with none named, and none in the folder, is exit 2.
     let out = run(&["drive", "status", "--local"]);
     assert_eq!(out.status.code(), Some(2));
+    // The scheduled refresh's probe: one read of an empty Keychain service,
+    // no sign-in there, exit 3; no request to Google is possible without one.
+    let out = run(&["drive-keychain-probe", "--drive-profile", "home-drive"]);
+    assert_eq!(
+        out.status.code(),
+        Some(3),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    // With no records folder named, no sign-in is needed yet.
+    let v = json_of(&run(&["--json", "auth", "status"]));
+    assert_eq!(v["required"], false, "{v}");
     // A folder on Drive whose profile is not signed in here: the command is
     // refused before anything is read, naming the sign-in.
     assert!(run(&[

@@ -126,14 +126,17 @@ fn drive_probe_exe() -> Option<std::path::PathBuf> {
     }
 }
 
-/// medrec's own `drive status --json` for `profile`, as a bounded
-/// subprocess: an in-process Keychain read cannot be stopped, a child can.
+/// medrec's own read of the Drive sign-in from the Keychain for `profile`
+/// (`medrec drive-keychain-probe`), as a bounded subprocess: an in-process
+/// Keychain read cannot be stopped, a child can. It sends no request, so a
+/// slow network never reads as an approval nobody gave: `TimedOut` is the
+/// Keychain alone. `ok` when the sign-in is there, `signed_out` when not.
 pub fn read_drive(profile: &str, wait: Duration) -> Read {
     let Some(exe) = drive_probe_exe() else {
         return Read::Failed("cannot find the medrec binary to check its Drive sign-in".into());
     };
     let ran = match Bounded::new(&exe)
-        .args(["drive", "status", "--json", "--drive-profile", profile])
+        .args(["drive-keychain-probe", "--json", "--drive-profile", profile])
         .timeout(wait)
         .max_stdout(1024 * 1024)
         .run()
@@ -142,13 +145,17 @@ pub fn read_drive(profile: &str, wait: Duration) -> Read {
         Err(e) if crate::proc::is_timeout(&e) => return Read::TimedOut,
         Err(e) => return Read::Failed(e.message().to_string()),
     };
-    match serde_json::from_slice::<Value>(&ran.stdout).ok() {
-        Some(v) if v.get("schema").and_then(Value::as_str) == Some("auth-status/v1") => {
-            let (state, expires_at) = state_of(&v, time::now());
-            Read::Read { state, expires_at }
-        }
+    match ran.code {
+        Some(0) => Read::Read {
+            state: "ok",
+            expires_at: None,
+        },
+        Some(3) => Read::Read {
+            state: "signed_out",
+            expires_at: None,
+        },
         _ => Read::Failed(format!(
-            "`medrec drive status` exited {}: {}",
+            "`medrec drive-keychain-probe` exited {}: {}",
             ran.code
                 .map(|c| c.to_string())
                 .unwrap_or_else(|| "on a signal".into()),

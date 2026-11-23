@@ -191,4 +191,20 @@ fn a_records_folder_is_set_up_on_drive_with_its_inbox_and_backed_up_both_ways() 
     assert!(to_drive.mismatched.is_empty(), "{:?}", to_drive.mismatched);
     assert_eq!(to_drive.files, to_disk.files);
     assert!(h.fake.find("Records copy/household.json").is_some());
+    // From Drive to Drive, one file at a time; a second backup copies
+    // nothing, since every MD5 already matches.
+    let other = h.fake.add_folder(ROOT_ID, "Records second copy");
+    let to_other = maint::backup(&f, &h.location(&other), BUDGET).unwrap();
+    assert!(to_other.mismatched.is_empty(), "{:?}", to_other.mismatched);
+    assert_eq!(to_other.files, to_disk.files);
+    h.fake.clear_requests();
+    let again = maint::backup(&f, &h.location(&other), BUDGET).unwrap();
+    assert!(again.mismatched.is_empty());
+    let uploads = h
+        .fake
+        .requests()
+        .iter()
+        .filter(|l| l.contains("/upload/"))
+        .count();
+    assert_eq!(uploads, 0, "{:?}", h.fake.requests());
 }

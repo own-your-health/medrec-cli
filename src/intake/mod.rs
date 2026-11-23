@@ -1151,8 +1151,8 @@ fn remove_source(item: &Item, stores: &[Store], read_md5: &str) -> Result<bool, 
             let store = &stores[*store];
             match store.md5(rel)? {
                 Some(m) => Some(m),
-                // A remote that lists no MD5 (OneDrive, Dropbox, crypt): the
-                // file is downloaded again and hashed.
+                // A store that reports no MD5 for the file: it is
+                // downloaded again and hashed.
                 None if store.exists(rel)? => {
                     let copy = store.fetch(rel)?;
                     Some(crate::store::md5_file(&copy.path)?)

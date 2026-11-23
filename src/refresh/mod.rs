@@ -9,8 +9,9 @@
 //! with the command to run. It is not tried again until that has run.
 //! medrec's own Drive sign-in is held to the same rule: a scheduled pass by
 //! a binary not yet known to read it without an approval (a new build, an
-//! update) checks it first in a bounded `medrec drive status`, and a check
-//! that hangs stops the pass, naming the command a person runs.
+//! update) reads it first in a bounded child (`medrec drive-keychain-probe`,
+//! the Keychain only, no request), and a read that hangs stops the pass,
+//! naming the command a person runs. A slow network is an ordinary error.
 
 pub mod contract;
 pub mod launchd;

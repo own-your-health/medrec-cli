@@ -183,6 +183,9 @@ register and a sign-in per Google account. It runs no rclone.
   folder is not visible to the new sign-in, so the records are copied once
   into a folder medrec makes:
 
+  0. On every machine that refreshes the folder, stop its agent with the
+     release it runs: `medrec --profile <NAME> refresh --uninstall`. An
+     agent left running would keep importing into the old folder.
   1. With the medrec release before this one, back the folder up to a
      local directory: `medrec backup --to ~/records-copy`.
   2. With this release, sign in and make a folder: `medrec drive login …`,
@@ -195,6 +198,14 @@ register and a sign-in per Google account. It runs no rclone.
   4. Set the household's profile to the new folder
      (`config set folder gdrive:<drive profile>/<folder id>`), run
      `medrec verify`, and remove the `move` profile and the local copy.
+  5. In the Drive web app, rename the old folder (for example to
+     `Medical Records (moved)`). A 0.3 binary that still names it then
+     stops on a missing `household.json` instead of writing there. Install
+     the agent again with this release: `medrec --profile <NAME> refresh
+     --install`.
+
+  Going back to 0.3 means setting `folder` to the rclone remote again; a
+  0.3 binary reads a `gdrive:` spec as an rclone path.
 
 ## Provider CLIs
 
@@ -412,8 +423,8 @@ text, their hashes and the upload all come from it. A cloud folder's
 online-only placeholder that serves other bytes while it downloads, or a
 file still being written, is skipped with a reason rather than filed as
 bytes the file does not hold. A moved source is kept, not removed, when it
-no longer has the bytes filed, checked by its MD5 (a remote that lists none
-is downloaded again and hashed; 0.2.10 and later).
+no longer has the bytes filed, checked by its MD5 (a file the store reports
+no MD5 for is downloaded again and hashed; 0.2.10 and later).
 
 ### How a document is filed
 

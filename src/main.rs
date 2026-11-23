@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use clap_complete::Shell;
-use pk_cli_auth::{AuthMethod, AuthStatus};
+use pk_cli_auth::AuthStatus;
 use pk_cli_config::profile::ProfileName;
 use pk_cli_config::ConfigStore;
 use pk_cli_core::info::{AuthInfo, CliInfo};
@@ -96,7 +96,8 @@ enum Command {
     /// recorded.
     Verify(VerifyArgs),
     /// Copy the whole records folder to another Google Drive folder or a
-    /// directory, then compare every file.
+    /// directory, then compare every file. A file the backup already holds
+    /// with other bytes is replaced; files only the backup holds are kept.
     Backup(BackupArgs),
     /// Google Drive sign-ins: one Drive profile per Google account, through
     /// medrec's own OAuth client, tokens in the Keychain.
@@ -114,6 +115,14 @@ enum Command {
     Completions { shell: Shell },
     /// Machine-readable capability discovery (cli-info/v1).
     Info,
+    /// The scheduled refresh's check that this binary reads its Drive
+    /// sign-in from the Keychain without an approval: one Keychain read,
+    /// no request to Google. Exit 0 when it is there, 3 when it is not.
+    #[command(hide = true)]
+    DriveKeychainProbe {
+        #[arg(long = "drive-profile", value_name = "NAME")]
+        drive_profile: String,
+    },
     /// This machine's copies of records-folder files: the read cache and
     /// opened documents and studies
     #[command(subcommand)]
@@ -370,7 +379,7 @@ struct IntakeArgs {
     #[arg(long)]
     inbox: bool,
     /// File everything in a Drive folder or directory (copied, not moved).
-    #[arg(long, value_name = "REMOTE:PATH|DIR")]
+    #[arg(long, value_name = "gdrive:PROFILE/FOLDER-ID|DIR")]
     drive: Option<String>,
     #[command(flatten)]
     given: GivenArgs,
@@ -911,8 +920,8 @@ fn run(cli: &Cli) -> Result<(), CliError> {
             if cli.profile.is_none()
                 && std::env::var(medrec::config::PROFILE_ENV).map_or(true, |v| v.is_empty()) =>
         {
-            // No records folder named: which sign-in it needs is unknown.
-            AuthStatus::new(true, false, AuthMethod::BrowserSession).emit(json);
+            // No records folder named: none is needed until one is.
+            AuthStatus::not_required().emit(json);
             if !json {
                 eprintln!(
                     "name a records profile (`--profile <NAME>`) for its folder's Drive sign-in; \
@@ -933,6 +942,17 @@ fn run(cli: &Cli) -> Result<(), CliError> {
                 Ok(())
             }
         },
+        Command::DriveKeychainProbe { drive_profile } => {
+            let profile = ProfileName::parse(drive_profile)?;
+            store::drive_cli()?.account(&profile).stored()?;
+            output::emit(
+                json,
+                "drive-keychain-probe",
+                json!({ "drive_profile": profile.as_str(), "signed_in": true }),
+                |_| println!("Drive profile `{profile}` is signed in"),
+            );
+            Ok(())
+        }
         Command::Drive(a) => {
             // --drive-profile, else MEDREC_DRIVE_PROFILE (read by the Drive
             // commands), else the records folder's.
@@ -966,9 +986,11 @@ fn run(cli: &Cli) -> Result<(), CliError> {
                 env!("CARGO_PKG_VERSION"),
                 &format!("https://github.com/{REPO}"),
                 AuthInfo {
-                    // A records folder on Google Drive is reached through a
-                    // Drive profile's sign-in; one on a local disk needs none.
-                    required: true,
+                    // Not required: a records folder on a local disk needs
+                    // none, and `info` names no folder. One on Google Drive
+                    // is reached through a Drive profile's sign-in;
+                    // `auth status --profile <NAME>` reports it.
+                    required: false,
                     method: "browser-session".into(),
                     login_hint: Some(format!(
                         "{} login {} <NAME>",
@@ -2157,7 +2179,7 @@ fn profiles_cmd(cli: &Cli, cmd: &ProfilesCmd, store: &ConfigStore) -> Result<(),
                 json!({ "name": name, "status": status }),
                 |_| {
                     if added {
-                        println!("added profile {name}; give it a records folder with `{BIN} --profile {name} init <remote:path|dir>`")
+                        println!("added profile {name}; give it a records folder with `{BIN} --profile {name} init <gdrive:PROFILE/FOLDER-ID|dir>`")
                     } else {
                         println!("profile {name} already exists")
                     }

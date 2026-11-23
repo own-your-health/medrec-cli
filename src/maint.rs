@@ -601,9 +601,11 @@ pub struct Backup {
 
 /// Copy the whole records folder to another Google Drive folder or a
 /// directory, then compare every file's MD5 on both sides. A file the
-/// backup already holds is replaced by the folder's current copy. From
-/// Drive to Drive the files pass through a private temporary directory, so
-/// the copy needs that much local disk.
+/// backup already holds with other bytes is replaced by the folder's
+/// current copy; one with the same bytes is left, and files only the
+/// backup holds are kept. From Drive to Drive the files pass through this
+/// machine one at a time, each in a private temporary directory removed
+/// once it is uploaded.
 pub fn backup(folder: &Folder, to: &Location, budget: Duration) -> Result<Backup, CliError> {
     let from = folder.store.location().clone();
     if from.display() == to.display() {
@@ -629,10 +631,19 @@ pub fn backup(folder: &Folder, to: &Location, budget: Duration) -> Result<Backup
             target.put_tree_replacing(a, "")?
         }
         (Location::Drive(_), Location::Drive(_)) => {
-            let staging = pk_cli_drive::private_temp_dir("medrec-backup")?;
-            folder.store.fetch_tree("", staging.path())?;
             target.mkdir("")?;
-            target.put_tree_replacing(staging.path(), "")?
+            let theirs: HashMap<String, Option<String>> = target
+                .hashes("")?
+                .into_iter()
+                .map(|f| (f.rel, f.md5))
+                .collect();
+            for f in folder.store.hashes("")? {
+                if f.md5.is_some() && theirs.get(&f.rel) == Some(&f.md5) {
+                    continue;
+                }
+                let copy = folder.store.fetch(&f.rel)?;
+                target.put_file(&copy.path, &f.rel)?;
+            }
         }
     }
     if let Location::Dir(b) = to {

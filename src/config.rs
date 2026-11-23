@@ -424,6 +424,21 @@ mod tests {
     }
 
     #[test]
+    fn the_budget_set_as_rclone_budget_secs_is_still_read_and_set() {
+        // A config written by 0.3 names it rclone_budget_secs.
+        let c: Config = serde_json::from_str(r#"{"rclone_budget_secs": 90}"#).unwrap();
+        assert_eq!(c.store_budget(), std::time::Duration::from_secs(90));
+        let v = serde_json::to_value(&c).unwrap();
+        assert_eq!(v["store_budget_secs"], 90, "{v}");
+        assert!(v.get("rclone_budget_secs").is_none(), "{v}");
+        let mut c = Config::default();
+        c.set("rclone_budget_secs", "120").unwrap();
+        assert_eq!(c.store_budget(), std::time::Duration::from_secs(120));
+        c.unset("rclone_budget_secs").unwrap();
+        assert_eq!(c.store_budget(), std::time::Duration::from_secs(1800));
+    }
+
+    #[test]
     fn a_profile_setting_is_saved_in_its_profile_only() {
         let mut c = with(&["home"]);
         c.select_from(Some("home"), None).unwrap();

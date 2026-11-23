@@ -12,7 +12,7 @@ each place, and what medrec does and does not do with them.
 | The macOS Keychain item `piekstra.medrec` | medrec's Drive sign-ins: per Drive profile, the OAuth client (id and secret) and the token set (access and refresh) | This Mac's user, through the Keychain's approval for each binary |
 | `~/.config/medrec/drive.json` | Each Drive profile's account email, the scopes Google granted, the client id and when it signed in; no secret. Owner-only (0600) | This Mac's user |
 | `~/.cache/medrec/` (or `$XDG_CACHE_HOME/medrec`) | The read cache (`household.json`, `index.json`, `text.json` and files read recently) and opened copies (`open/`, removed after 12 hours) | This Mac's user; mode 0700 directories and 0600 files |
-| A private temporary directory per command | A document or study being staged before upload | This Mac's user; removed when the command ends |
+| A private temporary directory per command | A document or study being staged before upload; in a backup from Drive to Drive, the one file being copied | This Mac's user; removed when the command ends (a backup's, once each file is uploaded) |
 | `~/.config/medrec/config.json` | Each profile's records folder location and settings, and this machine's settings; no secret. Written owner-only (0600). `config.json.pre-profiles` beside it, also 0600, is the file as it was before `profiles migrate` | This Mac's user |
 | A records folder or backup on a local disk (`init <dir>`, `backup --to <dir>`) | Everything the Drive folder holds | This Mac's user: medrec creates its folders 0700 and its files 0600, and `medrec doctor` warns when anything under the records folder can be read by other users |
 | A study exported with `images export` | That study's DICOM files | This Mac's user; 0700 folders and 0600 files |
@@ -45,8 +45,9 @@ client's secret as not confidential, and PKCE protects each sign-in.
   not tried again in the background until a person runs `medrec refresh
   sign-in <id>`, so the LaunchAgent never piles up dialogs. medrec's own
   Drive sign-in is held to the same rule: a scheduled pass by a binary not
-  yet known to read it without an approval (a new build, an update) checks it
-  in a `medrec drive status` stopped after 30 seconds. A check that hangs
+  yet known to read it without an approval (a new build, an update) first
+  reads it in a child process stopped after 30 seconds, which reads the
+  Keychain and sends nothing to Google. A read that hangs
   ends the pass, and no scheduled pass by that binary asks again until a
   person runs `medrec --profile <NAME> refresh` at the screen.
 - It never runs a disc's bundled viewer. `images open` hands the viewer a
