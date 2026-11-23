@@ -38,7 +38,8 @@ medrec self-update                    # later releases
 
 Or from source (Rust 1.89 or later): `cargo install --git
 https://github.com/own-your-health/medrec-cli --locked`, or `make install` from a
-checkout. medrec keeps its Google Drive sign-in in one Keychain item
+checkout. medrec keeps its Google Drive sign-ins sealed under
+`~/.config/medrec/vault/`, with the key in one Keychain item
 (`piekstra.medrec`). macOS asks to approve each newly built binary's first
 read of it, once.
 
@@ -67,7 +68,8 @@ copy a study.
    ```
 
    The login opens a browser for Google's consent. The client and the
-   tokens go into the Keychain, so the downloaded JSON can be deleted. A
+   tokens go into medrec's vault, sealed with its Keychain key, so the
+   downloaded JSON can be deleted. A
    local directory works too, with no sign-in.
 2. **A records folder and the people in it.**
 
@@ -353,6 +355,16 @@ the provider refuses for its sign-in (exit 3), as a member site does with a
 session `auth status` still reads as valid. `medrec refresh` at the terminal
 waits up to 10 minutes for an approval. `--scheduled` runs a pass as the
 LaunchAgent does.
+
+medrec's own Drive sign-in is held to the same rule. A scheduled pass by a
+binary not yet known to read it without an approval (a new build, an
+update) first reads it in a child process limited to 30 seconds, which
+reads the Keychain and sends nothing to Google. A read that outlives the
+limit ends the pass as `needs_person`, and the log names
+`medrec --profile <NAME> refresh`. No scheduled pass by that binary asks
+again until a person has run a pass. Such a pass cannot reach the folder,
+so it writes nothing there: `refresher.last_pass_at` stops moving, and the
+folder's readers see the refreshing machine as offline.
 
 `refresh sign-in <id>` runs the provider's own sign-in command, built from
 the `login_hint` its `info` gives (`uhc auth login --browser --profile

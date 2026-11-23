@@ -9,7 +9,8 @@ each place, and what medrec does and does not do with them.
 | Where | What | Who reads it |
 |---|---|---|
 | The records folder in Google Drive (`gdrive:<drive profile>/<folder id>`) | Every document, study, raw record, the index and extracted text, notes | The Google account, anyone it shares the folder with, and Google |
-| The macOS Keychain item `piekstra.medrec` | medrec's Drive sign-ins: per Drive profile, the OAuth client (id and secret) and the token set (access and refresh) | This Mac's user, through the Keychain's approval for each binary |
+| The macOS Keychain item `piekstra.medrec` | A random 256-bit key, the vault's: nothing else | This Mac's user, through the Keychain's approval for each binary |
+| `~/.config/medrec/vault/` | medrec's Drive sign-ins, per Drive profile the OAuth client (id and secret) and the token set (access and refresh), each in its own file sealed with the Keychain item's key (XChaCha20-Poly1305). A file is named by a hash, so no profile name is on disk in the clear | This Mac's user: an owner-only (0700) directory of 0600 files, unreadable without the key. A copy taken elsewhere (a backup, a dotfiles sync) holds the sign-ins sealed; it opens only with this Mac's Keychain item |
 | `~/.config/medrec/drive.json` | Each Drive profile's account email, the scopes Google granted, the client id and when it signed in; no secret. Owner-only (0600) | This Mac's user |
 | `~/.cache/medrec/` (or `$XDG_CACHE_HOME/medrec`) | The read cache (`household.json`, `index.json`, `text.json` and files read recently) and opened copies (`open/`, removed after 12 hours) | This Mac's user; mode 0700 directories and 0600 files |
 | A private temporary directory per command | A document or study being staged before upload; in a backup from Drive to Drive, the one file being copied | This Mac's user; removed when the command ends (a backup's, once each file is uploaded) |
@@ -20,8 +21,14 @@ each place, and what medrec does and does not do with them.
 | `~/Library/LaunchAgents/io.github.own-your-health.medrec.refresh.<profile>.plist` | The command `refresh --install` set up: medrec's path, the profile name, the pass interval, and the `PATH`, `XDG_CONFIG_HOME` and `XDG_CACHE_HOME` (when set) at install time; no secret | This Mac's user; launchd runs it in the user's own session, never as root |
 | `~/Library/Logs/medrec/refresh-<profile>.log` | One line per scheduled pass that did something: source ids, outcomes, error codes, counts and the command a person should run; never a name or record content | This Mac's user |
 
-medrec holds **one kind of credential**: its Google Drive sign-in, in the
-Keychain, never in a file, argv or a log. Provider and insurer CLIs keep
+medrec holds **one kind of credential**: its Google Drive sign-in, sealed in
+its vault with a key only the Keychain holds, never in the clear in a file,
+argv or a log. One Keychain item serves every sign-in, so a new build asks
+for one approval, however many Drive profiles there are. A vault whose key
+is gone (the Keychain item deleted) cannot be read and is not replaced
+while sealed files remain: remove each Drive profile (`medrec drive
+profiles remove <NAME> --force`, which deletes its files without the key),
+then sign in again with the client's JSON (`drive login --client-file`). Provider and insurer CLIs keep
 their own logins in the macOS Keychain under their own names. medrec runs
 them as bounded subprocesses and passes only a patient id, an organization
 and a date.

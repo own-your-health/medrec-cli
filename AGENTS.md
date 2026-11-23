@@ -9,7 +9,9 @@ It files scans, documents, imaging studies and provider records into one
 plain records folder ([docs/data-contract.md](docs/data-contract.md)) and
 answers questions over them. It conforms to `piekstra-cli/1`
 (`~/Dev/cli-common/DESIGN.md`) with `info.auth.required = false`: it holds no
-credentials. Provider CLIs (the README's provider table) fetch records; medrec files
+provider credentials. Its one credential is its Google Drive sign-in, which
+only a folder on Drive needs; `auth status --profile <NAME>` reports it.
+Provider CLIs (the README's provider table) fetch records; medrec files
 them.
 
 ## Invariant 1: never read a real record
