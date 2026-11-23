@@ -225,7 +225,8 @@ pub fn write_dicom(dicom: &Path) {
 /// 30 seconds, for `<DIR>/go` before it prints the stream. An export for
 /// `--patient <P>` prints `synthetic-<P>.ndjson` when the directory has one.
 /// With `FAKEPROV_WATCH=<DIR>` each export appends the checksum of
-/// `<DIR>/*/index.json` to `export-log`.
+/// `<DIR>/*/index.json` to `export-log`; with `FAKEPROV_EXIT_FOR=<P>` the
+/// export for `--patient <P>` answers that its session expired (exit 3).
 pub fn write_provider(provider: &Path, stream: &str) -> PathBuf {
     std::fs::create_dir_all(provider).unwrap();
     std::fs::write(provider.join("synthetic.ndjson"), stream).unwrap();
@@ -299,6 +300,9 @@ case "$1" in
         adult1|adult2) ;;
         *) echo "fakeprov: this command needs a profile; configured: adult1, adult2" >&2; exit 2 ;;
       esac
+    fi
+    if [ -n "$FAKEPROV_EXIT_FOR" ] && [ "$patient" = "$FAKEPROV_EXIT_FOR" ]; then
+      echo "error: the session for profile $profile has expired; sign in again" >&2; exit 3
     fi
     if [ -n "$FAKEPROV_WATCH" ]; then
       cat "$FAKEPROV_WATCH"/*/index.json | cksum >> "$d/export-log"

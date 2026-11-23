@@ -228,10 +228,13 @@ folder.
 `--person` in the same order (or none, for members imported before). Every
 member is exported first, each into an owner-only file on this machine,
 and only then filed, so a website session that ends within the hour serves
-them all before uploads to a Drive folder take their time. One member
+them all before uploads to a Drive folder take their time. Spooled
+exports live only as long as the command; one a killed command left is
+removed by the next export. One member
 that fails leaves the others filed; the exit code is the first failure's,
 and `--json` prints one `import-batch` document with each member's import
-or error. `medrec refresh` does the same with every source a pass runs.
+or error; one `--patient` prints the `import` document as before.
+`medrec refresh` does the same with every source a pass runs.
 
 `--from-files <DIR>` imports a provider's downloaded files (statements, an
 export the portal offered) instead of signing in. medrec passes the
@@ -303,8 +306,8 @@ passed. The skip says when the next load is allowed.
 
 A pass signs in and exports every source it runs before it files any of
 them, so the members on one short website session (`uhc`, `fertemr`,
-`caremark`, `oneblood`, `peryourhealth`) are exported back to back while it
-is fresh. Each export waits in an owner-only file on this machine until it
+`caremark`, `oneblood`, `flywire`, `peryourhealth`: those whose
+`sign_in.renews` is false) are exported back to back while it is fresh. Each export waits in an owner-only file on this machine until it
 is filed.
 
 A scheduled pass never waits on a person. Before importing a source that

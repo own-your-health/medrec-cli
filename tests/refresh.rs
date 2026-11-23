@@ -1169,7 +1169,7 @@ fn an_import_of_several_members_exports_them_all_before_filing() {
             .replace("2020-02-02", "1950-05-05"),
     )
     .unwrap();
-    let import = |patients: &[&str], people: &[&str]| {
+    let import_env = |patients: &[&str], people: &[&str], env: &[(&str, &str)]| {
         let mut args = vec!["import", "--from", "fakeprov", "--from-profile", "adult1"];
         for p in patients {
             args.extend(["--patient", p]);
@@ -1178,8 +1178,11 @@ fn an_import_of_several_members_exports_them_all_before_filing() {
             args.extend(["--person", p]);
         }
         let records = e.records();
-        e.doc(&args, &[("FAKEPROV_WATCH", records.to_str().unwrap())])
+        let mut env = env.to_vec();
+        env.push(("FAKEPROV_WATCH", records.to_str().unwrap()));
+        e.doc(&args, &env)
     };
+    let import = |patients: &[&str], people: &[&str]| import_env(patients, people, &[]);
 
     let (code, v) = import(&["pat-0001", "pat-0002"], &["Robin"]);
     assert_eq!(code, Some(2), "{v}");
@@ -1212,5 +1215,53 @@ fn an_import_of_several_members_exports_them_all_before_filing() {
     assert_eq!(v["ok"], false);
     assert_eq!(v["items"][0]["error"]["code"], "usage", "{v}");
     assert!(v["items"][1]["import"].is_object(), "{v}");
+
+    // One member's export refused for its sign-in: the next member is
+    // still exported and filed, and the exit is the refusal's.
+    let before = e.json_at("Robin Testperson/index.json")["imports"]
+        .as_array()
+        .unwrap()
+        .len();
+    let (code, v) = import_env(
+        &["pat-0001", "pat-0002"],
+        &["Robin", "Robin"],
+        &[("FAKEPROV_EXIT_FOR", "pat-0001")],
+    );
+    assert_eq!(code, Some(3), "{v}");
+    assert_eq!(v["ok"], false);
+    assert_eq!(v["items"][0]["patient"], "pat-0001");
+    assert!(v["items"][0]["error"]["message"].is_string(), "{v}");
+    assert!(v["items"][1]["import"].is_object(), "{v}");
+    let after = e.json_at("Robin Testperson/index.json")["imports"]
+        .as_array()
+        .unwrap()
+        .len();
+    assert_eq!(after, before + 1, "the second member was filed");
+
+    // Downloaded files are one member's.
+    let files = e.root.join("files");
+    std::fs::create_dir_all(&files).unwrap();
+    let (code, v) = e.doc(
+        &[
+            "import",
+            "--from",
+            "fakeprov",
+            "--from-files",
+            files.to_str().unwrap(),
+            "--patient",
+            "pat-0001",
+            "--patient",
+            "pat-0002",
+        ],
+        &[("FAKEPROV_INFO", "files")],
+    );
+    assert_eq!(code, Some(2), "{v}");
+    assert!(
+        v["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("--from-files"),
+        "{v}"
+    );
     let _ = std::fs::remove_dir_all(&e.root);
 }

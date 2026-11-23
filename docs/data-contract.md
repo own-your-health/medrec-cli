@@ -502,7 +502,7 @@ the month (UTC) the attempt started.
 | `requests` | The `_requests/` ids the attempt served; empty otherwise. |
 | `outcome` | `ok`, `failed`, `needs_person`, `skipped_interval` (for the schedule: imported less than `min_interval_secs` ago, or still waiting after a failure, see `failures`; for a person: within the request guard, `_requests/` rule 3) or `skipped_paused`. `running` appears only in `status.json`. |
 | `exit_code` | The import's exit code (Import, below); `null` for a skip, and for a `needs_person` found before the import ran. |
-| `error` | `null`, or `{"code", "message", "remedy"}` from the failing command's `--json` error (the family's error shape). `message` is at most 300 characters. When the provider's export answered that its sign-in ended (exit 3), `code` is `needs_person`, `message` and `remedy` are medrec's own (the remedy runs `medrec refresh sign-in <source>`), and the provider's message, which names the provider's own sign-in command, is in `provider_message` (0.7.0 and later). Show `remedy` as the one thing to do. A profile name in `message` or `remedy` is replaced, a provider profile's by `<provider profile>` and a medrec profile's by `<profile>`, so the folder holds none. medrec's own codes are `timeout` (a call outlived its limit), `interrupted` (the pass running it stopped before it finished) and `needs_person`. |
+| `error` | `null`, or `{"code", "message", "remedy"[, "provider_message"]}` from the failing command's `--json` error (the family's error shape). `message` is at most 300 characters. When the provider's export answered that its sign-in ended (exit 3), `code` is `needs_person`, `message` and `remedy` are medrec's own (the remedy runs `medrec refresh sign-in <source>`), and the provider's own message, which names the provider's own sign-in command, is in `provider_message` (0.7.0 and later). `provider_message` is present only then, and is at most 300 characters too. Show `remedy` as the one thing to do, and `provider_message` at most as detail. A profile name in `message`, `remedy` or `provider_message` is replaced, a provider profile's by `<provider profile>` and a medrec profile's by `<profile>`, so the folder holds none. medrec's own codes are `timeout` (a call outlived its limit), `interrupted` (the pass running it stopped before it finished) and `needs_person`. |
 | `import` | The `ImportRun` id in the person's `index.json`, when `ok`. |
 | `counts` | When `ok`, the import report's counts: `records_added`, `records_updated`, `records_unchanged`, `records_older`, `resources_written`, `resources_unchanged`, `documents_added`, `documents_duplicate`, `documents_unchanged`, `documents_same_statement`. A count the import report gains later is added here too. |
 
@@ -667,9 +667,18 @@ results never say "blood test".
 
 ## Import input: `records-stream/v1`
 
-`medrec import --from <cli> [--from-profile <name> | --from-files <dir>] --patient <id> [--org <org>] [--since <date>]`
+`medrec import --from <cli> [--from-profile <name> | --from-files <dir>] --patient <id> [--person <name>] [--patient <id> [--person <name>] …] [--org <org>] [--since <date>]`
 runs `<cli> records export --patient <id> --ndjson [--org …] [--since …]
-[--profile <name> | --files <dir>]`. A provider that signs in lists `login-profiles` in its
+[--profile <name> | --files <dir>]` for each `--patient`. With several
+(0.7.0 and later; not with `--from-files`, which is one member's files),
+`--person` is given once per `--patient` in the same order, or not at all.
+Every export runs first, each into an owner-only file on this machine, and
+the imports are filed after, so one short website session serves them all.
+A member that fails leaves the others filed, the exit code is the first
+failure's, and `--json` prints one `import-batch/v1` document,
+`{ok, items: [{patient, import | error}]}`, where `import` is the
+`import/v1` document one `--patient` prints and `error` the family's error
+shape. A provider that signs in lists `login-profiles` in its
 `info --json` `capabilities` (`cli-info/v1`); its export then needs
 `--from-profile`, passed as `--profile`, and without it medrec is exit 2
 listing the provider's profiles from `<cli> profiles list --json`

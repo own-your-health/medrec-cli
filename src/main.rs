@@ -1688,11 +1688,20 @@ fn import_cmd(cli: &Cli, a: &ImportArgs, store: &ConfigStore) -> Result<(), CliE
             for (patient, r) in &results {
                 match r {
                     Ok(r) => print_import(r),
-                    Err(e) => println!("{}: {e}", medrec::printable(patient)),
+                    Err(e) => {
+                        eprintln!("error: {}: {e}", medrec::printable(patient));
+                        if let Some(remedy) = e.remedy() {
+                            eprintln!("  {remedy}");
+                        }
+                    }
                 }
             }
         },
     );
+    // The one document is printed, so a failure exits here rather than
+    // printing a second (the family's rule). Every spool was consumed
+    // above; `results` is the last value holding anything.
+    drop(results);
     if code != 0 {
         std::process::exit(code);
     }

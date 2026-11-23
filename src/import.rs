@@ -24,7 +24,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io::{BufReader, Read};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use base64::Engine;
@@ -397,10 +397,15 @@ struct Streamed {
     skipped: Vec<Skip>,
 }
 
-/// A provider's export, kept on this machine (an owner-only temporary
-/// file) until it is filed. `medrec refresh` exports every due source
-/// first and files them after, so a short website session serves every
-/// member before uploads to the folder use it up.
+/// The prefix of a spool's directory under the system temp dir:
+/// `medrec-spool-<pid>-<nanos>-<seq>` (`pk_cli_drive::private_temp_dir`).
+const SPOOL_PREFIX: &str = "medrec-spool";
+
+/// A provider's export, kept on this machine (an owner-only `0600` file in
+/// a `0700` temporary directory) until it is filed, and removed when it is
+/// dropped. `medrec refresh` exports every due source first and files them
+/// after, so a short website session serves every member before uploads to
+/// the folder use it up.
 pub struct Spooled {
     dir: pk_cli_drive::TempDir,
 }
@@ -421,10 +426,18 @@ pub fn export(
     req: &Request,
 ) -> Result<Spooled, CliError> {
     who(&folder.household()?, req)?;
-    let dir = pk_cli_drive::private_temp_dir("medrec-spool")?;
+    sweep_spools(&std::env::temp_dir());
+    let dir = pk_cli_drive::private_temp_dir(SPOOL_PREFIX)?;
     let spooled = Spooled { dir };
-    let mut file = std::fs::File::create(spooled.path())
-        .map_err(|e| CliError::Other(format!("creating a spool file: {e}")))?;
+    let mut file = {
+        use std::os::unix::fs::OpenOptionsExt;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(spooled.path())
+            .map_err(|e| CliError::Other(format!("creating a spool file: {e}")))?
+    };
     let mut child = export_command(cfg, provider, req).stream()?;
     let mut tee = Tee {
         inner: child.stdout(),
@@ -451,6 +464,44 @@ pub fn export(
         ));
     }
     Ok(spooled)
+}
+
+/// Remove the spools a killed medrec left in `dir`: this user's, whose
+/// process is gone or which are a day old. A command that ends removes its
+/// own; one stopped by a signal or a logout cannot.
+pub fn sweep_spools(dir: &Path) {
+    use std::os::unix::fs::MetadataExt;
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let uid = unsafe { libc::getuid() };
+    let prefix = format!("{SPOOL_PREFIX}-");
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let Some(rest) = name.strip_prefix(&prefix) else {
+            continue;
+        };
+        let Ok(meta) = std::fs::symlink_metadata(entry.path()) else {
+            continue;
+        };
+        if !meta.is_dir() || meta.uid() != uid {
+            continue;
+        }
+        let pid: Option<i32> = rest.split('-').next().and_then(|p| p.parse().ok());
+        let gone = pid.is_some_and(|p| {
+            p != std::process::id() as i32
+                && unsafe { libc::kill(p, 0) } != 0
+                && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+        });
+        let old = meta
+            .modified()
+            .ok()
+            .and_then(|m| m.elapsed().ok())
+            .is_some_and(|age| age > Duration::from_secs(24 * 3600));
+        if gone || old {
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
+    }
 }
 
 /// File an export [`export`] spooled, as [`run`] files one it streams.
@@ -2248,6 +2299,30 @@ fn record_source(h: &mut Household, pid: &str, cli: &str, header: &Header) {
         if !p.identifiers.contains(&ident) {
             p.identifiers.push(ident);
         }
+    }
+}
+
+#[cfg(test)]
+mod spool_tests {
+    use super::*;
+
+    #[test]
+    fn a_spool_whose_process_is_gone_is_swept_and_a_live_one_kept() {
+        let dir = pk_cli_drive::private_temp_dir("medrec-sweep-test").unwrap();
+        let mine = dir
+            .path()
+            .join(format!("{SPOOL_PREFIX}-{}-1-0", std::process::id()));
+        // A pid far above any macOS or Linux pid_max: no such process.
+        let gone = dir.path().join(format!("{SPOOL_PREFIX}-99999999-1-0"));
+        let other = dir.path().join("medrec-other-99999999-1-0");
+        for d in [&mine, &gone, &other] {
+            std::fs::create_dir(d).unwrap();
+            std::fs::write(d.join("stream.ndjson"), b"{}").unwrap();
+        }
+        sweep_spools(dir.path());
+        assert!(mine.is_dir(), "this process's spool is kept");
+        assert!(!gone.exists(), "a spool whose process is gone is removed");
+        assert!(other.is_dir(), "only spools are touched");
     }
 }
 

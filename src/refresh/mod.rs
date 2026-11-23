@@ -728,31 +728,35 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
     // then are the exports filed: a short website session serves every
     // member before uploads to the folder use it up.
     let mut exported: Vec<Exported<'_>> = Vec::new();
-    for (id, w) in &want {
-        let Some(b) = bound.get(id) else { continue };
-        let t = Try {
-            id,
-            trigger: if !w.requests.is_empty() {
-                "request"
-            } else if w.manual {
-                "manual"
-            } else {
-                "schedule"
-            },
-            requests: &w.requests,
-            asked: w.manual || !w.requests.is_empty(),
-            now: time::now(),
-        };
-        let mut e = entries
-            .get(id)
-            .cloned()
-            .unwrap_or_else(|| entry(None, id, source_of(id), b, &local.declared));
+    // A failure to write the folder stops the exports, but those already
+    // taken are still filed below, so no sign-in is spent for nothing.
+    let mut halted: Option<CliError> = None;
+    let mut export_all = || -> Result<(), CliError> {
+        for (id, w) in &want {
+            let Some(b) = bound.get(id) else { continue };
+            let t = Try {
+                id,
+                trigger: if !w.requests.is_empty() {
+                    "request"
+                } else if w.manual {
+                    "manual"
+                } else {
+                    "schedule"
+                },
+                requests: &w.requests,
+                asked: w.manual || !w.requests.is_empty(),
+                now: time::now(),
+            };
+            let mut e = entries
+                .get(id)
+                .cloned()
+                .unwrap_or_else(|| entry(None, id, source_of(id), b, &local.declared));
 
-        let src = match source_of(id) {
-            Some(s) if s.cli.as_deref() == Some(b.cli.as_str()) && plain_cli(&b.cli) => Some(s),
-            Some(_) => {
-                let mut a = t.attempt(&e, "failed");
-                a.error = Some(ErrorInfo {
+            let src = match source_of(id) {
+                Some(s) if s.cli.as_deref() == Some(b.cli.as_str()) && plain_cli(&b.cli) => Some(s),
+                Some(_) => {
+                    let mut a = t.attempt(&e, "failed");
+                    a.error = Some(ErrorInfo {
                     code: "provider".into(),
                     message: format!(
                         "household.json names another provider CLI for source {id} than the `{}` it was set up with; not run",
@@ -763,172 +767,171 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
                     )),
                     ..ErrorInfo::default()
                 });
-                t.record(&writer, &mut e, &a, None, true, &mut report, &mut answers)?;
-                entries.insert(id.clone(), e);
-                continue;
-            }
-            None => None,
-        };
-        let Some(src) = src else {
-            let mut a = t.attempt(&e, "failed");
-            a.error = Some(ErrorInfo {
-                code: "not_found".into(),
-                message: format!("source {id} is no longer in household.json"),
-                remedy: Some(format!(
-                    "stop refreshing it with `medrec --profile <NAME> refresh remove {id}`"
-                )),
-                ..ErrorInfo::default()
-            });
-            t.record(
-                &writer,
-                &mut e,
-                &a,
-                None,
-                t.asked,
-                &mut report,
-                &mut answers,
-            )?;
-            entries.insert(id.clone(), e);
-            continue;
-        };
-        if b.paused.is_some() {
-            let a = t.attempt(&e, "skipped_paused");
-            t.record(
-                &writer,
-                &mut e,
-                &a,
-                None,
-                t.asked,
-                &mut report,
-                &mut answers,
-            )?;
-            entries.insert(id.clone(), e);
-            continue;
-        }
-        // Only a person at the terminal, naming the source, tries it again.
-        if e.sign_in.needs_person.is_some() && !w.manual {
-            let a = t.attempt(&e, "needs_person");
-            t.record(
-                &writer,
-                &mut e,
-                &a,
-                None,
-                t.asked,
-                &mut report,
-                &mut answers,
-            )?;
-            entries.insert(id.clone(), e);
-            continue;
-        }
-
-        let min = policy::min_interval(&e.cli) as i64;
-        let every_src = policy::every(&e.cli, b.every_secs) as i64;
-        let last = latest_import(&folder, &h, src)?;
-        let after_failure = e
-            .last_attempt
-            .as_ref()
-            .filter(|a| a.outcome == "failed")
-            .and_then(|a| time::parse(&a.started_at))
-            .map(|x| x + backoff(e.failures, min as u64) as i64);
-        let next_allowed = last.as_ref().map(|(_, x)| x + min).max(after_failure);
-        // A person's request waits only its own guard, from the latest
-        // import, run of the provider or failed attempt, whatever asked.
-        let guard = policy::REQUEST_GUARD as i64;
-        let ran_at = local.ran_at.get(id.as_str()).copied();
-        let failed_at = e
-            .last_attempt
-            .as_ref()
-            .filter(|a| a.outcome == "failed")
-            .and_then(|a| time::parse(&a.started_at));
-        let guard_until = last
-            .as_ref()
-            .map(|(_, x)| *x)
-            .max(ran_at)
-            .max(failed_at)
-            .map(|x| x + guard);
-
-        // A request a cut-short pass left: answered by the import since.
-        if !w.manual && !w.requests.is_empty() {
-            if let (Some((import_id, imported)), Some(asked_at)) = (&last, w.requested_at) {
-                if *imported >= asked_at {
-                    let attempt = e
-                        .last_success
-                        .as_ref()
-                        .filter(|s| s.import == *import_id)
-                        .map(|s| s.attempt.clone());
-                    answers.insert(
-                        id.clone(),
-                        Answer {
-                            outcome: "ok".into(),
-                            attempt,
-                            next_allowed_at: Some(time::fmt(imported + guard)),
-                        },
-                    );
+                    t.record(&writer, &mut e, &a, None, true, &mut report, &mut answers)?;
                     entries.insert(id.clone(), e);
                     continue;
                 }
-            }
-        }
-        if t.asked {
-            if guard_until.is_some_and(|n| t.now < n) {
-                let a = t.attempt(&e, "skipped_interval");
+                None => None,
+            };
+            let Some(src) = src else {
+                let mut a = t.attempt(&e, "failed");
+                a.error = Some(ErrorInfo {
+                    code: "not_found".into(),
+                    message: format!("source {id} is no longer in household.json"),
+                    remedy: Some(format!(
+                        "stop refreshing it with `medrec --profile <NAME> refresh remove {id}`"
+                    )),
+                    ..ErrorInfo::default()
+                });
                 t.record(
                     &writer,
                     &mut e,
                     &a,
-                    guard_until,
-                    true,
+                    None,
+                    t.asked,
+                    &mut report,
+                    &mut answers,
+                )?;
+                entries.insert(id.clone(), e);
+                continue;
+            };
+            if b.paused.is_some() {
+                let a = t.attempt(&e, "skipped_paused");
+                t.record(
+                    &writer,
+                    &mut e,
+                    &a,
+                    None,
+                    t.asked,
                     &mut report,
                     &mut answers,
                 )?;
                 entries.insert(id.clone(), e);
                 continue;
             }
-        } else {
-            // On its schedule: not due after all when an import the local
-            // record missed, or a failure's wait, says later.
-            let due_at = last.as_ref().map(|(_, x)| x + every_src).max(next_allowed);
-            if due_at.is_some_and(|d| t.now < d) {
-                e.next_run_at = due_at.map(time::fmt);
+            // Only a person at the terminal, naming the source, tries it again.
+            if e.sign_in.needs_person.is_some() && !w.manual {
+                let a = t.attempt(&e, "needs_person");
+                t.record(
+                    &writer,
+                    &mut e,
+                    &a,
+                    None,
+                    t.asked,
+                    &mut report,
+                    &mut answers,
+                )?;
                 entries.insert(id.clone(), e);
                 continue;
             }
+
+            let min = policy::min_interval(&e.cli) as i64;
+            let every_src = policy::every(&e.cli, b.every_secs) as i64;
+            let last = latest_import(&folder, &h, src)?;
+            let after_failure = e
+                .last_attempt
+                .as_ref()
+                .filter(|a| a.outcome == "failed")
+                .and_then(|a| time::parse(&a.started_at))
+                .map(|x| x + backoff(e.failures, min as u64) as i64);
+            let next_allowed = last.as_ref().map(|(_, x)| x + min).max(after_failure);
+            // A person's request waits only its own guard, from the latest
+            // import, run of the provider or failed attempt, whatever asked.
+            let guard = policy::REQUEST_GUARD as i64;
+            let ran_at = local.ran_at.get(id.as_str()).copied();
+            let failed_at = e
+                .last_attempt
+                .as_ref()
+                .filter(|a| a.outcome == "failed" || a.outcome == "running")
+                .and_then(|a| time::parse(&a.started_at));
+            let guard_until = last
+                .as_ref()
+                .map(|(_, x)| *x)
+                .max(ran_at)
+                .max(failed_at)
+                .map(|x| x + guard);
+
+            // A request a cut-short pass left: answered by the import since.
+            if !w.manual && !w.requests.is_empty() {
+                if let (Some((import_id, imported)), Some(asked_at)) = (&last, w.requested_at) {
+                    if *imported >= asked_at {
+                        let attempt = e
+                            .last_success
+                            .as_ref()
+                            .filter(|s| s.import == *import_id)
+                            .map(|s| s.attempt.clone());
+                        answers.insert(
+                            id.clone(),
+                            Answer {
+                                outcome: "ok".into(),
+                                attempt,
+                                next_allowed_at: Some(time::fmt(imported + guard)),
+                            },
+                        );
+                        entries.insert(id.clone(), e);
+                        continue;
+                    }
+                }
+            }
+            if t.asked {
+                if guard_until.is_some_and(|n| t.now < n) {
+                    let a = t.attempt(&e, "skipped_interval");
+                    t.record(
+                        &writer,
+                        &mut e,
+                        &a,
+                        guard_until,
+                        true,
+                        &mut report,
+                        &mut answers,
+                    )?;
+                    entries.insert(id.clone(), e);
+                    continue;
+                }
+            } else {
+                // On its schedule: not due after all when an import the local
+                // record missed, or a failure's wait, says later.
+                let due_at = last.as_ref().map(|(_, x)| x + every_src).max(next_allowed);
+                if due_at.is_some_and(|d| t.now < d) {
+                    e.next_run_at = due_at.map(time::fmt);
+                    entries.insert(id.clone(), e);
+                    continue;
+                }
+            }
+
+            let mut a = t.attempt(&e, "running");
+            a.finished_at = None;
+            let before = e.last_attempt.clone();
+            e.last_attempt = Some(a.summary());
+            entries.insert(id.clone(), e.clone());
+            writer.status(&entries, &mut local)?;
+
+            let provider = import::probe(&b.cli);
+            let ready = match prepare(mode, &provider, src, b, &mut e, &mut a, &mut local.declared)
+            {
+                Ok(req) => match import::export(&folder, cfg, &provider, &req) {
+                    Ok(spooled) => Ok((req, spooled)),
+                    Err(err) => Err(import_failed(&err, &b.cli, &src.id, &mut e, &mut a)),
+                },
+                Err(outcome) => Err(outcome),
+            };
+            let exported_at = ready.is_ok().then(time::now);
+            exported.push(Exported {
+                id,
+                t,
+                b,
+                e,
+                a,
+                before,
+                min,
+                exported_at,
+                ready,
+            });
         }
-
-        let mut a = t.attempt(&e, "running");
-        a.finished_at = None;
-        let before = e.last_attempt.clone();
-        e.last_attempt = Some(a.summary());
-        entries.insert(id.clone(), e.clone());
-        writer.status(&entries, &mut local)?;
-
-        let provider = import::probe(&b.cli);
-        let ready = match prepare(
-            cfg,
-            mode,
-            &provider,
-            src,
-            b,
-            &mut e,
-            &mut a,
-            &mut local.declared,
-        ) {
-            Ok(req) => match import::export(&folder, cfg, &provider, &req) {
-                Ok(spooled) => Ok((req, spooled)),
-                Err(err) => Err(import_failed(&err, &provider, &src.id, &mut e, &mut a)),
-            },
-            Err(outcome) => Err(outcome),
-        };
-        exported.push(Exported {
-            id,
-            t,
-            b,
-            e,
-            a,
-            before,
-            min,
-            ready,
-        });
+        Ok(())
+    };
+    if let Err(err) = export_all() {
+        halted = Some(err);
     }
 
     for x in exported {
@@ -940,19 +943,19 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
             mut a,
             before,
             min,
+            exported_at,
             ready,
         } = x;
         let id = &id.to_string();
         let guard = policy::REQUEST_GUARD as i64;
-        let ran = ready.is_ok();
         let outcome = match ready {
             Ok((req, spooled)) => file(cfg, &req, spooled, &mut e, &mut a),
             Err(outcome) => outcome,
         };
-        // An export counts toward a request's guard once it is filed or
-        // failed; one a busy folder threw away does not.
-        if ran && outcome != BUSY {
-            local.ran_at.insert(id.clone(), t.now);
+        // An export counts toward a request's guard, from when it ended,
+        // once it is filed or failed; one a busy folder threw away does not.
+        if let Some(at) = exported_at.filter(|_| outcome != BUSY) {
+            local.ran_at.insert(id.clone(), at);
         }
         if outcome == BUSY {
             // Another writer held the folder: no attempt, and its requests
@@ -961,7 +964,9 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
             unfinished.push(id.clone());
             report.attempts.push(AttemptRow::of(&a, &e));
             entries.insert(id.clone(), e);
-            writer.status(&entries, &mut local)?;
+            if let Err(err) = writer.status(&entries, &mut local) {
+                halted.get_or_insert(err);
+            }
             continue;
         }
         a.finished_at = Some(time::fmt(time::now()));
@@ -980,10 +985,19 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
             "failed" => Some(time::now() + backoff(e.failures, min as u64) as i64),
             _ => None,
         };
-        t.record(&writer, &mut e, &a, next, true, &mut report, &mut answers)?;
+        // Each spool is filed whatever happens to the status writes; the
+        // first failure ends the pass once all are.
+        if let Err(err) = t.record(&writer, &mut e, &a, next, true, &mut report, &mut answers) {
+            halted.get_or_insert(err);
+        }
         e.next_run_at = next_run(&e, b);
         entries.insert(id.clone(), e);
-        writer.status(&entries, &mut local)?;
+        if let Err(err) = writer.status(&entries, &mut local) {
+            halted.get_or_insert(err);
+        }
+    }
+    if let Some(err) = halted {
+        return Err(err);
     }
 
     // Each request's outcome, then the pending file goes.
@@ -1211,6 +1225,8 @@ struct Exported<'a> {
     a: Attempt,
     before: Option<AttemptSummary>,
     min: i64,
+    /// When its export ended, if it ran.
+    exported_at: Option<i64>,
     /// Its request and spooled export, or the outcome that ended it
     /// before filing.
     ready: Result<(import::Request, import::Spooled), String>,
@@ -1220,7 +1236,6 @@ struct Exported<'a> {
 /// attempt's outcome when it ends here, with `a` and `e` filled in.
 #[allow(clippy::too_many_arguments)]
 fn prepare(
-    cfg: &Config,
     mode: Mode,
     provider: &Provider,
     src: &Source,
@@ -1229,7 +1244,6 @@ fn prepare(
     a: &mut Attempt,
     declared: &mut BTreeMap<String, signin::Declared>,
 ) -> Result<import::Request, String> {
-    let _ = cfg;
     let command = sign_in_command(&src.id);
     let needs = |reason: &str, e: &mut SourceStatus| {
         e.sign_in.needs_person = Some(NeedsPerson {
@@ -1364,7 +1378,7 @@ fn prepare(
 /// `failed`.
 fn import_failed(
     err: &CliError,
-    provider: &Provider,
+    cli: &str,
     source: &str,
     e: &mut SourceStatus,
     a: &mut Attempt,
@@ -1379,10 +1393,7 @@ fn import_failed(
     // medrec's, which also binds the source.
     a.error = Some(ErrorInfo {
         code: "needs_person".into(),
-        message: format!(
-            "{} needs a sign-in: its export answered that the sign-in has ended",
-            provider.cli
-        ),
+        message: format!("{cli} needs a sign-in: its export answered that the sign-in has ended"),
         remedy: Some(format!("run `{command}` on this machine")),
         provider_message: Some(clip(err.message(), MESSAGE_MAX)),
     });
@@ -1409,7 +1420,6 @@ fn file(
     e: &mut SourceStatus,
     a: &mut Attempt,
 ) -> String {
-    let provider = import::probe(&req.from);
     let folder = match Folder::open(cfg, Access::Fresh) {
         Ok(f) => f,
         Err(err) => {
@@ -1438,7 +1448,7 @@ fn file(
         }
         Err(err) => {
             let source = a.source.clone();
-            import_failed(&err, &provider, &source, e, a)
+            import_failed(&err, &req.from, &source, e, a)
         }
     }
 }
