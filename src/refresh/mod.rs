@@ -997,6 +997,9 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
         }
     }
     if let Some(err) = halted {
+        // Keep this machine's record of what ran, so the guard holds for
+        // the exports filed; the first failure is the one reported.
+        let _ = state::save(&location, &local);
         return Err(err);
     }
 

@@ -400,6 +400,8 @@ struct Streamed {
 /// The prefix of a spool's directory under the system temp dir:
 /// `medrec-spool-<pid>-<nanos>-<seq>` (`pk_cli_drive::private_temp_dir`).
 const SPOOL_PREFIX: &str = "medrec-spool";
+/// The file in a spool's directory naming the pid of the medrec that owns it.
+const SPOOL_OWNER: &str = "owner.pid";
 
 /// A provider's export, kept on this machine (an owner-only `0600` file in
 /// a `0700` temporary directory) until it is filed, and removed when it is
@@ -428,6 +430,10 @@ pub fn export(
     who(&folder.household()?, req)?;
     sweep_spools(&std::env::temp_dir());
     let dir = pk_cli_drive::private_temp_dir(SPOOL_PREFIX)?;
+    // The owner, for `sweep_spools`, which reads this rather than the
+    // directory's name.
+    std::fs::write(dir.path().join(SPOOL_OWNER), std::process::id().to_string())
+        .map_err(|e| CliError::Other(format!("creating a spool: {e}")))?;
     let spooled = Spooled { dir };
     let mut file = {
         use std::os::unix::fs::OpenOptionsExt;
@@ -467,37 +473,48 @@ pub fn export(
 }
 
 /// Remove the spools a killed medrec left in `dir`: this user's, whose
-/// process is gone or which are a day old. A command that ends removes its
-/// own; one stopped by a signal or a logout cannot.
+/// owner (`owner.pid`) is gone, which have had no owner file for a minute,
+/// or which are a day old. A command that ends removes its own; one stopped
+/// by a signal or a logout cannot.
 pub fn sweep_spools(dir: &Path) {
     use std::os::unix::fs::MetadataExt;
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
+    // SAFETY: getuid has no preconditions and cannot fail.
     let uid = unsafe { libc::getuid() };
     let prefix = format!("{SPOOL_PREFIX}-");
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
-        let Some(rest) = name.strip_prefix(&prefix) else {
+        if !name.starts_with(&prefix) {
             continue;
-        };
+        }
         let Ok(meta) = std::fs::symlink_metadata(entry.path()) else {
             continue;
         };
         if !meta.is_dir() || meta.uid() != uid {
             continue;
         }
-        let pid: Option<i32> = rest.split('-').next().and_then(|p| p.parse().ok());
-        let gone = pid.is_some_and(|p| {
-            p != std::process::id() as i32
-                && unsafe { libc::kill(p, 0) } != 0
-                && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
-        });
-        let old = meta
-            .modified()
+        let age = meta.modified().ok().and_then(|m| m.elapsed().ok());
+        let older = |secs: u64| age.is_some_and(|a| a > Duration::from_secs(secs));
+        let owner: Option<i32> = std::fs::read_to_string(entry.path().join(SPOOL_OWNER))
             .ok()
-            .and_then(|m| m.elapsed().ok())
-            .is_some_and(|age| age > Duration::from_secs(24 * 3600));
+            .and_then(|p| p.trim().parse().ok());
+        let gone = match owner {
+            Some(p) if p == std::process::id() as i32 => false,
+            Some(p) if p > 0 => {
+                // SAFETY: signal 0 delivers nothing; kill only checks that
+                // the process exists. errno is read straight after the call,
+                // before anything else can set it. EPERM (a live process of
+                // another user) counts as not gone.
+                let probe = unsafe { libc::kill(p, 0) };
+                probe != 0 && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+            }
+            // The owner file is written as the spool is made, so one
+            // without it a minute on was cut short in the making.
+            _ => older(60),
+        };
+        let old = older(24 * 3600);
         if gone || old {
             let _ = std::fs::remove_dir_all(entry.path());
         }
@@ -2309,20 +2326,29 @@ mod spool_tests {
     #[test]
     fn a_spool_whose_process_is_gone_is_swept_and_a_live_one_kept() {
         let dir = pk_cli_drive::private_temp_dir("medrec-sweep-test").unwrap();
-        let mine = dir
-            .path()
-            .join(format!("{SPOOL_PREFIX}-{}-1-0", std::process::id()));
+        // Names that say nothing of the owner: only `owner.pid` does.
+        let mine = dir.path().join(format!("{SPOOL_PREFIX}-a"));
+        let gone = dir.path().join(format!("{SPOOL_PREFIX}-b"));
+        let other = dir.path().join("medrec-other-c");
         // A pid far above any macOS or Linux pid_max: no such process.
-        let gone = dir.path().join(format!("{SPOOL_PREFIX}-99999999-1-0"));
-        let other = dir.path().join("medrec-other-99999999-1-0");
-        for d in [&mine, &gone, &other] {
+        let owners = [
+            (&mine, std::process::id()),
+            (&gone, 99_999_999),
+            (&other, 99_999_999),
+        ];
+        for (d, pid) in owners {
             std::fs::create_dir(d).unwrap();
             std::fs::write(d.join("stream.ndjson"), b"{}").unwrap();
+            std::fs::write(d.join(SPOOL_OWNER), pid.to_string()).unwrap();
         }
+        // Just made, its owner file not yet written: kept.
+        let making = dir.path().join(format!("{SPOOL_PREFIX}-d"));
+        std::fs::create_dir(&making).unwrap();
         sweep_spools(dir.path());
         assert!(mine.is_dir(), "this process's spool is kept");
         assert!(!gone.exists(), "a spool whose process is gone is removed");
         assert!(other.is_dir(), "only spools are touched");
+        assert!(making.is_dir(), "a spool being made is kept");
     }
 }
 
