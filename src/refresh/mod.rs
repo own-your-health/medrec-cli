@@ -1470,7 +1470,9 @@ fn import_failed(
         code: "needs_person".into(),
         message: format!("{cli} needs a sign-in: its export answered that the sign-in has ended"),
         remedy: Some(format!("run `{command}` on this machine")),
-        provider_message: Some(clip(err.message(), MESSAGE_MAX)).filter(|m| !m.is_empty()),
+        // Present on every needs_person error, empty when the provider said
+        // nothing: the key is what marks the error as medrec's own.
+        provider_message: Some(clip(err.message(), MESSAGE_MAX)),
     });
     e.sign_in.needs_person = Some(NeedsPerson {
         reason: "sign_in".into(),

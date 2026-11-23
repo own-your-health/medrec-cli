@@ -444,19 +444,27 @@ is in [docs/data-contract.md](docs/data-contract.md) ("views/").
 
 medrec keeps them up to date itself. Every command that writes a person's
 `index.json` or `text.json`, or `household.json`, rewrites the views of the
-people whose files changed before it releases the folder. Only files whose
-bytes changed are written, so a refresh that adds a few records writes a few
-dozen small files per person. A refresh pass, or an import of several
-members, does this once at the end. `views.json` records the MD5 of every
-file the views were made from, so a reader can tell when they are stale.
+people whose files changed before it releases the folder. Each view's name
+carries its MD5, and only new views are uploaded, so a refresh that adds a
+few records writes a few dozen small files per person. A refresh pass, or an
+import of several members, does this once at the end. `views.json` records
+the MD5 of every file the views were made from, so a reader can tell when
+they are stale.
+
+The first build after upgrading to 0.8.0 writes every view (150 to 250
+files for an adult in medrec's synthetic test folders) and holds the folder
+while it uploads. On
+a Drive folder, run `medrec views write` once from a terminal right after
+upgrading, so a scheduled pass or the app's refresh does not wait on it.
 
 ```sh
 medrec --profile <NAME> views write          # bring them up to date now
 medrec --profile <NAME> views write --all    # make every person's again
 ```
 
-`views write --json` prints `views-write/v1`: `people`, `rewritten` (people
-whose views were made again), `written`, `unchanged` and `removed` (files).
+`views write --json` prints `views-write/v1`: `people`, `people_rebuilt`
+(people whose views were made again), and `files_written`, `files_unchanged`
+and `files_removed`.
 A failure to write them leaves them stale and says so on stderr. The command
 that wrote the records still succeeds, and the next write tries again.
 

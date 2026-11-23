@@ -69,7 +69,8 @@ quick-xml, lopdf), and so are local tools (poppler, tesseract, bsdtar).
 | `src/mcp.rs`, `src/summary.rs` | `medrec mcp`, the read-only MCP tools (pk-cli-mcp), and the per-person summary behind `medrec_summary` |
 | `src/refresh/` | `medrec refresh`: the pass, the `_status/` and `_requests/` shapes (`contract.rs`, docs/data-contract.md), request checks, provider sign-in reads, intervals, the LaunchAgent and this machine's refresh state |
 | `src/dicom.rs`, `src/imaging.rs`, `src/view.rs` | DICOM headers (medical-common's `pk-med-dicom`, re-exported), study intake and export, private copies and viewers |
-| `src/views.rs`, `src/notes.rs`, `src/people.rs` | Timeline, search, record views, notes, people |
+| `src/views.rs`, `src/notes.rs`, `src/people.rs` | Timeline, search, record views, notes, people. The views writer reuses its per-person timeline events and search items (`person_events`, `order_events`, `searchables`) |
+| `src/viewfiles.rs` | `views/` (`medrec-views/v1`): each person's view files under content-addressed names, `medrec views write`, and the sync `Folder`'s drop and `viewfiles::hold` run after writes (docs/data-contract.md, "views/") |
 | `src/maint.rs` | `init`, `doctor`, `verify`, `backup`, `cache clear` |
 | `src/testdata.rs` | The synthetic data generator (tests and `examples/synth.rs`) |
 

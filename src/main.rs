@@ -804,6 +804,9 @@ fn profile_name(s: &str) -> Result<ProfileName, String> {
 
 fn run(cli: &Cli) -> Result<(), CliError> {
     let json = cli.common.json;
+    if cli.common.quiet || json {
+        medrec::viewfiles::quiet();
+    }
     let store = ConfigStore::new(BIN);
     match &cli.command {
         Command::Profiles(cmd) => profiles_cmd(cli, cmd, &store),
@@ -918,7 +921,7 @@ fn run(cli: &Cli) -> Result<(), CliError> {
             output::emit(json, "views-write", to_value(&r), |_| {
                 println!(
                     "views: {} people, {} made again; {} files written, {} unchanged, {} removed",
-                    r.people, r.rewritten, r.written, r.unchanged, r.removed
+                    r.people, r.people_rebuilt, r.files_written, r.files_unchanged, r.files_removed
                 );
             });
             Ok(())

@@ -107,21 +107,66 @@ pub struct SearchCounts {
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct Synced {
     pub people: usize,
-    /// People whose views were made again (the rest had no file change).
-    pub rewritten: usize,
-    /// Files uploaded: new, or with other bytes than the folder held.
-    pub written: usize,
-    /// Files made again with the bytes the folder already held.
-    pub unchanged: usize,
-    /// Files no longer part of any view, deleted.
-    pub removed: usize,
+    /// People whose views were made again; the rest had no file change.
+    pub people_rebuilt: usize,
+    /// View files uploaded: new, or under a name the folder lacked.
+    pub files_written: usize,
+    /// View files made again that the folder already held.
+    pub files_unchanged: usize,
+    /// View files no view names any more, deleted.
+    pub files_removed: usize,
+}
+
+/// More view files than this to write, and the command says so first: the
+/// first build after an upgrade writes every view, under the folder lock.
+const NOTE_FILES: usize = 50;
+static QUIET: AtomicBool = AtomicBool::new(false);
+
+/// No notes on stderr from here on (`--quiet`, `--json`).
+pub fn quiet() {
+    QUIET.store(true, Ordering::SeqCst);
+}
+
+/// A view's name in the folder: its name with the first 12 hex of its MD5
+/// before the extension (`records-result-7.0a1b2c3d4e5f.json`). A file's
+/// bytes never change under its name, so a reader holding an older
+/// `views.json` reads that pass's files or finds them gone, never a newer
+/// pass's bytes.
+pub fn stored_name(name: &str, md5: &str) -> String {
+    let tag = &md5[..12.min(md5.len())];
+    match name.rsplit_once('.') {
+        Some((stem, ext)) => format!("{stem}.{tag}.{ext}"),
+        None => format!("{name}.{tag}"),
+    }
+}
+
+fn stored_rel(pid: &str, name: &str, md5: &str) -> String {
+    format!("{DIR}/{pid}/{}", stored_name(name, md5))
+}
+
+/// Whether a file name has a stored view's shape, `<stem>.<12 hex>.<json or
+/// bin>`: the only files `sync` deletes.
+fn is_stored_name(name: &str) -> bool {
+    let Some((rest, ext)) = name.rsplit_once('.') else {
+        return false;
+    };
+    let Some((stem, tag)) = rest.rsplit_once('.') else {
+        return false;
+    };
+    matches!(ext, "json" | "bin")
+        && !stem.is_empty()
+        && tag.len() == 12
+        && tag
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 /// Bring `views/` up to date with the folder's files. A person whose
 /// `index.json` and `text.json` have the MD5s `views.json` recorded, under
 /// the same `household.json` and medrec, keeps their views; `all` makes
-/// every person's again. Only files whose bytes differ are written, and
-/// `views.json` goes last.
+/// every person's again. Only views the folder lacks are uploaded, then
+/// `views.json`, then the views it no longer names are deleted. Nothing is
+/// deleted but files of a stored view's shape in a person's directory.
 pub fn sync(f: &Folder, all: bool) -> Result<Synced, CliError> {
     let store = &f.store;
     let household_text = store.read_text(folder::HOUSEHOLD)?.ok_or_else(|| {
@@ -131,6 +176,12 @@ pub fn sync(f: &Folder, all: bool) -> Result<Synced, CliError> {
         ))
     })?;
     let h: Household = parse(&household_text, folder::HOUSEHOLD)?;
+    if let Some(p) = h.people.iter().find(|p| p.folder.eq_ignore_ascii_case(DIR)) {
+        return Err(CliError::Other(format!(
+            "the person folder `{}` is where medrec writes the views, so this folder has none",
+            crate::printable(&p.folder)
+        )));
+    }
     let household = md5_hex(household_text.as_bytes());
     let old_text = store.read_text(INDEX)?;
     let old: Option<ViewsIndex> = old_text
@@ -139,24 +190,53 @@ pub fn sync(f: &Folder, all: bool) -> Result<Synced, CliError> {
     let current = old
         .as_ref()
         .filter(|o| !all && o.schema == SCHEMA && o.medrec == VERSION && o.household == household);
-
-    let mut index = ViewsIndex {
+    let fresh = |people: BTreeMap<String, PersonViews>| ViewsIndex {
         schema: SCHEMA.into(),
         medrec: VERSION.into(),
-        household,
-        people: BTreeMap::new(),
+        household: household.clone(),
+        people,
     };
-    let mut files = BTreeMap::new();
-    let mut kept = BTreeSet::new();
+
+    // Whose views stand: their files have the MD5s the views were made from.
+    let mut kept: BTreeMap<String, PersonViews> = BTreeMap::new();
     for p in &h.people {
-        let (irel, trel) = (folder::index_rel(p), folder::text_rel(p));
         if let Some(was) = current.and_then(|o| o.people.get(&p.id)) {
-            if store.md5(&irel)? == was.index && store.md5(&trel)? == was.text {
-                index.people.insert(p.id.clone(), was.clone());
-                kept.insert(p.id.clone());
-                continue;
+            if store.md5(&folder::index_rel(p))? == was.index
+                && store.md5(&folder::text_rel(p))? == was.text
+            {
+                kept.insert(p.id.clone(), was.clone());
             }
         }
+    }
+    let n = h.people.len();
+    if kept.len() == n
+        && old_text.as_deref().map(str::as_bytes) == Some(json(&fresh(kept.clone())).as_slice())
+    {
+        return Ok(Synced {
+            people: n,
+            ..Synced::default()
+        });
+    }
+    let held: BTreeMap<String, Option<String>> = store
+        .hashes(DIR)?
+        .into_iter()
+        .map(|x| (x.rel, x.md5))
+        .collect();
+    // A person missing one of their views has them made again.
+    kept.retain(|pid, v| {
+        v.files
+            .iter()
+            .all(|(name, md5)| held.contains_key(&stored_rel(pid, name, md5)))
+    });
+
+    let mut people = BTreeMap::new();
+    let mut files = BTreeMap::new();
+    for p in &h.people {
+        if let Some(v) = kept.get(&p.id) {
+            people.insert(p.id.clone(), v.clone());
+            continue;
+        }
+        let (irel, trel) = (folder::index_rel(p), folder::text_rel(p));
         let itext = store.read_text(&irel)?;
         let ttext = store.read_text(&trel)?;
         let idx: PersonIndex = match &itext {
@@ -172,52 +252,75 @@ pub fn sync(f: &Folder, all: bool) -> Result<Synced, CliError> {
         };
         let md5 = |t: &Option<String>| t.as_deref().map(|t| md5_hex(t.as_bytes()));
         let v = person(&h, p, &idx, &texts, md5(&itext), md5(&ttext), &mut files)?;
-        index.people.insert(p.id.clone(), v);
+        people.insert(p.id.clone(), v);
     }
-    let index_bytes = json(&index);
+    let index = fresh(people);
+
     let mut out = Synced {
-        people: h.people.len(),
-        rewritten: h.people.len() - kept.len(),
+        people: n,
+        people_rebuilt: n - kept.len(),
         ..Synced::default()
     };
-    if files.is_empty() && old_text.as_deref().map(str::as_bytes) == Some(index_bytes.as_slice()) {
-        return Ok(out);
+    let mut uploads = Vec::new();
+    for (rel, bytes) in &files {
+        let (dir, name) = rel
+            .rsplit_once('/')
+            .expect("a view is in a person's directory");
+        let md5 = md5_hex(bytes);
+        let stored = format!("{dir}/{}", stored_name(name, &md5));
+        if held.get(&stored).and_then(|m| m.as_deref()) == Some(md5.as_str()) {
+            out.files_unchanged += 1;
+        } else {
+            uploads.push((stored, bytes));
+        }
+    }
+    if uploads.len() > NOTE_FILES && !QUIET.load(Ordering::SeqCst) {
+        eprintln!(
+            "note: writing {} view files to {}; the first time after an upgrade takes a while",
+            uploads.len(),
+            store.display_path(DIR)
+        );
+    }
+    for (rel, bytes) in uploads {
+        store.write_bytes(&rel, bytes)?;
+        out.files_written += 1;
+    }
+    let index_bytes = json(&index);
+    if old_text.as_deref().map(str::as_bytes) != Some(index_bytes.as_slice()) {
+        store.write_bytes(INDEX, &index_bytes)?;
     }
 
-    let held: BTreeMap<String, Option<String>> = store
-        .hashes(DIR)?
-        .into_iter()
-        .map(|x| (x.rel, x.md5))
+    // The views no pass names any more, after `views.json`: in the
+    // directory of someone the household or the last views.json names, and
+    // of a stored view's shape. Nothing else under views/ is touched.
+    let wanted: BTreeSet<String> = index
+        .people
+        .iter()
+        .flat_map(|(pid, v)| {
+            v.files
+                .iter()
+                .map(move |(name, md5)| stored_rel(pid, name, md5))
+        })
         .collect();
-    let mut put = |rel: &str, bytes: &[u8]| -> Result<(), CliError> {
-        if held.get(rel).and_then(|m| m.as_deref()) == Some(md5_hex(bytes).as_str()) {
-            out.unchanged += 1;
-            return Ok(());
-        }
-        store.write_bytes(rel, bytes)?;
-        out.written += 1;
-        Ok(())
-    };
-    for (rel, bytes) in &files {
-        put(rel, bytes)?;
-    }
-    put(INDEX, &index_bytes)?;
-    // What no view names any more: a cut that moved, a person who left.
-    // Deleted after `views.json`, which no longer names them.
+    let known: BTreeSet<&str> = h
+        .people
+        .iter()
+        .map(|p| p.id.as_str())
+        .chain(old.iter().flat_map(|o| o.people.keys().map(String::as_str)))
+        .collect();
     let prefix = format!("{DIR}/");
     for rel in held.keys() {
-        if rel == INDEX || files.contains_key(rel) {
+        if wanted.contains(rel) {
             continue;
         }
-        let owner = rel
-            .strip_prefix(&prefix)
-            .and_then(|r| r.split_once('/'))
-            .map(|(pid, _)| pid);
-        if owner.is_some_and(|pid| kept.contains(pid)) {
+        let Some((pid, name)) = rel.strip_prefix(&prefix).and_then(|r| r.split_once('/')) else {
+            continue;
+        };
+        if name.contains('/') || !is_stored_name(name) || !known.contains(pid) {
             continue;
         }
         if store.delete(rel)? {
-            out.removed += 1;
+            out.files_removed += 1;
         }
     }
     Ok(out)
@@ -957,6 +1060,30 @@ mod tests {
         let hay = &files["views/p_test/search-hay.bin"];
         let (ord, first) = (panel[0], panel[2]);
         assert_eq!(&hay[hay_at(ord) + first..hay_at(ord) + first + 5], b"panel");
+    }
+
+    #[test]
+    fn a_view_is_stored_under_its_md5_and_only_that_shape_is_ever_deleted() {
+        let md5 = "0a1b2c3d4e5f60718293a4b5c6d7e8f9";
+        assert_eq!(
+            stored_name("records-result-7.json", md5),
+            "records-result-7.0a1b2c3d4e5f.json"
+        );
+        assert_eq!(
+            stored_name("search-hay.bin", md5),
+            "search-hay.0a1b2c3d4e5f.bin"
+        );
+        assert!(is_stored_name("records-result-7.0a1b2c3d4e5f.json"));
+        for not_a_view in [
+            "index.json",
+            "notes.md",
+            "records-result-7.json",
+            "scan.0a1b2c3d4e5f.pdf",
+            "x.0A1B2C3D4E5F.json",
+            ".0a1b2c3d4e5f.json",
+        ] {
+            assert!(!is_stored_name(not_a_view), "{not_a_view}");
+        }
     }
 
     #[test]

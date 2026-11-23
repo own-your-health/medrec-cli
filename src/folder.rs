@@ -503,6 +503,8 @@ pub fn person_folder(name: &str, taken: &[String]) -> String {
     let base = safe_component(name);
     let base = match base.as_str() {
         "inbox" | "_review" | "README.md" | "household.json" => format!("{base} (person)"),
+        // The views' directory, on a disk that ignores case too.
+        _ if base.eq_ignore_ascii_case(crate::viewfiles::DIR) => format!("{base} (person)"),
         _ if base.starts_with('_') => base.trim_start_matches('_').to_string(),
         _ => base,
     };

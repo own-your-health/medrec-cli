@@ -506,7 +506,7 @@ the month (UTC) the attempt started.
 | `requests` | The `_requests/` ids the attempt served; empty otherwise. |
 | `outcome` | `ok`, `failed`, `needs_person`, `skipped_interval` (for the schedule: imported less than `min_interval_secs` ago, or still waiting after a failure, see `failures`; for a person: within the request guard, `_requests/` rule 3) or `skipped_paused`. `running` appears only in `status.json`. |
 | `exit_code` | The import's exit code (Import, below); `null` for a skip, and for a `needs_person` found before the import ran. |
-| `error` | `null`, or `{"code", "message", "remedy"[, "provider_message"]}` from the failing command's `--json` error (the family's error shape). `message` is at most 300 characters. When the provider's export answered that its sign-in ended (exit 3), `code` is `needs_person`, `message` and `remedy` are medrec's own (the remedy runs `medrec refresh sign-in <source>`), and the provider's own message, which names the provider's own sign-in command, is in `provider_message` (0.7.0 and later). `provider_message` is present only then, and is at most 300 characters too. Show `remedy` as the one thing to do, and `provider_message` at most as detail. A profile name in `message`, `remedy` or `provider_message` is replaced, a provider profile's by `<provider profile>` and a medrec profile's by `<profile>`, so the folder holds none. medrec's own codes are `timeout` (a call outlived its limit), `interrupted` (the pass running it stopped before it finished) and `needs_person`. |
+| `error` | `null`, or `{"code", "message", "remedy"[, "provider_message"]}` from the failing command's `--json` error (the family's error shape). `message` is at most 300 characters. When the provider's export answered that its sign-in ended (exit 3), `code` is `needs_person`, `message` and `remedy` are medrec's own (the remedy runs `medrec refresh sign-in <source>`), and the provider's own message, which names the provider's own sign-in command, is in `provider_message` (0.7.0 and later). `provider_message` is present only then, always (an empty string when the provider gave no text), and is at most 300 characters too. Show `remedy` as the one thing to do, and `provider_message` at most as detail. A profile name in `message`, `remedy` or `provider_message` is replaced, a provider profile's by `<provider profile>` and a medrec profile's by `<profile>`, so the folder holds none. medrec's own codes are `timeout` (a call outlived its limit), `interrupted` (the pass running it stopped before it finished) and `needs_person`. |
 | `import` | The `ImportRun` id in the person's `index.json`, when `ok`. |
 | `counts` | When `ok`, the import report's counts: `records_added`, `records_updated`, `records_unchanged`, `records_older`, `resources_written`, `resources_unchanged`, `documents_added`, `documents_duplicate`, `documents_unchanged`, `documents_same_statement`. A count the import report gains later is added here too. |
 
@@ -666,7 +666,13 @@ views/<person id>/search-labs-<n>.json
 ```
 
 A person's directory is named by their id in `household.json`, not their
-name. JSON files are compact UTF-8 without a byte-order mark. Binary
+name. Each view is stored under its name with the first 12 hex of its MD5
+before the extension: `records-result-7.json` is
+`records-result-7.0a1b2c3d4e5f.json` in the folder. A file's bytes never
+change under its name, so a reader holding an older `views.json` reads that
+pass's views, or finds them gone, and never another pass's bytes.
+`views.json` is the one file with a fixed name. This document names views
+without the MD5. JSON files are compact UTF-8 without a byte-order mark. Binary
 integers are little-endian unsigned 32-bit. Strings compare as UTF-8 bytes.
 "Newest first" sorts by the date string, descending, with undated items
 last.
@@ -681,11 +687,20 @@ last.
 - **Only what changed.** A person keeps their views when their `index.json`
   and `text.json` have the MD5s `views.json` recorded, under the same
   `household.json` and medrec version. Otherwise their views are made
-  again, and only files whose bytes differ from the folder's are written.
+  again, and only views the folder does not already hold under their
+  stored names are uploaded. An unchanged view keeps its name and is not
+  written again.
 - **`views.json` last.** It records the MD5 of every view, so a reader
   checks each view it reads and never mixes two passes, whatever order an
-  uploader sends them in. Files that no view names any more, a person's who
-  left `household.json` among them, are deleted after it.
+  uploader sends them in. Views that it no longer names, a person's who
+  left `household.json` among them, are deleted after it. medrec deletes
+  only files of a stored view's shape (`<name>.<12 hex>.json` or `.bin`) in
+  the directory of a person the household or the last `views.json` names,
+  and nothing else under `views/`.
+- **`views` is medrec's.** No person folder is named `views` (in any case):
+  a person named that way gets `Views (person)`. A folder whose person
+  folder is already `views` gets no views, and `init --allow-other-files`
+  refuses a folder that already holds one.
 - **Each file whole.** On a local directory a file is written to a
   temporary name and renamed. On Drive it is one upload.
 - **A failure leaves them stale**, never wrong. medrec says so on stderr,
@@ -716,7 +731,7 @@ A reader decides freshness by MD5, as Drive reports it (`md5Checksum`):
 | `records` | For each record kind, `{"shards": [[newest day, oldest day, count], …], "undated": count}`: its dated shards by number, and how many records its undated file holds. |
 | `timeline` | The timeline's shards, the same way. |
 | `search` | `items` (how many search items) and `labs` (how many `search-labs-<n>.json`). |
-| `files` | Every file in `views/<person id>/`, by name, with its MD5 (hex). A search shard exists only for a character some word starts with, so one missing from `files` means no word matches. |
+| `files` | Every view in `views/<person id>/`, by name (without the MD5), with its MD5 (hex), from which its stored name follows. A search shard exists only for a character some word starts with, so one missing from `files` means no word matches. |
 
 `schema` names the layout. A change that a reader of the current layout
 would misread takes the next number (`medrec-views/v2`). A field readers may

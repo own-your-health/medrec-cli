@@ -2497,7 +2497,12 @@ fn the_views_follow_every_write_and_only_files_that_change_are_written() {
     let household = read(&records.join("household.json"));
     let people = household["people"].as_array().unwrap();
     assert_eq!(index["people"].as_object().unwrap().len(), people.len());
-    let mut robin = String::new();
+    let id_of = |name: &str| {
+        people.iter().find(|p| p["name"] == name).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
     for p in people {
         let id = p["id"].as_str().unwrap();
         let folder = records.join(p["folder"].as_str().unwrap());
@@ -2510,23 +2515,19 @@ fn the_views_follow_every_write_and_only_files_that_change_are_written() {
                 assert!(entry[field].is_null(), "{field} of {id}");
             }
         }
-        if p["name"] == "Robin Testperson" {
-            robin = id.to_string();
-        }
     }
+    let robin = id_of("Robin Testperson");
     let dir = records.join("views").join(&robin);
-    assert!(dir.join("summary.json").is_file());
-    // `files` is every file in the person's directory, with its MD5.
+    // `files` is every view in the person's directory, each stored under
+    // its name with its MD5's first 12 hex, and holding those bytes.
     let files = index["people"][&robin]["files"].as_object().unwrap();
-    let on_disk: Vec<String> = std::fs::read_dir(&dir)
-        .unwrap()
-        .map(|f| f.unwrap().file_name().to_string_lossy().into_owned())
-        .collect();
-    assert_eq!(files.len(), on_disk.len());
-    for name in &on_disk {
-        assert_eq!(files[name.as_str()], md5_of(&dir.join(name)), "{name}");
+    let on_disk = std::fs::read_dir(&dir).unwrap().count();
+    assert_eq!(files.len(), on_disk);
+    for (name, md5) in files {
+        let stored = medrec::viewfiles::stored_name(name, md5.as_str().unwrap());
+        assert_eq!(md5_of(&dir.join(&stored)), *md5, "{name}");
     }
-    assert!(dir.join("search-items.bin").is_file());
+    assert!(files.contains_key("summary.json") && files.contains_key("search-items.bin"));
     assert!(index["people"][&robin]["records"]["result"]["shards"]
         .as_array()
         .is_some_and(|s| !s.is_empty()));
@@ -2535,40 +2536,38 @@ fn the_views_follow_every_write_and_only_files_that_change_are_written() {
     let w = e.ok(&["views", "write"]);
     assert_eq!(w["schema"], "views-write/v1");
     assert_eq!(
-        (w["rewritten"].as_u64(), w["written"].as_u64()),
+        (w["people_rebuilt"].as_u64(), w["files_written"].as_u64()),
         (Some(0), Some(0)),
         "{w}"
     );
 
-    // Made again from the same files, every file has the same bytes; a file
-    // no view names is removed.
-    let stray = dir.join("records-result-99.json");
+    // Made again from the same files, every view keeps its name. A file of
+    // a view's shape that no view names is removed; anything else is left.
+    let stray = dir.join("records-result-99.0123456789ab.json");
     std::fs::write(&stray, "[]").unwrap();
+    let mine = dir.join("my notes.txt");
+    std::fs::write(&mine, "not a view").unwrap();
     let all = e.ok(&["views", "write", "--all"]);
     assert_eq!(
-        all["rewritten"].as_u64(),
+        all["people_rebuilt"].as_u64(),
         Some(people.len() as u64),
         "{all}"
     );
-    assert_eq!(all["written"], 0, "{all}");
-    assert_eq!(all["removed"], 1, "{all}");
-    assert!(all["unchanged"].as_u64().unwrap() > 10, "{all}");
+    assert_eq!(all["files_written"], 0, "{all}");
+    assert_eq!(all["files_removed"], 1, "{all}");
+    assert!(all["files_unchanged"].as_u64().unwrap() > 10, "{all}");
     assert!(!stray.exists());
+    assert!(mine.exists());
 
     // A person who left household.json leaves no views behind.
+    let alex = id_of("Alex Testperson");
+    let alex_views = || {
+        std::fs::read_dir(records.join("views").join(&alex))
+            .map(|d| d.count())
+            .unwrap_or(0)
+    };
+    assert!(alex_views() > 0);
     let mut h = household.clone();
-    let alex = people
-        .iter()
-        .find(|p| p["name"] == "Alex Testperson")
-        .unwrap()["id"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    assert!(records
-        .join("views")
-        .join(&alex)
-        .join("summary.json")
-        .is_file());
     h["people"]
         .as_array_mut()
         .unwrap()
@@ -2581,14 +2580,51 @@ fn the_views_follow_every_write_and_only_files_that_change_are_written() {
     .unwrap();
     let left = e.ok(&["views", "write"]);
     assert_eq!(left["people"], 1, "{left}");
-    assert!(left["removed"].as_u64().unwrap() > 0, "{left}");
-    assert!(!records
-        .join("views")
-        .join(&alex)
-        .join("summary.json")
-        .exists());
+    assert!(left["files_removed"].as_u64().unwrap() > 0, "{left}");
+    assert_eq!(alex_views(), 0);
     assert!(read(&records.join("views/views.json"))["people"]
         .get(&alex)
         .is_none());
+
+    // A person named "Views" gets another folder; a household whose person
+    // folder is `views` (made before 0.8.0) gets no views, and their files
+    // are left alone.
+    let views_person = e.ok(&["people", "add", "Views", "--birth-date", "1980-03-03"]);
+    let shown = e.ok(&["people", "show", "Views"]);
+    let folder = shown["folder"].as_str().unwrap_or_default().to_string();
+    assert!(
+        !folder.eq_ignore_ascii_case("views"),
+        "{views_person} {shown}"
+    );
+    let mut h = read(&records.join("household.json"));
+    for p in h["people"].as_array_mut().unwrap() {
+        if p["name"] == "Views" {
+            p["folder"] = "views".into();
+        }
+    }
+    std::fs::write(
+        records.join("household.json"),
+        serde_json::to_string_pretty(&h).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(records.join("views/notes.md"), "# Notes: Views\n").unwrap();
+    let refused = e.run(&["--json", "views", "write", "--all"]);
+    assert_ne!(refused.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&refused.stdout).contains("where medrec writes the views"));
+    assert!(records.join("views/notes.md").is_file());
+    assert!(mine.exists());
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
+#[test]
+fn init_refuses_to_adopt_a_folder_holding_a_views_folder() {
+    let e = Env::new("adopt-views");
+    let d = e.root.join("theirs");
+    std::fs::create_dir_all(d.join("Views")).unwrap();
+    std::fs::write(d.join("Views/holiday.txt"), "their own file").unwrap();
+    let out = e.run(&["--json", "init", d.to_str().unwrap(), "--allow-other-files"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("where medrec writes its views"));
+    assert!(d.join("Views/holiday.txt").is_file());
     let _ = std::fs::remove_dir_all(&e.root);
 }

@@ -254,21 +254,27 @@ fn the_views_on_drive_follow_a_write_and_then_upload_only_what_changed() {
     assert_eq!(mine.index, st.md5(&folder::index_rel(&p)).unwrap());
     // Every view is on Drive with the MD5 views.json gives, the binary
     // items file included.
+    let stored = |name: &str| {
+        format!(
+            "views/p_drive/{}",
+            crate::viewfiles::stored_name(name, &mine.files[name])
+        )
+    };
     for (name, md5) in &mine.files {
-        assert_eq!(
-            st.md5(&format!("views/p_drive/{name}")).unwrap().as_ref(),
-            Some(md5),
-            "{name}"
-        );
+        assert_eq!(st.md5(&stored(name)).unwrap().as_ref(), Some(md5), "{name}");
     }
-    let items = st.read_bytes("views/p_drive/search-items.bin").unwrap();
+    let items = st.read_bytes(&stored("search-items.bin")).unwrap();
     assert_eq!(u32::from_le_bytes(items[0..4].try_into().unwrap()), 40);
 
     // Nothing changed: no upload.
     let f = Folder::open_at(&loc, Access::Write, BUDGET).unwrap();
     h.fake.clear_requests();
     let again = crate::viewfiles::sync(&f, true).unwrap();
-    assert_eq!((again.rewritten, again.written), (1, 0), "{again:?}");
+    assert_eq!(
+        (again.people_rebuilt, again.files_written),
+        (1, 0),
+        "{again:?}"
+    );
     assert!(
         !h.fake.requests().iter().any(|r| r.contains("upload")),
         "{:?}",
@@ -279,10 +285,27 @@ fn the_views_on_drive_follow_a_write_and_then_upload_only_what_changed() {
     idx.records.push(result(40, "2026-02-01"));
     f.save_index(&p, &mut idx).unwrap();
     let after = crate::viewfiles::sync(&f, false).unwrap();
-    assert_eq!(after.rewritten, 1, "{after:?}");
+    assert_eq!(after.people_rebuilt, 1, "{after:?}");
     assert!(
-        after.written > 0 && after.written < after.unchanged,
+        after.files_written > 0 && after.files_written < after.files_unchanged,
         "{after:?}"
     );
+    // The replaced views went: the directory holds what views.json names.
+    assert!(after.files_removed > 0, "{after:?}");
+    let index: crate::viewfiles::ViewsIndex =
+        serde_json::from_str(&st.read_text(crate::viewfiles::INDEX).unwrap().unwrap()).unwrap();
+    let mut named: Vec<String> = index.people["p_drive"]
+        .files
+        .iter()
+        .map(|(name, md5)| format!("views/p_drive/{}", crate::viewfiles::stored_name(name, md5)))
+        .collect();
+    named.sort();
+    let held: Vec<String> = st
+        .hashes("views/p_drive")
+        .unwrap()
+        .into_iter()
+        .map(|x| x.rel)
+        .collect();
+    assert_eq!(held, named);
     drop(f);
 }
