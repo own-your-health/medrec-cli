@@ -402,7 +402,7 @@ fn day_of(v: &Value) -> Option<String> {
 pub fn link(records: &mut [Record]) {
     let encounters: Vec<(String, String, BTreeSet<String>)> = records
         .iter()
-        .filter(|r| r.kind == "encounter")
+        .filter(|r| r.kind == "encounter" && happened(r))
         .filter_map(|r| {
             let names = ["service_provider", "location", "practitioner"]
                 .iter()
@@ -414,7 +414,7 @@ pub fn link(records: &mut [Record]) {
         .collect();
     let results: Vec<(String, String)> = records
         .iter()
-        .filter(|r| r.kind == "result" || r.kind == "report")
+        .filter(|r| (r.kind == "result" || r.kind == "report") && happened(r))
         .filter_map(|r| Some((r.id.clone(), r.date.clone()?)))
         .collect();
     for c in records.iter_mut().filter(|r| r.kind == "claim") {
@@ -512,6 +512,15 @@ pub fn link(records: &mut [Record]) {
             }
         }
     }
+}
+
+/// A record a claim can have paid for: not one only planned, cancelled or
+/// entered in error.
+fn happened(r: &Record) -> bool {
+    !matches!(
+        r.status.as_deref(),
+        Some("planned" | "cancelled" | "entered-in-error")
+    )
 }
 
 #[cfg(test)]
@@ -724,6 +733,24 @@ mod tests {
             visit("e9", "2026-03-10", "Elsewhere"),
         ];
         assert_eq!(linked(&mut r)["visit"], "e9");
+
+        // A planned, cancelled or mistaken encounter is not what it paid
+        // for, so a finished one that day is the one.
+        for status in ["planned", "cancelled", "entered-in-error"] {
+            let mut gone = visit("e1", "2026-03-04", "Example Health");
+            gone.status = Some(status.into());
+            let mut r = vec![
+                claim("2026-03-04", "Example Health", &[("visit", None)]),
+                gone.clone(),
+                visit("e2", "2026-03-04", "Elsewhere"),
+            ];
+            assert_eq!(linked(&mut r)["visit"], "e2", "{status}");
+            let mut r = vec![
+                claim("2026-03-04", "Example Health", &[("visit", None)]),
+                gone,
+            ];
+            assert!(!linked(&mut r).contains_key("visit"), "{status}");
+        }
     }
 
     #[test]

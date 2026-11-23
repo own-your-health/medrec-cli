@@ -214,8 +214,9 @@ medrec files the claims it imports again in the earlier shape.
 - `billable_period`, `provider`, `insurer`, `facility`, `outcome`, `use`,
   `total`, `payment` and `benefit_balance` (deductible and out-of-pocket
   used and allowed) as the resource gives them.
-- `diagnoses`: `[{sequence, code}]` from `diagnosis`, ICD-10 preferred;
-  an entry without a code is left out.
+- `diagnoses`: `[{sequence, code}]` from `diagnosis`, `code` a
+  `{system, code, display}` with ICD-10 preferred; an entry without a code
+  is left out.
 - `items`, one per line: `sequence`, `category`, `amounts`, `service`
   (`{system, code, display}`), `serviced` (a date or `{start, end}`),
   `quantity`, `net`, `adjudication` (`[{category, amount, reason}]` as the
@@ -243,7 +244,10 @@ are inclusive; descriptors come from the source.
 | `facility` | a line with a revenue code and no CPT, HCPCS or CDT code |
 | `other` | anything else, CPT Category II and III codes and other HCPCS letters included |
 
-Amounts are `{amount, currency}`, `amount` a decimal string. A line's come
+Amounts are `{amount, currency}`, `amount` a decimal string. `you_owe` is
+the payer's own figure for what the member owes. When it is missing, the
+member's share is `deductible` + `copay` + `coinsurance` + `not_covered`,
+of those given. `discount` is never part of it. A line's come
 from its `adjudication` entries, a claim's from its `total` entries. Each
 entry's category maps to a name by its code, and only failing that by the
 payer's words. Of one name's entries, those of the best rank count, summed,
@@ -266,14 +270,16 @@ A claim's links are guesses by date and name, recomputed on every write of
 the person's index, so a visit imported after its claim is linked then:
 
 - `visit`: the record id of the one `encounter` dated on one of the
-  claim's dates of service (each line's `serviced`, else the claim's date
+  claim's dates of service, leaving out encounters whose `status` is
+  `planned`, `cancelled` or `entered-in-error` (each line's `serviced`, else the claim's date
   for a line with none, or for a claim with no lines). Of several, it is
   the one that shares a word of four or more letters between its
   `service_provider`, `location` or `practitioner` and the claim's
   `provider` or `facility`. When that leaves no single
   encounter, there is no `visit`.
 - `results`: the ids of the `result` and `report` records dated on a `lab`
-  line's date of service.
+  line's date of service, leaving out those `cancelled` or
+  `entered-in-error`.
 - a line's `records`: the claim's `visit` for a `visit` line, its date's
   results and reports for a `lab` line.
 
