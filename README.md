@@ -203,6 +203,7 @@ medrec meds --active
 medrec note add Robin "Ask about the recheck" --tag question --about <record id>
 
 medrec verify                                   # every indexed file against the index
+medrec reindex                                  # claims shaped again from their raw files, after an upgrade
 medrec backup --to "/Volumes/Backup/Medical Records"
 ```
 
@@ -407,7 +408,7 @@ supported.
 | Tool | What it answers |
 |---|---|
 | `medrec_summary` | The household's people. With `person`: their current medicines, conditions and allergies, immunizations, the latest result of each test with the lab's range and flag, recent visits, and bills with an amount due |
-| `medrec_search` | Documents, records, imaging studies and notes holding every word of a query |
+| `medrec_search` | Documents, records, imaging studies and notes holding every word of a query; a query naming lab tests (`blood tests`, `labs`) also finds every lab result, report and lab claim |
 | `medrec_records` | One kind, newest first: `medications`, `conditions`, `allergies`, `immunizations`, `visits`, `procedures`, `results` (with `name`, one test over time), `tests` (the latest result of each), `reports`, `claims`, `coverage`, `bills`, `documents`, `notes` or `timeline`; `active` keeps current ones |
 | `medrec_document` | A filed document's extracted text, in parts of up to 16,000 characters, with page breaks marked |
 

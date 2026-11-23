@@ -441,8 +441,12 @@ pub fn link(records: &mut [Record]) {
                 (cat, day)
             })
             .collect();
+        // Its lines' dates of service, a line with none taking the claim's
+        // date; the claim's date alone when it has no lines.
         let mut days: BTreeSet<String> = line_days.iter().filter_map(|(_, d)| d.clone()).collect();
-        days.extend(c.date.clone());
+        if line_days.is_empty() {
+            days.extend(c.date.clone());
+        }
         let on_days: Vec<_> = encounters
             .iter()
             .filter(|(_, d, _)| days.contains(d))
@@ -621,6 +625,143 @@ mod tests {
         assert_eq!(got["copay"]["amount"], "25.50");
         assert_eq!(got["plan_paid"]["amount"], "90.00");
         assert!(!got.contains_key("allowed"), "missing means unknown");
+    }
+
+    fn rec(id: &str, kind: &str, date: &str, fields: Value) -> Record {
+        Record {
+            id: id.into(),
+            kind: kind.into(),
+            key: id.into(),
+            date: Some(date.into()),
+            code: None,
+            display: id.into(),
+            status: None,
+            fields: fields.as_object().cloned().unwrap_or_default(),
+            documents: Vec::new(),
+            provenance: Vec::new(),
+        }
+    }
+
+    fn claim(date: &str, provider: &str, lines: &[(&str, Option<&str>)]) -> Record {
+        let items: Vec<Value> = lines
+            .iter()
+            .map(|(cat, day)| match day {
+                Some(d) => json!({"category": cat, "serviced": d}),
+                None => json!({ "category": cat }),
+            })
+            .collect();
+        rec(
+            "c",
+            "claim",
+            date,
+            json!({"provider": provider, "items": items}),
+        )
+    }
+
+    fn linked(records: &mut [Record]) -> Map<String, Value> {
+        link(records);
+        records
+            .iter()
+            .find(|r| r.kind == "claim")
+            .unwrap()
+            .fields
+            .clone()
+    }
+
+    #[test]
+    fn a_claim_links_the_one_visit_of_its_dates_of_service() {
+        let visit = |id: &str, date: &str, org: &str| {
+            rec(id, "encounter", date, json!({ "service_provider": org }))
+        };
+        // One encounter that day.
+        let mut r = vec![
+            claim("2026-03-04", "Example Health", &[("visit", None)]),
+            visit("e1", "2026-03-04", "Other Clinic"),
+        ];
+        let f = linked(&mut r);
+        assert_eq!(f["visit"], "e1");
+        assert_eq!(f["items"][0]["records"], json!(["e1"]));
+
+        // Two that day: the one sharing a word with the provider.
+        let mut r = vec![
+            claim("2026-03-04", "Example Health", &[("visit", None)]),
+            visit("e1", "2026-03-04", "Other Clinic"),
+            visit("e2", "2026-03-04", "Example Pediatrics"),
+        ];
+        assert_eq!(linked(&mut r)["visit"], "e2");
+
+        // Two that day, both or neither sharing one: no visit.
+        for (a, b) in [
+            ("Example Clinic", "Example Pediatrics"),
+            ("Other Clinic", "Elsewhere"),
+        ] {
+            let mut r = vec![
+                claim("2026-03-04", "Example Health", &[("visit", None)]),
+                visit("e1", "2026-03-04", a),
+                visit("e2", "2026-03-04", b),
+            ];
+            let f = linked(&mut r);
+            assert!(!f.contains_key("visit"), "{a} / {b}");
+            assert!(!f["items"][0].as_object().unwrap().contains_key("records"));
+        }
+
+        // A line serviced on another day than the claim's: its day counts,
+        // the claim's does not.
+        let mut r = vec![
+            claim(
+                "2026-03-10",
+                "Example Health",
+                &[("visit", Some("2026-03-04"))],
+            ),
+            visit("e1", "2026-03-04", "Other Clinic"),
+            visit("e9", "2026-03-10", "Example Health"),
+        ];
+        assert_eq!(linked(&mut r)["visit"], "e1");
+
+        // A claim with no lines goes by its own date.
+        let mut r = vec![
+            claim("2026-03-10", "Example Health", &[]),
+            visit("e9", "2026-03-10", "Elsewhere"),
+        ];
+        assert_eq!(linked(&mut r)["visit"], "e9");
+    }
+
+    #[test]
+    fn a_lab_line_links_its_days_results_and_stale_links_go() {
+        let mut r = vec![
+            claim(
+                "2026-03-04",
+                "Example Health",
+                &[
+                    ("visit", None),
+                    ("lab", Some("2026-03-05")),
+                    ("imaging", None),
+                ],
+            ),
+            rec("e1", "encounter", "2026-03-04", json!({})),
+            rec("o1", "result", "2026-03-05", json!({})),
+            rec("o2", "report", "2026-03-05", json!({})),
+            rec("o3", "result", "2026-03-04", json!({})),
+        ];
+        let f = linked(&mut r);
+        assert_eq!(
+            f["results"],
+            json!(["o1", "o2"]),
+            "a lab line's day, not the claim's"
+        );
+        assert_eq!(f["items"][1]["records"], json!(["o1", "o2"]));
+        assert!(!f["items"][2].as_object().unwrap().contains_key("records"));
+
+        // The visit and results go away: so do the links.
+        r.retain(|x| x.kind == "claim");
+        let f = linked(&mut r);
+        for k in ["visit", "results"] {
+            assert!(!f.contains_key(k), "{k}");
+        }
+        for i in f["items"].as_array().unwrap() {
+            assert!(!i.as_object().unwrap().contains_key("records"));
+        }
+        assert_eq!(without_links(&f), f);
     }
 
     #[test]

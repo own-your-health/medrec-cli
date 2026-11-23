@@ -381,7 +381,7 @@ impl Toolset for MedrecTools {
                 SEARCH,
                 "Search records",
                 "Finds documents, records, studies and notes holding every word of query, best \
-                 first. Use it when a question names a doctor, test, medicine or clinic. \
+                 first; labs or blood tests also finds every lab result. Use it when a question names a doctor, test, medicine or clinic. \
                  Returns items with person, kind, id, date, title and snippet.",
             )
             .input::<SearchArgs>()

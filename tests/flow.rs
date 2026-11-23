@@ -2409,4 +2409,54 @@ fn a_claim_is_titled_priced_by_category_and_linked_to_its_visit_and_results() {
         "{kinds:?}"
     );
     assert!(!kinds.contains(&"encounter"), "{kinds:?}");
+
+    // A claim filed in an earlier shape, which no source serves again, is
+    // shaped again from its raw file.
+    let path = e.records().join("Robin Testperson/index.json");
+    let mut old: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let want = old.clone();
+    for r in old["records"].as_array_mut().unwrap() {
+        if r["kind"] == "claim" {
+            r["display"] = serde_json::json!("Professional");
+            let f = r["fields"].as_object_mut().unwrap();
+            for k in [
+                "amounts",
+                "category",
+                "benefit_period",
+                "diagnoses",
+                "visit",
+                "results",
+            ] {
+                f.remove(k);
+            }
+        }
+    }
+    std::fs::write(&path, serde_json::to_string(&old).unwrap()).unwrap();
+    let r = e.ok(&["reindex"]);
+    assert_eq!(
+        (r["claims"].as_u64(), r["reshaped"].as_u64()),
+        (Some(1), Some(1)),
+        "{r}"
+    );
+    let now: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let claim_of = |v: &Value| {
+        v["records"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["kind"] == "claim")
+            .cloned()
+            .unwrap()
+    };
+    assert_eq!(claim_of(&now)["display"], claim_of(&want)["display"]);
+    assert_eq!(
+        claim_of(&now)["fields"],
+        claim_of(&want)["fields"],
+        "links included"
+    );
+    assert_eq!(
+        e.ok(&["reindex"])["reshaped"],
+        0,
+        "a second run changes nothing"
+    );
 }

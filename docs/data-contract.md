@@ -191,8 +191,13 @@ under the source, filed by an earlier import). A pharmacy `claim`
 `refill_number`, `refills_authorized` and `brand_generic`, from its
 `supportingInfo`. Each of its `items` has a `quantity`.
 
-A `claim` (an ExplanationOfBenefit) is shaped for costs (0.5.0 and later;
-an earlier import's claims take this shape on their next import):
+A `claim` (an ExplanationOfBenefit) is shaped for costs (0.5.0 and later).
+An earlier import's claims take this shape when their source serves them
+again, or all at once with `medrec reindex`, which shapes every claim again
+from the raw file filed for it, reading nothing but the folder. A claim
+with no `amounts` and no `category` was filed by an earlier medrec. Every
+machine that imports into one folder must run 0.5.0 or later: an earlier
+medrec files the claims it imports again in the earlier shape.
 
 - `display`: what it paid for and who. That is its lines' service names
   (`A`, `A and B`, `A, B and 2 more`), a pharmacy claim's drug (RxNorm,

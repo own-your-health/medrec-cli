@@ -94,6 +94,9 @@ enum Command {
     /// Check every indexed file is in the folder with the hash the index
     /// recorded.
     Verify(VerifyArgs),
+    /// Shape every claim again from its filed raw resource, as this
+    /// medrec's import does: once after an upgrade that changes claims.
+    Reindex(ReindexArgs),
     /// Copy the whole records folder to another rclone remote or folder,
     /// then compare every file.
     Backup(BackupArgs),
@@ -648,6 +651,13 @@ enum ImagesCmd {
 }
 
 #[derive(Args, Debug)]
+struct ReindexArgs {
+    /// Only this person's claims (name or id).
+    #[arg(long)]
+    person: Option<String>,
+}
+
+#[derive(Args, Debug)]
 struct VerifyArgs {
     /// Download every document and compare its SHA-256 too.
     #[arg(long)]
@@ -837,6 +847,19 @@ fn run(cli: &Cli) -> Result<(), CliError> {
             if failed > 0 {
                 std::process::exit(1);
             }
+            Ok(())
+        }
+        Command::Reindex(a) => {
+            let cfg = load(&store, cli)?;
+            let f = Folder::open(&cfg, Access::Write)?;
+            let h = f.household()?;
+            let r = medrec::reindex::claims(&f, &h, a.person.as_deref())?;
+            output::emit(json, "reindex", to_value(&r), |_| {
+                println!(
+                    "{} claims: {} shaped again, {} unchanged, {} with no raw file",
+                    r.claims, r.reshaped, r.unchanged, r.without_raw
+                );
+            });
             Ok(())
         }
         Command::Verify(a) => {
