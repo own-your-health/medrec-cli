@@ -2462,3 +2462,200 @@ fn a_claim_is_titled_priced_by_category_and_linked_to_its_visit_and_results() {
         "a second run changes nothing"
     );
 }
+
+/// MD5 (hex) of a file, as Drive reports it.
+fn md5_of(path: &Path) -> String {
+    medrec::hash::md5_hex(&std::fs::read(path).unwrap())
+}
+
+#[test]
+fn the_views_follow_every_write_and_only_files_that_change_are_written() {
+    let base = Env::new("views");
+    setup(&base);
+    let e = provider_env(&base, medrec::testdata::STREAM);
+    e.ok(&["config", "set", "providers", "fakeprov"]);
+    e.ok(&[
+        "import",
+        "--from",
+        "fakeprov",
+        "--from-profile",
+        "adult1",
+        "--patient",
+        "pat-0001",
+        "--person",
+        "Robin",
+    ]);
+
+    // The import brought them up to date: views.json records the files
+    // as they are now.
+    let records = e.records();
+    let read = |p: &Path| -> Value { serde_json::from_slice(&std::fs::read(p).unwrap()).unwrap() };
+    let index = read(&records.join("views/views.json"));
+    assert_eq!(index["schema"], "medrec-views/v2");
+    assert_eq!(index["medrec"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(index["household"], md5_of(&records.join("household.json")));
+    let household = read(&records.join("household.json"));
+    let people = household["people"].as_array().unwrap();
+    assert_eq!(index["people"].as_object().unwrap().len(), people.len());
+    let id_of = |name: &str| {
+        people.iter().find(|p| p["name"] == name).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    for p in people {
+        let id = p["id"].as_str().unwrap();
+        let folder = records.join(p["folder"].as_str().unwrap());
+        let entry = &index["people"][id];
+        for (field, file) in [("index", "index.json"), ("text", "text.json")] {
+            let path = folder.join(file);
+            if path.is_file() {
+                assert_eq!(entry[field], md5_of(&path), "{field} of {id}");
+            } else {
+                assert!(entry[field].is_null(), "{field} of {id}");
+            }
+        }
+    }
+    let robin = id_of("Robin Testperson");
+    let dir = records.join("views").join(&robin);
+    // `files` is every view in the person's directory, each stored under
+    // its name with its MD5's first 12 hex, and holding those bytes.
+    let files = index["people"][&robin]["files"].as_object().unwrap();
+    let on_disk = std::fs::read_dir(&dir).unwrap().count();
+    assert_eq!(files.len(), on_disk);
+    for (name, md5) in files {
+        let stored = medrec::viewfiles::stored_name(name, md5.as_str().unwrap());
+        assert_eq!(md5_of(&dir.join(&stored)), *md5, "{name}");
+    }
+    assert!(files.contains_key("summary.json") && files.contains_key("search-items.bin"));
+    assert!(index["people"][&robin]["records"]["result"]["shards"]
+        .as_array()
+        .is_some_and(|s| !s.is_empty()));
+
+    // Views of the v1 layout (plain names, from the connector's own writer)
+    // are removed by the names their views.json gave.
+    let current = std::fs::read(records.join("views/views.json")).unwrap();
+    for plain in ["summary.json", "records-result-0.json"] {
+        std::fs::write(dir.join(plain), "[]").unwrap();
+    }
+    let mut v1 = index.clone();
+    v1["schema"] = "medrec-views/v1".into();
+    v1["people"][&robin]["files"] =
+        serde_json::json!({"summary.json": "0", "records-result-0.json": "0"});
+    std::fs::write(records.join("views/views.json"), v1.to_string()).unwrap();
+    let upgraded = e.ok(&["views", "write"]);
+    assert_eq!(upgraded["files_removed"], 2, "{upgraded}");
+    assert_eq!(upgraded["files_written"], 0, "{upgraded}");
+    assert!(!dir.join("summary.json").exists());
+    assert_eq!(
+        std::fs::read(records.join("views/views.json")).unwrap(),
+        current
+    );
+
+    // Nothing changed since: nothing is made or written.
+    let w = e.ok(&["views", "write"]);
+    assert_eq!(w["schema"], "views-write/v1");
+    assert_eq!(
+        (w["people_rebuilt"].as_u64(), w["files_written"].as_u64()),
+        (Some(0), Some(0)),
+        "{w}"
+    );
+
+    // Made again from the same files, every view keeps its name. A file of
+    // a view's shape that no view names is removed; anything else is left.
+    let stray = dir.join("records-result-99.0123456789ab.json");
+    std::fs::write(&stray, "[]").unwrap();
+    let mine = dir.join("my notes.txt");
+    std::fs::write(&mine, "not a view").unwrap();
+    let all = e.ok(&["views", "write", "--all"]);
+    assert_eq!(
+        all["people_rebuilt"].as_u64(),
+        Some(people.len() as u64),
+        "{all}"
+    );
+    assert_eq!(all["files_written"], 0, "{all}");
+    assert_eq!(all["files_removed"], 1, "{all}");
+    assert!(all["files_unchanged"].as_u64().unwrap() > 10, "{all}");
+    assert!(!stray.exists());
+    assert!(mine.exists());
+
+    // A person who left household.json leaves no views behind.
+    let alex = id_of("Alex Testperson");
+    let alex_views = || {
+        std::fs::read_dir(records.join("views").join(&alex))
+            .map(|d| d.count())
+            .unwrap_or(0)
+    };
+    assert!(alex_views() > 0);
+    let mut h = household.clone();
+    h["people"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|p| p["id"] != alex.as_str());
+    // Robin's guardian is the person who left; the views do not mind.
+    std::fs::write(
+        records.join("household.json"),
+        serde_json::to_string_pretty(&h).unwrap(),
+    )
+    .unwrap();
+    let left = e.ok(&["views", "write"]);
+    assert_eq!(left["people"], 1, "{left}");
+    assert!(left["files_removed"].as_u64().unwrap() > 0, "{left}");
+    assert_eq!(alex_views(), 0);
+    assert!(read(&records.join("views/views.json"))["people"]
+        .get(&alex)
+        .is_none());
+
+    // A person named "Views" gets another folder; a household whose person
+    // folder is `views` (made before 0.8.0) gets no views, and their files
+    // are left alone.
+    let views_person = e.ok(&["people", "add", "Views", "--birth-date", "1980-03-03"]);
+    let shown = e.ok(&["people", "show", "Views"]);
+    let folder = shown["folder"].as_str().unwrap_or_default().to_string();
+    assert!(
+        !folder.eq_ignore_ascii_case("views"),
+        "{views_person} {shown}"
+    );
+    let mut h = read(&records.join("household.json"));
+    for p in h["people"].as_array_mut().unwrap() {
+        if p["name"] == "Views" {
+            p["folder"] = "views".into();
+        }
+    }
+    std::fs::write(
+        records.join("household.json"),
+        serde_json::to_string_pretty(&h).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(records.join("views/notes.md"), "# Notes: Views\n").unwrap();
+    let refused = e.run(&["--json", "views", "write", "--all"]);
+    assert_ne!(refused.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&refused.stdout).contains("where medrec writes the views"));
+    assert!(records.join("views/notes.md").is_file());
+    assert!(mine.exists());
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
+#[test]
+fn init_refuses_to_adopt_a_folder_holding_a_views_folder() {
+    let e = Env::new("adopt-views");
+    let d = e.root.join("theirs");
+    std::fs::create_dir_all(d.join("Views")).unwrap();
+    std::fs::write(d.join("Views/holiday.txt"), "their own file").unwrap();
+    let out = e.run(&["--json", "init", d.to_str().unwrap(), "--allow-other-files"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("where medrec writes its views"));
+    assert!(d.join("Views/holiday.txt").is_file());
+
+    // An empty one too, flag or not: it lists no files.
+    let empty = e.root.join("empty");
+    std::fs::create_dir_all(empty.join("views")).unwrap();
+    for args in [vec!["--allow-other-files"], vec![]] {
+        let mut cmd = vec!["--json", "init", empty.to_str().unwrap()];
+        cmd.extend(args);
+        let out = e.run(&cmd);
+        assert_eq!(out.status.code(), Some(2), "{cmd:?}");
+        assert!(!empty.join("household.json").exists());
+    }
+    let _ = std::fs::remove_dir_all(&e.root);
+}

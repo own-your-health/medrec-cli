@@ -964,6 +964,8 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
         halted = Some(err);
     }
 
+    // The views once, after every source is filed, not after each.
+    let views = crate::viewfiles::hold(&location, cfg.store_budget());
     for x in exported {
         let Exported {
             id,
@@ -1026,6 +1028,7 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
             halted.get_or_insert(err);
         }
     }
+    drop(views);
     if let Some(err) = halted {
         // Keep this machine's record of what ran, so the guard holds for
         // the exports filed; the first failure is the one reported.
@@ -1467,6 +1470,8 @@ fn import_failed(
         code: "needs_person".into(),
         message: format!("{cli} needs a sign-in: its export answered that the sign-in has ended"),
         remedy: Some(format!("run `{command}` on this machine")),
+        // Present on every needs_person error, empty when the provider said
+        // nothing: the key is what marks the error as medrec's own.
         provider_message: Some(clip(err.message(), MESSAGE_MAX)),
     });
     e.sign_in.needs_person = Some(NeedsPerson {

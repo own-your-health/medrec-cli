@@ -32,6 +32,7 @@ pub mod summary;
 pub mod testdata;
 pub mod version;
 pub mod view;
+pub mod viewfiles;
 pub mod views;
 
 /// Create `path` owner-only (0600) and write `bytes`; never replaces a file.

@@ -112,7 +112,9 @@ consent. How long a provider's sign-in lasts is in its README. Everything
 else runs without you.
 
 `init` adopts an existing medrec folder, and refuses a folder that holds
-other files unless given `--allow-other-files`. The folder's layout and every file format
+other files unless given `--allow-other-files`. A folder that holds a
+`views` folder, even an empty one, is refused either way: medrec writes its
+views there. The folder's layout and every file format
 are in [docs/data-contract.md](docs/data-contract.md).
 
 ### Profiles
@@ -431,6 +433,46 @@ source takes its id as an argument (`refresh sign-in <id>`, `pause`,
 `resume`, `remove`); `--source` picks one for a pass or binds one.
 `--provider-profile` is `import --from-profile`'s login, and takes that name
 too.
+
+### Views
+
+`views/` at the top of the records folder holds each person's records again,
+cut into small files: a summary, records by kind in shards of about 48 KB,
+the timeline, the documents with their text in packs, and a search index by
+word. A reader that cannot parse a whole `index.json` per request, such as
+the hosted [records connector](https://github.com/own-your-health/connector)
+on Cloudflare's free plan, opens only the files its answer needs. The layout
+is in [docs/data-contract.md](docs/data-contract.md) ("views/").
+
+medrec keeps them up to date itself. Every command that writes a person's
+`index.json` or `text.json`, or `household.json`, rewrites the views of the
+people whose files changed before it releases the folder. Each view's name
+carries its MD5, and only new views are uploaded, so a refresh that adds a
+few records writes a few dozen small files per person. A refresh pass, or an
+import of several members, does this once at the end. `views.json` records
+the MD5 of every file the views were made from, so a reader can tell when
+they are stale.
+
+On Drive, the views a pass replaces go to the trash, which keeps them for
+30 days against the storage quota. One new result replaces about 30 views
+(0.9 MB) for a person with about 1,600 results; SECURITY.md has more.
+
+The first build after upgrading to 0.8.0 writes every view (100 to 340
+files per person in medrec's synthetic test folders) and holds the folder
+while it uploads. On
+a Drive folder, run `medrec views write` once from a terminal right after
+upgrading, so a scheduled pass or the app's refresh does not wait on it.
+
+```sh
+medrec --profile <NAME> views write          # bring them up to date now
+medrec --profile <NAME> views write --all    # make every person's again
+```
+
+`views write --json` prints `views-write/v1`: `people`, `people_rebuilt`
+(people whose views were made again), and `files_written`, `files_unchanged`
+and `files_removed`.
+A failure to write them leaves them stale and says so on stderr. The command
+that wrote the records still succeeds, and the next write tries again.
 
 ### Settings
 

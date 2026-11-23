@@ -18,6 +18,7 @@ inbox/                        drops waiting for `medrec intake --inbox`
 _review/                      documents intake could not file, and review.json
 _status/                      what `medrec refresh` did: status.json, attempts/ (0.3.0 and later)
 _requests/                    refresh requests from the app, and done/ (0.3.0 and later)
+views/                        each person's records cut into small files, for readers (0.8.0 and later)
 <Person>/
   notes.md                    dated notes; this file is their source
   index.json                  the person's index (documents, records, studies, imports)
@@ -505,7 +506,7 @@ the month (UTC) the attempt started.
 | `requests` | The `_requests/` ids the attempt served; empty otherwise. |
 | `outcome` | `ok`, `failed`, `needs_person`, `skipped_interval` (for the schedule: imported less than `min_interval_secs` ago, or still waiting after a failure, see `failures`; for a person: within the request guard, `_requests/` rule 3) or `skipped_paused`. `running` appears only in `status.json`. |
 | `exit_code` | The import's exit code (Import, below); `null` for a skip, and for a `needs_person` found before the import ran. |
-| `error` | `null`, or `{"code", "message", "remedy"[, "provider_message"]}` from the failing command's `--json` error (the family's error shape). `message` is at most 300 characters. When the provider's export answered that its sign-in ended (exit 3), `code` is `needs_person`, `message` and `remedy` are medrec's own (the remedy runs `medrec refresh sign-in <source>`), and the provider's own message, which names the provider's own sign-in command, is in `provider_message` (0.7.0 and later). `provider_message` is present only then, and is at most 300 characters too. Show `remedy` as the one thing to do, and `provider_message` at most as detail. A profile name in `message`, `remedy` or `provider_message` is replaced, a provider profile's by `<provider profile>` and a medrec profile's by `<profile>`, so the folder holds none. medrec's own codes are `timeout` (a call outlived its limit), `interrupted` (the pass running it stopped before it finished) and `needs_person`. |
+| `error` | `null`, or `{"code", "message", "remedy"[, "provider_message"]}` from the failing command's `--json` error (the family's error shape). `message` is at most 300 characters. When the provider's export answered that its sign-in ended (exit 3), `code` is `needs_person`, `message` and `remedy` are medrec's own (the remedy runs `medrec refresh sign-in <source>`), and the provider's own message, which names the provider's own sign-in command, is in `provider_message` (0.7.0 and later). `provider_message` is present only then, always (an empty string when the provider gave no text), and is at most 300 characters too. Show `remedy` as the one thing to do, and `provider_message` at most as detail. A profile name in `message`, `remedy` or `provider_message` is replaced, a provider profile's by `<provider profile>` and a medrec profile's by `<profile>`, so the folder holds none. medrec's own codes are `timeout` (a call outlived its limit), `interrupted` (the pass running it stopped before it finished) and `needs_person`. |
 | `import` | The `ImportRun` id in the person's `index.json`, when `ok`. |
 | `counts` | When `ok`, the import report's counts: `records_added`, `records_updated`, `records_unchanged`, `records_older`, `resources_written`, `resources_unchanged`, `documents_added`, `documents_duplicate`, `documents_unchanged`, `documents_same_statement`. A count the import report gains later is added here too. |
 
@@ -633,11 +634,243 @@ file as found) and `handled`. A `done/` file is at most 8 KiB.
 | `message` | One line for a person, with no record content. |
 | `by` | The medrec that handled it. |
 
+## views/ (`medrec-views/v2`, 0.8.0 and later)
+
+The views hold each person's records again, cut into small files in the
+order a reader lists them. A reader that cannot parse a whole `index.json`
+per request opens only the few kilobytes its answer needs. The hosted
+connector is one: it runs on Cloudflare's Workers Free plan, with 10 ms of
+CPU per request, and parsing a 2.5 MB index alone takes about 6 ms.
+
+Every view is derived from `household.json` and the person's `index.json`
+and `text.json`. `notes.md` has no view. It is small, the app may change
+it, and readers read it as it is. Nothing in `views/` is a source: deleting
+it loses nothing, and `medrec views write` makes it again.
+
+```text
+views/views.json                         what was written, and from which files
+views/<person id>/summary.json
+views/<person id>/records-<kind>-<n>.json
+views/<person id>/records-<kind>-undated.json
+views/<person id>/names-<kind>.json
+views/<person id>/tests.json
+views/<person id>/timeline-<n>.json
+views/<person id>/timeline-undated.json
+views/<person id>/documents.json
+views/<person id>/text-<n>.bin
+views/<person id>/search-<hex>.json
+views/<person id>/search-1-<hex>.json
+views/<person id>/search-items.bin
+views/<person id>/search-hay-<n>.bin
+views/<person id>/search-labs-<n>.json
+```
+
+A person's directory is named by their id in `household.json`, not their
+name. Each view is stored under its name with the first 12 hex of its MD5
+before the extension: `records-result-7.json` is
+`records-result-7.0a1b2c3d4e5f.json` in the folder. A file's bytes never
+change under its name, so a reader holding an older `views.json` reads that
+pass's views, or finds them gone, and never another pass's bytes.
+`views.json` is the one file with a fixed name. This document names views
+without the MD5. JSON files are compact UTF-8 without a byte-order mark. Binary
+integers are little-endian unsigned 32-bit. Strings compare as UTF-8 bytes.
+"Newest first" sorts by the date string, descending, with undated items
+last.
+
+### When they are written
+
+- **After every write.** A command that writes `household.json`, an
+  `index.json` or a `text.json` brings the views up to date before it
+  releases the folder lock. A refresh pass, and an import of several
+  members, does it once, after the last filing. `medrec views write` does
+  it on demand, and `--all` makes every person's again.
+- **Only what changed.** A person keeps their views when their `index.json`
+  and `text.json` have the MD5s `views.json` recorded, under the same
+  `household.json` and medrec version. Otherwise their views are made
+  again, and only views the folder does not already hold under their
+  stored names are uploaded. An unchanged view keeps its name and is not
+  written again.
+- **`views.json` last.** It records the MD5 of every view, so a reader
+  checks each view it reads and never mixes two passes, whatever order an
+  uploader sends them in. Views that it no longer names, a person's who
+  left `household.json` among them, are deleted after it; a left person's
+  directory may stay, empty, since readers list only the directories of
+  the people `household.json` names. On Drive, a deleted view goes to the
+  account's trash, like every file medrec removes there, until the trash
+  is emptied or 30 days pass. medrec deletes
+  only files of a stored view's shape (`<name>.<12 hex>.json` or `.bin`) in
+  the directory of a person the household or the last `views.json` names,
+  and nothing else under `views/`.
+- **`views` is medrec's.** No person folder is named `views` (in any case):
+  a person named that way gets `Views (person)`. A folder whose person
+  folder is already `views` gets no views, and `init` refuses a folder
+  that already holds one, even empty, with or without `--allow-other-files`.
+- **Each file whole.** On a local directory a file is written to a
+  temporary name and renamed. On Drive it is one upload.
+- **A failure leaves them stale**, never wrong. medrec says so on stderr,
+  the command's result stands, and the next write tries again.
+
+A reader decides freshness by MD5, as Drive reports it (`md5Checksum`):
+
+- A person whose `index.json` or `text.json` MD5 differs from `views.json`
+  has stale views.
+- A different `household.json` MD5 makes every person's views stale.
+- A view that is missing, or whose MD5 is not the one `files` gives,
+  belongs to a pass still arriving.
+
+### views.json
+
+```json
+{"schema":"medrec-views/v2","medrec":"0.8.0","household":"<md5>",
+ "people":{"p_…":{"index":"<md5>","text":"<md5>","row":{…},"records":{…},"timeline":{…},"search":{…},
+                  "files":{"summary.json":"<md5>","records-result-0.json":"<md5>",…}}}}
+```
+
+| Field | What |
+|---|---|
+| `medrec` | The version that wrote them. Another version makes every view again. |
+| `household` | The MD5 (hex) of `household.json` as the views were made from it. |
+| `people.<id>.index`, `.text` | The MD5s of the person's `index.json` and `text.json` as read; `null` when the file is absent. |
+| `row` | `documents`, `records`, `studies`, and `newest` and `last_import` when there are any: the person's line in `medrec_summary`'s people list, without `notes`. |
+| `records` | For each record kind, `{"shards": [[newest day, oldest day, count], …], "undated": count}`: its dated shards by number, and how many records its undated file holds. |
+| `timeline` | The timeline's shards, the same way. |
+| `search` | `items` (how many search items) and `labs` (how many `search-labs-<n>.json`). |
+| `files` | Every view in `views/<person id>/`, by name (without the MD5), with its MD5 (hex), from which its stored name follows. A search shard exists only for a character some word starts with, so one missing from `files` means no word matches. |
+
+`schema` names the layout. A change that a reader of the current layout
+would misread takes the next number (`medrec-views/v3` after this one). A
+field readers may ignore does not. medrec moves to a new number only in a
+release whose notes name the connector version that reads it. medrec has
+written v2 from its first views. v1, the same layout with plain names and
+one search text file, was only ever written by the connector's own `npm run
+views`. medrec removes a v1 `views.json`'s views by the names in its
+`files`.
+
+### Shards: from the oldest end
+
+Records and timeline events are cut into shards from the oldest end.
+`-0.json` holds the oldest days, and the highest-numbered shard is the
+newest, the only one still filling. A shard closes once it holds 48,000
+bytes or more, never inside a day (the date's first 10 characters).
+Undated items go in the kind's `-undated.json`, outside the numbered run;
+a date range leaves them out. Inside a shard items keep the reader's
+order, newest first, and a reader reads shards from the highest number
+down, choosing them by their spans.
+
+New records are nearly always the newest, so a pass that adds a few
+changes the newest shard and starts the next one at most. Backfilled
+history (a new source's first import) moves more.
+
+### Records
+
+`records-<kind>-<n>.json` is a JSON array of one kind's records (`result`,
+`medication`, …), in the records tool's order: by day, newest first, then
+by name (`display` clipped to 200 characters with `…`), then as `index.json`
+holds them. Each keeps its `index.json` fields `id`, `kind`, `date`,
+`code`, `display`, `status` and `fields` when present. `provenance` is cut
+to its first entry's `source`, with only `fhir_base` and `cli`.
+
+`names-<kind>.json` lists every distinct name the kind's records carry, as
+`[code, display, code display, [shard numbers]]`. `code` and `code display`
+are `code.code` and `code.display`, or `null`. Shard `-1` is the undated
+file. A reader filtering by name opens only the shards a matching name is
+in.
+
+`tests.json` lists each test series (the `result` records of one code with
+its system, or of one folded name when uncoded), in the order of its newest
+result:
+
+```json
+[{"names":[[code, display, code display], …],
+  "entries":[[date, name number, shard, place in shard, rank], …]}, …]
+```
+
+`entries` holds every result of the series, newest first. `shard` and
+`place` locate it in `records-result-<shard>.json` (`-1`: the undated file).
+`rank` is its place among all the person's results, newest first, then by
+name.
+
+### Timeline
+
+`timeline-<n>.json` holds the person's documents, records and studies as
+events, `{date, kind, id, title, detail, source}`, each key absent when it
+has no value. They are in the records tool's timeline order: newest first
+by full date, then by title clipped to 200 characters, then by kind and
+full title, then documents, records and studies in their `index.json`
+order. Notes are not in it; a reader adds them from `notes.md`.
+
+### summary.json
+
+`medrec_summary`'s summary of the person without `person` and `as_of`:
+`counts`, `sources`, `medications`, `conditions`, `allergies`,
+`immunizations`, `latest_results`, `recent_visits` and `bills`. Each list
+is `{items, more}`, at most 25 items. It is computed as of no day, so no
+bill is `past_due`; a reader works `past_due` out for the day it answers.
+
+### documents.json and text-<n>.bin
+
+`documents.json` is `index.json`'s `documents`, each with two fields added:
+
+- `text_at`: where its text is, `[pack, byte offset, byte length,
+  characters]`. Absent when the document has no text.
+- `linked`: the names (`display`) of the first 20 records that list it in
+  their `documents`, in `index.json` order. Absent when none do.
+
+`text-<n>.bin` holds the documents' texts, UTF-8, one after another in
+document order. A pack closes before a text would take it past 1,000,000
+bytes; a text is never split.
+
+### Search
+
+The search items are what `medrec_search` looks through, notes aside, as
+the same text:
+
+- **Documents:** the title, then the organization and document type, then
+  the document's text.
+- **Records:** the name, then the record's fields flattened.
+- **Studies:** the description, then the modalities, body part, facility
+  and series descriptions.
+
+**Item numbers** run in the reverse of medrec's order for hits of equal
+score (newest first, undated last, then documents, records and studies in
+their `index.json` order). Undated items take the lowest numbers, then
+dated ones from the oldest; within one date a later `index.json` entry has
+the lower number. Hits rank by score, then by item number, highest first.
+A date range is one run of numbers, and a new item, nearly always the
+newest, takes a new number.
+
+- **`search-<hex>.json`:** postings by word. Each item's text is folded as
+  medrec folds it (lowercase, Latin accents removed, every other character
+  a word break). For each distinct word: `[item, occurrences, byte offset of
+  its first occurrence in the item's text]`, repeated, by item number, as
+  `{"cholesterol":[12,3,40,57,1,0,…],…}`. `<hex>` is the lowercase hex of
+  the UTF-8 bytes of the word's first two characters, or of the whole word
+  when it has one.
+- **`search-1-<hex>.json`:** the same postings keyed by the first character
+  only, for one-character terms such as the "d" in "vitamin d".
+- **`search-items.bin`:** `n`, the number of items; then `n + 1` offsets
+  of each item's text, counted over the `search-hay-<n>.bin` packs in
+  order; then `n + 1` offsets of each item's details in the rest of the
+  file; then each item's details, `[date or null, kind, id, title]` as
+  JSON, one after another.
+- **`search-hay-<n>.bin`:** the items' texts, UTF-8, in item order, with no
+  separators, 512 items to a pack: pack `n` holds items `512n` to
+  `512n + 511`, and there are ⌈items / 512⌉ packs. Item `i` starts at
+  `text[i] − text[512 · ⌊i / 512⌋]` in pack `⌊i / 512⌋`. A reader fetches
+  only the byte ranges its snippets need. A changed item rewrites only its
+  pack, and a new newest one only the last.
+- **`search-labs-<n>.json`:** for the lab queries (Readers, below), every
+  `result` and `report` record and every claim with a `lab` line, as
+  `[item, date, kind, id, title, detail line]`, by item number, 256 to a
+  file.
+
 ## Readers
 
 Anything that only reads the folder follows the files above and writes
-nothing but `_requests/` (the app, by that section's rules). Two readers
-ship with medrec:
+nothing but `_requests/` (the app, by that section's rules). A reader that
+answers from `views/` (the hosted connector) answers as `medrec mcp` does,
+and falls back to the files themselves when the views are stale. Two
+readers ship with medrec:
 
 - **The commands** (`timeline`, `search`, `results`, `meds`, `documents
   list` and the rest) read `household.json`, each person's `index.json`,

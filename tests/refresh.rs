@@ -1154,6 +1154,24 @@ fn a_pass_exports_every_source_before_it_files_any() {
     assert_eq!(seen[0], seen[1], "an import was filed between the exports");
     let idx = e.json_at("Robin Testperson/index.json");
     assert_eq!(idx["imports"].as_array().unwrap().len(), 4);
+    // The views were brought up to date once, after both filings: they
+    // record the files as the pass left them.
+    let md5 = |rel: &str| medrec::hash::md5_hex(&std::fs::read(records.join(rel)).unwrap());
+    let views = e.json_at("views/views.json");
+    assert_eq!(views["household"], md5("household.json"));
+    let robin = e.json_at("household.json")["people"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["folder"] == "Robin Testperson")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        views["people"][&robin]["index"],
+        md5("Robin Testperson/index.json")
+    );
 }
 
 #[test]

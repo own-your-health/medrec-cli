@@ -972,6 +972,26 @@ impl Squashed {
             .collect()
     }
 
+    /// Each word as [`Squashed::find_prefix`] matches it, folded, with the
+    /// byte offset of its start in the original text, in order.
+    pub fn word_starts(&self) -> Vec<(String, usize)> {
+        let mut out = Vec::new();
+        let mut i = 1;
+        while i < self.folded.len() {
+            if self.folded[i] != ' ' && self.folded[i - 1] == ' ' {
+                let end = self.folded[i..]
+                    .iter()
+                    .position(|c| *c == ' ')
+                    .map_or(self.folded.len(), |n| i + n);
+                out.push((self.folded[i..end].iter().collect(), self.map[i]));
+                i = end;
+            } else {
+                i += 1;
+            }
+        }
+        out
+    }
+
     fn starts_with_label(&self, label: &str) -> bool {
         let needle: Vec<char> = format!(" {} ", fold(label)).chars().collect();
         self.folded.len() >= needle.len() && self.folded[..needle.len()] == needle[..]

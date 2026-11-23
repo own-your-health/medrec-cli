@@ -50,6 +50,30 @@ pub fn init(
                 Err(e) => return Err(e),
             };
             let foreign: Vec<_> = entries.iter().filter(|e| !e.rel.starts_with('.')).collect();
+            // medrec writes and prunes views/; never inside someone else's.
+            if let Some(e) = foreign.iter().find(|e| {
+                e.rel
+                    .split('/')
+                    .next()
+                    .is_some_and(|top| top.eq_ignore_ascii_case(crate::viewfiles::DIR))
+            }) {
+                return Err(CliError::Usage(format!(
+                    "{} already holds a `{}` folder, where medrec writes its views; move it, or \
+                     name another folder",
+                    location.display(),
+                    crate::printable(e.rel.split('/').next().unwrap_or_default())
+                )));
+            }
+            // An empty `views` folder lists no files (and on a disk that
+            // ignores case, `Views` is the same folder).
+            if st.exists(crate::viewfiles::DIR)? {
+                return Err(CliError::Usage(format!(
+                    "{} already holds a `{}` folder, where medrec writes its views; move it, or \
+                     name another folder",
+                    location.display(),
+                    crate::viewfiles::DIR
+                )));
+            }
             if !foreign.is_empty() && !allow_other_files {
                 return Err(CliError::Usage(format!(
                     "{} already holds {} files that are not a medrec records folder; name an empty \

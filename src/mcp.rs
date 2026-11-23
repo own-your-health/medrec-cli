@@ -30,7 +30,7 @@ pub const RECORDS: &str = "medrec_records";
 pub const DOCUMENT: &str = "medrec_document";
 
 /// Lines per section of a summary.
-const SUMMARY_LINES: usize = 25;
+pub(crate) const SUMMARY_LINES: usize = 25;
 /// Characters of a document's text one call returns at most, before JSON
 /// escaping; the part is cut further if escaping takes it over budget.
 const TEXT_CHUNK: usize = 16_000;

@@ -314,6 +314,29 @@ impl Store {
         self.backend.write_file(rel, content)
     }
 
+    /// Write bytes to `rel` whole, replacing any file there: atomic and
+    /// owner-only on a local directory, one upload on Drive.
+    pub fn write_bytes(&self, rel: &str, content: &[u8]) -> Result<(), CliError> {
+        if let Location::Dir(root) = &self.location {
+            let path = root.join(rel);
+            create_parent(&path)?;
+            return pk_cli_drive::private_file::write(
+                &path,
+                content,
+                pk_cli_drive::private_file::Replace::Always,
+            )
+            .map_err(|e| CliError::Other(format!("writing {}: {e}", path.display())));
+        }
+        if let Ok(text) = std::str::from_utf8(content) {
+            return self.backend.write_file(rel, text);
+        }
+        let dir = pk_cli_drive::private_temp_dir("medrec-upload")?;
+        let local = dir.path().join("file");
+        std::fs::write(&local, content)
+            .map_err(|e| CliError::Other(format!("staging {}: {e}", self.display_path(rel))))?;
+        self.backend.put_file(&local, rel)
+    }
+
     /// Upload a local file (binary-safe), replacing any file at `rel`. On a
     /// local directory the file is owner-only (0600) in owner-only folders.
     pub fn put_file(&self, local: &Path, rel: &str) -> Result<(), CliError> {
