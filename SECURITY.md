@@ -93,6 +93,11 @@ The records folder is a plain, private Drive folder without encryption
 | **The user's Claude account** (with `medrec mcp` added) | What the tools returned in its conversations | The account's own security and Anthropic's retention settings. Remove the extension (or `claude mcp remove medrec`) to stop; past conversations keep what they were given until deleted. |
 | **This repository** (public) | No personal data | [PRIVACY.md](PRIVACY.md) and the tests that enforce it |
 
+`views/` in the records folder (0.8.0 and later) holds the same records as
+each person's `index.json` and `text.json`, cut into small files for
+readers. It is inside the folder, so everything above covers it, and it
+adds no copy anywhere else.
+
 `medrec cache clear` removes every copy on this Mac (the read cache and
 opened copies). It keeps the run locks and the refresh state. The records
 folder is not touched.

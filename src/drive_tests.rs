@@ -208,3 +208,81 @@ fn a_records_folder_is_set_up_on_drive_with_its_inbox_and_backed_up_both_ways() 
         .count();
     assert_eq!(uploads, 0, "{:?}", h.fake.requests());
 }
+
+#[test]
+fn the_views_on_drive_follow_a_write_and_then_upload_only_what_changed() {
+    use crate::model::{PersonIndex, Record};
+    let h = Harness::new(true);
+    h.sign_in();
+    let records = h.fake.add_folder(ROOT_ID, "Medical Records");
+    let loc = h.location(&records);
+    let mut cfg = Config::default();
+    maint::init(&mut cfg, &loc, false, BUDGET).unwrap();
+    let result = |n: usize, date: &str| -> Record {
+        serde_json::from_value(serde_json::json!({
+            "id": format!("r_{n}"), "kind": "result", "key": format!("k_{n}"), "date": date,
+            "display": "Glucose", "code": {"system": "http://loinc.org", "code": "2345-7"},
+            "fields": {"value": format!("{n} mg/dL")}, "provenance": []
+        }))
+        .unwrap()
+    };
+    let p = {
+        // A person and their index, written through the folder: the views
+        // follow as it closes.
+        let f = Folder::open_at(&loc, Access::Write, BUDGET).unwrap();
+        let mut hh = f.household().unwrap();
+        hh.people.push(
+            serde_json::from_value(serde_json::json!({
+                "id": "p_drive", "name": "Robin Testperson", "folder": "Robin Testperson",
+                "created_at": "2026-01-01T00:00:00Z"
+            }))
+            .unwrap(),
+        );
+        f.save_household(&mut hh).unwrap();
+        let p = hh.people[0].clone();
+        let mut idx = PersonIndex::new(&p.id);
+        idx.records = (0..40)
+            .map(|n| result(n, &format!("2026-01-{:02}", n % 28 + 1)))
+            .collect();
+        f.save_index(&p, &mut idx).unwrap();
+        p
+    };
+    let st = Store::open(&loc, Reads::Fresh, BUDGET).unwrap();
+    let index: crate::viewfiles::ViewsIndex =
+        serde_json::from_str(&st.read_text(crate::viewfiles::INDEX).unwrap().unwrap()).unwrap();
+    let mine = &index.people["p_drive"];
+    assert_eq!(mine.index, st.md5(&folder::index_rel(&p)).unwrap());
+    // Every view is on Drive with the MD5 views.json gives, the binary
+    // items file included.
+    for (name, md5) in &mine.files {
+        assert_eq!(
+            st.md5(&format!("views/p_drive/{name}")).unwrap().as_ref(),
+            Some(md5),
+            "{name}"
+        );
+    }
+    let items = st.read_bytes("views/p_drive/search-items.bin").unwrap();
+    assert_eq!(u32::from_le_bytes(items[0..4].try_into().unwrap()), 40);
+
+    // Nothing changed: no upload.
+    let f = Folder::open_at(&loc, Access::Write, BUDGET).unwrap();
+    h.fake.clear_requests();
+    let again = crate::viewfiles::sync(&f, true).unwrap();
+    assert_eq!((again.rewritten, again.written), (1, 0), "{again:?}");
+    assert!(
+        !h.fake.requests().iter().any(|r| r.contains("upload")),
+        "{:?}",
+        h.fake.requests()
+    );
+    // One newer result: a few files, not all of them.
+    let mut idx = f.index(&p).unwrap();
+    idx.records.push(result(40, "2026-02-01"));
+    f.save_index(&p, &mut idx).unwrap();
+    let after = crate::viewfiles::sync(&f, false).unwrap();
+    assert_eq!(after.rewritten, 1, "{after:?}");
+    assert!(
+        after.written > 0 && after.written < after.unchanged,
+        "{after:?}"
+    );
+    drop(f);
+}

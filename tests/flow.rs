@@ -2462,3 +2462,133 @@ fn a_claim_is_titled_priced_by_category_and_linked_to_its_visit_and_results() {
         "a second run changes nothing"
     );
 }
+
+/// MD5 (hex) of a file, as Drive reports it.
+fn md5_of(path: &Path) -> String {
+    medrec::hash::md5_hex(&std::fs::read(path).unwrap())
+}
+
+#[test]
+fn the_views_follow_every_write_and_only_files_that_change_are_written() {
+    let base = Env::new("views");
+    setup(&base);
+    let e = provider_env(&base, medrec::testdata::STREAM);
+    e.ok(&["config", "set", "providers", "fakeprov"]);
+    e.ok(&[
+        "import",
+        "--from",
+        "fakeprov",
+        "--from-profile",
+        "adult1",
+        "--patient",
+        "pat-0001",
+        "--person",
+        "Robin",
+    ]);
+
+    // The import brought them up to date: views.json records the files
+    // as they are now.
+    let records = e.records();
+    let read = |p: &Path| -> Value { serde_json::from_slice(&std::fs::read(p).unwrap()).unwrap() };
+    let index = read(&records.join("views/views.json"));
+    assert_eq!(index["schema"], "medrec-views/v1");
+    assert_eq!(index["medrec"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(index["household"], md5_of(&records.join("household.json")));
+    let household = read(&records.join("household.json"));
+    let people = household["people"].as_array().unwrap();
+    assert_eq!(index["people"].as_object().unwrap().len(), people.len());
+    let mut robin = String::new();
+    for p in people {
+        let id = p["id"].as_str().unwrap();
+        let folder = records.join(p["folder"].as_str().unwrap());
+        let entry = &index["people"][id];
+        for (field, file) in [("index", "index.json"), ("text", "text.json")] {
+            let path = folder.join(file);
+            if path.is_file() {
+                assert_eq!(entry[field], md5_of(&path), "{field} of {id}");
+            } else {
+                assert!(entry[field].is_null(), "{field} of {id}");
+            }
+        }
+        if p["name"] == "Robin Testperson" {
+            robin = id.to_string();
+        }
+    }
+    let dir = records.join("views").join(&robin);
+    assert!(dir.join("summary.json").is_file());
+    // `files` is every file in the person's directory, with its MD5.
+    let files = index["people"][&robin]["files"].as_object().unwrap();
+    let on_disk: Vec<String> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|f| f.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(files.len(), on_disk.len());
+    for name in &on_disk {
+        assert_eq!(files[name.as_str()], md5_of(&dir.join(name)), "{name}");
+    }
+    assert!(dir.join("search-items.bin").is_file());
+    assert!(index["people"][&robin]["records"]["result"]["shards"]
+        .as_array()
+        .is_some_and(|s| !s.is_empty()));
+
+    // Nothing changed since: nothing is made or written.
+    let w = e.ok(&["views", "write"]);
+    assert_eq!(w["schema"], "views-write/v1");
+    assert_eq!(
+        (w["rewritten"].as_u64(), w["written"].as_u64()),
+        (Some(0), Some(0)),
+        "{w}"
+    );
+
+    // Made again from the same files, every file has the same bytes; a file
+    // no view names is removed.
+    let stray = dir.join("records-result-99.json");
+    std::fs::write(&stray, "[]").unwrap();
+    let all = e.ok(&["views", "write", "--all"]);
+    assert_eq!(
+        all["rewritten"].as_u64(),
+        Some(people.len() as u64),
+        "{all}"
+    );
+    assert_eq!(all["written"], 0, "{all}");
+    assert_eq!(all["removed"], 1, "{all}");
+    assert!(all["unchanged"].as_u64().unwrap() > 10, "{all}");
+    assert!(!stray.exists());
+
+    // A person who left household.json leaves no views behind.
+    let mut h = household.clone();
+    let alex = people
+        .iter()
+        .find(|p| p["name"] == "Alex Testperson")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(records
+        .join("views")
+        .join(&alex)
+        .join("summary.json")
+        .is_file());
+    h["people"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|p| p["id"] != alex.as_str());
+    // Robin's guardian is the person who left; the views do not mind.
+    std::fs::write(
+        records.join("household.json"),
+        serde_json::to_string_pretty(&h).unwrap(),
+    )
+    .unwrap();
+    let left = e.ok(&["views", "write"]);
+    assert_eq!(left["people"], 1, "{left}");
+    assert!(left["removed"].as_u64().unwrap() > 0, "{left}");
+    assert!(!records
+        .join("views")
+        .join(&alex)
+        .join("summary.json")
+        .exists());
+    assert!(read(&records.join("views/views.json"))["people"]
+        .get(&alex)
+        .is_none());
+    let _ = std::fs::remove_dir_all(&e.root);
+}

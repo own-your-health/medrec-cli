@@ -432,6 +432,34 @@ source takes its id as an argument (`refresh sign-in <id>`, `pause`,
 `--provider-profile` is `import --from-profile`'s login, and takes that name
 too.
 
+### Views
+
+`views/` at the top of the records folder holds each person's records again,
+cut into small files: a summary, records by kind in shards of about 48 KB,
+the timeline, the documents with their text in packs, and a search index by
+word. A reader that cannot parse a whole `index.json` per request, such as
+the hosted [records connector](https://github.com/own-your-health/connector)
+on Cloudflare's free plan, opens only the files its answer needs. The layout
+is in [docs/data-contract.md](docs/data-contract.md) ("views/").
+
+medrec keeps them up to date itself. Every command that writes a person's
+`index.json` or `text.json`, or `household.json`, rewrites the views of the
+people whose files changed before it releases the folder. Only files whose
+bytes changed are written, so a refresh that adds a few records writes a few
+dozen small files per person. A refresh pass, or an import of several
+members, does this once at the end. `views.json` records the MD5 of every
+file the views were made from, so a reader can tell when they are stale.
+
+```sh
+medrec --profile <NAME> views write          # bring them up to date now
+medrec --profile <NAME> views write --all    # make every person's again
+```
+
+`views write --json` prints `views-write/v1`: `people`, `rewritten` (people
+whose views were made again), `written`, `unchanged` and `removed` (files).
+A failure to write them leaves them stale and says so on stderr. The command
+that wrote the records still succeeds, and the next write tries again.
+
 ### Settings
 
 `medrec config set <key> <value>`, kept in `~/.config/medrec/config.json`.

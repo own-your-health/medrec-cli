@@ -9,7 +9,7 @@ use serde_json::Value;
 
 use crate::folder::Folder;
 use crate::intake::classify;
-use crate::model::{Household, Note, Person, Record};
+use crate::model::{Household, Note, Person, PersonIndex, PersonText, Record};
 use crate::people;
 
 #[derive(Debug, Clone, Default)]
@@ -106,92 +106,116 @@ pub fn timeline(
     let mut out = Vec::new();
     for p in people::selected(h, person)? {
         let idx = folder.index(p)?;
-        if want("document") {
-            for d in &idx.documents {
-                if !range.holds(d.date.as_deref()) {
-                    continue;
-                }
-                out.push(Event {
-                    date: d.date.clone(),
-                    person: p.id.clone(),
-                    person_name: p.name.clone(),
-                    kind: "document".into(),
-                    id: d.id.clone(),
-                    title: d
-                        .title
-                        .clone()
-                        .unwrap_or_else(|| label(d.doc_type.as_deref()).to_string()),
-                    detail: d.original_name.clone(),
-                    source: d.organization.clone(),
-                });
-            }
-        }
-        for r in &idx.records {
-            if !want(&r.kind) || !range.holds(r.date.as_deref()) {
+        let notes = if want("note") {
+            folder.notes(p)?
+        } else {
+            Vec::new()
+        };
+        person_events(h, p, &idx, &notes, range, &want, &mut out);
+    }
+    order_events(&mut out);
+    Ok(out)
+}
+
+/// One person's timeline events, in their files' order: documents,
+/// records, studies, then notes.
+pub(crate) fn person_events(
+    h: &Household,
+    p: &Person,
+    idx: &PersonIndex,
+    notes: &[Note],
+    range: &Range,
+    want: &dyn Fn(&str) -> bool,
+    out: &mut Vec<Event>,
+) {
+    if want("document") {
+        for d in &idx.documents {
+            if !range.holds(d.date.as_deref()) {
                 continue;
             }
             out.push(Event {
-                date: r.date.clone(),
+                date: d.date.clone(),
                 person: p.id.clone(),
                 person_name: p.name.clone(),
-                kind: r.kind.clone(),
-                id: r.id.clone(),
-                title: r.display.clone(),
-                detail: record_detail(r),
-                source: record_source(h, r),
+                kind: "document".into(),
+                id: d.id.clone(),
+                title: d
+                    .title
+                    .clone()
+                    .unwrap_or_else(|| label(d.doc_type.as_deref()).to_string()),
+                detail: d.original_name.clone(),
+                source: d.organization.clone(),
             });
         }
-        if want("study") {
-            for s in &idx.studies {
-                if !range.holds(s.date.as_deref()) {
-                    continue;
-                }
-                out.push(Event {
-                    date: s.date.clone(),
-                    person: p.id.clone(),
-                    person_name: p.name.clone(),
-                    kind: "study".into(),
-                    id: s.id.clone(),
-                    title: format!(
-                        "{} {}",
-                        s.modalities.join("/"),
-                        s.description
-                            .clone()
-                            .or_else(|| s.body_part.clone())
-                            .unwrap_or_default()
-                    )
-                    .trim()
-                    .to_string(),
-                    detail: Some(format!("{} series, {} images", s.series.len(), s.instances)),
-                    source: s.facility.clone(),
-                });
-            }
+    }
+    for r in &idx.records {
+        if !want(&r.kind) || !range.holds(r.date.as_deref()) {
+            continue;
         }
-        if want("note") {
-            for n in folder.notes(p)? {
-                if !range.holds(Some(&n.date)) {
-                    continue;
-                }
-                out.push(Event {
-                    date: Some(n.date.clone()),
-                    person: p.id.clone(),
-                    person_name: p.name.clone(),
-                    kind: "note".into(),
-                    id: n.id.clone(),
-                    title: first_line(&n.text, 80),
-                    detail: (!n.tags.is_empty()).then(|| n.tags.join(", ")),
-                    source: n.author.clone(),
-                });
+        out.push(Event {
+            date: r.date.clone(),
+            person: p.id.clone(),
+            person_name: p.name.clone(),
+            kind: r.kind.clone(),
+            id: r.id.clone(),
+            title: r.display.clone(),
+            detail: record_detail(r),
+            source: record_source(h, r),
+        });
+    }
+    if want("study") {
+        for s in &idx.studies {
+            if !range.holds(s.date.as_deref()) {
+                continue;
             }
+            out.push(Event {
+                date: s.date.clone(),
+                person: p.id.clone(),
+                person_name: p.name.clone(),
+                kind: "study".into(),
+                id: s.id.clone(),
+                title: format!(
+                    "{} {}",
+                    s.modalities.join("/"),
+                    s.description
+                        .clone()
+                        .or_else(|| s.body_part.clone())
+                        .unwrap_or_default()
+                )
+                .trim()
+                .to_string(),
+                detail: Some(format!("{} series, {} images", s.series.len(), s.instances)),
+                source: s.facility.clone(),
+            });
         }
     }
+    if want("note") {
+        for n in notes {
+            if !range.holds(Some(&n.date)) {
+                continue;
+            }
+            out.push(Event {
+                date: Some(n.date.clone()),
+                person: p.id.clone(),
+                person_name: p.name.clone(),
+                kind: "note".into(),
+                id: n.id.clone(),
+                title: first_line(&n.text, 80),
+                detail: (!n.tags.is_empty()).then(|| n.tags.join(", ")),
+                source: n.author.clone(),
+            });
+        }
+    }
+}
+
+/// medrec's timeline order: newest first, then by kind and title.
+pub(crate) fn order_events(out: &mut [Event]) {
     out.sort_by(|a, b| {
         b.date
             .cmp(&a.date)
             .then(a.kind.cmp(&b.kind))
             .then(a.title.cmp(&b.title))
     });
-    Ok(out)
 }
 
 pub(crate) fn label(doc_type: Option<&str>) -> &'static str {
@@ -493,7 +517,7 @@ const LAB_QUERIES: &[&str] = &[
 
 /// Whether a record is one a lab query names: a result, a report, or a
 /// claim with a lab line.
-fn is_lab(r: &Record) -> bool {
+pub(crate) fn is_lab(r: &Record) -> bool {
     match r.kind.as_str() {
         "result" | "report" => true,
         "claim" => r
@@ -534,99 +558,25 @@ pub fn search(
     for p in people::selected(h, person)? {
         let idx = folder.index(p)?;
         let texts = folder.text(p)?;
-        let mut consider = |kind: &str,
-                            id: &str,
-                            date: Option<&str>,
-                            title: String,
-                            body: &str,
-                            named: Option<String>| {
-            if !range.holds(date) {
-                return;
+        let notes = folder.notes(p)?;
+        for s in searchables(&idx, &texts, &notes, labs) {
+            if !range.holds(s.date.as_deref()) {
+                continue;
             }
-            let hay = format!("{title}\n{body}");
-            let found = matches(&hay, &terms).or_else(|| named.map(|snippet| (0, snippet)));
+            let hay = s.hay();
+            let found = matches(&hay, &terms).or_else(|| s.lab.map(|snippet| (0, snippet)));
             if let Some((score, snippet)) = found {
                 hits.push(Hit {
                     person: p.id.clone(),
                     person_name: p.name.clone(),
-                    kind: kind.into(),
-                    id: id.into(),
-                    date: date.map(str::to_string),
-                    title,
+                    kind: s.kind,
+                    id: s.id,
+                    date: s.date,
+                    title: s.title,
                     snippet,
                     score,
                 });
             }
-        };
-        for d in &idx.documents {
-            let title = d
-                .title
-                .clone()
-                .or_else(|| d.original_name.clone())
-                .unwrap_or_else(|| label(d.doc_type.as_deref()).into());
-            let meta = format!(
-                "{} {}",
-                d.organization.as_deref().unwrap_or(""),
-                label(d.doc_type.as_deref())
-            );
-            let body = texts.texts.get(&d.id).map(String::as_str).unwrap_or("");
-            consider(
-                "document",
-                &d.id,
-                d.date.as_deref(),
-                title,
-                &format!("{meta}\n{body}"),
-                None,
-            );
-        }
-        for r in &idx.records {
-            let mut body = String::new();
-            flat_text(&Value::Object(r.fields.clone()), &mut body);
-            let named = (labs && is_lab(r)).then(|| record_detail(r).unwrap_or_default());
-            consider(
-                &r.kind,
-                &r.id,
-                r.date.as_deref(),
-                r.display.clone(),
-                &body,
-                named,
-            );
-        }
-        for s in &idx.studies {
-            let body = format!(
-                "{} {} {} {}",
-                s.modalities.join(" "),
-                s.body_part.as_deref().unwrap_or(""),
-                s.facility.as_deref().unwrap_or(""),
-                s.series
-                    .iter()
-                    .filter_map(|x| x.description.as_deref())
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            );
-            consider(
-                "study",
-                &s.id,
-                s.date.as_deref(),
-                s.description
-                    .clone()
-                    .unwrap_or_else(|| "Imaging study".into()),
-                &body,
-                None,
-            );
-        }
-        for n in folder.notes(p)? {
-            // The title is the text's first line; the rest is the body.
-            let rest: String = n.text.trim().lines().skip(1).collect::<Vec<_>>().join("\n");
-            let body = format!("{}\n{rest}", n.tags.join(" "));
-            consider(
-                "note",
-                &n.id,
-                Some(&n.date),
-                first_line(&n.text, 80),
-                &body,
-                None,
-            );
         }
     }
     hits.sort_by(|a, b| b.score.cmp(&a.score).then(b.date.cmp(&a.date)));
@@ -634,9 +584,110 @@ pub fn search(
     Ok(hits)
 }
 
+/// One item `search` looks through: its title and the text after it.
+pub(crate) struct Searchable {
+    pub kind: String,
+    pub id: String,
+    pub date: Option<String>,
+    pub title: String,
+    pub body: String,
+    /// For a lab record when lab queries are wanted: what a lab query
+    /// shows for it (its detail line).
+    pub lab: Option<String>,
+}
+
+impl Searchable {
+    /// The text searched: the title, then the body.
+    pub fn hay(&self) -> String {
+        format!("{}\n{}", self.title, self.body)
+    }
+}
+
+/// What `search` looks through in one person's files, in their order:
+/// documents, records, studies, then notes. `labs` fills each lab
+/// record's `lab`.
+pub(crate) fn searchables(
+    idx: &PersonIndex,
+    texts: &PersonText,
+    notes: &[Note],
+    labs: bool,
+) -> Vec<Searchable> {
+    let mut out = Vec::new();
+    for d in &idx.documents {
+        let title = d
+            .title
+            .clone()
+            .or_else(|| d.original_name.clone())
+            .unwrap_or_else(|| label(d.doc_type.as_deref()).into());
+        let meta = format!(
+            "{} {}",
+            d.organization.as_deref().unwrap_or(""),
+            label(d.doc_type.as_deref())
+        );
+        let body = texts.texts.get(&d.id).map(String::as_str).unwrap_or("");
+        out.push(Searchable {
+            kind: "document".into(),
+            id: d.id.clone(),
+            date: d.date.clone(),
+            title,
+            body: format!("{meta}\n{body}"),
+            lab: None,
+        });
+    }
+    for r in &idx.records {
+        let mut body = String::new();
+        flat_text(&Value::Object(r.fields.clone()), &mut body);
+        out.push(Searchable {
+            kind: r.kind.clone(),
+            id: r.id.clone(),
+            date: r.date.clone(),
+            title: r.display.clone(),
+            body,
+            lab: (labs && is_lab(r)).then(|| record_detail(r).unwrap_or_default()),
+        });
+    }
+    for s in &idx.studies {
+        let body = format!(
+            "{} {} {} {}",
+            s.modalities.join(" "),
+            s.body_part.as_deref().unwrap_or(""),
+            s.facility.as_deref().unwrap_or(""),
+            s.series
+                .iter()
+                .filter_map(|x| x.description.as_deref())
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+        out.push(Searchable {
+            kind: "study".into(),
+            id: s.id.clone(),
+            date: s.date.clone(),
+            title: s
+                .description
+                .clone()
+                .unwrap_or_else(|| "Imaging study".into()),
+            body,
+            lab: None,
+        });
+    }
+    for n in notes {
+        // The title is the text's first line; the rest is the body.
+        let rest: String = n.text.trim().lines().skip(1).collect::<Vec<_>>().join("\n");
+        out.push(Searchable {
+            kind: "note".into(),
+            id: n.id.clone(),
+            date: Some(n.date.clone()),
+            title: first_line(&n.text, 80),
+            body: format!("{}\n{rest}", n.tags.join(" ")),
+            lab: None,
+        });
+    }
+    out
+}
+
 /// All terms present (each as a word prefix): the count of their
 /// occurrences and a snippet around the first.
-fn matches(hay: &str, terms: &[String]) -> Option<(usize, String)> {
+pub(crate) fn matches(hay: &str, terms: &[String]) -> Option<(usize, String)> {
     let sq = classify::Squashed::new(hay);
     let mut score = 0;
     let mut first = usize::MAX;

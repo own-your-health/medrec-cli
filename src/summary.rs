@@ -196,6 +196,18 @@ pub fn person(
 ) -> Result<Summary, CliError> {
     let idx = folder.index(p)?;
     let notes = folder.notes(p)?.len();
+    Ok(of_index(h, p, &idx, notes, today, limits))
+}
+
+/// [`person`] from the person's index already read, with `notes` notes.
+pub(crate) fn of_index(
+    h: &Household,
+    p: &Person,
+    idx: &PersonIndex,
+    notes: usize,
+    today: &str,
+    limits: Limits,
+) -> Summary {
     let n = limits.per_list;
     let mut records: Vec<&Record> = idx.records.iter().collect();
     records.sort_by(|a, b| b.date.cmp(&a.date).then(a.display.cmp(&b.display)));
@@ -230,8 +242,8 @@ pub fn person(
             .collect::<Vec<_>>()
     };
 
-    Ok(Summary {
-        person: person_row(p, &idx, notes),
+    Summary {
+        person: person_row(p, idx, notes),
         as_of: today.to_string(),
         counts,
         sources,
@@ -248,11 +260,11 @@ pub fn person(
                 .collect(),
             n,
         ),
-        bills: Listed::cut(bills(&idx, today), n),
-    })
+        bills: Listed::cut(bills(idx, today), n),
+    }
 }
 
-fn person_row(p: &Person, idx: &PersonIndex, notes: usize) -> PersonRow {
+pub(crate) fn person_row(p: &Person, idx: &PersonIndex, notes: usize) -> PersonRow {
     let newest = idx
         .documents
         .iter()

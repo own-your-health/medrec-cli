@@ -98,6 +98,11 @@ enum Command {
     /// Shape every claim again from its filed raw resource, as this
     /// medrec's import does: once after an upgrade that changes claims.
     Reindex(ReindexArgs),
+    /// The views: each person's records cut into small files under views/,
+    /// for readers that cannot parse a whole index at once. medrec brings
+    /// them up to date after every write.
+    #[command(subcommand)]
+    Views(ViewsCmd),
     /// Copy the whole records folder to another Google Drive folder or a
     /// directory, then compare every file. A file the backup already holds
     /// with other bytes is replaced; files only the backup holds are kept.
@@ -660,6 +665,20 @@ enum ImagesCmd {
     },
 }
 
+#[derive(Subcommand, Debug)]
+enum ViewsCmd {
+    /// Bring views/ up to date now: each person whose files changed since
+    /// the views were written, and only the files whose bytes differ.
+    Write(ViewsWriteArgs),
+}
+
+#[derive(Args, Debug)]
+struct ViewsWriteArgs {
+    /// Make every person's views again, changed or not.
+    #[arg(long)]
+    all: bool,
+}
+
 #[derive(Args, Debug)]
 struct ReindexArgs {
     /// Only this person's claims (name or id).
@@ -888,6 +907,18 @@ fn run(cli: &Cli) -> Result<(), CliError> {
                 println!(
                     "{} claims: {} shaped again, {} unchanged, {} with no raw file",
                     r.claims, r.reshaped, r.unchanged, r.without_raw
+                );
+            });
+            Ok(())
+        }
+        Command::Views(ViewsCmd::Write(a)) => {
+            let cfg = load(&store, cli)?;
+            let f = Folder::open(&cfg, Access::Write)?;
+            let r = medrec::viewfiles::sync(&f, a.all)?;
+            output::emit(json, "views-write", to_value(&r), |_| {
+                println!(
+                    "views: {} people, {} made again; {} files written, {} unchanged, {} removed",
+                    r.people, r.rewritten, r.written, r.unchanged, r.removed
                 );
             });
             Ok(())
@@ -1740,6 +1771,8 @@ fn import_cmd(cli: &Cli, a: &ImportArgs, store: &ConfigStore) -> Result<(), CliE
         let spooled = import::export(&f, &cfg, &provider, &req);
         exported.push((req, spooled));
     }
+    // The views once, after every member is filed.
+    let views = medrec::viewfiles::hold(&cfg.folder_location()?, cfg.store_budget());
     let mut results = Vec::new();
     for (i, (req, spooled)) in exported.into_iter().enumerate() {
         note(cli, &format!("filing member {} of {n} ...", i + 1));
@@ -1779,6 +1812,7 @@ fn import_cmd(cli: &Cli, a: &ImportArgs, store: &ConfigStore) -> Result<(), CliE
     // printing a second (the family's rule). Every spool was consumed
     // above; `results` is the last value holding anything.
     drop(results);
+    drop(views);
     if code != 0 {
         std::process::exit(code);
     }
