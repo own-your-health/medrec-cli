@@ -16,7 +16,7 @@
   "homepage": "https://github.com/own-your-health/medrec-cli",
   "documentation": "https://github.com/own-your-health/medrec-cli#use-with-claude",
   "support": "https://github.com/own-your-health/medrec-cli/issues",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "keywords": ["medical records", "health", "lab results", "fhir", "read-only"],
   "server": {
     "type": "binary",
