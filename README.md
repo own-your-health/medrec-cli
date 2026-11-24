@@ -266,6 +266,8 @@ medrec intake --inbox                           # drain the folder's inbox/
 medrec intake --drive "gdrive:Old scans"        # the back catalogue, copied
 medrec review list                              # what intake could not decide
 medrec review file <id> --person Robin --type lab_report --date 2026-03-04
+medrec review file --from held.ndjson            # many at once: one JSON object per line
+medrec intake --from scans.ndjson                # the same for files, each with its own values
 medrec documents list --person Robin
 medrec documents merge <copy> --into <id>       # a document filed twice: one kept
 
@@ -289,6 +291,16 @@ medrec verify                                   # every indexed file against the
 medrec reindex                                  # claims shaped again from their raw files, after an upgrade
 medrec backup --to "/Volumes/Backup/Medical Records"
 ```
+
+A `--from` list holds one JSON object per line, with the keys the flags
+name: `{"id": "<review id>", "person": "Robin", "type": "lab_report",
+"date": "2026-03-04", "org": "Example Health"}` for `review file`, and
+`"file"` in place of `"id"` (plus `"classified_by"`) for `intake`. `-`
+reads standard input. Every line is checked before anything is filed, so a
+bad type or date stops the list with nothing changed. The lines are filed in
+order under one lock, a line that fails is reported while the rest are still
+filed (exit 1), and the views are written once, at the end, rather than
+after each filing.
 
 Every command takes `--json` (one document on stdout) and `--help`. Every
 list (`timeline`, the record views, `documents list`, `note list`,

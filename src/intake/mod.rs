@@ -150,6 +150,24 @@ pub struct Outcome {
 }
 
 impl Outcome {
+    /// A named file that failed before it was read: a batch line whose
+    /// values the folder refused (`intake --from`).
+    pub fn failed(source: &str, error: &str) -> Self {
+        let mut o = Outcome::new(
+            &Item {
+                from: From::Local(PathBuf::from(source)),
+                name: source.to_string(),
+                origin: "file",
+                policy: Policy::Copy,
+                size: None,
+                md5: None,
+            },
+            "failed",
+        );
+        o.error = Some(error.to_string());
+        o
+    }
+
     fn new(item: &Item, status: &str) -> Self {
         Outcome {
             source: item.name.clone(),

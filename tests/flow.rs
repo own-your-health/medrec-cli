@@ -2558,6 +2558,158 @@ fn a_claim_line_its_totals_leave_out_is_marked_and_kept_through_reindex() {
     let _ = std::fs::remove_dir_all(&e.root);
 }
 
+/// Whether the views are those of every person's current `index.json`.
+fn views_current(e: &Env) -> bool {
+    let h: Value =
+        serde_json::from_str(&std::fs::read_to_string(e.records().join("household.json")).unwrap())
+            .unwrap();
+    let v: Value = serde_json::from_str(
+        &std::fs::read_to_string(e.records().join("views/views.json")).unwrap(),
+    )
+    .unwrap();
+    h["people"].as_array().unwrap().iter().all(|p| {
+        let index = e
+            .records()
+            .join(p["folder"].as_str().unwrap())
+            .join("index.json");
+        !index.exists() || v["people"][p["id"].as_str().unwrap()]["index"] == md5_of(&index)
+    })
+}
+
+#[test]
+fn a_list_files_each_line_with_its_own_values_and_the_views_once() {
+    if !has("pdftotext") {
+        eprintln!("skipped: pdftotext (poppler) is not installed");
+        return;
+    }
+    let e = Env::new("lists");
+    setup(&e);
+    let scans = e.root.join("scans");
+    medrec::testdata::write_scans(&scans);
+    let f = |n: &str| scans.join(n).to_string_lossy().into_owned();
+    let list = e.root.join("intake.ndjson");
+    let line = |v: Value| format!("{}\n", serde_json::to_string(&v).unwrap());
+    let lines = [
+        line(
+            serde_json::json!({"file": f("visit_alex.pdf"), "person": "Alex", "type": "visit_summary", "date": "2026-02-01", "org": "Example Health"}),
+        ),
+        line(
+            serde_json::json!({"file": f("lab_robin.pdf"), "person": "Robin", "type": "lab_report", "date": "2026-03-04"}),
+        ),
+        line(serde_json::json!({"file": f("ambiguous.pdf")})),
+    ];
+    // A bad line anywhere stops the list before anything is filed.
+    std::fs::write(
+        &list,
+        format!(
+            "{}{}",
+            lines[0],
+            line(serde_json::json!({"file": f("eob_alex.pdf"), "type": "statement"}))
+        ),
+    )
+    .unwrap();
+    let bad = e.run(&["--json", "intake", "--from", list.to_str().unwrap()]);
+    assert_eq!(bad.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&bad.stdout).contains("list line 2: unknown document type"));
+    assert!(!e.records().join("Alex Testperson/Documents").exists());
+    // The list and the flags it replaces do not mix.
+    assert_eq!(
+        e.run(&[
+            "intake",
+            "--from",
+            list.to_str().unwrap(),
+            "--person",
+            "Alex"
+        ])
+        .status
+        .code(),
+        Some(2)
+    );
+
+    std::fs::write(&list, lines.concat()).unwrap();
+    let r = e.ok(&["intake", "--from", list.to_str().unwrap()]);
+    assert_eq!(
+        (
+            r["counts"]["filed"].as_u64(),
+            r["counts"]["review"].as_u64()
+        ),
+        (Some(2), Some(1)),
+        "{r}"
+    );
+    let by = |src: &str| {
+        r["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|i| i["source"] == src)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(by("visit_alex.pdf")["person_name"], "Alex Testperson");
+    assert_eq!(by("lab_robin.pdf")["date"], "2026-03-04");
+    assert!(views_current(&e), "the views follow the whole list");
+
+    // The held page and an item that is not held: the first is filed, the
+    // second reported, and the command exits 1.
+    let q = ids_of(&e.ok(&["review", "list"]));
+    assert_eq!(q.len(), 1);
+    let rl = e.root.join("review.ndjson");
+    std::fs::write(
+        &rl,
+        [
+            line(serde_json::json!({"id": "rv_not_held"})),
+            line(serde_json::json!({"id": q[0], "person": "Alex", "type": "letter", "date": "2026-01-20"})),
+        ]
+        .concat(),
+    )
+    .unwrap();
+    let out = e.run(&["--json", "review", "file", "--from", rl.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["schema"], "review-filed-list/v1");
+    assert_eq!(v["counts"], serde_json::json!({"failed": 1, "filed": 1}));
+    assert_eq!(v["items"][0]["line"], 1);
+    assert_eq!(v["items"][1]["status"], "filed");
+    assert!(e
+        .records()
+        .join(v["items"][1]["path"].as_str().unwrap())
+        .exists());
+    assert!(ids_of(&e.ok(&["review", "list"])).is_empty());
+    assert!(views_current(&e));
+
+    // A plain intake with a file that fails still brings the views up to
+    // date for the one it filed, before it exits 1.
+    // The claim's folder refuses writes, so the EOB fails to upload.
+    use std::os::unix::fs::PermissionsExt;
+    let claims = e.records().join("Alex Testperson/Claims/2026");
+    std::fs::create_dir_all(&claims).unwrap();
+    std::fs::set_permissions(&claims, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let out = e.run(&[
+        "--json",
+        "intake",
+        &f("lab_robin_rescan.pdf"),
+        &f("eob_alex.pdf"),
+    ]);
+    std::fs::set_permissions(&claims, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(
+        (
+            v["counts"]["filed"].as_u64(),
+            v["counts"]["failed"].as_u64()
+        ),
+        (Some(1), Some(1)),
+        "{v}"
+    );
+    assert!(views_current(&e));
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
 /// MD5 (hex) of a file, as Drive reports it.
 fn md5_of(path: &Path) -> String {
     medrec::hash::md5_hex(&std::fs::read(path).unwrap())
