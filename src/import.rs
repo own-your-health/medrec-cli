@@ -2284,8 +2284,14 @@ fn record_source(h: &mut Household, pid: &str, cli: &str, header: &Header) {
                 s.patient_label = header.patient.label.clone();
             }
             // A sign-in's organization can be renamed between pulls (an
-            // athenahealth-wide sign-in learns its practice's name).
-            if !header.organization.name.trim().is_empty() {
+            // athenahealth-wide sign-in learns its practice's name), but a
+            // practice's name is not given back for a connection's.
+            let name = header.organization.name.trim();
+            let knows_practice = s
+                .organization_name
+                .as_deref()
+                .is_some_and(|n| !n.trim().is_empty() && !crate::plain::is_connection(n));
+            if !name.is_empty() && !(crate::plain::is_connection(name) && knows_practice) {
                 s.organization_name = Some(header.organization.name.clone());
             }
         }
@@ -2969,6 +2975,20 @@ mod tests {
             "athena",
             &header("900002", "Example Family Medicine"),
         );
+        // A later pull that names only the connection keeps the practice.
+        record_source(
+            &mut h,
+            "p_a",
+            "athena",
+            &header("900001", "athenahealth (all practices)"),
+        );
+        // A renamed practice is renamed.
+        record_source(
+            &mut h,
+            "p_a",
+            "athena",
+            &header("900002", "Example Family Health"),
+        );
         let names: Vec<_> = h
             .sources
             .iter()
@@ -2978,8 +2998,19 @@ mod tests {
             names,
             [
                 (Some("900001"), Some("Example Pediatrics")),
-                (Some("900002"), Some("Example Family Medicine"))
+                (Some("900002"), Some("Example Family Health"))
             ]
+        );
+        // A record is labelled with its own sign-in's practice, not the
+        // first organization at the shared base.
+        let pv: crate::model::Provenance = serde_json::from_value(serde_json::json!({
+            "source": {"kind": "fhir", "cli": "athena", "organization_id": "900002",
+                       "fhir_base": "https://athena.example.test/fhir/r4"},
+            "method": "fhir-api", "filed_at": "2026-11-20T10:00:00Z", "filed_by": "medrec 0.9.3"}))
+        .unwrap();
+        assert_eq!(
+            crate::views::source_label(&h, &pv).as_deref(),
+            Some("Example Family Health")
         );
         let orgs: Vec<&str> = h.organizations.iter().map(|o| o.name.as_str()).collect();
         assert_eq!(
@@ -2987,7 +3018,8 @@ mod tests {
             [
                 "athenahealth (all practices)",
                 "Example Pediatrics",
-                "Example Family Medicine"
+                "Example Family Medicine",
+                "Example Family Health"
             ]
         );
     }

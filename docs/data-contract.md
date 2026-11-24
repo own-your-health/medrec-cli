@@ -1370,7 +1370,8 @@ readers ship with medrec:
     when uncoded: the newest.
   - the latest result of each test is grouped the same way. A test's
     series is every `result` record whose code is the one asked for, or
-    whose name holds the words asked for.
+    whose name holds the words asked for. A series is private when any of its
+    results is (0.9.3 and later; see the private items below).
   - a bill is a `bill` document with a `statement`, not `same_statement_as`
     another. The newest statement per organization and account is shown
     when its `amount_due` is over zero and `bills.json` does not have it
