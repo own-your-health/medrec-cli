@@ -17,6 +17,104 @@ pub const RXNORM: &str = "http://www.nlm.nih.gov/research/umls/rxnorm";
 pub const CVX: &str = "http://hl7.org/fhir/sid/cvx";
 pub const NDC: &str = "http://hl7.org/fhir/sid/ndc";
 
+/// Each kind's `fields`, as data-contract.md's table lists them: a reader
+/// may meet any of these, and no other. A claim's `visit` and `results` are
+/// the links `claims` makes.
+pub const FIELDS: &[(&str, &[&str])] = &[
+    (
+        "encounter",
+        &[
+            "when",
+            "class",
+            "location",
+            "practitioner",
+            "reason",
+            "service_provider",
+            "period",
+        ],
+    ),
+    (
+        "result",
+        &[
+            "when",
+            "value",
+            "reference_range",
+            "interpretation",
+            "category",
+            "issued",
+        ],
+    ),
+    (
+        "report",
+        &["when", "conclusion", "category", "results", "issued"],
+    ),
+    (
+        "condition",
+        &["when", "verification_status", "category", "abatement"],
+    ),
+    (
+        "medication",
+        &[
+            "when",
+            "dosage",
+            "prescriber",
+            "intent",
+            "quantity",
+            "days_supply",
+            "pharmacy",
+            "type",
+            "ndc",
+            "source",
+        ],
+    ),
+    ("allergy", &["when", "criticality", "reaction"]),
+    (
+        "immunization",
+        &["when", "lot_number", "site", "route", "performer"],
+    ),
+    ("procedure", &["when", "performer", "location"]),
+    (
+        "coverage",
+        &[
+            "when",
+            "payer",
+            "period",
+            "relationship",
+            "plan",
+            "group",
+            "subscriber_id",
+        ],
+    ),
+    (
+        "claim",
+        &[
+            "when",
+            "provider",
+            "insurer",
+            "facility",
+            "outcome",
+            "use",
+            "type",
+            "category",
+            "billable_period",
+            "benefit_period",
+            "total",
+            "payment",
+            "amounts",
+            "items",
+            "payer_notes",
+            "diagnoses",
+            "benefit_balance",
+            "days_supply",
+            "refill_number",
+            "refills_authorized",
+            "brand_generic",
+            "visit",
+            "results",
+        ],
+    ),
+];
+
 /// The record a resource becomes, if it is one medrec indexes.
 pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
     let rt = r.get("resourceType")?.as_str()?;
@@ -406,6 +504,13 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
         ),
         _ => merge_key(kind, code.as_ref(), &display, date.as_deref()),
     };
+    debug_assert!(
+        FIELDS
+            .iter()
+            .any(|(k, known)| *k == kind && fields.keys().all(|f| known.contains(&f.as_str()))),
+        "a {kind} field is not in FIELDS: {:?}",
+        fields.keys().collect::<Vec<_>>()
+    );
     Some(Record {
         id: crate::ids::new("r"),
         kind: kind.into(),
@@ -888,6 +993,35 @@ fn put_str(m: &mut Map<String, Value>, k: &str, v: Option<&str>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// data-contract.md's table of fields is FIELDS, row for row.
+    #[test]
+    fn the_contract_lists_each_kinds_fields() {
+        let doc = include_str!("../docs/data-contract.md");
+        let table = doc
+            .split_once("**Fields by kind.**")
+            .expect("the table")
+            .1
+            .split_once("\n\n")
+            .unwrap()
+            .1;
+        let rows: Vec<(String, String)> = table
+            .lines()
+            .take_while(|l| l.starts_with('|'))
+            .skip(2)
+            .map(|l| {
+                let cell: Vec<&str> = l.split('|').map(str::trim).collect();
+                let name = |c: &str| c.trim_matches('`').to_string();
+                (name(cell[1]), name(cell[2]))
+            })
+            .collect();
+        let want: Vec<(String, String)> = FIELDS
+            .iter()
+            .flat_map(|(k, fs)| fs.iter().map(move |f| (k.to_string(), f.to_string())))
+            .collect();
+        assert_eq!(rows, want);
+    }
+
     use crate::model::{filed_by, ProvenanceSource};
 
     fn prov() -> Provenance {
