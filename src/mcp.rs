@@ -523,19 +523,35 @@ fn person_error(e: CliError) -> ToolError {
 struct PrivateItems {
     /// By id, with their area.
     areas: std::collections::BTreeMap<String, String>,
-    /// The people, by name, whose `marks.json` does not read. Any of their
-    /// items may be one the household marked private, so an answer about
-    /// the whole household holds all of them back.
+    /// The people whose `marks.json` does not read, by name as shown. Any
+    /// of their items may be one the household marked private, so an
+    /// answer about the whole household holds all of them back (`held`).
     unreadable: Vec<String>,
+    /// The record, document and event ids of those people.
+    held: std::collections::BTreeSet<String>,
 }
 
 impl PrivateItems {
     fn of(f: &Folder, h: &Household, people: &[&crate::model::Person]) -> Result<Self, CliError> {
         let mut out = PrivateItems::default();
         for p in people {
-            let v = crate::private::of_person(f, h, p)?;
+            let idx = f.index(p)?;
+            let (v, events) = crate::private::with_events(f, h, p, &idx)?;
             if v.get("marks_unreadable").is_some() {
-                out.unreadable.push(p.name.clone());
+                out.unreadable.push(crate::printable(&p.name));
+                out.held.extend(
+                    idx.records
+                        .iter()
+                        .map(|r| r.id.clone())
+                        .chain(idx.documents.iter().map(|d| d.id.clone()))
+                        .chain(
+                            events["events"]
+                                .as_array()
+                                .into_iter()
+                                .flatten()
+                                .filter_map(|e| e["id"].as_str().map(str::to_string)),
+                        ),
+                );
             }
             out.areas.extend(crate::private::Private::of(&v).items);
         }
@@ -546,10 +562,10 @@ impl PrivateItems {
         self.areas.get(id).cloned()
     }
 
-    /// Whether an item of `person` (by name) stays out of an answer about
-    /// the whole household that does not name it.
-    fn held_back(&self, id: &str, person: &str) -> bool {
-        self.areas.contains_key(id) || self.unreadable.iter().any(|n| n == person)
+    /// Whether an item stays out of an answer about the whole household
+    /// that does not name it.
+    fn held_back(&self, id: &str) -> bool {
+        self.areas.contains_key(id) || self.held.contains(id)
     }
 
     /// Marks an answer's private items with their area when the call is
@@ -558,7 +574,7 @@ impl PrivateItems {
     fn keep(&self, items: &mut Vec<Item>, open: impl Fn(&Item) -> bool) -> usize {
         let before = items.len();
         items.retain_mut(|i| {
-            if !self.held_back(&i.id, &i.person) {
+            if !self.held_back(&i.id) {
                 return true;
             }
             if !open(i) {
@@ -721,7 +737,7 @@ impl MedrecTools {
         let (hits, left_out) =
             views::search_leaving_out(&f, &h, person, &a.query, &r, page.wanted(), &|x| {
                 person.is_none()
-                    && private.held_back(&x.id, &x.person_name)
+                    && private.held_back(&x.id)
                     && !crate::private::names(&x.title, &a.query)
             })?;
         let items = hits
