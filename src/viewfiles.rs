@@ -652,8 +652,6 @@ fn name_of(r: &Record) -> Name {
     )
 }
 
-/// Every view file of one person into `out`, by path in the folder, and
-/// the person's entry in `views.json`.
 /// A linked person's files as a person's events read them.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct LinkedFiles {
@@ -668,6 +666,8 @@ pub(crate) struct EventsFrom {
     pub linked: BTreeMap<String, LinkedFiles>,
 }
 
+/// Every view file of one person into `out`, by path in the folder, and
+/// the person's entry in `views.json`.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn person(
     h: &Household,

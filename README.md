@@ -616,7 +616,7 @@ supported.
 |---|---|
 | `medrec_summary` | The household's people. With `person`: their current medicines, conditions and allergies, immunizations, the latest result of each test with the lab's range and flag, recent visits, and bills with an amount due |
 | `medrec_search` | Documents, records, imaging studies and notes holding every word of a query; a query naming lab tests (`blood tests`, `labs`) also finds every lab result, report and lab claim |
-| `medrec_records` | One kind, newest first: `medications`, `conditions`, `allergies`, `immunizations`, `visits`, `procedures`, `results` (with `name`, one test over time), `tests` (the latest result of each), `reports`, `claims`, `coverage`, `bills`, `documents`, `notes`, `timeline` or `events` (what happened: one per visit, ER trip, stay, test or fill, with `you_owe`; `id` gives one with its money and members); `active` keeps current ones |
+| `medrec_records` | One kind, newest first: `medications`, `conditions`, `allergies`, `immunizations`, `visits`, `procedures`, `results` (with `name`, one test over time), `tests` (the latest result of each), `reports`, `claims`, `coverage`, `bills`, `documents`, `notes`, `timeline` or `events` (what happened: one per visit, ER trip, stay, test or fill, with `you_owe`; `id` gives one with its money and members); `active` keeps current ones (not for `events`, whose `status` says which are still waiting) |
 | `medrec_document` | A filed document's extracted text, in parts of up to 16,000 characters, with page breaks marked |
 
 Claude Desktop: install the release's `medrec-<version>.mcpb` (open the
