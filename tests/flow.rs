@@ -2302,7 +2302,7 @@ fn with_lab_line() -> String {
                 };
                 v["item"].as_array_mut().unwrap().push(serde_json::json!({
                     "sequence": 2,
-                    "productOrService": {"coding": [{"system": "http://www.ama-assn.org/go/cpt", "code": "80053", "display": "Metabolic panel"}]},
+                    "productOrService": {"coding": [{"system": "http://www.ama-assn.org/go/cpt", "code": "80053", "display": "Chemistry tests"}]},
                     "servicedDate": "2026-03-04",
                     "adjudication": [adj("submitted", "Billed", 40.0), adj("benefit", "Plan paid", 30.0), adj("copay", "Copay", 5.5)],
                 }));
@@ -2356,7 +2356,7 @@ fn a_claim_is_titled_priced_by_category_and_linked_to_its_visit_and_results() {
     let f = &claim["fields"];
     assert_eq!(
         claim["display"],
-        "Office visit and Metabolic panel · Example Health"
+        "Office visit and Chemistry tests · Example Health"
     );
     assert_eq!(f["type"], "professional", "the type stays in fields.type");
     assert_eq!(f["category"], "mixed");
