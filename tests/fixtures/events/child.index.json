@@ -4,15 +4,15 @@
  "rev": 1,
  "documents": [
   {
-   "id": "d_urologyrxaaaaaaaaaaa",
-   "path": "Documents/2026/2026-03-02_urologyrx.pdf",
-   "sha256": "1689e854fd0565ab535e022c046b7006157296c22fb2d0e64151db880a3234f0",
-   "md5": "583287e8b87f6282591e996d21c09952",
+   "id": "d_podiatryrxaaaaaaaaaa",
+   "path": "Documents/2026/2026-03-02_podiatryrx.pdf",
+   "sha256": "28d5b71e6792e2d1a88c93365268eacc045a5b72bf3b5ce53c73ab8ae4fa5ace",
+   "md5": "aa8eeb965caec2f3f16121c5684cdae7",
    "size": 1000,
    "media_type": "application/pdf",
    "doc_type": "prescription",
    "date": "2026-03-02",
-   "organization": "Example Pediatric Urology",
+   "organization": "Example Podiatry for Kids",
    "filed_at": "2026-03-02T12:00:00Z",
    "origin": {
     "kind": "file",

@@ -145,15 +145,15 @@
    "title": "Prescription"
   },
   {
-   "id": "d_urologybillaaaaaaaaa",
-   "path": "Documents/2026/2026-03-02_urologybill.pdf",
-   "sha256": "0776ac9954aa6f909b81ae07be90010f6edd255a455d4fe936bc8ae9872b0cd5",
-   "md5": "a6ec9e47f4992554b8d0ef66db3aff10",
+   "id": "d_podiatrybillaaaaaaaa",
+   "path": "Documents/2026/2026-03-02_podiatrybill.pdf",
+   "sha256": "f7da115dddc6b36633c13d0e1f028b5f922425d93f38b6217ad5c769d3751d6e",
+   "md5": "cdf24d24fc6cbe8a6353268e4576f948",
    "size": 1000,
    "media_type": "application/pdf",
    "doc_type": "bill",
    "date": "2026-03-02",
-   "organization": "Example Urology Associates",
+   "organization": "Example Podiatry Associates",
    "filed_at": "2026-03-02T12:00:00Z",
    "origin": {
     "kind": "file",
@@ -170,11 +170,11 @@
    "title": "Statement",
    "statement": {
     "statement_date": "2026-03-02",
-    "due_date": "2026-03-30",
     "amount_due": {
      "amount": "40.00",
      "currency": "USD"
-    }
+    },
+    "due_date": "2026-03-30"
    }
   }
  ],
@@ -646,13 +646,13 @@
    ]
   },
   {
-   "id": "r_birthobaaaaaaaaaaaaa",
+   "id": "r_birthrheumaaaaaaaaaa",
    "kind": "claim",
-   "key": "claim|example|birthob|2026-03-08",
+   "key": "claim|example|birthrheum|2026-03-08",
    "date": "2026-03-08",
-   "display": "Day of discharge \u00b7 Sample OB Hospitalists Group",
+   "display": "Day of discharge \u00b7 Sample Rheumatology Group",
    "fields": {
-    "provider": "Sample OB Hospitalists Group",
+    "provider": "Sample Rheumatology Group",
     "insurer": "Example Health Plan",
     "billable_period": {
      "start": "2026-03-08",
@@ -1786,9 +1786,9 @@
    ]
   },
   {
-   "id": "r_urologyaaaaaaaaaaaaa",
+   "id": "r_podiatryaaaaaaaaaaaa",
    "kind": "claim",
-   "key": "claim|example|urology|2026-03-02",
+   "key": "claim|example|podiatry|2026-03-02",
    "date": "2026-03-02",
    "display": "Office visit \u00b7 K EXAMPLE",
    "fields": {
