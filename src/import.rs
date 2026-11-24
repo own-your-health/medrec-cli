@@ -2283,6 +2283,11 @@ fn record_source(h: &mut Household, pid: &str, cli: &str, header: &Header) {
             if header.patient.label.is_some() {
                 s.patient_label = header.patient.label.clone();
             }
+            // A sign-in's organization can be renamed between pulls (an
+            // athenahealth-wide sign-in learns its practice's name).
+            if !header.organization.name.trim().is_empty() {
+                s.organization_name = Some(header.organization.name.clone());
+            }
         }
         None => h.sources.push(Source {
             id: ids::new("s"),
@@ -2297,9 +2302,13 @@ fn record_source(h: &mut Household, pid: &str, cli: &str, header: &Header) {
             last_pull: Some(header.pulled_at.clone()),
         }),
     }
-    if !h.organizations.iter().any(|o| {
-        o.fhir_base.as_deref() == Some(base.as_str()) || o.name == header.organization.name
-    }) {
+    // One FHIR base can serve many practices (athenahealth's), so an
+    // organization is told apart by its name.
+    if !h
+        .organizations
+        .iter()
+        .any(|o| o.name == header.organization.name)
+    {
         h.organizations.push(Organization {
             id: ids::new("g"),
             name: header.organization.name.clone(),
@@ -2922,6 +2931,65 @@ mod tests {
         }
         // A patient never filed from this CLI still fails before the export.
         assert!(super::who(&h, &req("nobody", Some("health"), None)).is_err());
+    }
+
+    #[test]
+    fn a_sign_in_takes_its_organizations_name_on_every_pull_and_each_practice_is_listed() {
+        let mut h: Household = serde_json::from_value(serde_json::json!({
+            "schema": "medrec-household/v1", "format": 1, "folder_id": "f_1", "rev": 1,
+            "created_at": "2026-01-01T00:00:00Z",
+            "people": [{"id": "p_a", "name": "Alex Testperson", "folder": "Alex Testperson",
+                        "created_at": "2026-01-01T00:00:00Z"}]
+        }))
+        .unwrap();
+        // One FHIR base serving every practice, as athenahealth's does.
+        let header = |org: &str, name: &str| -> Header {
+            let line = crate::testdata::STREAM.lines().next().unwrap();
+            let mut v: Value = serde_json::from_str(line).unwrap();
+            v["organization"]["id"] = org.into();
+            v["organization"]["name"] = name.into();
+            v["organization"]["fhir_base"] = "https://athena.example.test/fhir/r4/".into();
+            serde_json::from_value(v).unwrap()
+        };
+        record_source(
+            &mut h,
+            "p_a",
+            "athena",
+            &header("900001", "athenahealth (all practices)"),
+        );
+        record_source(
+            &mut h,
+            "p_a",
+            "athena",
+            &header("900001", "Example Pediatrics"),
+        );
+        record_source(
+            &mut h,
+            "p_a",
+            "athena",
+            &header("900002", "Example Family Medicine"),
+        );
+        let names: Vec<_> = h
+            .sources
+            .iter()
+            .map(|s| (s.organization.as_deref(), s.organization_name.as_deref()))
+            .collect();
+        assert_eq!(
+            names,
+            [
+                (Some("900001"), Some("Example Pediatrics")),
+                (Some("900002"), Some("Example Family Medicine"))
+            ]
+        );
+        let orgs: Vec<&str> = h.organizations.iter().map(|o| o.name.as_str()).collect();
+        assert_eq!(
+            orgs,
+            [
+                "athenahealth (all practices)",
+                "Example Pediatrics",
+                "Example Family Medicine"
+            ]
+        );
     }
 
     #[test]

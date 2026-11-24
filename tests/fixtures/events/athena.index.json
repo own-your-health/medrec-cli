@@ -1,0 +1,251 @@
+{
+ "schema": "medrec-index/v1",
+ "person": "p_athenaexampleaaaaaaa",
+ "rev": 1,
+ "documents": [],
+ "records": [
+  {
+   "id": "r_newvisitaaaaaaaaaaaa",
+   "kind": "encounter",
+   "key": "encounter|newvisit|2026-09-01",
+   "date": "2026-09-01T14:00:00Z",
+   "code": {
+    "system": "http://www.ama-assn.org/go/cpt",
+    "code": "99203",
+    "display": "NEW PT OFFICE VISIT LEVEL THREE"
+   },
+   "display": "NEW PT OFFICE VISIT LEVEL THREE",
+   "status": "finished",
+   "fields": {
+    "class": "AMB",
+    "period": {
+     "start": "2026-09-01T14:00:00Z"
+    },
+    "reason": "Ofc visit, new pt"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "athena",
+      "organization_id": "900001",
+      "fhir_base": "https://athena.example.test/fhir/r4"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.2",
+     "fetched_at": "2026-11-20T10:00:00Z"
+    }
+   ]
+  },
+  {
+   "id": "r_earpainaaaaaaaaaaaaa",
+   "kind": "encounter",
+   "key": "encounter|earpain|2026-09-10",
+   "date": "2026-09-10T14:00:00Z",
+   "code": {
+    "system": "http://www.ama-assn.org/go/cpt",
+    "code": "99213",
+    "display": "EST PT OFFICE VISIT LEVEL THREE"
+   },
+   "display": "EST PT OFFICE VISIT LEVEL THREE",
+   "status": "finished",
+   "fields": {
+    "class": "AMB",
+    "period": {
+     "start": "2026-09-10T14:00:00Z"
+    },
+    "reason": "Ear pain",
+    "service_provider": "athenahealth (all practices)",
+    "location": "Example Pediatrics Annex"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "athena",
+      "organization_id": "900001",
+      "fhir_base": "https://athena.example.test/fhir/r4"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.2",
+     "fetched_at": "2026-11-20T10:00:00Z"
+    }
+   ]
+  },
+  {
+   "id": "r_consultaaaaaaaaaaaaa",
+   "kind": "encounter",
+   "key": "encounter|consult|2026-09-20",
+   "date": "2026-09-20T14:00:00Z",
+   "code": {
+    "system": "http://www.ama-assn.org/go/cpt",
+    "code": "99243",
+    "display": "CONSULT VISIT WITH ENT REVIEW"
+   },
+   "display": "CONSULT VISIT WITH ENT REVIEW",
+   "status": "finished",
+   "fields": {
+    "class": "AMB",
+    "period": {
+     "start": "2026-09-20T14:00:00Z"
+    }
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "athena",
+      "organization_id": "900001",
+      "fhir_base": "https://athena.example.test/fhir/r4"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.2",
+     "fetched_at": "2026-11-20T10:00:00Z"
+    }
+   ]
+  },
+  {
+   "id": "r_checkupaaaaaaaaaaaaa",
+   "kind": "encounter",
+   "key": "encounter|checkup|2026-10-01",
+   "date": "2026-10-01T14:00:00Z",
+   "code": {
+    "system": "http://www.ama-assn.org/go/cpt",
+    "code": "99392",
+    "display": "PREVENTIVE VISIT EST AGE ONE TO FOUR"
+   },
+   "display": "PREVENTIVE VISIT EST AGE ONE TO FOUR",
+   "status": "finished",
+   "fields": {
+    "class": "AMB",
+    "period": {
+     "start": "2026-10-01T14:00:00Z"
+    },
+    "reason": "Office visit, est pt"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "athena",
+      "organization_id": "900001",
+      "fhir_base": "https://athena.example.test/fhir/r4"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.2",
+     "fetched_at": "2026-11-20T10:00:00Z"
+    }
+   ]
+  },
+  {
+   "id": "r_fluclaimaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|example|fluclaim|2026-10-20",
+   "date": "2026-10-20",
+   "display": "Flu vaccine and Vaccine given \u00b7 Example Pediatrics",
+   "fields": {
+    "provider": "Example Pediatrics",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2026-10-20",
+     "end": "2026-10-20"
+    },
+    "type": "professional",
+    "amounts": {
+     "billed": {
+      "amount": "60.00",
+      "currency": "USD"
+     },
+     "allowed": {
+      "amount": "45.00",
+      "currency": "USD"
+     },
+     "plan_paid": {
+      "amount": "45.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "0.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "sequence": 1,
+      "category": "vaccine",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "90686",
+       "display": "Flu vaccine"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "40.00",
+        "currency": "USD"
+       },
+       "allowed": {
+        "amount": "30.00",
+        "currency": "USD"
+       },
+       "plan_paid": {
+        "amount": "30.00",
+        "currency": "USD"
+       },
+       "you_owe": {
+        "amount": "0.00",
+        "currency": "USD"
+       }
+      }
+     },
+     {
+      "sequence": 2,
+      "category": "vaccine",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "90471",
+       "display": "Vaccine given"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "20.00",
+        "currency": "USD"
+       },
+       "allowed": {
+        "amount": "15.00",
+        "currency": "USD"
+       },
+       "plan_paid": {
+        "amount": "15.00",
+        "currency": "USD"
+       },
+       "you_owe": {
+        "amount": "0.00",
+        "currency": "USD"
+       }
+      }
+     }
+    ],
+    "category": "vaccine"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "uhc",
+      "organization_id": "example-plan",
+      "fhir_base": "https://plan.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.2"
+    }
+   ]
+  }
+ ],
+ "studies": [],
+ "imports": []
+}

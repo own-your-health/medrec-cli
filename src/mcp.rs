@@ -365,6 +365,10 @@ pub struct Item {
     /// For `tests`: results of the test on file.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub results: Option<usize>,
+    /// For `tests`: the ids of every result in the series, the latest's
+    /// included, so that a private one among them holds the series back.
+    #[serde(skip)]
+    pub members: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub amount_due: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -571,15 +575,17 @@ impl PrivateItems {
     /// Marks an answer's private items with their area when the call is
     /// about one person or names the item (`open`); otherwise leaves them
     /// out. What is kept, and where those left out sat.
+    /// A series of tests counts as private when any of its results does.
     fn keep(&self, items: Vec<Item>, open: impl Fn(&Item) -> bool) -> (Vec<Item>, views::LeftOut) {
         views::LeftOut::split(items, |i| {
-            if !self.held_back(&i.id) {
+            let ids = || std::iter::once(&i.id).chain(&i.members);
+            if !ids().any(|id| self.held_back(id)) {
                 return false;
             }
             if !open(i) {
                 return true;
             }
-            i.private = self.area(&i.id);
+            i.private = ids().find_map(|id| self.area(id));
             false
         })
     }
@@ -819,8 +825,24 @@ impl MedrecTools {
                         .filter(|x| name.is_none_or(|n| views::matches_code(x, n)))
                         .collect();
                     results.sort_by(|a, b| b.date.cmp(&a.date).then(a.display.cmp(&b.display)));
+                    let mut series: std::collections::BTreeMap<String, Vec<String>> =
+                        Default::default();
+                    for x in &results {
+                        series
+                            .entry(summary::series_key(x))
+                            .or_default()
+                            .push(x.id.clone());
+                    }
                     for row in summary::latest_results(&h, &results) {
-                        items.push(result_item(&p.name, row));
+                        let members = results
+                            .iter()
+                            .find(|x| Some(x.id.as_str()) == row.id.as_deref())
+                            .and_then(|x| series.get(&summary::series_key(x)))
+                            .cloned()
+                            .unwrap_or_default();
+                        let mut item = result_item(&p.name, row);
+                        item.members = members;
+                        items.push(item);
                     }
                 }
             }

@@ -103,6 +103,9 @@ pub struct Input<'a> {
     pub texts: &'a PersonText,
     pub overrides: Option<&'a Overrides>,
     pub linked: Vec<Linked<'a>>,
+    /// The household's sources: a portal's own name for its organization is
+    /// the place of a visit whose records name none.
+    pub sources: &'a [crate::model::Source],
     /// The UTC offset, in seconds, at a time: the days an event is shown
     /// on are the calendar days at it (`pk_cli_core::dates::local_utc_offset`,
     /// the machine's zone, outside tests).
@@ -830,9 +833,21 @@ fn classify(r: &Record) -> Option<Claim<'_>> {
     } else {
         "service"
     };
-    let vaccine = ty == Ty::Pharmacy
+    let admin = |i: &Value| {
+        i.pointer("/service/code")
+            .and_then(Value::as_str)
+            .is_some_and(crate::plain::administration)
+    };
+    // A pharmacy's vaccine, or a doctor's claim for vaccines and giving
+    // them, and nothing else.
+    let vaccine = (ty == Ty::Pharmacy
         && (lines.iter().any(|i| line_cat(i) == "vaccine")
-            || vaccine_family(&format!("{} {}", r.display, text)).is_some());
+            || vaccine_family(&format!("{} {}", r.display, text)).is_some()))
+        || (role == "service"
+            && counted
+                .iter()
+                .any(|i| line_cat(i) == "vaccine" && !admin(i))
+            && counted.iter().all(|i| line_cat(i) == "vaccine" || admin(i)));
     let clinician = is_clinician(&provider);
     let pkey = if clinician {
         let (s, i) = clinician_key(&provider);
@@ -1099,8 +1114,13 @@ fn claims_into_events(cs: &[Claim]) -> Vec<Ev> {
                 office_evs.push(evs.len());
                 evs.push(ev);
             } else if has(g, &["service"]) {
+                let kind = if g.iter().all(|&i| cs[i].vaccine) {
+                    "vaccine"
+                } else {
+                    "service"
+                };
                 let mut ev = Ev::new(
-                    "service",
+                    kind,
                     claim_member(&cs[g[0]], cs[g[0]].role, "C5", Conf::Sure),
                 );
                 for &j in &g[1..] {
@@ -1212,6 +1232,7 @@ fn kind_alone(c: &Claim) -> &'static str {
             "hospital" => "stay_no_facility",
             "ancillary" => "tests",
             "office" => "office",
+            _ if c.vaccine => "vaccine",
             _ => "service",
         },
     }
@@ -1257,6 +1278,82 @@ fn is_visit(r: &Record) -> bool {
         return false;
     }
     !CONTACT.is_match(&r.display)
+}
+
+/// A record's source, as the household's sources are keyed for their
+/// organization names: CLI, organization and FHIR base.
+fn place_key(p: &[crate::model::Provenance]) -> Option<String> {
+    let s = &p.first()?.source;
+    Some(format!(
+        "{}|{}|{}",
+        s.cli.as_deref()?,
+        s.organization_id.as_deref()?,
+        s.fhir_base.as_deref().unwrap_or("").trim_end_matches('/')
+    ))
+}
+
+/// The organization names of the household's portal sources, by
+/// [`place_key`], leaving out a records connection's own name.
+fn source_places(sources: &[crate::model::Source]) -> BTreeMap<String, String> {
+    sources
+        .iter()
+        .filter_map(|s| {
+            let name = s.organization_name.as_deref()?.trim();
+            if name.is_empty() || crate::plain::is_connection(name) {
+                return None;
+            }
+            let key = format!(
+                "{}|{}|{}",
+                s.cli.as_deref()?,
+                s.organization.as_deref()?,
+                s.fhir_base.as_deref().unwrap_or("").trim_end_matches('/')
+            );
+            Some((key, name.to_string()))
+        })
+        .collect()
+}
+
+/// The plain name of a claim's first counted line with a visit code.
+fn visit_line(c: &Record) -> Option<&'static str> {
+    c.fields
+        .get("items")
+        .and_then(Value::as_array)?
+        .iter()
+        .filter(|i| crate::claims::counted(i))
+        .find_map(|i| {
+            let s = i.get("service")?;
+            if !crate::plain::is_cpt(s.get("system").and_then(Value::as_str)) {
+                return None;
+            }
+            crate::plain::visit(s.get("code").and_then(Value::as_str)?)
+        })
+}
+
+/// What a claim paid for, from its counted lines' names, each in title
+/// case when written in capitals; else its title's first part.
+fn claim_what(c: &Record) -> Option<String> {
+    let names: Vec<String> = c
+        .fields
+        .get("items")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|i| crate::claims::counted(i))
+        .filter(|i| {
+            !i.pointer("/service/code")
+                .and_then(Value::as_str)
+                .is_some_and(crate::plain::administration)
+        })
+        .filter_map(|i| i.pointer("/service/display").and_then(Value::as_str))
+        .map(|d| crate::plain::tidy(d, MEMBER_TITLE))
+        .collect();
+    crate::claims::title(names.iter().map(String::as_str), None, None).or_else(|| {
+        c.display
+            .split(" · ")
+            .next()
+            .filter(|s| !s.is_empty())
+            .map(|s| crate::plain::tidy(s, MEMBER_TITLE))
+    })
 }
 
 fn source_key(p: &[crate::model::Provenance]) -> Option<String> {
@@ -1903,7 +2000,7 @@ fn papers_into_events(
             if pass == 0 {
                 for c in DIVISION.captures_iter(&text) {
                     let (a, b) = (c[1].trim().to_string(), c[2].trim().to_string());
-                    if !same_org(&a, &b) {
+                    if !same_org(&a, &b) && !crate::plain::is_connection(&b) {
                         p.aliases.push(Alias {
                             clinician: a,
                             organization: b,
@@ -2062,7 +2159,10 @@ fn papers_into_events(
                         .filter(|n| is_clinician(n))
                         .map(str::to_string)
                         .collect();
-                    if let ([c], false) = (clinicians.as_slice(), org.is_empty()) {
+                    if let ([c], false) = (
+                        clinicians.as_slice(),
+                        org.is_empty() || crate::plain::is_connection(org),
+                    ) {
                         p.aliases.push(Alias {
                             clinician: c.clone(),
                             organization: org.to_string(),
@@ -2380,6 +2480,7 @@ fn render(
     recs: &BTreeMap<&str, &Record>,
     labels: &Labels,
     aliases: &[Alias],
+    places: &BTreeMap<String, String>,
 ) -> Option<(Day, Day, String, Value)> {
     let (start, end) = ev.span()?;
     let id = event_id(person, &ev.anchor);
@@ -2433,16 +2534,44 @@ fn render(
         .map(|(_, t)| *t)
         .unwrap_or("Event");
     o.insert("title".into(), json!(title));
-    let reason = encs.iter().find_map(|e| str_field(e, "reason"));
-    let from_claims = facility.or(claims.first().copied()).and_then(|c| {
-        c.display
-            .split(" · ")
-            .next()
-            .filter(|s| !s.is_empty())
-            .map(str::to_string)
+    // The portal's reason, unless it only names the kind of visit, as
+    // billing does; then the visit code's plain name, the portal's before
+    // the claims'.
+    let given = encs.iter().find_map(|e| str_field(e, "reason"));
+    let reason = given.filter(|r| !crate::plain::only_visit_words(r));
+    let portal_code = encs.iter().find_map(|e| {
+        e.code
+            .as_ref()
+            .filter(|c| crate::plain::is_cpt(c.system.as_deref()))
+            .and_then(|c| c.code.as_deref())
+            .and_then(crate::plain::visit)
     });
+    let claims_code = claims.iter().find_map(|c| visit_line(c));
+    let from_claims = facility.or(claims.first().copied()).and_then(claim_what);
     if let Some(r) = reason {
-        o.insert("what".into(), json!(r));
+        o.insert("what".into(), json!(crate::plain::tidy(r, MEMBER_TITLE)));
+        o.insert("what_from".into(), json!("portal"));
+    } else if let Some((w, from)) = portal_code
+        .map(|w| (w, "portal"))
+        .or_else(|| claims_code.map(|w| (w, "claims")))
+        // Only a visit takes its visit code's name: a stay, a series or
+        // tests keep their own.
+        .filter(|_| matches!(kind, "office" | "portal" | "er" | "er_no_facility"))
+    {
+        o.insert("what".into(), json!(w));
+        o.insert("what_from".into(), json!(from));
+    } else if let Some(w) = given.or_else(|| {
+        // A portal visit coded in CPT outside the plain-name table: its
+        // descriptor, in title case.
+        encs.iter().find_map(|e| {
+            e.code
+                .as_ref()
+                .filter(|c| c.system.is_some() && crate::plain::is_cpt(c.system.as_deref()))
+                .and_then(|c| c.display.as_deref())
+                .filter(|d| !d.trim().is_empty() && !crate::plain::only_visit_words(d))
+        })
+    }) {
+        o.insert("what".into(), json!(crate::plain::tidy(w, MEMBER_TITLE)));
         o.insert("what_from".into(), json!("portal"));
     } else if encs.is_empty() {
         let listed = |names: Vec<&str>| -> Option<String> {
@@ -2461,12 +2590,17 @@ fn render(
         };
         let (what, from) = if matches!(ev.kind, "fill" | "vaccine") {
             // The claims' names, else the fills' or doses' own.
-            match listed(
-                claims
-                    .iter()
-                    .filter_map(|c| c.display.split(" · ").next())
-                    .collect(),
-            ) {
+            let names: Vec<String> = claims
+                .iter()
+                .filter_map(|c| {
+                    if ev.kind == "vaccine" {
+                        claim_what(c)
+                    } else {
+                        c.display.split(" · ").next().map(str::to_string)
+                    }
+                })
+                .collect();
+            match listed(names.iter().map(String::as_str).collect()) {
                 Some(w) => (Some(w), "claims"),
                 None => (
                     listed(
@@ -2489,12 +2623,24 @@ fn render(
             o.insert("what_from".into(), json!(from));
         }
     }
+    // A records connection's name ("… (all practices)") is never a place.
+    let a_place = |s: &&str| !crate::plain::is_connection(s);
     let portal_place = encs
         .iter()
-        .find_map(|e| str_field(e, "service_provider").or_else(|| str_field(e, "location")));
+        .find_map(|e| {
+            str_field(e, "service_provider")
+                .filter(a_place)
+                .or_else(|| str_field(e, "location").filter(a_place))
+        })
+        .or_else(|| {
+            encs.iter()
+                .find_map(|e| places.get(&place_key(&e.provenance)?))
+                .map(String::as_str)
+        });
     let first_org = claims
         .iter()
         .filter_map(|c| str_field(c, "provider"))
+        .filter(a_place)
         .find(|p| !is_clinician(p));
     let alias = claims
         .iter()
@@ -2504,14 +2650,21 @@ fn render(
                 .iter()
                 .find(|a| same_clinician(p, &a.clinician) == Same::Yes)
                 .map(|a| a.organization.clone())
-        });
+        })
+        .filter(|a| !crate::plain::is_connection(a));
     let (place, from) = if let Some(p) = portal_place {
         (Some(p.to_string()), "portal")
-    } else if let Some(f) =
-        facility.and_then(|f| str_field(f, "provider").or_else(|| str_field(f, "facility")))
-    {
+    } else if let Some(f) = facility.and_then(|f| {
+        str_field(f, "provider")
+            .filter(a_place)
+            .or_else(|| str_field(f, "facility").filter(a_place))
+    }) {
         (Some(f.to_string()), "claims")
-    } else if let Some(p) = &ev.linked_place {
+    } else if let Some(p) = ev
+        .linked_place
+        .as_ref()
+        .filter(|p| !crate::plain::is_connection(p))
+    {
         (Some(p.clone()), "linked")
     } else if let Some(p) = first_org {
         (Some(p.to_string()), "claims")
@@ -2774,6 +2927,7 @@ pub fn build(inp: &Input) -> Value {
         .map(|o| apply(&mut b.evs, inp.index, &o.events, dates))
         .unwrap_or(0);
 
+    let places = source_places(inp.sources);
     let mut labels = Labels::new();
     labels_of(inp.index, &mut labels);
     for l in &inp.linked {
@@ -2782,7 +2936,7 @@ pub fn build(inp: &Input) -> Value {
     let mut out: Vec<(Day, Day, String, Value)> = b
         .evs
         .iter()
-        .filter_map(|ev| render(pid, ev, &recs, &labels, &b.aliases))
+        .filter_map(|ev| render(pid, ev, &recs, &labels, &b.aliases, &places))
         .collect();
     out.sort_by(|a, z| z.0.cmp(&a.0).then(z.1.cmp(&a.1)).then(a.2.cmp(&z.2)));
     let pending: Vec<Value> = b
@@ -2847,6 +3001,7 @@ pub fn of_person(
         person: p,
         index: &idx,
         texts: &texts,
+        sources: &h.sources,
         overrides: overrides.as_ref().ok(),
         linked: linked
             .iter()

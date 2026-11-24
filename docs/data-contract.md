@@ -1147,11 +1147,11 @@ matching rules), then the household's decisions (`overrides.json`).
 | Field | What |
 |---|---|
 | `id` | `e_` and 20 base32 characters of the SHA-256 of the person's id and the event's anchor member: the claim that opened it (a facility's, a stay's first hospital claim, a day's first), else its encounter, record or paper. It holds while that member stays the anchor. |
-| `kind` | `er`, `inpatient`, `outpatient`, `office`, `service`, `tests`, `dental`, `vaccine`, `fill`, `series`, `stay_no_facility` (a stay's doctors' claims, no facility claim yet), `er_no_facility` or `portal` (a portal visit with no claim). From 0.9.1 a portal visit with no claim whose encounter class is inpatient is `inpatient`, and one whose class is emergency is `er`: an `inpatient` or `er` event can have no claim member, and then expects `claim`, not `doctor_claims`. A reader shows an unknown kind by its `title`. |
+| `kind` | `er`, `inpatient`, `outpatient`, `office`, `service`, `tests`, `dental`, `vaccine`, `fill`, `series`, `stay_no_facility` (a stay's doctors' claims, no facility claim yet), `er_no_facility` or `portal` (a portal visit with no claim). From 0.9.1 a portal visit with no claim whose encounter class is inpatient is `inpatient`, and one whose class is emergency is `er`: an `inpatient` or `er` event can have no claim member, and then expects `claim`, not `doctor_claims`. From 0.9.3 a doctor's claim for vaccines and giving them, and nothing else, is a `vaccine` event (a `service` event before), and a line that only bills for giving a vaccine (CPT 90460–90461, 90471–90474, HCPCS G0008–G0010) names nothing in its `what`. A reader shows an unknown kind by its `title`. |
 | `start`, `end` | Local calendar dates, `YYYY-MM-DD`; equal for a one-day event. A time with an offset is on its own date. From 0.9.1 a UTC time is on its date in the zone of the machine that writes the views, when that is one of the US dates it can be (UTC−4 to UTC−10), else on the earlier of them; and a portal visit runs to its period's end, up to 90 days. |
 | `title` | Plain words for the kind; the reader adds the place. |
-| `what`, `what_from` | The portal's reason, else the claims' services in plain words, else the papers'; `portal`, `claims` or `papers`. A fill's or a vaccine's is its claims' names, else (0.9.1 and later) the fills' or doses' own names from the portal, as "A", "A and B" or "A, B and N more". Absent when nothing says. |
-| `place`, `place_from` | The portal's organization, else the facility claim's provider, else the first claim's, else an N5 alias; `portal`, `claims` or `alias`. A clinician's name is never a place. |
+| `what`, `what_from` | The portal's reason, unless it only names the kind of visit in billing words ("Ofc visit, new pt"). Then, for a visit (an office, portal or ER visit; 0.9.3 and later), its visit code's plain name, the portal's encounter code before the claims' lines (below). Else that reason, or a portal visit's CPT descriptor, else the claims' services, else the papers'. A name written in capitals is put in title case, its acronyms kept (0.9.3 and later). `portal`, `claims` or `papers`. A fill's or a vaccine's is its claims' names, else (0.9.1 and later) the fills' or doses' own names from the portal, as "A", "A and B" or "A, B and N more". Absent when nothing says. |
+| `place`, `place_from` | The portal's organization: the encounter's service provider, else its location, else (0.9.3 and later) its source's organization name. Else the facility claim's provider, else the first claim's, else an N5 alias; `portal`, `claims` or `alias`. A clinician's name is never a place. Nor (0.9.3 and later) is a records connection's: a name ending "(all practices)", or a portal platform's own name such as athenahealth or MyChart; no alias is learned to one. |
 | `clinicians` | As the portal or the claims name them. |
 | `confidence` | The lowest of its members': `sure`, `likely` or `unsure`. |
 | `status` | `unsure` when the confidence is; else `waiting` when something is `expected`; else `complete`. |
@@ -1166,6 +1166,19 @@ matching rules), then the household's decisions (`overrides.json`).
 | `undated` | Claims with no date, in no event. |
 | `overrides` | How many of the household's decisions applied. |
 | `overrides_unreadable` | `true` when the person's `overrides.json` does not read as `medrec-overrides/v1`: the events are the rules' alone, and medrec writes no decision over the file until it is fixed or removed. Absent otherwise. |
+
+Plain visit names (0.9.3 and later), bundled with medrec and never fetched,
+from CPT evaluation-and-management codes:
+
+| Codes | Name |
+|---|---|
+| 99202–99205 | New-patient visit |
+| 99211–99215 | Follow-up visit |
+| 99381, 99391 | Well-baby checkup |
+| 99382–99384, 99392–99394 | Well-child checkup |
+| 99385–99387, 99395–99397 | Preventive checkup |
+| 99460–99463 | Newborn care |
+| 99281–99285 | Emergency room visit |
 
 `money` for an office visit whose one claim gave no `allowed` and no
 `you_owe`, only its deductible:
@@ -1379,7 +1392,11 @@ readers ship with medrec:
     answer's count on every page). A page counts the items left out that
     sort after the previous page's last item and up to its own last, or to
     the end on the last page, so the pages add up to the whole count and
-    a reader that reads only what a page needs can count it. An answer about one person (`person`)
+    a reader that reads only what a page needs can count it. A series of
+    tests (`kind: "tests"`) is private when any of its results is, not
+    only its latest (0.9.3 and later): it is left out whole, counted once,
+    and marked with the first private result's area where it is included.
+    An answer about one person (`person`)
     includes them, and so does one that names the item: `medrec_records`
     with a `name`, or `medrec_search` with a query, each of whose words
     starts a word of the item's title (for an event, its title, detail or

@@ -346,6 +346,7 @@ pub fn sync(f: &Folder, all: bool) -> Result<Synced, CliError> {
             person: p,
             index: &me.idx,
             texts: &me.texts,
+            sources: &h.sources,
             overrides: overrides.as_ref().and_then(|o| o.as_ref().ok()),
             linked: linked
                 .iter()

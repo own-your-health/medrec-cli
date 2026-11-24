@@ -48,6 +48,7 @@ fn events_of(w: &World, who: usize, overrides: Option<&Overrides>) -> Value {
         person,
         index: idx,
         texts: text,
+        sources: &w.h.sources,
         overrides,
         linked: vec![Linked {
             person: other,
@@ -399,6 +400,7 @@ fn a_portal_stay_spans_its_days_and_a_days_doses_and_fills_say_what_they_were() 
             person: &person,
             index: &idx,
             texts: &texts,
+            sources: &[],
             overrides: None,
             linked: Vec::new(),
             utc_offset,
@@ -486,4 +488,111 @@ fn a_portal_stay_spans_its_days_and_a_days_doses_and_fills_say_what_they_were() 
             "{fill}"
         );
     }
+}
+
+#[test]
+fn visits_get_plain_names_and_a_connections_name_is_never_a_place() {
+    let idx: PersonIndex = load("athena.index.json");
+    let person: Person = serde_json::from_value(json!({
+        "id": idx.person, "name": "Robin Example", "folder": "Robin Example",
+        "created_at": "2026-11-10T00:00:00Z"}))
+    .unwrap();
+    let texts = PersonText::new(&person.id);
+    let source = |name: &str| -> medrec::model::Source {
+        serde_json::from_value(json!({
+            "id": "s_athenaexampleaaaaaaa", "kind": "fhir", "person": idx.person,
+            "cli": "athena", "organization": "900001", "organization_name": name,
+            "fhir_base": "https://athena.example.test/fhir/r4/"}))
+        .unwrap()
+    };
+    let build = |sources: &[medrec::model::Source]| {
+        events::build(&Input {
+            person: &person,
+            index: &idx,
+            texts: &texts,
+            sources,
+            overrides: None,
+            linked: Vec::new(),
+            utc_offset: eastern,
+        })
+    };
+    let named = [source("Example Pediatrics")];
+    let v = build(&named);
+    let what = |v: &Value, id: &str| {
+        let e = holding(v, id);
+        (e["what"].clone(), e["what_from"].clone())
+    };
+    let place = |v: &Value, id: &str| {
+        let e = holding(v, id);
+        (e["place"].clone(), e["place_from"].clone())
+    };
+
+    // A reason in billing words gives way to the visit code's plain name.
+    assert_eq!(
+        what(&v, "r_newvisitaaaaaaaaaaaa"),
+        (json!("New-patient visit"), json!("portal"))
+    );
+    assert_eq!(
+        what(&v, "r_checkupaaaaaaaaaaaaa"),
+        (json!("Well-child checkup"), json!("portal"))
+    );
+    // A reason a person gives stays.
+    assert_eq!(
+        what(&v, "r_earpainaaaaaaaaaaaaa"),
+        (json!("Ear pain"), json!("portal"))
+    );
+    // A code outside the table: its descriptor, never in capitals.
+    assert_eq!(
+        what(&v, "r_consultaaaaaaaaaaaaa"),
+        (json!("Consult Visit with ENT Review"), json!("portal"))
+    );
+
+    // The encounter's location, not the connection's name it gives as its
+    // service provider.
+    assert_eq!(
+        place(&v, "r_earpainaaaaaaaaaaaaa"),
+        (json!("Example Pediatrics Annex"), json!("portal"))
+    );
+    // An encounter naming no place takes its source's practice.
+    assert_eq!(
+        place(&v, "r_newvisitaaaaaaaaaaaa"),
+        (json!("Example Pediatrics"), json!("portal"))
+    );
+    // A visit seen only in claims takes its line's visit code's name; a
+    // reason from the portal still comes first.
+    let w = world();
+    let parent = events_of(&w, 0, None);
+    assert_eq!(
+        what(&parent, "r_obvisitaaaaaaaaaaaaa"),
+        (json!("Follow-up visit"), json!("claims"))
+    );
+    assert_eq!(
+        what(&parent, "r_urologyaaaaaaaaaaaaa"),
+        (json!("New-patient visit"), json!("claims"))
+    );
+    assert_eq!(
+        what(&parent, "r_checkupdocaaaaaaaaaa"),
+        (json!("Annual checkup"), json!("portal"))
+    );
+
+    // A doctor's claim for a vaccine and giving it is a vaccine, and the
+    // giving names nothing.
+    let flu = holding(&v, "r_fluclaimaaaaaaaaaaaa");
+    assert_eq!(
+        (&flu["kind"], &flu["title"], &flu["what"]),
+        (&json!("vaccine"), &json!("Vaccine"), &json!("Flu vaccine")),
+        "{flu}"
+    );
+
+    // A source named for every practice it serves names none of them.
+    let wide = [source("athenahealth (all practices)")];
+    let v = build(&wide);
+    assert!(
+        holding(&v, "r_newvisitaaaaaaaaaaaa").get("place").is_none(),
+        "{v}"
+    );
+    assert_eq!(
+        place(&v, "r_earpainaaaaaaaaaaaaa").0,
+        json!("Example Pediatrics Annex")
+    );
 }
