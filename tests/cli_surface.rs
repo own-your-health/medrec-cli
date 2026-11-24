@@ -16,6 +16,7 @@ fn medrec() -> Command {
     std::fs::create_dir_all(&dir).unwrap();
     let mut c = Command::cargo_bin("medrec").unwrap();
     c.env("XDG_CONFIG_HOME", dir.join("config"))
+        .env("TZ", "America/New_York")
         .env("XDG_CACHE_HOME", dir.join("cache"))
         .env("HOME", &dir)
         .env("MEDREC_KEYCHAIN_SERVICE", "piekstra.medrec.hermetic-tests")
@@ -39,6 +40,7 @@ fn with_profile() -> impl Fn(&[&str]) -> std::process::Output {
     let run = move |args: &[&str]| {
         let mut c = Command::cargo_bin("medrec").unwrap();
         c.env("XDG_CONFIG_HOME", dir.join("config"))
+            .env("TZ", "America/New_York")
             .env("XDG_CACHE_HOME", dir.join("cache"))
             .env("HOME", &dir)
             .env("MEDREC_KEYCHAIN_SERVICE", "piekstra.medrec.hermetic-tests")
@@ -384,6 +386,7 @@ fn config_round_trips() {
     let run = |args: &[&str]| {
         let mut c = Command::cargo_bin("medrec").unwrap();
         c.env("XDG_CONFIG_HOME", dir.join("config"))
+            .env("TZ", "America/New_York")
             .env("XDG_CACHE_HOME", dir.join("cache"))
             .env("MEDREC_KEYCHAIN_SERVICE", "piekstra.medrec.hermetic-tests")
             .env_remove("MEDREC_PROFILE");

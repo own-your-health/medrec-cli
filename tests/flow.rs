@@ -33,6 +33,7 @@ impl Env {
     fn run_env(&self, args: &[&str], env: &[(&str, &str)]) -> Output {
         let mut c = Command::cargo_bin("medrec").unwrap();
         c.env("XDG_CONFIG_HOME", self.root.join("config"))
+            .env("TZ", "America/New_York")
             .env("XDG_CACHE_HOME", self.root.join("cache"))
             .env("HOME", &self.root)
             .env("PATH", &self.path)
@@ -1122,6 +1123,7 @@ fn held_import(e: &Env, hold: &Path) -> std::process::Child {
     std::fs::create_dir_all(hold).unwrap();
     let mut c = std::process::Command::new(env!("CARGO_BIN_EXE_medrec"));
     c.env("XDG_CONFIG_HOME", e.root.join("config"))
+        .env("TZ", "America/New_York")
         .env("XDG_CACHE_HOME", e.root.join("cache"))
         .env("HOME", &e.root)
         .env("PATH", &e.path)

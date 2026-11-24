@@ -1093,16 +1093,16 @@ matching rules), then the household's decisions (`overrides.json`).
 | Field | What |
 |---|---|
 | `id` | `e_` and 20 base32 characters of the SHA-256 of the person's id and the event's anchor member: the claim that opened it (a facility's, a stay's first hospital claim, a day's first), else its encounter, record or paper. It holds while that member stays the anchor. |
-| `kind` | `er`, `inpatient`, `outpatient`, `office`, `service`, `tests`, `dental`, `vaccine`, `fill`, `series`, `stay_no_facility` (a stay's doctors' claims, no facility claim yet), `er_no_facility` or `portal` (a portal visit with no claim). A reader shows an unknown kind by its `title`. |
-| `start`, `end` | Local calendar dates, `YYYY-MM-DD`; equal for a one-day event. |
+| `kind` | `er`, `inpatient`, `outpatient`, `office`, `service`, `tests`, `dental`, `vaccine`, `fill`, `series`, `stay_no_facility` (a stay's doctors' claims, no facility claim yet), `er_no_facility` or `portal` (a portal visit with no claim). From 0.9.1 a portal visit with no claim whose encounter class is inpatient is `inpatient`, and one whose class is emergency is `er`. A reader shows an unknown kind by its `title`. |
+| `start`, `end` | Local calendar dates, `YYYY-MM-DD`; equal for a one-day event. A time with an offset is on its own date. From 0.9.1 a UTC time is on its date in the zone of the machine that writes the views, when that is one of the US dates it can be (UTC−4 to UTC−10), else on the earlier of them; and a portal visit runs to its period's end, up to 90 days. |
 | `title` | Plain words for the kind; the reader adds the place. |
-| `what`, `what_from` | The portal's reason, else the claims' services in plain words, else the papers'; `portal`, `claims` or `papers`. Absent when nothing says. |
+| `what`, `what_from` | The portal's reason, else the claims' services in plain words, else the papers'; `portal`, `claims` or `papers`. A fill's or a vaccine's is its claims' names, else (0.9.1 and later) the fills' or doses' own names from the portal, as "A", "A and B" or "A, B and N more". Absent when nothing says. |
 | `place`, `place_from` | The portal's organization, else the facility claim's provider, else the first claim's, else an N5 alias; `portal`, `claims` or `alias`. A clinician's name is never a place. |
 | `clinicians` | As the portal or the claims name them. |
 | `confidence` | The lowest of its members': `sure`, `likely` or `unsure`. |
 | `status` | `unsure` when the confidence is; else `waiting` when something is `expected`; else `complete`. |
 | `money` | The claim members' claim-level amounts, summed, as decimal strings: `billed`, `allowed`, `plan_paid`, `you_owe`, `discount` (`billed` − `allowed`) and `share`, the reasons for `you_owe` that the claims give (`deductible`, `copay`, `coinsurance`, `not_covered`). An amount some claim lacks is left out and named in `partial`. A claim with no `you_owe` of its own counts its share's parts added up, and `you_owe_added` is then `true`. A claim whose `allowed` is below zero counts `plan_paid` + `you_owe` as its allowed, and one with neither leaves `allowed` out. Absent with no claim. |
-| `members` | Every record and document in the event, each with `record` or `document`, its `kind` (a record kind, or a document type), its `title` (at most 120 characters) and `date`, its `role`, the `rule` that placed it and that placement's `confidence`. A claim adds `provider` and its amounts. A bill joined by its amount due (D3s) adds `matches`, the claim whose share it bills. `person` marks another person's paper (X2). `role` is `facility`, `hospital`, `ancillary`, `office`, `dental`, `fill`, `portal`, `contact`, `satellite` or `paper`; a reader ignores one it does not know. |
+| `members` | Every record and document in the event, each with `record` or `document`, its `kind` (a record kind, or a document type), its `title` (at most 120 characters) and `date`, its `role`, the `rule` that placed it and that placement's `confidence`. A claim adds `provider` and its amounts. A bill joined by its amount due (D3s) adds `matches`, the claim whose share it bills. `person` marks another person's paper (X2). `role` is `facility`, `hospital`, `ancillary`, `office`, `dental`, `fill`, `vaccine`, `portal`, `contact`, `satellite` or `paper`; a reader ignores one it does not know. |
 | `expected` | What has not arrived: `doctor_claims`, `facility_claim`, `claim` or `bill`, with `why` in words and `since`, the day it was first expected. A fill or a vaccine expects no bill. |
 | `differences` | Where the sources disagree (a clinician's name, a date), each source's value, and the rule. |
 | `links` | Related events of a linked person: `newborn` (from a parent's stay to the child's care in it) and `born_during` (back). A reader ignores a relation it does not know. |
@@ -1123,6 +1123,11 @@ matching rules), then the household's decisions (`overrides.json`).
 
 - **Every claim is in exactly one event.** A portal visit, a result or a
   paper joins at most one.
+- **A portal visit's records.** Records from the same portal source join a
+  portal visit on its day, a result or report also the day before (E4),
+  and from 0.9.1 on any day of the visit's period, as a result during a
+  stay does. With no claim, a day's vaccine doses from one source are one
+  `vaccine` event (0.9.1 and later; one event per dose before).
 - **Linked people.** A person's events read the records of their guardians
   and children, when the child has a birth date: a newborn's care during a
   parent's birth stay links to it (X1), and a child's paper filed under a
