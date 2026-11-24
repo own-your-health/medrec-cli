@@ -268,6 +268,12 @@ its totals leave one out.
   a line left out as not owed. `allowed`, `discount`,
   `not_covered` and the cost-share parts are not compared, since payers
   break them down differently on a line and on the claim.
+- A provider CLI of this project can mark a line left out itself, with an
+  adjudication whose category is `not-counted` in its own
+  `https://github.com/own-your-health/<cli>/fhir/adjudication` code system
+  (uhc-cli 0.3.6 and later). When any line of a claim carries that mark,
+  the marks decide which lines are `counted: false`, and the totals are
+  not compared (0.9.2 and later).
 - links, below: `visit`, `results` and each line's `records`.
 
 A field that is missing is unknown, never zero.
@@ -1368,8 +1374,12 @@ readers ship with medrec:
     still expected, and `you_owe` the share with its currency. `id` gives
     one event, with its money, members and evidence in `fields`.
   - private items (`private.json`, 0.9.1 and later) are left out of an
-    answer about the whole household, which says how many in a
-    `private-left-out` warning. An answer about one person (`person`)
+    answer about the whole household. Each page says how many it left out
+    in a `private-left-out` warning (0.9.2 and later; 0.9.1 gives the whole
+    answer's count on every page). A page counts the items left out that
+    sort after the previous page's last item and up to its own last, or to
+    the end on the last page, so the pages add up to the whole count and
+    a reader that reads only what a page needs can count it. An answer about one person (`person`)
     includes them, and so does one that names the item: `medrec_records`
     with a `name`, or `medrec_search` with a query, each of whose words
     starts a word of the item's title (for an event, its title, detail or
@@ -1380,6 +1390,17 @@ readers ship with medrec:
     items held back from answers about the whole household, with a
     `private-marks-unreadable` warning naming them. The commands are the
     household's own terminal and leave nothing out.
+  - a reader that answers from the views without a current `private.json`
+    for a person cannot tell which of their items are private: theirs is
+    stale or absent (views from 0.9.0 or earlier), or the reader falls
+    back to the files and has no rules of its own. It holds back all of
+    that person's items from answers about the whole household, with a
+    `private-not-prepared` warning naming them, and includes them
+    unmarked, with the same warning, in an answer about that person.
+    `medrec mcp` judges from the files and is never without it.
+  - a reader without a current `bills.json` for a person shows their bills
+    as 0.9.0 did, due and past due by date, with a `bills-not-prepared`
+    warning that payments may be missing.
 
 Both search the same way: every item whose text holds all the query's
 words, as word prefixes, with case, accents and punctuation ignored. A

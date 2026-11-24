@@ -316,7 +316,11 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
             let pharmacy = is_pharmacy(r);
             let mut items = eob_items(r, pharmacy);
             let totals = claims::amounts(eob_entries(r.get("total")));
-            if let Some(Value::Array(list)) = items.as_mut() {
+            // The provider's own marks decide; with none, the totals do.
+            if let Some(Value::Array(list)) = items
+                .as_mut()
+                .filter(|l| l.as_array().is_some_and(|l| l.iter().all(claims::counted)))
+            {
                 for i in claims::left_out(list, &totals) {
                     if let Some(o) = list[i].as_object_mut() {
                         o.insert("counted".into(), Value::Bool(false));
@@ -708,6 +712,25 @@ fn claim_notes(r: &Value) -> Option<Value> {
     (!notes.is_empty()).then(|| Value::Array(notes))
 }
 
+/// Whether a provider CLI of this project marked an EOB line as left out of
+/// the claim's totals: an adjudication whose category is `not-counted` in
+/// its own `…/fhir/adjudication` code system (uhc-cli 0.3.6 and later).
+fn marked_not_counted(item: &Value) -> bool {
+    item.get("adjudication")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|a| a.pointer("/category/coding").and_then(Value::as_array))
+        .flatten()
+        .any(|c| {
+            c["code"] == "not-counted"
+                && c["system"].as_str().is_some_and(|s| {
+                    s.starts_with("https://github.com/own-your-health/")
+                        && s.ends_with("/fhir/adjudication")
+                })
+        })
+}
+
 /// Each claim line: its service and revenue codes, category, dates and
 /// amounts, with its adjudication entries and processing notes as the payer
 /// wrote them.
@@ -742,6 +765,9 @@ fn eob_items(r: &Value, pharmacy: bool) -> Option<Value> {
                 "net": money(it.get("net")),
                 "adjudication": adjudication,
             });
+            if marked_not_counted(it) {
+                line["counted"] = Value::Bool(false);
+            }
             let texts: Vec<Value> = note_numbers(it)
                 .into_iter()
                 .filter_map(|k| notes.iter().find(|(n, _)| *n == Some(k)))
@@ -991,6 +1017,39 @@ mod tests {
             record(&prepared, prov()).unwrap().date.as_deref(),
             Some("2026-03-09")
         );
+    }
+
+    #[test]
+    fn a_line_its_provider_marks_not_counted_is_left_out_whatever_the_totals_say() {
+        let marker = |system: &str| {
+            json!({"category": {"coding": [{"system": system, "code": "not-counted",
+                "display": "Not counted in the claim's totals"}]}})
+        };
+        let mut r: Value = serde_json::from_str(REPLACED_LINE_EOB).unwrap();
+        r["item"][2]["adjudication"]
+            .as_array_mut()
+            .unwrap()
+            .push(marker(
+                "https://github.com/own-your-health/uhc-cli/fhir/adjudication",
+            ));
+        let rec = record(&r, prov()).unwrap();
+        let items = rec.fields["items"].as_array().unwrap();
+        // The provider's mark decides: the line the totals would leave out
+        // stays counted.
+        assert_eq!(items[2]["counted"], false);
+        assert!(items[1].get("counted").is_none());
+        assert!(items[0].get("counted").is_none());
+
+        // A mark in another code system is the payer's words, not a mark.
+        let mut r: Value = serde_json::from_str(REPLACED_LINE_EOB).unwrap();
+        r["item"][2]["adjudication"]
+            .as_array_mut()
+            .unwrap()
+            .push(marker("https://example.org/fhir/adjudication"));
+        let rec = record(&r, prov()).unwrap();
+        let items = rec.fields["items"].as_array().unwrap();
+        assert_eq!(items[1]["counted"], false);
+        assert!(items[2].get("counted").is_none());
     }
 
     #[test]
