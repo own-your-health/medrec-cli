@@ -2020,6 +2020,115 @@ fn private_items_follow_the_rules_until_the_household_marks_them() {
 }
 
 #[test]
+fn an_event_mark_follows_its_members_when_the_event_takes_a_new_id() {
+    let e = Env::new("private-follow");
+    setup(&e);
+    let alex = with_private_fixtures(&e);
+    let aid = alex["id"].as_str().unwrap();
+    e.ok(&["views", "write"]);
+    let visit = "r_therapyvisitaaaaaaaa";
+    let event_of = |e: &Env| -> String {
+        events_view(e, aid)["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|ev| {
+                ev["members"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|m| m["record"] == visit)
+            })
+            .unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    let file = e
+        .records()
+        .join(alex["folder"].as_str().unwrap())
+        .join("marks.json");
+    let event_marks = || -> Vec<Value> {
+        let m: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        m["private"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|x| x["item"].as_str().unwrap().starts_with("e_"))
+            .cloned()
+            .collect()
+    };
+
+    // The portal visit's event, marked not private, keeps its members.
+    let first = event_of(&e);
+    assert_eq!(e.ok(&["private", "unmark", &first])["status"], "recorded");
+    assert_eq!(e.ok(&["private", "unmark", &first])["status"], "unchanged");
+    let marks = event_marks();
+    assert_eq!(marks.len(), 1, "{marks:?}");
+    assert_eq!(marks[0]["members"], json!([visit]));
+
+    // The practice's claim for that visit arrives and becomes the event's
+    // anchor: a new id, and the mark follows.
+    let index = e
+        .records()
+        .join(alex["folder"].as_str().unwrap())
+        .join("index.json");
+    let mut idx: Value = serde_json::from_slice(&std::fs::read(&index).unwrap()).unwrap();
+    let mut claim: Value = serde_json::from_str::<Value>(
+        &std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/events/parent.index.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap()["records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["id"] == "r_checkupdocaaaaaaaaaa")
+        .unwrap()
+        .clone();
+    claim["id"] = json!("r_therapyclaimaaaaaaaa");
+    claim["key"] = json!("claim|example|therapyclaim|2026-09-01");
+    claim["date"] = json!("2026-09-01");
+    claim["display"] = json!("Office visit · Example Behavioral Health");
+    claim["fields"]["provider"] = json!("Example Behavioral Health");
+    claim["fields"]["billable_period"] = json!({"start": "2026-09-01", "end": "2026-09-01"});
+    idx["records"].as_array_mut().unwrap().push(claim);
+    std::fs::write(&index, serde_json::to_vec(&idx).unwrap()).unwrap();
+    e.ok(&["views", "write"]);
+    let second = event_of(&e);
+    assert_ne!(first, second, "the claim is the anchor now");
+    let v = private_view(&e, aid);
+    assert!(v["events"].get(&second).is_none(), "the mark followed: {v}");
+    assert!(v["events"].get(&first).is_none(), "{v}");
+
+    // Marking the new event replaces the followed mark; the same again
+    // changes nothing; a reset drops it, and again changes nothing.
+    assert_eq!(e.ok(&["private", "unmark", &second])["status"], "recorded");
+    let marks = event_marks();
+    assert_eq!(marks.len(), 1, "{marks:?}");
+    assert_eq!(marks[0]["item"], second.as_str());
+    let mut members: Vec<&str> = marks[0]["members"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m.as_str().unwrap())
+        .collect();
+    members.sort();
+    assert_eq!(members, vec!["r_therapyclaimaaaaaaaa", visit]);
+    assert_eq!(e.ok(&["private", "unmark", &second])["status"], "unchanged");
+    assert_eq!(e.ok(&["private", "reset", &second])["status"], "recorded");
+    assert!(event_marks().is_empty());
+    assert_eq!(e.ok(&["private", "reset", &second])["status"], "unchanged");
+    e.ok(&["views", "write"]);
+    let v = private_view(&e, aid);
+    assert_eq!(
+        v["events"][&second]["from"], "members",
+        "back to the rules: {v}"
+    );
+}
+
+#[test]
 fn a_decision_is_kept_replaced_or_undone_and_a_broken_file_never_stops_the_views() {
     let e = Env::new("decisions");
     setup(&e);

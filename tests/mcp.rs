@@ -687,6 +687,69 @@ fn private_items_stay_out_of_household_wide_answers_unless_asked_about() {
     let v = ask(RECORDS, json!({"kind": "conditions", "person": "Alex"}));
     assert_eq!(item(&v, depression)["private"], "mental_health");
     assert!(item(&v, "r_hypertensionaaaaaaaa").get("private").is_none());
+
+    // A second Alex Testperson, born another day, whose marks read: only
+    // the first one's records and events are held back.
+    e.ok(&[
+        "people",
+        "add",
+        "Alex Testperson",
+        "--birth-date",
+        "1985-05-05",
+    ]);
+    let h: Value =
+        serde_json::from_slice(&std::fs::read(e.records().join("household.json")).unwrap())
+            .unwrap();
+    let other = h["people"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["name"] == "Alex Testperson" && p["id"] != alex["id"])
+        .unwrap()
+        .clone();
+    let mut v: Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/events/portal.index.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    v["person"] = other["id"].clone();
+    std::fs::write(
+        e.records()
+            .join(other["folder"].as_str().unwrap())
+            .join("index.json"),
+        serde_json::to_vec(&v).unwrap(),
+    )
+    .unwrap();
+    let v = ask(RECORDS, json!({"kind": "medications"}));
+    assert!(
+        ids(&v).contains(&"r_amoxfillaaaaaaaaaaaa".to_string()),
+        "{v}"
+    );
+    assert!(
+        !ids(&v).contains(&"r_lisinoprilaaaaaaaaaa".to_string()),
+        "{v}"
+    );
+    let v = ask(RECORDS, json!({"kind": "events"}));
+    let shown: Vec<&Value> = v["items"].as_array().unwrap().iter().collect();
+    assert!(
+        shown.iter().any(|i| i["source"] == "Example Pharmacy"),
+        "the other Alex's fills: {v}"
+    );
+    assert!(
+        shown
+            .iter()
+            .all(|i| i["source"] != "Example Family Practice"),
+        "the first Alex's events are held back: {v}"
+    );
+    let warned = v["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|w| w["code"] == "private-marks-unreadable")
+        .count();
+    assert_eq!(warned, 1, "{v}");
 }
 
 fn rpc(stdin: &mut impl Write, stdout: &mut impl BufRead, msg: Value) -> Option<Value> {
