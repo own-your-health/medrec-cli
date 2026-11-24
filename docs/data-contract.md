@@ -208,11 +208,12 @@ medrec files the claims it imports again in the earlier shape.
   else NDC), or failing those its category's label (`Lab work`), then
   ` · ` and its `provider`. The FHIR claim type stays in `type`
   (`professional`, `institutional`, `pharmacy`, `oral`).
-- `category`: its lines' one category, `mixed` when they have several,
-  `pharmacy` for a pharmacy claim.
+- `category`: the one category of the lines its totals count, `mixed` when
+  they have several, `pharmacy` for a pharmacy claim.
 - `amounts`: the claim's, by the names below. A name its `total` gives
-  comes from there. Otherwise it is the sum of its lines that give it, and
-  `plan_paid` failing both is its `payment`.
+  comes from there: the totals are the claim's figures, whatever its lines
+  say. Otherwise it is the sum of the lines the totals count that give it,
+  and `plan_paid` failing both is its `payment`.
 - `benefit_period` (`{start, end}`): `benefitPeriod` as the payer wrote
   it, the plan year the claim counts toward.
 - `billable_period`, `provider`, `insurer`, `facility`, `outcome`, `use`,
@@ -222,9 +223,30 @@ medrec files the claims it imports again in the earlier shape.
   `{system, code, display}` with ICD-10 preferred; an entry without a code
   is left out.
 - `items`, one per line: `sequence`, `category`, `amounts`, `service`
-  (`{system, code, display}`), `serviced` (a date or `{start, end}`),
+  (`{system, code, display}`), `revenue` (a facility line's revenue code,
+  the same shape; 0.8.2 and later), `serviced` (a date or `{start, end}`),
   `quantity`, `net`, `adjudication` (`[{category, amount, reason}]` as the
-  payer wrote them) and `records`.
+  payer wrote them), `notes`, `counted` and `records`. `revenue`, `notes`
+  and `counted` are present only when they say something.
+- A line's `notes` (0.8.2 and later): the texts of the `processNote`
+  entries its `noteNumber` points at, in that order, as the payer wrote
+  them (UHC's start with their code: `XX -- …`). The claim's own `notes`
+  are the `processNote` texts no line points at.
+- `counted: false` (0.8.2 and later) marks a line the claim's totals
+  leave out. A payer can list a line it then does not count: UHC lists
+  the billed code it replaced, at the member's whole cost, beside its
+  replacement, and lines it wrote off. The same amounts occur on lines
+  that are counted, so medrec tells them apart by the totals alone. It
+  compares the lines' sums of `billed`, `plan_paid` and `you_owe` with
+  the totals, for those the totals and some line give. When at least two
+  are compared and a sum differs, the lines left out are the one smallest
+  set of at most 3 lines, never all of them, whose removal makes every
+  compared sum agree. When no such set exists, or two do, or fewer than
+  two amounts can be compared, every line stays counted, and the claim's
+  totals and its lines simply disagree. A reader sums only counted lines,
+  and shows a line left out as not owed. `allowed`, `discount`,
+  `not_covered` and the cost-share parts are not compared, since payers
+  break them down differently on a line and on the claim.
 - links, below: `visit`, `results` and each line's `records`.
 
 A field that is missing is unknown, never zero.

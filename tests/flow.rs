@@ -2463,6 +2463,98 @@ fn a_claim_is_titled_priced_by_category_and_linked_to_its_visit_and_results() {
     );
 }
 
+/// The synthetic stream with its claim replaced by one whose payer replaced
+/// the billed visit code (tests/fixtures/fhir/replaced-line-eob.json).
+fn with_replaced_line() -> String {
+    let eob: Value =
+        serde_json::from_str(include_str!("fixtures/fhir/replaced-line-eob.json")).unwrap();
+    medrec::testdata::STREAM
+        .lines()
+        .map(|l| {
+            let v: Value = serde_json::from_str(l).unwrap();
+            let v = if v["resourceType"] == "ExplanationOfBenefit" {
+                eob.clone()
+            } else {
+                v
+            };
+            format!("{}\n", serde_json::to_string(&v).unwrap())
+        })
+        .collect()
+}
+
+#[test]
+fn a_claim_line_its_totals_leave_out_is_marked_and_kept_through_reindex() {
+    let base = Env::new("claim-lines");
+    setup(&base);
+    let e = provider_env(&base, &with_replaced_line());
+    e.ok(&[
+        "import",
+        "--from",
+        "fakeprov",
+        "--from-profile",
+        "adult1",
+        "--patient",
+        "pat-0001",
+        "--person",
+        "Robin",
+    ]);
+    let path = e.records().join("Robin Testperson/index.json");
+    let claim_of = |v: &Value| {
+        v["records"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["kind"] == "claim")
+            .cloned()
+            .unwrap()
+    };
+    let read =
+        || -> Value { serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap() };
+    let want = read();
+    let f = &claim_of(&want)["fields"];
+    let counted: Vec<bool> = f["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["counted"] != false)
+        .collect();
+    assert_eq!(counted, [true, false, true]);
+    assert_eq!(f["items"][0]["revenue"]["code"], "0450");
+    assert_eq!(f["notes"][0], "Z9 -- Processed under the member's plan.");
+
+    // Readers give the claim's totals.
+    let claims = e.ok(&["timeline", "--kind", "claim"]);
+    assert_eq!(
+        claims["items"][0]["detail"],
+        "billed 1600.0 USD, plan paid 690.0 USD, you owe 250.0 USD"
+    );
+    // A line's processing note is searchable.
+    let hits = e.ok(&["search", "coding policy"]);
+    assert_eq!(hits["items"][0]["kind"], "claim", "{hits}");
+
+    // A claim filed by 0.8.1, without these fields, takes them on reindex.
+    let mut old = want.clone();
+    for r in old["records"].as_array_mut().unwrap() {
+        if r["kind"] == "claim" {
+            let f = r["fields"].as_object_mut().unwrap();
+            f.remove("notes");
+            for i in f["items"].as_array_mut().unwrap() {
+                let i = i.as_object_mut().unwrap();
+                for k in ["counted", "notes", "revenue"] {
+                    i.remove(k);
+                }
+            }
+        }
+    }
+    std::fs::write(&path, serde_json::to_string(&old).unwrap()).unwrap();
+    let r = e.ok(&["reindex"]);
+    assert_eq!(r["reshaped"], 1, "{r}");
+    assert_eq!(claim_of(&read())["fields"], claim_of(&want)["fields"]);
+    assert_eq!(claim_of(&read())["display"], claim_of(&want)["display"]);
+    assert_eq!(e.ok(&["reindex"])["reshaped"], 0);
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
 /// MD5 (hex) of a file, as Drive reports it.
 fn md5_of(path: &Path) -> String {
     medrec::hash::md5_hex(&std::fs::read(path).unwrap())

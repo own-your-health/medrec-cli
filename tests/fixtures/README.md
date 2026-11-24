@@ -27,6 +27,12 @@ real record, document, study or provider response.
   unassigned labeler `00000`. `fhir/medication-dispense-contained.json` is
   the same fill with its prescription contained, naming an `Example
   Prescriber`.
+- `fhir/replaced-line-eob.json` is an emergency claim (an
+  ExplanationOfBenefit at "Example Hospital") whose payer replaced the
+  billed visit code: it lists the replacement, the billed code at the
+  member's whole cost, and a lab line, and its totals count the first and
+  the last. Its two processing notes, one a line points at and one no line
+  does, and its NUBC revenue code `0450` are invented.
 - `fhir/stu3.json` holds invented FHIR STU3 resources in the shapes a
   behavioral-health EHR's patient API publishes: statuses as plain codes,
   `assertedDate`, `Immunization.notGiven` and `date`, `requester.agent`, one
