@@ -2520,7 +2520,10 @@ fn a_claim_line_its_totals_leave_out_is_marked_and_kept_through_reindex() {
         .collect();
     assert_eq!(counted, [true, false, true]);
     assert_eq!(f["items"][0]["revenue"]["code"], "0450");
-    assert_eq!(f["notes"][0], "Z9 -- Processed under the member's plan.");
+    assert_eq!(
+        f["payer_notes"][0],
+        "Z9 -- Processed under the member's plan."
+    );
 
     // Readers give the claim's totals.
     let claims = e.ok(&["timeline", "--kind", "claim"]);
@@ -2537,10 +2540,10 @@ fn a_claim_line_its_totals_leave_out_is_marked_and_kept_through_reindex() {
     for r in old["records"].as_array_mut().unwrap() {
         if r["kind"] == "claim" {
             let f = r["fields"].as_object_mut().unwrap();
-            f.remove("notes");
+            f.remove("payer_notes");
             for i in f["items"].as_array_mut().unwrap() {
                 let i = i.as_object_mut().unwrap();
-                for k in ["counted", "notes", "revenue"] {
+                for k in ["counted", "payer_notes", "revenue"] {
                     i.remove(k);
                 }
             }

@@ -244,7 +244,8 @@ fn add(a: &Value, b: &Value) -> Option<Value> {
         return None;
     }
     let amt = |m: &Value| m.get("amount").and_then(Value::as_str).and_then(units);
-    Some(json!({"amount": decimal(amt(a)? + amt(b)?), "currency": cur(a)}))
+    let sum = amt(a)?.checked_add(amt(b)?)?;
+    Some(json!({"amount": decimal(sum), "currency": cur(a)}))
 }
 
 /// The member's share of a claim's or line's `amounts`, for a reader: the
@@ -303,6 +304,11 @@ const COUNTED_BY: [&str; 3] = ["billed", "plan_paid", "you_owe"];
 const LEFT_OUT_MAX: usize = 3;
 const LEFT_OUT_LINES: usize = 64;
 
+/// The sum of amounts in ten-thousandths, `None` past `i128`.
+fn sum(mut amounts: impl Iterator<Item = i128>) -> Option<i128> {
+    amounts.try_fold(0i128, i128::checked_add)
+}
+
 /// Whether a claim's totals count this line: every line but one `left_out`
 /// marked `"counted": false`.
 pub fn counted(item: &Value) -> bool {
@@ -359,7 +365,10 @@ pub fn left_out(items: &[Value], totals: &Map<String, Value>) -> Vec<usize> {
             }
         }
         if given {
-            rows.push((lines.iter().sum::<i128>() - total, lines));
+            let Some(excess) = sum(lines.iter().copied()).and_then(|s| s.checked_sub(total)) else {
+                return Vec::new();
+            };
+            rows.push((excess, lines));
         }
     }
     if rows.len() < 2 || rows.iter().all(|(excess, _)| *excess == 0) {
@@ -371,7 +380,7 @@ pub fn left_out(items: &[Value], totals: &Map<String, Value>) -> Vec<usize> {
         loop {
             if rows
                 .iter()
-                .all(|(excess, lines)| set.iter().map(|&i| lines[i]).sum::<i128>() == *excess)
+                .all(|(excess, lines)| sum(set.iter().map(|&i| lines[i])) == Some(*excess))
             {
                 found.push(set.clone());
                 if found.len() > 1 {
@@ -820,6 +829,17 @@ mod tests {
         owed_only.insert("you_owe".into(), usd("250.00"));
         let unpriced = [json!({"amounts": {"billed": usd("1")}}), json!({})];
         assert!(left_out(&unpriced, &owed_only).is_empty());
+        // An amount too large to add decides nothing: 10^34 parses (10^38
+        // ten-thousandths), and two of them pass i128.
+        let huge = format!("1{}", "0".repeat(34));
+        assert!(units(&huge).is_some());
+        let vast = [
+            line(&huge, "0", "0"),
+            line(&huge, "0", "0"),
+            line("1", "1", "0"),
+        ];
+        assert!(left_out(&vast, &totals("1", "1", "0")).is_empty());
+        assert_eq!(add(&usd(&huge), &usd(&huge)), None);
         // One amount compared is too little to go on.
         let mut billed_only = Map::new();
         billed_only.insert("billed".into(), usd("1600.00"));

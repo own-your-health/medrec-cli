@@ -338,7 +338,7 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
                 fields.insert("amounts".into(), Value::Object(amounts));
             }
             put(&mut fields, "items", items);
-            put(&mut fields, "notes", claim_notes(r));
+            put(&mut fields, "payer_notes", claim_notes(r));
             put(&mut fields, "diagnoses", eob_diagnoses(r));
             // A pharmacy claim (CARIN's Pharmacy EOB) carries the fill on
             // `supportingInfo`.
@@ -748,7 +748,7 @@ fn eob_items(r: &Value, pharmacy: bool) -> Option<Value> {
                 .map(|(_, t)| (*t).into())
                 .collect();
             if !texts.is_empty() {
-                line["notes"] = Value::Array(texts);
+                line["payer_notes"] = Value::Array(texts);
             }
             // A facility line's revenue code (NUBC: 045x is the emergency
             // room), beside or instead of its service code.
@@ -1021,14 +1021,14 @@ mod tests {
         // Each line keeps the processing notes it points at; the claim
         // keeps those no line points at.
         assert_eq!(
-            items[0]["notes"],
+            items[0]["payer_notes"],
             json!(["R1 -- This line replaces the billed code under the plan's coding policy."])
         );
-        assert!(items[1].get("notes").is_none());
+        assert!(items[1].get("payer_notes").is_none());
         assert_eq!(items[0]["revenue"]["code"], "0450");
         assert!(items[2].get("revenue").is_none());
         assert_eq!(
-            f["notes"],
+            f["payer_notes"],
             json!(["Z9 -- Processed under the member's plan."])
         );
 
