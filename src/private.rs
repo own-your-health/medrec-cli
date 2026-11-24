@@ -40,6 +40,33 @@ pub struct Mark {
     pub by: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request: Option<String>,
+    /// An event's own members when it was marked: when the event's id
+    /// changes (its anchor did), the mark follows them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub members: Vec<String>,
+}
+
+/// An event's own members, by record or document id: those without
+/// `person` (another person's paper).
+fn own_members(e: &Value) -> Vec<String> {
+    e["members"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|m| m.get("person").is_none())
+        .filter_map(|m| m["record"].as_str().or(m["document"].as_str()))
+        .map(str::to_string)
+        .collect()
+}
+
+/// Whether a mark on an event applies to the event `eid` with these own
+/// members: it names it, or it names an event no longer there and shares
+/// a member with it.
+fn marks_event(m: &Mark, eid: &str, members: &[String], events: &BTreeSet<&str>) -> bool {
+    m.item == eid
+        || (m.item.starts_with("e_")
+            && !events.contains(m.item.as_str())
+            && m.members.iter().any(|x| members.contains(x)))
 }
 
 /// Why an item is private: its area, and what said so.
@@ -283,7 +310,7 @@ pub fn build(p: &Person, idx: &PersonIndex, events: &Value, marks: &[Mark]) -> V
         area: HOUSEHOLD,
         from: "household",
     };
-    let marked = |items: &mut BTreeMap<String, Why>, id: &str| match mark_of.get(id) {
+    let apply = |items: &mut BTreeMap<String, Why>, id: &str, mark: Option<bool>| match mark {
         Some(true) => {
             let area = items.get(id).map_or(HOUSEHOLD, |w| w.area);
             items.insert(id.to_string(), Why { area, ..household });
@@ -293,6 +320,12 @@ pub fn build(p: &Person, idx: &PersonIndex, events: &Value, marks: &[Mark]) -> V
         }
         None => {}
     };
+    let event_ids: BTreeSet<&str> = events["events"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e["id"].as_str())
+        .collect();
     // A mark naming an item the person no longer has is skipped.
     let held: BTreeSet<&str> = idx
         .records
@@ -300,8 +333,8 @@ pub fn build(p: &Person, idx: &PersonIndex, events: &Value, marks: &[Mark]) -> V
         .map(|r| r.id.as_str())
         .chain(idx.documents.iter().map(|d| d.id.as_str()))
         .collect();
-    for id in mark_of.keys().filter(|id| held.contains(*id)) {
-        marked(&mut items, id);
+    for (id, mark) in mark_of.iter().filter(|(id, _)| held.contains(**id)) {
+        apply(&mut items, id, Some(*mark));
     }
 
     // An event is private when a claim or portal visit in it is, or every
@@ -311,24 +344,15 @@ pub fn build(p: &Person, idx: &PersonIndex, events: &Value, marks: &[Mark]) -> V
         let Some(eid) = e["id"].as_str() else {
             continue;
         };
-        let own: Vec<&Value> = e["members"]
+        let ids = own_members(e);
+        let lead = e["members"]
             .as_array()
             .into_iter()
             .flatten()
             .filter(|m| m.get("person").is_none())
-            .collect();
-        let id_of = |m: &Value| {
-            m["record"]
-                .as_str()
-                .or(m["document"].as_str())
-                .map(str::to_string)
-        };
-        let ids: Vec<String> = own.iter().filter_map(|m| id_of(m)).collect();
-        let lead = own
-            .iter()
             .filter(|m| m["kind"] == "claim" || m["role"] == "portal")
-            .filter_map(|m| id_of(m))
-            .find_map(|id| items.get(&id).copied());
+            .filter_map(|m| m["record"].as_str().or(m["document"].as_str()))
+            .find_map(|id| items.get(id).copied());
         let all = (!ids.is_empty() && ids.iter().all(|id| items.contains_key(id)))
             .then(|| items[&ids[0]]);
         if let Some(w) = lead.or(all) {
@@ -340,7 +364,20 @@ pub fn build(p: &Person, idx: &PersonIndex, events: &Value, marks: &[Mark]) -> V
                 },
             );
         }
-        marked(&mut items, eid);
+        // The last mark that applies: its own, else one that followed its
+        // members here.
+        let mark = marks
+            .iter()
+            .rev()
+            .find(|m| m.item == eid)
+            .or_else(|| {
+                marks
+                    .iter()
+                    .rev()
+                    .find(|m| marks_event(m, eid, &ids, &event_ids))
+            })
+            .map(|m| m.private);
+        apply(&mut items, eid, mark);
         by_event.push((eid.to_string(), ids));
     }
     for (eid, ids) in &by_event {
@@ -484,15 +521,21 @@ pub fn mark(
             crate::printable(item)
         )));
     }
-    let known = if item.starts_with("e_") {
-        crate::events::of_person(folder, h, p)?["events"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .any(|e| e["id"] == item)
+    // An event's own members, and the person's events now.
+    let (known, members, events) = if item.starts_with("e_") {
+        let v = crate::events::of_person(folder, h, p)?;
+        let list = v["events"].as_array().cloned().unwrap_or_default();
+        let members = list.iter().find(|e| e["id"] == item).map(own_members);
+        let ids: BTreeSet<String> = list
+            .iter()
+            .filter_map(|e| e["id"].as_str().map(str::to_string))
+            .collect();
+        (members.is_some(), members.unwrap_or_default(), ids)
     } else {
         let idx = folder.index(p)?;
-        idx.records.iter().any(|r| r.id == item) || idx.documents.iter().any(|d| d.id == item)
+        let known =
+            idx.records.iter().any(|r| r.id == item) || idx.documents.iter().any(|d| d.id == item);
+        (known, Vec::new(), BTreeSet::new())
     };
     if !known {
         return Err(CliError::NotFound(format!(
@@ -502,29 +545,45 @@ pub fn mark(
         )));
     }
     let mut m = folder.marks(p)?;
-    let at = m.private.iter().position(|x| x.item == item);
-    match (private, at) {
-        (None, None) => return Ok((None, false)),
-        (None, Some(i)) => {
-            m.private.remove(i);
-            folder.save_marks(p, &m)?;
-            return Ok((None, true));
+    // The marks that apply to the item: its own, and for an event those
+    // that followed its members from an id it no longer has.
+    let events: BTreeSet<&str> = events.iter().map(String::as_str).collect();
+    let applies = |x: &Mark| {
+        if item.starts_with("e_") {
+            marks_event(x, item, &members, &events)
+        } else {
+            x.item == item
         }
-        (Some(b), Some(i)) if m.private[i].private == b => {
-            return Ok((Some(m.private[i].clone()), false))
+    };
+    let found: Vec<usize> = (0..m.private.len())
+        .filter(|i| applies(&m.private[*i]))
+        .collect();
+    match (private, found.as_slice()) {
+        (None, []) => return Ok((None, false)),
+        (Some(b), [i]) if m.private[*i].item == item && m.private[*i].private == b => {
+            return Ok((Some(m.private[*i].clone()), false))
         }
-        (Some(_), Some(i)) => {
-            m.private.remove(i);
-        }
-        (Some(_), None) => {}
+        _ => {}
     }
+    let changed = !found.is_empty();
+    m.private = std::mem::take(&mut m.private)
+        .into_iter()
+        .enumerate()
+        .filter(|(i, _)| !found.contains(i))
+        .map(|(_, x)| x)
+        .collect();
+    let Some(private) = private else {
+        folder.save_marks(p, &m)?;
+        return Ok((None, changed));
+    };
     let new = Mark {
         id: crate::ids::new("o"),
         item: item.to_string(),
-        private: private.unwrap_or(true),
+        private,
         at: crate::refresh::time::fmt(crate::refresh::time::now()),
         by: by.map(str::to_string),
         request: request.map(str::to_string),
+        members,
     };
     m.private.push(new.clone());
     folder.save_marks(p, &m)?;
@@ -813,6 +872,7 @@ mod tests {
             at: "2026-11-24T12:00:00Z".into(),
             by: None,
             request: None,
+            members: Vec::new(),
         };
         let v = build(
             &person(),
@@ -828,6 +888,7 @@ mod tests {
         );
         assert!(v["records"].get("r_goneaaaaaaaaaaaaaaaa").is_none(), "{v}");
         assert!(v["events"].get("e_goneaaaaaaaaaaaaaaaa").is_none(), "{v}");
+
         assert_eq!(
             v["records"]["r_vitaminaaaaaaaaaaaaa"],
             json!({"area": HOUSEHOLD, "from": "household"})
@@ -839,5 +900,31 @@ mod tests {
         assert!(v["events"].get("e_therapyaaaaaaaaaaaaa").is_none(), "{v}");
         assert!(v["records"].get("r_therapyvisitaaaaaaaa").is_none(), "{v}");
         assert_eq!(v["records"]["r_therapyclaimaaaaaaaa"]["from"], "code");
+
+        // A mark on an event whose id changed (its anchor did) follows its
+        // members; one whose members are all gone is skipped.
+        let followed = Mark {
+            members: vec!["r_vitaminaaaaaaaaaaaaa".into()],
+            ..mark("e_oldvitaminfillaaaaa", false)
+        };
+        let w = build(
+            &person(),
+            &idx,
+            &events,
+            &[mark("r_vitaminaaaaaaaaaaaaa", true), followed],
+        );
+        assert!(w["events"].get("e_vitaminfillaaaaaaaaa").is_none(), "{w}");
+        assert!(w["events"].get("e_oldvitaminfillaaaaa").is_none(), "{w}");
+        // Its own mark wins over one that followed.
+        let own = mark("e_vitaminfillaaaaaaaaa", true);
+        let followed = Mark {
+            members: vec!["r_vitaminaaaaaaaaaaaaa".into()],
+            ..mark("e_oldvitaminfillaaaaa", false)
+        };
+        let w = build(&person(), &idx, &events, &[own, followed]);
+        assert_eq!(
+            w["events"]["e_vitaminfillaaaaaaaaa"],
+            json!({"area": HOUSEHOLD, "from": "household"})
+        );
     }
 }

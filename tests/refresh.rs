@@ -1848,6 +1848,21 @@ fn private_items_follow_the_rules_until_the_household_marks_them() {
     );
     let visit_event = events[0].0.clone();
     assert!(events_view(&e, aid).get("private").is_none());
+    // Views a build of the same version wrote before private.json existed
+    // are made again.
+    let mut index = e.json_at("views/views.json");
+    index["people"][aid]["files"]
+        .as_object_mut()
+        .unwrap()
+        .remove("private.json");
+    std::fs::write(
+        e.records().join("views/views.json"),
+        serde_json::to_vec(&index).unwrap(),
+    )
+    .unwrap();
+    let w = e.ok(&["views", "write"]);
+    assert_eq!(w["people_rebuilt"], 1, "{w}");
+    assert_eq!(private_view(&e, aid)["person"], aid);
     // Robin has nothing private, and a view all the same.
     let r = private_view(&e, &robin);
     assert!(r["records"].as_object().unwrap().is_empty(), "{r}");
@@ -1987,6 +2002,21 @@ fn private_items_follow_the_rules_until_the_household_marks_them() {
     e.ok(&["views", "write"]);
     let records = private_rows(&private_view(&e, aid), "records");
     assert!(records.contains(&(sertraline.into(), mh(), "medicine".into())));
+
+    // A marks.json that does not read is left out, and said so; no mark is
+    // written over it.
+    std::fs::write(&file, b"{not json").unwrap();
+    e.ok(&["views", "write"]);
+    let v = private_view(&e, aid);
+    assert_eq!(v["marks_unreadable"], true, "{v}");
+    assert!(!private_rows(&v, "records")
+        .iter()
+        .any(|r| r.0 == hypertension));
+    let listed = e.ok(&["private", "list", "--person", "Alex"]);
+    assert_eq!(listed["marks_unreadable"], json!([aid]), "{listed}");
+    let (code, _) = e.code(&["private", "mark", lisinopril]);
+    assert_ne!(code, Some(0));
+    assert_eq!(std::fs::read(&file).unwrap(), b"{not json");
 }
 
 #[test]

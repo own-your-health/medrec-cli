@@ -36,6 +36,18 @@ pub const SCHEMA: &str = "medrec-views/v2";
 const SCHEMA_V1: &str = "medrec-views/v1";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// The views every person has. A person whose `views.json` entry lacks
+/// one was written by an earlier build of the same version, before that
+/// view existed, and gets their views made again.
+const EVERY_PERSON: &[&str] = &[
+    "summary.json",
+    "tests.json",
+    "documents.json",
+    "events.json",
+    "bills.json",
+    "private.json",
+];
+
 /// A records or timeline shard closes once it holds this many bytes, never
 /// inside a day.
 const SHARD_BYTES: usize = 48_000;
@@ -244,6 +256,7 @@ pub fn sync(f: &Folder, all: bool) -> Result<Synced, CliError> {
                 && store.md5(&crate::events::overrides_rel(p))? == was.overrides
                 && store.md5(&crate::marks::rel(p))? == was.marks
                 && linked_md5s(p)? == was.linked
+                && EVERY_PERSON.iter().all(|f| was.files.contains_key(*f))
             {
                 kept.insert(p.id.clone(), was.clone());
             }

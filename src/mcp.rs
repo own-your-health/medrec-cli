@@ -518,51 +518,79 @@ fn person_error(e: CliError) -> ToolError {
     ToolError::from(e).with_fix("Call medrec_summary with no arguments for the household's people")
 }
 
-/// The private items of these people (`private.json`), by id, with their
-/// area.
-fn private_of(
-    f: &Folder,
-    h: &Household,
-    people: &[&crate::model::Person],
-) -> Result<std::collections::BTreeMap<String, String>, CliError> {
-    let mut m = std::collections::BTreeMap::new();
-    for p in people {
-        m.extend(crate::private::Private::of(&crate::private::of_person(f, h, p)?).items);
-    }
-    Ok(m)
+/// The private items of the people an answer covers (`private.json`).
+#[derive(Debug, Default)]
+struct PrivateItems {
+    /// By id, with their area.
+    areas: std::collections::BTreeMap<String, String>,
+    /// The people, by name, whose `marks.json` does not read. Any of their
+    /// items may be one the household marked private, so an answer about
+    /// the whole household holds all of them back.
+    unreadable: Vec<String>,
 }
 
-/// Marks an answer's private items with their area when the call is about
-/// one person or names the item (`open`); otherwise leaves them out. How
-/// many it left out.
-fn keep_private(
-    items: &mut Vec<Item>,
-    private: &std::collections::BTreeMap<String, String>,
-    open: impl Fn(&Item) -> bool,
-) -> usize {
-    let before = items.len();
-    items.retain_mut(|i| match private.get(&i.id) {
-        Some(area) if open(i) => {
-            i.private = Some(area.clone());
-            true
+impl PrivateItems {
+    fn of(f: &Folder, h: &Household, people: &[&crate::model::Person]) -> Result<Self, CliError> {
+        let mut out = PrivateItems::default();
+        for p in people {
+            let v = crate::private::of_person(f, h, p)?;
+            if v.get("marks_unreadable").is_some() {
+                out.unreadable.push(p.name.clone());
+            }
+            out.areas.extend(crate::private::Private::of(&v).items);
         }
-        Some(_) => false,
-        None => true,
-    });
-    before - items.len()
-}
+        Ok(out)
+    }
 
-/// Says on a household-wide page how many private items it left out.
-fn left_out_warning<T>(page: &mut Page<T>, n: usize) {
-    if n > 0 {
-        page.warn(
-            "private-left-out",
-            format!(
-                "{n} private item{} left out of this household-wide answer: ask about one person, or name the item, to include {}",
-                if n == 1 { "" } else { "s" },
-                if n == 1 { "it" } else { "them" },
-            ),
-        );
+    fn area(&self, id: &str) -> Option<String> {
+        self.areas.get(id).cloned()
+    }
+
+    /// Whether an item of `person` (by name) stays out of an answer about
+    /// the whole household that does not name it.
+    fn held_back(&self, id: &str, person: &str) -> bool {
+        self.areas.contains_key(id) || self.unreadable.iter().any(|n| n == person)
+    }
+
+    /// Marks an answer's private items with their area when the call is
+    /// about one person or names the item (`open`); otherwise leaves them
+    /// out. How many it left out.
+    fn keep(&self, items: &mut Vec<Item>, open: impl Fn(&Item) -> bool) -> usize {
+        let before = items.len();
+        items.retain_mut(|i| {
+            if !self.held_back(&i.id, &i.person) {
+                return true;
+            }
+            if !open(i) {
+                return false;
+            }
+            i.private = self.area(&i.id);
+            true
+        });
+        before - items.len()
+    }
+
+    /// Says on a page how many items it left out, and whose marks did not
+    /// read.
+    fn warn<T>(&self, page: &mut Page<T>, left_out: usize) {
+        if left_out > 0 {
+            page.warn(
+                "private-left-out",
+                format!(
+                    "{left_out} private item{} left out of this household-wide answer: ask about one person, or name the item, to include {}",
+                    if left_out == 1 { "" } else { "s" },
+                    if left_out == 1 { "it" } else { "them" },
+                ),
+            );
+        }
+        for name in &self.unreadable {
+            page.warn(
+                "private-marks-unreadable",
+                format!(
+                    "{name}'s marks.json does not read, so the household's private marks are not applied: {name}'s items are left out of household-wide answers until it is fixed"
+                ),
+            );
+        }
     }
 }
 
@@ -662,9 +690,9 @@ impl MedrecTools {
                     },
                 )?;
                 let mut s = sections(s);
-                let private = private_of(&f, &h, &[p])?;
+                let private = PrivateItems::of(&f, &h, &[p])?;
                 for line in s.sections.iter_mut().flat_map(|s| s.items.iter_mut()) {
-                    line.private = line.id.as_deref().and_then(|id| private.get(id)).cloned();
+                    line.private = line.id.as_deref().and_then(|id| private.area(id));
                 }
                 Some(s)
             }
@@ -688,18 +716,18 @@ impl MedrecTools {
         if let Some(q) = person {
             people::resolve(&h, q).map_err(person_error)?;
         }
-        let private = private_of(&f, &h, &people::selected(&h, person)?)?;
+        let private = PrivateItems::of(&f, &h, &people::selected(&h, person)?)?;
         // Household-wide, a private hit is left out unless the query names it.
         let (hits, left_out) =
             views::search_leaving_out(&f, &h, person, &a.query, &r, page.wanted(), &|x| {
                 person.is_none()
-                    && private.contains_key(&x.id)
+                    && private.held_back(&x.id, &x.person_name)
                     && !crate::private::names(&x.title, &a.query)
             })?;
         let items = hits
             .into_iter()
             .map(|x| SearchItem {
-                private: private.get(&x.id).cloned(),
+                private: private.area(&x.id),
                 person: x.person_name,
                 kind: x.kind,
                 id: x.id,
@@ -709,7 +737,7 @@ impl MedrecTools {
             })
             .collect();
         let mut out = page.page(items, "person, since/until, or more words")?;
-        left_out_warning(&mut out, left_out);
+        private.warn(&mut out, left_out);
         ToolOutput::new(&out)
     }
 
@@ -907,12 +935,12 @@ impl MedrecTools {
             }
         }
         items.sort_by(|a, b| b.date.cmp(&a.date).then(a.title.cmp(&b.title)));
-        let private = private_of(&f, &h, &selected)?;
-        let left_out = keep_private(&mut items, &private, |i| {
+        let private = PrivateItems::of(&f, &h, &selected)?;
+        let left_out = private.keep(&mut items, |i| {
             person.is_some() || name.is_some_and(|n| crate::private::names(&i.title, n))
         });
         let mut out = page.page(items, "person, since/until, active or name")?;
-        left_out_warning(&mut out, left_out);
+        private.warn(&mut out, left_out);
         ToolOutput::new(&out)
     }
 
@@ -966,8 +994,8 @@ impl MedrecTools {
                     .with_fix("List events with medrec_records kind events to find the id"),
             );
         }
-        let private = private_of(&f, &h, &selected)?;
-        let left_out = keep_private(&mut items, &private, |i| {
+        let private = PrivateItems::of(&f, &h, &selected)?;
+        let left_out = private.keep(&mut items, |i| {
             person.is_some()
                 || id.is_some()
                 || name.is_some_and(|n| {
@@ -982,7 +1010,7 @@ impl MedrecTools {
                 })
         });
         let mut out = page.page(items, "person, since/until or name")?;
-        left_out_warning(&mut out, left_out);
+        private.warn(&mut out, left_out);
         ToolOutput::new(&out)
     }
 
@@ -1042,7 +1070,7 @@ impl MedrecTools {
             text_pages,
             records,
             // Asked for by id: a private document is the person's, named.
-            private: private_of(&f, &h, &[&p])?.remove(&d.id),
+            private: PrivateItems::of(&f, &h, &[&p])?.area(&d.id),
             ..Default::default()
         };
         if chars.is_empty() {

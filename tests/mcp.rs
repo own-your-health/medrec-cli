@@ -657,6 +657,36 @@ fn private_items_stay_out_of_household_wide_answers_unless_asked_about() {
         "{v}"
     );
     assert!(lines.iter().filter(|l| l.get("private").is_none()).count() >= 3);
+
+    // A marks.json that does not read: any of Alex's items may be one the
+    // household marked, so a household-wide answer holds them all back.
+    std::fs::write(
+        e.records()
+            .join(alex["folder"].as_str().unwrap())
+            .join("marks.json"),
+        b"{not json",
+    )
+    .unwrap();
+    let v = ask(RECORDS, json!({"kind": "conditions"}));
+    assert!(
+        v["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|i| i["person"] != "Alex Testperson"),
+        "{v}"
+    );
+    assert!(left_out(&v).unwrap().starts_with("2 private items"), "{v}");
+    let unreadable: Vec<&Value> = v["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|w| w["code"] == "private-marks-unreadable")
+        .collect();
+    assert_eq!(unreadable.len(), 1, "{v}");
+    let v = ask(RECORDS, json!({"kind": "conditions", "person": "Alex"}));
+    assert_eq!(item(&v, depression)["private"], "mental_health");
+    assert!(item(&v, "r_hypertensionaaaaaaaa").get("private").is_none());
 }
 
 fn rpc(stdin: &mut impl Write, stdout: &mut impl BufRead, msg: Value) -> Option<Value> {

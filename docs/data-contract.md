@@ -495,6 +495,10 @@ fields it knows, never drops a mark. It is absent until the first mark.
   (`false`), whatever the rules say. An item has at most one mark: another
   replaces it, the same again changes nothing, and `medrec private reset`
   drops it. `private` is absent until the first such mark.
+- A mark on an event also lists the event's own `members` (record and
+  document ids) when it was made. An event keeps its id only while its
+  anchor member stays (Events, below); when the id changes, the mark
+  follows its members to the event that holds any of them.
 - `by` and `request` are as in `overrides.json`: who asked and the request
   it came from, `null` from a terminal, neither trusted.
 - medrec writes it (`medrec bills paid|undo`, `medrec private
@@ -886,7 +890,10 @@ last.
   medrec version. Otherwise their views are made
   again, and only views the folder does not already hold under their
   stored names are uploaded. An unchanged view keeps its name and is not
-  written again.
+  written again. A person whose views lack one every person has
+  (`summary.json`, `tests.json`, `documents.json`, `events.json`,
+  `bills.json`, `private.json`) gets them made again: a build of the same
+  version wrote them before that view existed.
 - **`views.json` last.** It records the MD5 of every view, so a reader
   checks each view it reads and never mixes two passes, whatever order an
   uploader sends them in. Views that it no longer names, a person's who
@@ -1313,11 +1320,15 @@ nothing is private.
   mark `true` makes an item private, with the area the rules give it, else
   `household`. A mark `false` takes it out, even as a member of a private
   event. Marks on records and documents apply before events are judged,
-  marks on events after. A mark naming an item the person no longer has
-  is skipped: an event keeps its id only while its anchor member stays
-  (Events, above).
+  marks on events after. An event's own mark comes first; else the last
+  mark on an event id the person no longer has that shares a member with
+  it (`marks.json`, above). A mark naming a record or document the person
+  no longer has, or an event none of whose members remain, is skipped.
 - **`marks_unreadable`**: `true` when the person's `marks.json` does not
-  read, so no household mark applies. Absent otherwise.
+  read, so no household mark applies. Absent otherwise. Any of the
+  person's items may then be one the household marked private, so a
+  reader holds all of them back from shared screens and household-wide
+  answers until it reads.
 
 ## Readers
 
@@ -1365,8 +1376,10 @@ readers ship with medrec:
     place), one of them a word of its own rather than a form, unit or kind
     of record ("sertraline", not "tablets"); an event or a document asked
     for by `id`. Each private item an answer includes carries `private`,
-    its area. The commands are the household's own terminal and leave
-    nothing out.
+    its area. A person whose `marks.json` does not read has all their
+    items held back from answers about the whole household, with a
+    `private-marks-unreadable` warning naming them. The commands are the
+    household's own terminal and leave nothing out.
 
 Both search the same way: every item whose text holds all the query's
 words, as word prefixes, with case, accents and punctuation ignored. A
