@@ -3,6 +3,8 @@
 //! rest in the raw layer, so a record can always be rebuilt from its raw
 //! object.
 
+use std::collections::BTreeSet;
+
 use serde_json::{json, Map, Value};
 
 use crate::claims;
@@ -312,7 +314,15 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
             put_str(&mut fields, "use", path_str(r, "use"));
             put_str(&mut fields, "facility", path_str(r, "facility.display"));
             let pharmacy = is_pharmacy(r);
-            let items = eob_items(r, pharmacy);
+            let mut items = eob_items(r, pharmacy);
+            let totals = claims::amounts(eob_entries(r.get("total")));
+            if let Some(Value::Array(list)) = items.as_mut() {
+                for i in claims::left_out(list, &totals) {
+                    if let Some(o) = list[i].as_object_mut() {
+                        o.insert("counted".into(), Value::Bool(false));
+                    }
+                }
+            }
             let lines = items
                 .as_ref()
                 .and_then(Value::as_array)
@@ -323,12 +333,12 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
                 "category",
                 claims::claim_category(lines, pharmacy),
             );
-            let totals = claims::amounts(eob_entries(r.get("total")));
             let amounts = claims::claim_amounts(totals, lines, money(path(r, "payment.amount")));
             if !amounts.is_empty() {
                 fields.insert("amounts".into(), Value::Object(amounts));
             }
             put(&mut fields, "items", items);
+            put(&mut fields, "payer_notes", claim_notes(r));
             put(&mut fields, "diagnoses", eob_diagnoses(r));
             // A pharmacy claim (CARIN's Pharmacy EOB) carries the fill on
             // `supportingInfo`.
@@ -619,7 +629,7 @@ fn eob_entries(list: Option<&Value>) -> impl Iterator<Item = (&Value, Option<Val
 }
 
 /// A claim's title (`claims::title`): a fill by its drug (RxNorm or NDC
-/// display), other claims by their lines' services.
+/// display), other claims by the services of the lines its totals count.
 fn claim_title(r: &Value, fields: &Map<String, Value>) -> Option<String> {
     let lines = r
         .get("item")
@@ -627,9 +637,13 @@ fn claim_title(r: &Value, fields: &Map<String, Value>) -> Option<String> {
         .map(Vec::as_slice)
         .unwrap_or(&[]);
     let prefer: &[&str] = if is_pharmacy(r) { &[RXNORM, NDC] } else { &[] };
+    // `items` holds one entry per line, in order.
+    let shaped = fields.get("items").and_then(Value::as_array);
     let names: Vec<String> = lines
         .iter()
-        .filter_map(|l| l.get("productOrService").and_then(|c| codeable(c, prefer)))
+        .enumerate()
+        .filter(|(i, _)| shaped.and_then(|s| s.get(*i)).is_none_or(claims::counted))
+        .filter_map(|(_, l)| l.get("productOrService").and_then(|c| codeable(c, prefer)))
         .filter_map(|c| c.display)
         .collect();
     claims::title(
@@ -653,9 +667,52 @@ fn eob_diagnoses(r: &Value) -> Option<Value> {
     (!list.is_empty()).then(|| Value::Array(list))
 }
 
-/// Each claim line: its service code, category, dates and amounts, with
-/// its adjudication entries as the payer wrote them.
+/// An EOB's `processNote` texts by their `number`.
+fn process_notes(r: &Value) -> Vec<(Option<u64>, &str)> {
+    r.get("processNote")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|n| {
+            let text = n.get("text").and_then(Value::as_str)?.trim();
+            (!text.is_empty()).then(|| (n.get("number").and_then(Value::as_u64), text))
+        })
+        .collect()
+}
+
+/// The `noteNumber`s a line points at.
+fn note_numbers(item: &Value) -> Vec<u64> {
+    item.get("noteNumber")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_u64)
+        .collect()
+}
+
+/// The claim's processing notes that no line points at, as the payer wrote
+/// them; each line carries its own (`eob_items`).
+fn claim_notes(r: &Value) -> Option<Value> {
+    let used: BTreeSet<u64> = r
+        .get("item")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .flat_map(note_numbers)
+        .collect();
+    let notes: Vec<Value> = process_notes(r)
+        .into_iter()
+        .filter(|(n, _)| n.is_none_or(|n| !used.contains(&n)))
+        .map(|(_, t)| t.into())
+        .collect();
+    (!notes.is_empty()).then(|| Value::Array(notes))
+}
+
+/// Each claim line: its service and revenue codes, category, dates and
+/// amounts, with its adjudication entries and processing notes as the payer
+/// wrote them.
 fn eob_items(r: &Value, pharmacy: bool) -> Option<Value> {
+    let notes = process_notes(r);
     let items: Vec<Value> = r
         .get("item")
         .and_then(Value::as_array)?
@@ -675,7 +732,7 @@ fn eob_items(r: &Value, pharmacy: bool) -> Option<Value> {
                 })
                 .collect();
             let amounts = claims::amounts(eob_entries(it.get("adjudication")));
-            json!({
+            let mut line = json!({
                 "sequence": it.get("sequence"),
                 "category": claims::item_category(it, pharmacy),
                 "amounts": (!amounts.is_empty()).then_some(amounts),
@@ -684,7 +741,21 @@ fn eob_items(r: &Value, pharmacy: bool) -> Option<Value> {
                 "quantity": quantity(it.get("quantity")),
                 "net": money(it.get("net")),
                 "adjudication": adjudication,
-            })
+            });
+            let texts: Vec<Value> = note_numbers(it)
+                .into_iter()
+                .filter_map(|k| notes.iter().find(|(n, _)| *n == Some(k)))
+                .map(|(_, t)| (*t).into())
+                .collect();
+            if !texts.is_empty() {
+                line["payer_notes"] = Value::Array(texts);
+            }
+            // A facility line's revenue code (NUBC: 045x is the emergency
+            // room), beside or instead of its service code.
+            if let Some(rev) = it.get("revenue").and_then(|c| codeable(c, &[])) {
+                line["revenue"] = json!(rev);
+            }
+            line
         })
         .collect();
     (!items.is_empty()).then(|| Value::Array(items))
@@ -815,6 +886,7 @@ mod tests {
 
     const DISPENSE: &str = include_str!("../tests/fixtures/fhir/medication-dispense.json");
     const PHARMACY_EOB: &str = include_str!("../tests/fixtures/fhir/pharmacy-eob.json");
+    const REPLACED_LINE_EOB: &str = include_str!("../tests/fixtures/fhir/replaced-line-eob.json");
     const STU3: &str = include_str!("../tests/fixtures/fhir/stu3.json");
     const DISPENSE_CONTAINED: &str =
         include_str!("../tests/fixtures/fhir/medication-dispense-contained.json");
@@ -918,6 +990,57 @@ mod tests {
         assert_eq!(
             record(&prepared, prov()).unwrap().date.as_deref(),
             Some("2026-03-09")
+        );
+    }
+
+    #[test]
+    fn a_line_the_totals_leave_out_is_marked_and_named_by_nothing() {
+        let r: Value = serde_json::from_str(REPLACED_LINE_EOB).unwrap();
+        let rec = record(&r, prov()).unwrap();
+        let f = &rec.fields;
+        let items = f["items"].as_array().unwrap();
+        // The billed code the payer replaced, at the member's cost, is
+        // listed and left out of the totals; the other lines are counted.
+        assert_eq!(items[1]["counted"], false);
+        assert!(items[0].get("counted").is_none());
+        assert!(items[2].get("counted").is_none());
+        // Its amounts stay as the payer wrote them; the claim's are the
+        // totals.
+        assert_eq!(items[1]["amounts"]["you_owe"]["amount"], "1800.0");
+        assert_eq!(f["amounts"]["you_owe"]["amount"], "250.0");
+        assert_eq!(f["amounts"]["billed"]["amount"], "1600.0");
+        // A name no total gives sums the counted lines only.
+        assert_eq!(f["amounts"]["not_covered"], Value::Null);
+        assert_eq!(f["amounts"]["copay"]["amount"], "250.0");
+        // The title names what the counted lines paid for.
+        assert_eq!(
+            rec.display,
+            "Emergency visit, moderate and Blood count · Example Hospital"
+        );
+        assert_eq!(f["category"], "mixed");
+        // Each line keeps the processing notes it points at; the claim
+        // keeps those no line points at.
+        assert_eq!(
+            items[0]["payer_notes"],
+            json!(["R1 -- This line replaces the billed code under the plan's coding policy."])
+        );
+        assert!(items[1].get("payer_notes").is_none());
+        assert_eq!(items[0]["revenue"]["code"], "0450");
+        assert!(items[2].get("revenue").is_none());
+        assert_eq!(
+            f["payer_notes"],
+            json!(["Z9 -- Processed under the member's plan."])
+        );
+
+        // Without the left-out line its claim reads the same, nothing marked.
+        let mut whole = r.clone();
+        whole["item"].as_array_mut().unwrap().remove(1);
+        let rec = record(&whole, prov()).unwrap();
+        let items = rec.fields["items"].as_array().unwrap();
+        assert!(items.iter().all(|i| i.get("counted").is_none()));
+        assert_eq!(
+            rec.display,
+            "Emergency visit, moderate and Blood count · Example Hospital"
         );
     }
 

@@ -201,18 +201,25 @@ again, or all at once with `medrec reindex`, which shapes every claim again
 from the raw file filed for it, reading nothing but the folder. A claim
 with no `amounts` and no `category` was filed by an earlier medrec. Every
 machine that imports into one folder must run 0.5.0 or later: an earlier
-medrec files the claims it imports again in the earlier shape.
+medrec files the claims it imports again in the earlier shape. The line
+fields `counted`, `payer_notes` and `revenue` and the claim's
+`payer_notes` come with 0.8.2: run `medrec reindex` once after upgrading
+to it, and run 0.8.2 or later on every machine that imports into the
+folder, since an earlier medrec files claims again without them. A claim
+filed by an earlier medrec has no line marked `counted: false` even where
+its totals leave one out.
 
-- `display`: what it paid for and who. That is its lines' service names
-  (`A`, `A and B`, `A, B and 2 more`), a pharmacy claim's drug (RxNorm,
-  else NDC), or failing those its category's label (`Lab work`), then
-  ` · ` and its `provider`. The FHIR claim type stays in `type`
+- `display`: what it paid for and who. That is the service names of the
+  lines its totals count (`A`, `A and B`, `A, B and 2 more`), a pharmacy
+  claim's drug (RxNorm, else NDC), or failing those its category's label
+  (`Lab work`), then ` · ` and its `provider`. The FHIR claim type stays in `type`
   (`professional`, `institutional`, `pharmacy`, `oral`).
-- `category`: its lines' one category, `mixed` when they have several,
-  `pharmacy` for a pharmacy claim.
+- `category`: the one category of the lines its totals count, `mixed` when
+  they have several, `pharmacy` for a pharmacy claim.
 - `amounts`: the claim's, by the names below. A name its `total` gives
-  comes from there. Otherwise it is the sum of its lines that give it, and
-  `plan_paid` failing both is its `payment`.
+  comes from there: the totals are the claim's figures, whatever its lines
+  say. Otherwise it is the sum of the lines the totals count that give it,
+  and `plan_paid` failing both is its `payment`.
 - `benefit_period` (`{start, end}`): `benefitPeriod` as the payer wrote
   it, the plan year the claim counts toward.
 - `billable_period`, `provider`, `insurer`, `facility`, `outcome`, `use`,
@@ -222,9 +229,32 @@ medrec files the claims it imports again in the earlier shape.
   `{system, code, display}` with ICD-10 preferred; an entry without a code
   is left out.
 - `items`, one per line: `sequence`, `category`, `amounts`, `service`
-  (`{system, code, display}`), `serviced` (a date or `{start, end}`),
+  (`{system, code, display}`), `revenue` (a facility line's revenue code,
+  the same shape; 0.8.2 and later), `serviced` (a date or `{start, end}`),
   `quantity`, `net`, `adjudication` (`[{category, amount, reason}]` as the
-  payer wrote them) and `records`.
+  payer wrote them), `payer_notes`, `counted` and `records`. `revenue`,
+  `payer_notes` and `counted` are present only when they say something.
+- A line's `payer_notes` (0.8.2 and later): the texts of the
+  `processNote` entries its `noteNumber` points at, in that order, as the
+  payer wrote them (UHC's start with their code: `XX -- …`). The claim's
+  own `payer_notes` are the `processNote` texts no line points at. They
+  are the payer's, never the household's notes in `notes.md`.
+- `counted: false` (0.8.2 and later) marks a line the claim's totals
+  leave out. A payer can list a line it then does not count: UHC lists
+  the billed code it replaced, at the member's whole cost, beside its
+  replacement, and lines it wrote off. The same amounts occur on lines
+  that are counted, so medrec tells them apart by the totals alone. It
+  compares the lines' sums of `billed`, `plan_paid` and `you_owe` with
+  the totals, for those the totals and some line give. When at least two
+  are compared and a sum differs, the lines left out are the one smallest
+  set of at most 3 lines, never all of them, whose removal makes every
+  compared sum agree. When no such set exists, or two do, or fewer than
+  two amounts can be compared, every line stays counted, and the claim's
+  totals and its lines simply disagree. A reader that sums or shows line
+  amounts reads them with `counted`: it sums only counted lines, and shows
+  a line left out as not owed. `allowed`, `discount`,
+  `not_covered` and the cost-share parts are not compared, since payers
+  break them down differently on a line and on the claim.
 - links, below: `visit`, `results` and each line's `records`.
 
 A field that is missing is unknown, never zero.
@@ -739,8 +769,11 @@ A reader decides freshness by MD5, as Drive reports it (`md5Checksum`):
 
 `schema` names the layout. A change that a reader of the current layout
 would misread takes the next number (`medrec-views/v3` after this one). A
-field readers may ignore does not. medrec moves to a new number only in a
-release whose notes name the connector version that reads it. medrec has
+field readers may ignore does not, such as a claim line's `counted` and
+`payer_notes` (0.8.2): a reader that lists records or sums a claim's
+totals reads them as before, and one that sums or shows line amounts
+reads them with `counted` (Claims, above). medrec moves to a new number
+only in a release whose notes name the connector version that reads it. medrec has
 written v2 from its first views. v1, the same layout with plain names and
 one search text file, was only ever written by the connector's own `npm run
 views`. medrec removes a v1 `views.json`'s views by the names in its
@@ -827,7 +860,9 @@ the same text:
 
 - **Documents:** the title, then the organization and document type, then
   the document's text.
-- **Records:** the name, then the record's fields flattened.
+- **Records:** the name, then the record's fields flattened. A claim's
+  fields include its lines' `payer_notes`, so the payer's words are
+  searched; the household's `notes.md` is the notes set aside.
 - **Studies:** the description, then the modalities, body part, facility
   and series descriptions.
 

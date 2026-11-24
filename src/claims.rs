@@ -244,7 +244,8 @@ fn add(a: &Value, b: &Value) -> Option<Value> {
         return None;
     }
     let amt = |m: &Value| m.get("amount").and_then(Value::as_str).and_then(units);
-    Some(json!({"amount": decimal(amt(a)? + amt(b)?), "currency": cur(a)}))
+    let sum = amt(a)?.checked_add(amt(b)?)?;
+    Some(json!({"amount": decimal(sum), "currency": cur(a)}))
 }
 
 /// The member's share of a claim's or line's `amounts`, for a reader: the
@@ -292,8 +293,119 @@ pub fn amounts<'a>(
     out
 }
 
+/// The amounts that decide which lines a claim's totals count: what was
+/// charged, what the plan paid and what the member owes. The rest (allowed,
+/// discounts, what is not covered) payers break down one way on a line and
+/// another on the claim, so they are not compared.
+const COUNTED_BY: [&str; 3] = ["billed", "plan_paid", "you_owe"];
+
+/// The most lines looked for as left out of one claim's totals, and the
+/// most lines a claim may have to be looked at.
+const LEFT_OUT_MAX: usize = 3;
+const LEFT_OUT_LINES: usize = 64;
+
+/// The sum of amounts in ten-thousandths, `None` past `i128`.
+fn sum(mut amounts: impl Iterator<Item = i128>) -> Option<i128> {
+    amounts.try_fold(0i128, i128::checked_add)
+}
+
+/// Whether a claim's totals count this line: every line but one `left_out`
+/// marked `"counted": false`.
+pub fn counted(item: &Value) -> bool {
+    item.get("counted") != Some(&Value::Bool(false))
+}
+
+/// The lines a claim's totals leave out, by their place in `items`. When
+/// the lines' sums of `COUNTED_BY` (those the totals give and some line
+/// gives, at least two of them) differ from the totals, it is the one
+/// smallest set of at most `LEFT_OUT_MAX` lines, never all of them, whose
+/// removal makes every sum agree. Empty when the sums agree already, when
+/// fewer than two are compared, when no such set exists or two do, or when
+/// an amount is in another currency or not a plain decimal. One amount
+/// alone is too little to go on: a payer's totals can give a figure that
+/// is not its lines' sum.
+///
+/// A payer can list a line it then leaves out of the claim: UHC lists the
+/// billed code it replaced, at the member's cost, beside its replacement,
+/// and lines it wrote off. The same shapes also occur on lines the totals
+/// count, so only the totals tell them apart.
+pub fn left_out(items: &[Value], totals: &Map<String, Value>) -> Vec<usize> {
+    let n = items.len();
+    if !(2..=LEFT_OUT_LINES).contains(&n) {
+        return Vec::new();
+    }
+    // Per amount compared: how far the lines' sum exceeds the total, and
+    // each line's amount (none given is zero).
+    let mut rows: Vec<(i128, Vec<i128>)> = Vec::new();
+    for name in COUNTED_BY {
+        let Some(total) = totals.get(name) else {
+            continue;
+        };
+        let currency = total.get("currency");
+        let parse = |m: &Value| {
+            (m.get("currency") == currency)
+                .then(|| m.get("amount").and_then(Value::as_str).and_then(units))
+                .flatten()
+        };
+        let Some(total) = parse(total) else {
+            return Vec::new();
+        };
+        let mut given = false;
+        let mut lines = Vec::with_capacity(n);
+        for it in items {
+            match it.get("amounts").and_then(|a| a.get(name)) {
+                None => lines.push(0),
+                Some(m) => {
+                    let Some(u) = parse(m) else {
+                        return Vec::new();
+                    };
+                    given = true;
+                    lines.push(u);
+                }
+            }
+        }
+        if given {
+            let Some(excess) = sum(lines.iter().copied()).and_then(|s| s.checked_sub(total)) else {
+                return Vec::new();
+            };
+            rows.push((excess, lines));
+        }
+    }
+    if rows.len() < 2 || rows.iter().all(|(excess, _)| *excess == 0) {
+        return Vec::new();
+    }
+    for k in 1..=LEFT_OUT_MAX.min(n - 1) {
+        let mut found: Vec<Vec<usize>> = Vec::new();
+        let mut set: Vec<usize> = (0..k).collect();
+        loop {
+            if rows
+                .iter()
+                .all(|(excess, lines)| sum(set.iter().map(|&i| lines[i])) == Some(*excess))
+            {
+                found.push(set.clone());
+                if found.len() > 1 {
+                    return Vec::new();
+                }
+            }
+            // The next set of k lines in order, or none left.
+            let Some(at) = (0..k).rev().find(|&j| set[j] < n - k + j) else {
+                break;
+            };
+            set[at] += 1;
+            for j in at + 1..k {
+                set[j] = set[j - 1] + 1;
+            }
+        }
+        if let Some(set) = found.pop() {
+            return set;
+        }
+    }
+    Vec::new()
+}
+
 /// A claim's amounts: its totals; for a name no total gives, the sum of
-/// the lines that give it; failing both, its payment as `plan_paid`.
+/// the lines that give it, of those the totals count; failing both, its
+/// payment as `plan_paid`.
 pub fn claim_amounts(
     totals: Map<String, Value>,
     items: &[Value],
@@ -307,6 +419,7 @@ pub fn claim_amounts(
         }
         let mut lines = items
             .iter()
+            .filter(|i| counted(i))
             .filter_map(|i| i.get("amounts").and_then(|a| a.get(name)));
         let Some(first) = lines.next() else { continue };
         if let Some(sum) = lines.try_fold(first.clone(), |s, m| add(&s, m)) {
@@ -319,14 +432,15 @@ pub fn claim_amounts(
     out
 }
 
-/// The claim's category: `pharmacy` for a pharmacy claim, else its lines'
-/// one category, or `mixed`.
+/// The claim's category: `pharmacy` for a pharmacy claim, else the one
+/// category of the lines its totals count, or `mixed`.
 pub fn claim_category(items: &[Value], pharmacy: bool) -> Option<&'static str> {
     if pharmacy {
         return Some("pharmacy");
     }
     let cats: BTreeSet<&str> = items
         .iter()
+        .filter(|i| counted(i))
         .filter_map(|i| i.get("category").and_then(Value::as_str))
         .collect();
     match cats.len() {
@@ -650,6 +764,95 @@ mod tests {
         assert_eq!(got["copay"]["amount"], "25.50");
         assert_eq!(got["plan_paid"]["amount"], "90.00");
         assert!(!got.contains_key("allowed"), "missing means unknown");
+    }
+
+    #[test]
+    fn the_lines_a_claims_totals_leave_out_are_the_one_smallest_set() {
+        let usd = |a: &str| json!({"amount": a, "currency": "USD"});
+        let line = |billed: &str, paid: &str, owed: &str| json!({"amounts": {"billed": usd(billed), "plan_paid": usd(paid), "you_owe": usd(owed)}});
+        let totals = |billed: &str, paid: &str, owed: &str| {
+            let mut t = Map::new();
+            t.insert("billed".into(), usd(billed));
+            t.insert("plan_paid".into(), usd(paid));
+            t.insert("you_owe".into(), usd(owed));
+            t
+        };
+        // A replaced billed code at the member's cost, beside its
+        // replacement and a counted line.
+        let replaced = [
+            line("1500.00", "650.00", "250.00"),
+            line("1800.00", "0", "1800.00"),
+            line("100.00", "40.00", "0"),
+        ];
+        assert_eq!(
+            left_out(&replaced, &totals("1600.00", "690.00", "250.00")),
+            [1]
+        );
+        // Two written-off lines, left out together.
+        let written_off = [
+            line("400.00", "0", "0"),
+            line("300.00", "200.00", "20.00"),
+            line("400.00", "0", "0"),
+        ];
+        assert_eq!(
+            left_out(&written_off, &totals("300.00", "200.00", "20.00")),
+            [0, 2]
+        );
+        // Sums that agree leave nothing out.
+        assert!(left_out(&replaced, &totals("3400.00", "690.00", "2050.00")).is_empty());
+        // Two lines alike: either could be the one left out, so neither is.
+        let alike = [
+            line("50", "0", "0"),
+            line("50", "0", "0"),
+            line("70", "60", "10"),
+        ];
+        assert!(left_out(&alike, &totals("120", "60", "10")).is_empty());
+        // Totals that no set of lines explains (a billed total of one line
+        // while the plan paid every line) mark nothing.
+        let rental = [
+            line("90", "70", "0"),
+            line("90", "70", "0"),
+            line("90", "70", "0"),
+        ];
+        assert!(left_out(&rental, &totals("90", "210", "0")).is_empty());
+        // Never every line, nor one claim of one line.
+        assert!(left_out(&replaced[1..2], &totals("0", "0", "0")).is_empty());
+        // Another currency, or a name only the totals give, decides nothing
+        // and is not compared.
+        let mut eur = totals("1600.00", "690.00", "250.00");
+        eur.insert(
+            "billed".into(),
+            json!({"amount": "1600.00", "currency": "EUR"}),
+        );
+        assert!(left_out(&replaced, &eur).is_empty());
+        let mut owed_only = Map::new();
+        owed_only.insert("you_owe".into(), usd("250.00"));
+        let unpriced = [json!({"amounts": {"billed": usd("1")}}), json!({})];
+        assert!(left_out(&unpriced, &owed_only).is_empty());
+        // An amount too large to add decides nothing: 10^34 parses (10^38
+        // ten-thousandths), and two of them pass i128.
+        let huge = format!("1{}", "0".repeat(34));
+        assert!(units(&huge).is_some());
+        let vast = [
+            line(&huge, "0", "0"),
+            line(&huge, "0", "0"),
+            line("1", "1", "0"),
+        ];
+        assert!(left_out(&vast, &totals("1", "1", "0")).is_empty());
+        assert_eq!(add(&usd(&huge), &usd(&huge)), None);
+        // One amount compared is too little to go on.
+        let mut billed_only = Map::new();
+        billed_only.insert("billed".into(), usd("1600.00"));
+        assert!(left_out(&replaced, &billed_only).is_empty());
+        // A line left out adds to no sum the totals do not give.
+        let mut items = replaced.to_vec();
+        items[1]["counted"] = json!(false);
+        for it in items.iter_mut() {
+            it["amounts"]["copay"] = usd("5.00");
+        }
+        let got = claim_amounts(totals("1600.00", "690.00", "250.00"), &items, None);
+        assert_eq!(got["copay"]["amount"], "10.00");
+        assert!(counted(&items[0]) && !counted(&items[1]));
     }
 
     fn rec(id: &str, kind: &str, date: &str, fields: Value) -> Record {
