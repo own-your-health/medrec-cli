@@ -313,6 +313,141 @@ fn the_tools_answer_from_the_folder_within_their_schemas() {
     let _ = std::fs::remove_dir_all(&e.root);
 }
 
+#[test]
+fn events_answer_what_happened_with_each_members_title_and_date() {
+    let e = Env::new("events");
+    household(&e);
+    // Alex's records are the invented parent's (tests/fixtures/events).
+    let h: Value =
+        serde_json::from_slice(&std::fs::read(e.records().join("household.json")).unwrap())
+            .unwrap();
+    let alex = h["people"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["name"] == "Alex Testperson")
+        .unwrap()
+        .clone();
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/events");
+    for (from, to) in [
+        ("parent.index.json", "index.json"),
+        ("parent.text.json", "text.json"),
+    ] {
+        let mut v: Value =
+            serde_json::from_str(&std::fs::read_to_string(fixtures.join(from)).unwrap()).unwrap();
+        v["person"] = alex["id"].clone();
+        std::fs::write(
+            e.records().join(alex["folder"].as_str().unwrap()).join(to),
+            serde_json::to_vec(&v).unwrap(),
+        )
+        .unwrap();
+    }
+    let t = e.tools();
+    assert_conforms(&t);
+
+    let ev = |args: Value| {
+        let mut a = args;
+        a["kind"] = json!("events");
+        let r = call(&t, RECORDS, a);
+        assert_fits(&t, RECORDS, &r).clone()
+    };
+    let v = ev(json!({"person": "Alex"}));
+    let items = v["items"].as_array().unwrap();
+    let er = items
+        .iter()
+        .find(|i| i["kind"] == "er")
+        .expect("the ER visit");
+    assert_eq!(
+        (&er["you_owe"], &er["date"], &er["end"], &er["status"]),
+        (
+            &json!("260.00 USD"),
+            &json!("2026-10-07"),
+            &json!("2026-10-08"),
+            &json!("complete")
+        ),
+        "{er}"
+    );
+    assert_eq!(er["source"], "Example General Hospital", "{er}");
+    assert!(er.get("fields").is_none(), "concise leaves the members out");
+    let starts: Vec<&str> = items.iter().map(|i| i["date"].as_str().unwrap()).collect();
+    assert!(starts.windows(2).all(|w| w[0] >= w[1]), "newest first");
+    // What is still expected, and a grouping that is not sure, in words.
+    assert!(
+        items.iter().any(|i| i["status"] == "waiting"
+            && i["detail"]
+                .as_str()
+                .unwrap_or("")
+                .contains("still expected:")),
+        "{v}"
+    );
+    assert!(
+        items.iter().any(|i| i["detail"]
+            .as_str()
+            .unwrap_or("")
+            .contains("grouping unsure")),
+        "{v}"
+    );
+
+    // Words of the event; dates that overlap its days.
+    let v = ev(json!({"name": "amoxicillin"}));
+    assert_eq!(v["returned"], 1, "{v}");
+    assert_eq!(v["items"][0]["kind"], "fill", "{v}");
+    let v = ev(json!({"since": "2026-10-08", "until": "2026-10-08"}));
+    assert!(
+        v["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|i| i["id"] == er["id"]),
+        "an event spanning the day: {v}"
+    );
+
+    // One event in full: its money and members, each with its title and
+    // date, from events.json alone.
+    let v = ev(json!({"id": er["id"]}));
+    assert_eq!(v["returned"], 1, "{v}");
+    let f = &v["items"][0]["fields"];
+    assert_eq!(f["money"]["discount"], "8955.00", "{f}");
+    assert_eq!(f["confidence"], "sure", "{f}");
+    let members = f["members"].as_array().unwrap();
+    assert!(members.len() >= 4, "{f}");
+    assert!(
+        members
+            .iter()
+            .all(|m| m["title"].is_string() && m["date"].is_string()),
+        "{f}"
+    );
+
+    // Mistakes are errors naming the fix.
+    for (args, want) in [
+        (
+            json!({"kind": "events", "id": er["id"], "person": "Alex"}),
+            "usage:",
+        ),
+        (
+            json!({"kind": "events", "id": "x_notaneventatall"}),
+            "usage:",
+        ),
+        (json!({"kind": "claims", "id": er["id"]}), "usage:"),
+        (
+            json!({"kind": "events", "id": "e_aaaaaaaaaaaaaaaaaaaa"}),
+            "not_found:",
+        ),
+        (
+            json!({"kind": "events", "person": "Nobody Atall"}),
+            "not_found:",
+        ),
+    ] {
+        let r = call(&t, RECORDS, args.clone());
+        assert!(
+            r.is_error() && r.text().starts_with(want),
+            "{args}: {}",
+            r.text()
+        );
+    }
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
 /// One JSON-RPC exchange over the server's stdio: send `msg`, and for a
 /// request, read lines until its answer.
 fn rpc(stdin: &mut impl Write, stdout: &mut impl BufRead, msg: Value) -> Option<Value> {

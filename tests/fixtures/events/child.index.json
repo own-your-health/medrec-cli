@@ -1,0 +1,267 @@
+{
+ "schema": "medrec-index/v1",
+ "person": "p_childaaaaaaaaaaaaaaa",
+ "rev": 1,
+ "documents": [
+  {
+   "id": "d_urologyrxaaaaaaaaaaa",
+   "path": "Documents/2026/2026-03-02_urologyrx.pdf",
+   "sha256": "1689e854fd0565ab535e022c046b7006157296c22fb2d0e64151db880a3234f0",
+   "md5": "583287e8b87f6282591e996d21c09952",
+   "size": 1000,
+   "media_type": "application/pdf",
+   "doc_type": "prescription",
+   "date": "2026-03-02",
+   "organization": "Example Pediatric Urology",
+   "filed_at": "2026-03-02T12:00:00Z",
+   "origin": {
+    "kind": "file",
+    "action": "copied"
+   },
+   "provenance": {
+    "source": {
+     "kind": "file"
+    },
+    "method": "file",
+    "filed_at": "2026-11-20T10:00:00Z",
+    "filed_by": "medrec 0.9.0"
+   },
+   "title": "Prescription"
+  }
+ ],
+ "records": [
+  {
+   "id": "r_nboneaaaaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|example|nbone|2026-03-06",
+   "date": "2026-03-06",
+   "display": "Newborn care \u00b7 Sample Neonatal Physicians",
+   "fields": {
+    "provider": "Sample Neonatal Physicians",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2026-03-06",
+     "end": "2026-03-06"
+    },
+    "type": "professional",
+    "amounts": {
+     "billed": {
+      "amount": "300.00",
+      "currency": "USD"
+     },
+     "allowed": {
+      "amount": "120.00",
+      "currency": "USD"
+     },
+     "plan_paid": {
+      "amount": "120.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "0.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "sequence": 1,
+      "category": "visit",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "99460",
+       "display": "Newborn care"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "300.00",
+        "currency": "USD"
+       },
+       "allowed": {
+        "amount": "120.00",
+        "currency": "USD"
+       },
+       "plan_paid": {
+        "amount": "120.00",
+        "currency": "USD"
+       },
+       "you_owe": {
+        "amount": "0.00",
+        "currency": "USD"
+       }
+      }
+     }
+    ],
+    "category": "visit"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "uhc",
+      "organization_id": "example-plan",
+      "fhir_base": "https://plan.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ]
+  },
+  {
+   "id": "r_nbtwoaaaaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|example|nbtwo|2026-03-07",
+   "date": "2026-03-07",
+   "display": "Newborn care \u00b7 Sample Neonatal Physicians",
+   "fields": {
+    "provider": "Sample Neonatal Physicians",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2026-03-07",
+     "end": "2026-03-07"
+    },
+    "type": "professional",
+    "amounts": {
+     "billed": {
+      "amount": "300.00",
+      "currency": "USD"
+     },
+     "allowed": {
+      "amount": "120.00",
+      "currency": "USD"
+     },
+     "plan_paid": {
+      "amount": "120.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "0.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "sequence": 1,
+      "category": "visit",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "99462",
+       "display": "Newborn care"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "300.00",
+        "currency": "USD"
+       },
+       "allowed": {
+        "amount": "120.00",
+        "currency": "USD"
+       },
+       "plan_paid": {
+        "amount": "120.00",
+        "currency": "USD"
+       },
+       "you_owe": {
+        "amount": "0.00",
+        "currency": "USD"
+       }
+      }
+     }
+    ],
+    "category": "visit"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "uhc",
+      "organization_id": "example-plan",
+      "fhir_base": "https://plan.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ]
+  },
+  {
+   "id": "r_nbthreeaaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|example|nbthree|2026-03-08",
+   "date": "2026-03-08",
+   "display": "Day of discharge \u00b7 Sample Neonatal Physicians",
+   "fields": {
+    "provider": "Sample Neonatal Physicians",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2026-03-08",
+     "end": "2026-03-08"
+    },
+    "type": "professional",
+    "amounts": {
+     "billed": {
+      "amount": "300.00",
+      "currency": "USD"
+     },
+     "allowed": {
+      "amount": "120.00",
+      "currency": "USD"
+     },
+     "plan_paid": {
+      "amount": "120.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "0.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "sequence": 1,
+      "category": "visit",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "99238",
+       "display": "Day of discharge"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "300.00",
+        "currency": "USD"
+       },
+       "allowed": {
+        "amount": "120.00",
+        "currency": "USD"
+       },
+       "plan_paid": {
+        "amount": "120.00",
+        "currency": "USD"
+       },
+       "you_owe": {
+        "amount": "0.00",
+        "currency": "USD"
+       }
+      }
+     }
+    ],
+    "category": "visit"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "uhc",
+      "organization_id": "example-plan",
+      "fhir_base": "https://plan.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ]
+  }
+ ],
+ "studies": [],
+ "imports": []
+}

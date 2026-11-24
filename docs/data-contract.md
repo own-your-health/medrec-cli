@@ -23,6 +23,7 @@ views/                        each person's records cut into small files, for re
   notes.md                    dated notes; this file is their source
   index.json                  the person's index (documents, records, studies, imports)
   text.json                   extracted text per document
+  overrides.json              the household's decisions on events (0.9.0 and later)
   Documents/<YYYY>/<YYYY-MM-DD>_<type>_<org>_<details>_<original name>
   Claims/<YYYY>/              EOBs, bills and receipts, named the same way
   Imaging/<YYYY-MM-DD>_<modality>_<body part>_<facility>/
@@ -417,6 +418,37 @@ Notes are sorted by date. The `Tags:` and `About:` lines are optional.
 `notes.md` is the notes' only store; a note edited by hand in this format is
 read back as edited.
 
+## overrides.json (`medrec-overrides/v1`, 0.9.0 and later)
+
+The household's decisions on a person's events (`events.json`, below),
+which outrank the matching rules. It is absent until the first decision.
+
+```json
+{"schema": "medrec-overrides/v1", "person": "p_…",
+ "events": [
+   {"id": "o_…", "kind": "apart", "members": ["r_…", "d_…"],
+    "at": "2026-11-24T12:00:00Z", "by": "Alex Testperson", "request": "x_…"}
+ ]}
+```
+
+- `kind` is `apart` ("Not the same visit") or `together` ("Attach to this
+  visit"). `members` names two of the person's records or documents by
+  id, never an event id, so a decision survives every rebuild.
+- `apart`: the two are never in one event. The one that is not the event's
+  anchor leaves it. A claim or an encounter becomes an event of its own,
+  and a paper or another record joins none.
+- `together`: the second joins the event holding the first.
+- Decisions apply in order, after every rule. One naming a member the index
+  no longer holds is skipped. The same two members have at most one
+  decision: the other kind replaces it, and the same kind again changes
+  nothing.
+- `by` is who asked, as shown (a request's `requested_by`), and `request`
+  the request it came from; both are `null` from a terminal. Neither is
+  trusted.
+- medrec writes it (`medrec events apart|together|undo`, and event requests
+  in `_requests/`, below). Readers read it only to judge `events.json`'s
+  freshness.
+
 ## _status/ (`medrec-status/v1`, `medrec-attempt/v1`)
 
 What `medrec refresh` (0.3.0 and later) has done: for each source it
@@ -664,6 +696,32 @@ file as found) and `handled`. A `done/` file is at most 8 KiB.
 | `message` | One line for a person, with no record content. |
 | `by` | The medrec that handled it. |
 
+### Event requests (0.9.0 and later)
+
+The app's "Not the same visit" and "Attach to this visit" are requests too,
+with `event` in place of `scope`:
+
+```json
+{"schema": "medrec-request/v1", "id": "x_…", "requested_at": "…",
+ "requested_by": {…}, "app": {…},
+ "event": {"person": "p_…", "apart": ["r_…", "d_…"]}}
+```
+
+- `event` holds `person` and exactly one of `apart` or `together`, each two
+  different record (`r_…`) or document (`d_…`) ids. A request with both
+  `scope` and `event`, or with neither, is `invalid` (rule 1), as is one
+  whose `person` is not in `household.json`.
+- The next pass writes the decision to the person's `overrides.json`, and
+  the views follow before it releases the lock, once for all of a pass's
+  decisions. It imports nothing, so no guard or interval applies. While
+  another writer holds the folder, the request stays pending, with no
+  `done/` file, for the next pass.
+- Its `done/` file keeps `event` where a refresh's keeps `scope`.
+  `handled.outcome` is `ok` once recorded (a decision already recorded is
+  `ok` too), `invalid` when a member is not one of that person's records or
+  documents, and `failed` when the folder could not be written. `sources`
+  is empty.
+
 ## views/ (`medrec-views/v2`, 0.8.0 and later)
 
 The views hold each person's records again, cut into small files in the
@@ -673,7 +731,9 @@ connector is one: it runs on Cloudflare's Workers Free plan, with 10 ms of
 CPU per request, and parsing a 2.5 MB index alone takes about 6 ms.
 
 Every view is derived from `household.json` and the person's `index.json`
-and `text.json`. `notes.md` has no view. It is small, the app may change
+and `text.json`. `events.json` also reads the person's `overrides.json`, and
+the `index.json` and `text.json` of the people linked to them (Events,
+below). `notes.md` has no view. It is small, the app may change
 it, and readers read it as it is. Nothing in `views/` is a source: deleting
 it loses nothing, and `medrec views write` makes it again.
 
@@ -693,6 +753,7 @@ views/<person id>/search-1-<hex>.json
 views/<person id>/search-items.bin
 views/<person id>/search-hay-<n>.bin
 views/<person id>/search-labs-<n>.json
+views/<person id>/events.json            0.9.0 and later
 ```
 
 A person's directory is named by their id in `household.json`, not their
@@ -714,9 +775,10 @@ last.
   releases the folder lock. A refresh pass, and an import of several
   members, does it once, after the last filing. `medrec views write` does
   it on demand, and `--all` makes every person's again.
-- **Only what changed.** A person keeps their views when their `index.json`
-  and `text.json` have the MD5s `views.json` recorded, under the same
-  `household.json` and medrec version. Otherwise their views are made
+- **Only what changed.** A person keeps their views when their `index.json`,
+  `text.json` and `overrides.json` and their linked people's `index.json`
+  and `text.json` have the MD5s `views.json` recorded, under the same `household.json` and
+  medrec version. Otherwise their views are made
   again, and only views the folder does not already hold under their
   stored names are uploaded. An unchanged view keeps its name and is not
   written again.
@@ -745,14 +807,19 @@ A reader decides freshness by MD5, as Drive reports it (`md5Checksum`):
 - A person whose `index.json` or `text.json` MD5 differs from `views.json`
   has stale views.
 - A different `household.json` MD5 makes every person's views stale.
+- A person whose `overrides.json` MD5 differs from `overrides`, or one of
+  whose linked people's `index.json` or `text.json` MD5 differs from
+  `linked`, has a stale `events.json` only. A reader that does not read `events.json`
+  ignores both.
 - A view that is missing, or whose MD5 is not the one `files` gives,
   belongs to a pass still arriving.
 
 ### views.json
 
 ```json
-{"schema":"medrec-views/v2","medrec":"0.8.0","household":"<md5>",
- "people":{"p_…":{"index":"<md5>","text":"<md5>","row":{…},"records":{…},"timeline":{…},"search":{…},
+{"schema":"medrec-views/v2","medrec":"0.9.0","household":"<md5>",
+ "people":{"p_…":{"index":"<md5>","text":"<md5>","overrides":null,"linked":{"p_…":{"index":"<md5>","text":"<md5>"}},
+                  "row":{…},"records":{…},"timeline":{…},"search":{…},
                   "files":{"summary.json":"<md5>","records-result-0.json":"<md5>",…}}}}
 ```
 
@@ -761,6 +828,8 @@ A reader decides freshness by MD5, as Drive reports it (`md5Checksum`):
 | `medrec` | The version that wrote them. Another version makes every view again. |
 | `household` | The MD5 (hex) of `household.json` as the views were made from it. |
 | `people.<id>.index`, `.text` | The MD5s of the person's `index.json` and `text.json` as read; `null` when the file is absent. |
+| `people.<id>.overrides` | The MD5 of the person's `overrides.json` as read; `null` when there is none (0.9.0 and later). |
+| `people.<id>.linked` | For each person linked to this one (Events, below), the MD5s of their `index.json` and `text.json` as read, as `{"index", "text"}`, each `null` when the file is absent; `{}` when no one is linked (0.9.0 and later). |
 | `row` | `documents`, `records`, `studies`, and `newest` and `last_import` when there are any: the person's line in `medrec_summary`'s people list, without `notes`. |
 | `records` | For each record kind, `{"shards": [[newest day, oldest day, count], …], "undated": count}`: its dated shards by number, and how many records its undated file holds. |
 | `timeline` | The timeline's shards, the same way. |
@@ -899,6 +968,98 @@ newest, takes a new number.
   `[item, date, kind, id, title, detail line]`, by item number, 256 to a
   file.
 
+### Events (`events.json`, `medrec-events/v1`, 0.9.0 and later)
+
+What happened, as the household would say it: each visit, ER trip,
+hospital stay, test, vaccine or fill is one event, however many claims,
+portal records and papers it produced. Every person has an `events.json`,
+with no events when nothing groups, so a missing one means views still
+being prepared. It is derived on every views write by the matching rules
+(medrec's `src/events.rs`; the rule names are those of the design's
+matching rules), then the household's decisions (`overrides.json`).
+
+```json
+{"schema": "medrec-events/v1", "person": "p_…",
+ "events": [
+  {"id": "e_…", "kind": "er", "start": "2026-10-07", "end": "2026-10-08",
+   "title": "ER visit", "what": "Emergency room visit", "what_from": "claims",
+   "place": "Example General Hospital", "place_from": "claims",
+   "clinicians": ["J SAMPLE"],
+   "confidence": "sure", "status": "complete",
+   "money": {"currency": "USD", "billed": "10400.00", "allowed": "1445.00",
+             "discount": "8955.00", "plan_paid": "1185.00", "you_owe": "260.00",
+             "share": {"copay": "200.00", "coinsurance": "60.00"}},
+   "members": [
+     {"record": "r_…", "kind": "claim", "title": "…", "date": "2026-10-07",
+      "role": "facility", "rule": "C1", "confidence": "sure",
+      "provider": "Example General Hospital",
+      "billed": "9000.00", "allowed": "1100.00", "plan_paid": "900.00", "you_owe": "200.00"},
+     {"document": "d_…", "kind": "bill", "title": "…", "date": "2026-10-20",
+      "role": "paper", "rule": "D3s", "confidence": "sure"}
+   ],
+   "expected": [{"what": "doctor_claims", "why": "…", "since": "2026-10-08"}],
+   "differences": [{"field": "clinician", "values": [{"from": "portal", "value": "…"}, {"from": "claims", "value": "…"}], "rule": "N3"}],
+   "links": [{"event": "e_…", "person": "p_…", "relation": "newborn"}],
+   "could_join": ["e_…"]}
+ ],
+ "pending": [{"document": "d_…", "could_join": ["e_…", "e_…"], "rule": "D4"}],
+ "aliases": [{"clinician": "…", "organization": "…", "rule": "N5", "document": "d_…", "confidence": "likely"}],
+ "undated": ["r_…"],
+ "overrides": 1}
+```
+
+| Field | What |
+|---|---|
+| `id` | `e_` and 20 base32 characters of the SHA-256 of the person's id and the event's anchor member: the claim that opened it (a facility's, a stay's first hospital claim, a day's first), else its encounter, record or paper. It holds while that member stays the anchor. |
+| `kind` | `er`, `inpatient`, `outpatient`, `office`, `service`, `tests`, `dental`, `vaccine`, `fill`, `series`, `stay_no_facility` (a stay's doctors' claims, no facility claim yet), `er_no_facility` or `portal` (a portal visit with no claim). A reader shows an unknown kind by its `title`. |
+| `start`, `end` | Local calendar dates, `YYYY-MM-DD`; equal for a one-day event. |
+| `title` | Plain words for the kind; the reader adds the place. |
+| `what`, `what_from` | The portal's reason, else the claims' services in plain words, else the papers'; `portal`, `claims` or `papers`. Absent when nothing says. |
+| `place`, `place_from` | The portal's organization, else the facility claim's provider, else the first claim's, else an N5 alias; `portal`, `claims` or `alias`. A clinician's name is never a place. |
+| `clinicians` | As the portal or the claims name them. |
+| `confidence` | The lowest of its members': `sure`, `likely` or `unsure`. |
+| `status` | `unsure` when the confidence is; else `waiting` when something is `expected`; else `complete`. |
+| `money` | The claim members' claim-level amounts, summed, as decimal strings: `billed`, `allowed`, `plan_paid`, `you_owe`, `discount` (`billed` − `allowed`) and `share`, the reasons for `you_owe` that the claims give (`deductible`, `copay`, `coinsurance`, `not_covered`). An amount some claim lacks is left out and named in `partial`. A claim with no `you_owe` of its own counts its share's parts added up, and `you_owe_added` is then `true`. A claim whose `allowed` is below zero counts `plan_paid` + `you_owe` as its allowed, and one with neither leaves `allowed` out. Absent with no claim. |
+| `members` | Every record and document in the event, each with `record` or `document`, its `kind` (a record kind, or a document type), its `title` (at most 120 characters) and `date`, its `role`, the `rule` that placed it and that placement's `confidence`. A claim adds `provider` and its amounts. A bill joined by its amount due (D3s) adds `matches`, the claim whose share it bills. `person` marks another person's paper (X2). `role` is `facility`, `hospital`, `ancillary`, `office`, `dental`, `fill`, `portal`, `contact`, `satellite` or `paper`; a reader ignores one it does not know. |
+| `expected` | What has not arrived: `doctor_claims`, `facility_claim`, `claim` or `bill`, with `why` in words and `since`, the day it was first expected. A fill or a vaccine expects no bill. |
+| `differences` | Where the sources disagree (a clinician's name, a date), each source's value, and the rule. |
+| `links` | Related events of a linked person: `newborn` (from a parent's stay to the child's care in it) and `born_during` (back). A reader ignores a relation it does not know. |
+| `could_join` | For an `unsure` event, the events it may belong to. |
+| `pending` | Papers that fit two or more events, merged into none. |
+| `aliases` | Clinicians learned to belong to a practice, with the paper that says so. |
+| `undated` | Claims with no date, in no event. |
+| `overrides` | How many of the household's decisions applied. |
+| `overrides_unreadable` | `true` when the person's `overrides.json` does not read as `medrec-overrides/v1`: the events are the rules' alone, and medrec writes no decision over the file until it is fixed or removed. Absent otherwise. |
+
+`money` for an office visit whose one claim gave no `allowed` and no
+`you_owe`, only its deductible:
+
+```json
+{"currency": "USD", "billed": "300.00", "plan_paid": "180.00", "you_owe": "40.00",
+ "you_owe_added": true, "share": {"deductible": "40.00"}, "partial": ["allowed"]}
+```
+
+- **Every claim is in exactly one event.** A portal visit, a result or a
+  paper joins at most one.
+- **Linked people.** A person's events read the records of their guardians
+  and children, when the child has a birth date: a newborn's care during a
+  parent's birth stay links to it (X1), and a child's paper filed under a
+  parent joins the child's visit that day (X2).
+- **Order.** Newest first by `start`, then by `end`, then by `id`, so a
+  cursor over the list holds between calls.
+- **Size.** One file per person, about 1 KB per event: a person with 200
+  claims takes about 150 KB. A reader parses it whole; it stays one file up
+  to 1 MB, and a person past that would take a later schema that cuts it
+  the way the timeline is cut.
+- **Planned, not yet written: `private`.** A later release (0.9.1) marks
+  an event about mental health, reproductive and fertility care, sexual
+  health or substance use with `private: true`. No release writes it yet,
+  so until one does its absence means "not judged", never "not
+  sensitive". It will be discretion, not access control: a reader leaves
+  such an event off shared screens and household-wide answers, and shows
+  it on that person's own pages, or when a question is about that person
+  or names the item. Anyone who can read the folder can read it.
+
 ## Readers
 
 Anything that only reads the folder follows the files above and writes
@@ -927,6 +1088,11 @@ readers ship with medrec:
     `due_date` is before today. Whether a bill was paid is not recorded.
   - a document's text is its `text.json` entry. Pages are the form feeds
     between `pdftotext` pages, shown as `--- page N ---`.
+  - `medrec_records` with `kind: "events"` lists a person's events as
+    `events.json` holds them (0.9.0 and later): `source` is the place,
+    `detail` what it was, who, a grouping that is not sure and what is
+    still expected, and `you_owe` the share with its currency. `id` gives
+    one event, with its money, members and evidence in `fields`.
 
 Both search the same way: every item whose text holds all the query's
 words, as word prefixes, with case, accents and punctuation ignored. A

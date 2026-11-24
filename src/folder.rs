@@ -96,6 +96,16 @@ impl Folder {
         Folder::open_within(location, access, budget, LOCK_WAIT)
     }
 
+    /// Open, waiting up to `wait` for another writer to finish.
+    pub fn open_at_within(
+        location: &Location,
+        access: Access,
+        budget: Duration,
+        wait: Duration,
+    ) -> Result<Folder, CliError> {
+        Folder::open_within(location, access, budget, wait)
+    }
+
     fn open_within(
         location: &Location,
         access: Access,
@@ -206,6 +216,27 @@ impl Folder {
     pub fn save_text(&self, p: &Person, t: &PersonText) -> Result<(), CliError> {
         self.written.set(true);
         self.write_json(&text_rel(p), t)
+    }
+
+    /// A person's `overrides.json`; an empty one when none was written.
+    pub fn overrides(&self, p: &Person) -> Result<crate::events::Overrides, CliError> {
+        let rel = crate::events::overrides_rel(p);
+        let o: crate::events::Overrides = self
+            .read_json(&rel)?
+            .unwrap_or_else(|| crate::events::Overrides::new(&p.id));
+        if o.person != p.id || o.schema != crate::events::OVERRIDES_SCHEMA {
+            return Err(CliError::Other(format!(
+                "{rel} is not this person's {}",
+                crate::events::OVERRIDES_SCHEMA
+            )));
+        }
+        Ok(o)
+    }
+
+    /// Write a person's `overrides.json`; the views follow.
+    pub fn save_overrides(&self, p: &Person, o: &crate::events::Overrides) -> Result<(), CliError> {
+        self.written.set(true);
+        self.write_json(&crate::events::overrides_rel(p), o)
     }
 
     pub fn review(&self) -> Result<ReviewQueue, CliError> {

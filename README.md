@@ -282,6 +282,7 @@ medrec import --from uhc --from-files ~/Downloads/statements --patient <id>   # 
 medrec import --from uhc --from-profile adult1 --patient <a> --person Alex --patient <b> --person Robin
 
 medrec timeline --person Robin --since 2026-01-01
+medrec events list --person Robin               # what happened: one line per visit, stay, test or fill
 medrec search hemoglobin
 medrec results --code 718-7
 medrec meds --active
@@ -456,6 +457,39 @@ source takes its id as an argument (`refresh sign-in <id>`, `pause`,
 `--provider-profile` is `import --from-profile`'s login, and takes that name
 too.
 
+### Events
+
+An event is what happened, as the household would say it: an ER trip, a
+hospital stay, an office visit, a lab draw, a vaccine or a pharmacy fill. It
+stays one event however many claims, portal records and papers it produced:
+an ER visit billed by the hospital, the on-call doctor, the radiologist and
+the lab is one event, with the hospital as its place and the household's
+share summed from the plan's claim totals. medrec groups them by matching
+rules on dates, providers and codes, and each grouping says how sure it is
+(`sure`, `likely`, `unsure`) and what is still expected (doctors' claims
+that usually follow a facility's, a bill not yet filed).
+
+```sh
+medrec events list --person Robin --since 2026-01-01   # newest first, with the share
+medrec events show <event id>                           # its money, members and papers
+medrec events apart <record or document id> <another>   # not the same visit
+medrec events together <id in the event> <id to attach> # attach to this visit
+medrec events decisions --person Robin                  # the household's decisions
+medrec events undo <decision id>                        # the rules decide again
+```
+
+`show` takes an event id (`e_…`), and `undo` a decision id (`o_…`), which
+`events decisions` lists. `apart` and `together` take two of a person's
+record (`r_…`) or document (`d_…`) ids, never an event id. An event's id
+comes from the claim or record that opened it, so it changes when that
+member leaves the event; a decision names members so that it survives
+every rebuild. They go to the person's
+`overrides.json`, which outranks the rules. The app asks for the same
+through `_requests/`, and the refreshing machine records it on its next
+pass. Each person's events are also a view, `views/<person id>/events.json`,
+for the app and the connector ([docs/data-contract.md](docs/data-contract.md),
+"Events").
+
 ### Views
 
 `views/` at the top of the records folder holds each person's records again,
@@ -582,7 +616,7 @@ supported.
 |---|---|
 | `medrec_summary` | The household's people. With `person`: their current medicines, conditions and allergies, immunizations, the latest result of each test with the lab's range and flag, recent visits, and bills with an amount due |
 | `medrec_search` | Documents, records, imaging studies and notes holding every word of a query; a query naming lab tests (`blood tests`, `labs`) also finds every lab result, report and lab claim |
-| `medrec_records` | One kind, newest first: `medications`, `conditions`, `allergies`, `immunizations`, `visits`, `procedures`, `results` (with `name`, one test over time), `tests` (the latest result of each), `reports`, `claims`, `coverage`, `bills`, `documents`, `notes` or `timeline`; `active` keeps current ones |
+| `medrec_records` | One kind, newest first: `medications`, `conditions`, `allergies`, `immunizations`, `visits`, `procedures`, `results` (with `name`, one test over time), `tests` (the latest result of each), `reports`, `claims`, `coverage`, `bills`, `documents`, `notes`, `timeline` or `events` (what happened: one per visit, ER trip, stay, test or fill, with `you_owe`; `id` gives one with its money and members); `active` keeps current ones (not for `events`, whose `status` says which are still waiting) |
 | `medrec_document` | A filed document's extracted text, in parts of up to 16,000 characters, with page breaks marked |
 
 Claude Desktop: install the release's `medrec-<version>.mcpb` (open the

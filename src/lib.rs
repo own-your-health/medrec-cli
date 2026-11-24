@@ -8,6 +8,7 @@ pub mod claims;
 pub mod config;
 pub mod dicom;
 pub mod documents;
+pub mod events;
 pub mod folder;
 pub mod hash;
 pub mod ids;

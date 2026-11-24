@@ -66,11 +66,12 @@ quick-xml, lopdf), and so are local tools (poppler, tesseract, bsdtar).
 | `src/review.rs` | Filing what intake held back |
 | `src/import.rs`, `src/stream.rs`, `src/normalize.rs` | Provider import: the bounded subprocess, the `records-stream/v1` reader (medical-common's `pk-med-records`), FHIR to index records |
 | `src/claims.rs`, `src/reindex.rs` | Claim shaping (line and claim categories, amounts, titles, visit and result links) and `medrec reindex`, which shapes filed claims again from their raw files |
+| `src/events.rs` | Events (`medrec-events/v1`): claims, portal records and papers grouped into one event per visit, stay, test or fill (rules C0-C6, E1-E5, D2-D6 with D3s, X1-X2, N3, N5), the household's `overrides.json` decisions, and what `medrec events` and `medrec_records` kind `events` list (docs/data-contract.md, "Events") |
 | `src/mcp.rs`, `src/summary.rs` | `medrec mcp`, the read-only MCP tools (pk-cli-mcp), and the per-person summary behind `medrec_summary` |
 | `src/refresh/` | `medrec refresh`: the pass, the `_status/` and `_requests/` shapes (`contract.rs`, docs/data-contract.md), request checks, provider sign-in reads, intervals, the LaunchAgent and this machine's refresh state |
 | `src/dicom.rs`, `src/imaging.rs`, `src/view.rs` | DICOM headers (medical-common's `pk-med-dicom`, re-exported), study intake and export, private copies and viewers |
 | `src/views.rs`, `src/notes.rs`, `src/people.rs` | Timeline, search, record views, notes, people. The views writer reuses its per-person timeline events and search items (`person_events`, `order_events`, `searchables`) |
-| `src/viewfiles.rs` | `views/` (`medrec-views/v2`): each person's view files under content-addressed names, `medrec views write`, and the sync `Folder`'s drop and `viewfiles::hold` run after writes (docs/data-contract.md, "views/") |
+| `src/viewfiles.rs` | `views/` (`medrec-views/v2`): each person's view files under content-addressed names, `events.json` among them, `medrec views write`, and the sync `Folder`'s drop and `viewfiles::hold` run after writes (docs/data-contract.md, "views/") |
 | `src/maint.rs` | `init`, `doctor`, `verify`, `backup`, `cache clear` |
 | `src/testdata.rs` | The synthetic data generator (tests and `examples/synth.rs`) |
 

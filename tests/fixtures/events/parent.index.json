@@ -1,0 +1,1871 @@
+{
+ "schema": "medrec-index/v1",
+ "person": "p_parentaaaaaaaaaaaaaa",
+ "rev": 1,
+ "documents": [
+  {
+   "id": "d_erbillaaaaaaaaaaaaaa",
+   "path": "Documents/2026/2026-11-02_erbill.pdf",
+   "sha256": "3cb0087200aa56286d50d9bb2c440e5b86889d0bd8c29b62679bc3fde0813501",
+   "md5": "9d0c58c092701c26ff7ea9433eabd8f2",
+   "size": 1000,
+   "media_type": "application/pdf",
+   "doc_type": "bill",
+   "date": "2026-11-02",
+   "organization": "Example General Hospital",
+   "filed_at": "2026-11-02T12:00:00Z",
+   "origin": {
+    "kind": "file",
+    "action": "copied"
+   },
+   "provenance": {
+    "source": {
+     "kind": "file"
+    },
+    "method": "file",
+    "filed_at": "2026-11-20T10:00:00Z",
+    "filed_by": "medrec 0.9.0"
+   },
+   "title": "Statement",
+   "statement": {
+    "statement_date": "2026-11-02",
+    "amount_due": {
+     "amount": "200.00",
+     "currency": "USD"
+    }
+   }
+  },
+  {
+   "id": "d_checkupavsaaaaaaaaaa",
+   "path": "Documents/2026/2026-06-10_checkupavs.pdf",
+   "sha256": "06c8c2eb3b52c1e0a12efd1e43c0e29b293d7dab0981fd6bb32f24d4993cb97f",
+   "md5": "c4c2431ab232d303d98e0d695e6626ff",
+   "size": 1000,
+   "media_type": "application/pdf",
+   "doc_type": "visit_summary",
+   "date": "2026-06-10",
+   "organization": "Example Family Practice",
+   "filed_at": "2026-06-10T12:00:00Z",
+   "origin": {
+    "kind": "file",
+    "action": "copied"
+   },
+   "provenance": {
+    "source": {
+     "kind": "fhir",
+     "cli": "mychart",
+     "organization_id": "example-family",
+     "fhir_base": "https://portal.example.test/fhir"
+    },
+    "method": "fhir-api",
+    "filed_at": "2026-11-20T10:00:00Z",
+    "filed_by": "medrec 0.9.0"
+   },
+   "title": "After Visit Summary"
+  },
+  {
+   "id": "d_obreceiptaaaaaaaaaaa",
+   "path": "Documents/2026/2026-05-14_obreceipt.pdf",
+   "sha256": "724d64dec711661e01b2ec7f80d3014253443e42a8e87dbc97ceceeb29363922",
+   "md5": "25bbc609e6efa68822f81958602fbfec",
+   "size": 1000,
+   "media_type": "application/pdf",
+   "doc_type": "receipt",
+   "date": "2026-05-14",
+   "organization": "Example Womens Care",
+   "filed_at": "2026-05-14T12:00:00Z",
+   "origin": {
+    "kind": "file",
+    "action": "copied"
+   },
+   "provenance": {
+    "source": {
+     "kind": "file"
+    },
+    "method": "file",
+    "filed_at": "2026-11-20T10:00:00Z",
+    "filed_by": "medrec 0.9.0"
+   },
+   "title": "Payment receipt"
+  },
+  {
+   "id": "d_obreceiptcopyaaaaaaa",
+   "path": "Documents/2026/2026-05-14_obreceiptcopy.pdf",
+   "sha256": "c8b56da0f0b58594926a01f87bb89ee2c4c083081332831fbc8da51141cc9740",
+   "md5": "4d9ca3a75f5989a8ec935f4f91aa1e44",
+   "size": 1000,
+   "media_type": "application/pdf",
+   "doc_type": "receipt",
+   "date": "2026-05-14",
+   "organization": "Example Womens Care",
+   "filed_at": "2026-05-14T12:00:00Z",
+   "origin": {
+    "kind": "file",
+    "action": "copied"
+   },
+   "provenance": {
+    "source": {
+     "kind": "file"
+    },
+    "method": "file",
+    "filed_at": "2026-11-20T10:00:00Z",
+    "filed_by": "medrec 0.9.0"
+   },
+   "title": "Payment receipt",
+   "near_duplicates": [
+    {
+     "document": "d_obreceiptaaaaaaaaaaa",
+     "similarity": 0.97
+    }
+   ]
+  },
+  {
+   "id": "d_rxpaperaaaaaaaaaaaaa",
+   "path": "Documents/2026/2026-09-01_rxpaper.pdf",
+   "sha256": "29d643382a753a0275b668786766fcd05ffe72d611ccac5025e372a295e57442",
+   "md5": "9af45146194a6356554aa567afa8a746",
+   "size": 1000,
+   "media_type": "application/pdf",
+   "doc_type": "prescription",
+   "date": "2026-09-01",
+   "organization": "Sample Pharmacy",
+   "filed_at": "2026-09-01T12:00:00Z",
+   "origin": {
+    "kind": "file",
+    "action": "copied"
+   },
+   "provenance": {
+    "source": {
+     "kind": "file"
+    },
+    "method": "file",
+    "filed_at": "2026-11-20T10:00:00Z",
+    "filed_by": "medrec 0.9.0"
+   },
+   "title": "Prescription"
+  },
+  {
+   "id": "d_urologybillaaaaaaaaa",
+   "path": "Documents/2026/2026-03-02_urologybill.pdf",
+   "sha256": "0776ac9954aa6f909b81ae07be90010f6edd255a455d4fe936bc8ae9872b0cd5",
+   "md5": "a6ec9e47f4992554b8d0ef66db3aff10",
+   "size": 1000,
+   "media_type": "application/pdf",
+   "doc_type": "bill",
+   "date": "2026-03-02",
+   "organization": "Example Urology Associates",
+   "filed_at": "2026-03-02T12:00:00Z",
+   "origin": {
+    "kind": "file",
+    "action": "copied"
+   },
+   "provenance": {
+    "source": {
+     "kind": "file"
+    },
+    "method": "file",
+    "filed_at": "2026-11-20T10:00:00Z",
+    "filed_by": "medrec 0.9.0"
+   },
+   "title": "Statement",
+   "statement": {
+    "statement_date": "2026-03-02",
+    "amount_due": {
+     "amount": "40.00",
+     "currency": "USD"
+    }
+   }
+  }
+ ],
+ "records": [
+  {
+   "id": "r_erfacaaaaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|example|erfac|2026-10-07",
+   "date": "2026-10-07",
+   "display": "Emergency room visit \u00b7 Example General Hospital",
+   "fields": {
+    "provider": "Example General Hospital",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2026-10-07",
+     "end": "2026-10-08"
+    },
+    "type": "institutional",
+    "amounts": {
+     "billed": {
+      "amount": "9000.00",
+      "currency": "USD"
+     },
+     "allowed": {
+      "amount": "1100.00",
+      "currency": "USD"
+     },
+     "plan_paid": {
+      "amount": "900.00",
+      "currency": "USD"
+     },
+     "copay": {
+      "amount": "200.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "200.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "sequence": 1,
+      "category": "visit",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "99285",
+       "display": "Emergency room visit"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "7000.00",
+        "currency": "USD"
+       },
+       "plan_paid": {
+        "amount": "0.00",
+        "currency": "USD"
+       },
+       "you_owe": {
+        "amount": "7000.00",
+        "currency": "USD"
+       }
+      },
+      "revenue": {
+       "system": "https://www.nubc.org/CodeSystem/RevenueCodes",
+       "code": "0450",
+       "display": "Emergency room visit"
+      },
+      "counted": false
+     },
+     {
+      "sequence": 2,
+      "category": "visit",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "99284",
+       "display": "Emergency room visit"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "7000.00",
+        "currency": "USD"
+       },
+       "allowed": {
+        "amount": "900.00",
+        "currency": "USD"
+       },
+       "plan_paid": {
+        "amount": "700.00",
+        "currency": "USD"
+       },
+       "you_owe": {
+        "amount": "200.00",
+        "currency": "USD"
+       }
+      },
+      "revenue": {
+       "system": "https://www.nubc.org/CodeSystem/RevenueCodes",
+       "code": "0450",
+       "display": "Emergency room visit"
+      }
+     },
+     {
+      "sequence": 3,
+      "category": "lab",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "85025",
+       "display": "Blood count"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "2000.00",
+        "currency": "USD"
+       },
+       "allowed": {
+        "amount": "200.00",
+        "currency": "USD"
+       },
+       "plan_paid": {
+        "amount": "200.00",
+        "currency": "USD"
+       },
+       "you_owe": {
+        "amount": "0.00",
+        "currency": "USD"
+       }
+      },
+      "revenue": {
+       "system": "https://www.nubc.org/CodeSystem/RevenueCodes",
+       "code": "0300",
+       "display": "Blood count"
+      }
+     }
+    ]
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "uhc",
+      "organization_id": "example-plan",
+      "fhir_base": "https://plan.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ]
+  },
+  {
+   "id": "r_erdocaaaaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|example|erdoc|2026-10-07",
+   "date": "2026-10-07",
+   "display": "Emergency room visit \u00b7 J SAMPLE",
+   "fields": {
+    "provider": "J SAMPLE",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2026-10-07",
+     "end": "2026-10-07"
+    },
+    "type": "professional",
+    "amounts": {
+     "billed": {
+      "amount": "1200.00",
+      "currency": "USD"
+     },
+     "allowed": {
+      "amount": "300.00",
+      "currency": "USD"
+     },
+     "plan_paid": {
+      "amount": "240.00",
+      "currency": "USD"
+     },
+     "coinsurance": {
+      "amount": "60.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "60.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "sequence": 1,
+      "category": "visit",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "99284",
+       "display": "Emergency room visit"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "1200.00",
+        "currency": "USD"
+       },
+       "allowed": {
+        "amount": "300.00",
+        "currency": "USD"
+       },
+       "plan_paid": {
+        "amount": "240.00",
+        "currency": "USD"
+       },
+       "you_owe": {
+        "amount": "60.00",
+        "currency": "USD"
+       }
+      }
+     }
+    ],
+    "category": "visit"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "uhc",
+      "organization_id": "example-plan",
+      "fhir_base": "https://plan.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ]
+  },
+  {
+   "id": "r_erradaaaaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|example|errad|2026-10-07",
+   "date": "2026-10-07",
+   "display": "Chest x-ray \u00b7 Example Radiology Associates",
+   "fields": {
+    "provider": "Example Radiology Associates",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2026-10-07",
+     "end": "2026-10-07"
+    },
+    "type": "professional",
+    "amounts": {
+     "billed": {
+      "amount": "120.00",
+      "currency": "USD"
+     },
+     "allowed": {
+      "amount": "30.00",
+      "currency": "USD"
+     },
+     "plan_paid": {
+      "amount": "30.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "0.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "sequence": 1,
+      "category": "imaging",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "71046",
+       "display": "Chest x-ray"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "120.00",
+        "currency": "USD"
+       },
+       "allowed": {
+        "amount": "30.00",
+        "currency": "USD"
+       },
+       "plan_paid": {
+        "amount": "30.00",
+        "currency": "USD"
+       },
+       "you_owe": {
+        "amount": "0.00",
+        "currency": "USD"
+       }
+      }
+     }
+    ],
+    "category": "imaging"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "uhc",
+      "organization_id": "example-plan",
+      "fhir_base": "https://plan.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ]
+  },
+  {
+   "id": "r_erlabaaaaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|example|erlab|2026-10-08",
+   "date": "2026-10-08",
+   "display": "Metabolic panel \u00b7 Sample Pathology Labs",
+   "fields": {
+    "provider": "Sample Pathology Labs",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2026-10-08",
+     "end": "2026-10-08"
+    },
+    "type": "professional",
+    "amounts": {
+     "billed": {
+      "amount": "80.00",
+      "currency": "USD"
+     },
+     "allowed": {
+      "amount": "15.00",
+      "currency": "USD"
+     },
+     "plan_paid": {
+      "amount": "15.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "0.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "sequence": 1,
+      "category": "lab",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "80053",
+       "display": "Metabolic panel"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "80.00",
+        "currency": "USD"
+       },
+       "allowed": {
+        "amount": "15.00",
+        "currency": "USD"
+       },
+       "plan_paid": {
+        "amount": "15.00",
+        "currency": "USD"
+       },
+       "you_owe": {
+        "amount": "0.00",
+        "currency": "USD"
+       }
+      }
+     }
+    ],
+    "category": "lab"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "uhc",
+      "organization_id": "example-plan",
+      "fhir_base": "https://plan.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ]
+  },
+  {
+   "id": "r_birthfacaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|example|birthfac|2026-03-05",
+   "date": "2026-03-05",
+   "display": "Room and board \u00b7 Example General Hospital",
+   "fields": {
+    "provider": "Example General Hospital",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2026-03-05",
+     "end": "2026-03-08"
+    },
+    "type": "institutional",
+    "amounts": {
+     "billed": {
+      "amount": "20000.00",
+      "currency": "USD"
+     },
+     "allowed": {
+      "amount": "9000.00",
+      "currency": "USD"
+     },
+     "plan_paid": {
+      "amount": "8000.00",
+      "currency": "USD"
+     },
+     "deductible": {
+      "amount": "1000.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "1000.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "sequence": 1,
+      "category": "facility",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "59400",
+       "display": "Room and board"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "20000.00",
+        "currency": "USD"
+       },
+       "allowed": {
+        "amount": "9000.00",
+        "currency": "USD"
+       },
+       "plan_paid": {
+        "amount": "8000.00",
+        "currency": "USD"
+       },
+       "you_owe": {
+        "amount": "1000.00",
+        "currency": "USD"
+       }
+      },
+      "revenue": {
+       "system": "https://www.nubc.org/CodeSystem/RevenueCodes",
+       "code": "0120",
+       "display": "Room and board"
+      }
+     }
+    ]
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "uhc",
+      "organization_id": "example-plan",
+      "fhir_base": "https://plan.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ]
+  },
+  {
+   "id": "r_birthobaaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|example|birthob|2026-03-08",
+   "date": "2026-03-08",
+   "display": "Day of discharge \u00b7 Sample OB Hospitalists Group",
+   "fields": {
+    "provider": "Sample OB Hospitalists Group",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2026-03-08",
+     "end": "2026-03-08"
+    },
+    "type": "professional",
+    "amounts": {
+     "billed": {
+      "amount": "400.00",
+      "currency": "USD"
+     },
+     "allowed": {
+      "amount": "150.00",
+      "currency": "USD"
+     },
+     "plan_paid": {
+      "amount": "150.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "0.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "sequence": 1,
+      "category": "visit",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "99238",
+       "display": "Day of discharge"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "400.00",
+        "currency": "USD"
+       },
+       "allowed": {
+        "amount": "150.00",
+        "currency": "USD"
+       },
+       "plan_paid": {
+        "amount": "150.00",
+        "currency": "USD"
+       },
+       "you_owe": {
+        "amount": "0.00",
+        "currency": "USD"
+       }
+      }
+     }
+    ],
+    "category": "visit"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "uhc",
+      "organization_id": "example-plan",
+      "fhir_base": "https://plan.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ]
+  },
+  {
+   "id": "r_birthanesaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|example|birthanes|2026-03-06",
+   "date": "2026-03-06",
+   "display": "Anesthesia for labor \u00b7 Example Anesthesia Partners",
+   "fields": {
+    "provider": "Example Anesthesia Partners",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2026-03-06",
+     "end": "2026-03-06"
+    },
+    "type": "professional",
+    "amounts": {
+     "billed": {
+      "amount": "2500.00",
+      "currency": "USD"
+     },
+     "allowed": {
+      "amount": "700.00",
+      "currency": "USD"
+     },
+     "plan_paid": {
+      "amount": "700.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "0.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "sequence": 1,
+      "category": "anesthesia",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "01967",
+       "display": "Anesthesia for labor"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "2500.00",
+        "currency": "USD"
+       },
+       "allowed": {
+        "amount": "700.00",
+        "currency": "USD"
+       },
+       "plan_paid": {
+        "amount": "700.00",
+        "currency": "USD"
+       },
+       "you_owe": {
+        "amount": "0.00",
+        "currency": "USD"
+       }
+      }
+     }
+    ],
+    "category": "anesthesia"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "uhc",
+      "organization_id": "example-plan",
+      "fhir_base": "https://plan.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ]
+  },
+  {
+   "id": "r_lipidaaaaaaaaaaaaaaa",
+   "kind": "result",
+   "key": "result|lipid|2026-06-10",
+   "date": "2026-06-10T15:00:00-04:00",
+   "display": "Cholesterol",
+   "fields": {
+    "value": {
+     "value": 180,
+     "unit": "mg/dL"
+    }
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "mychart",
+      "organization_id": "example-family",
+      "fhir_base": "https://portal.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ]
+  },
+  {
+   "id": "r_glucoseaaaaaaaaaaaaa",
+   "kind": "result",
+   "key": "result|glucose|2026-06-10",
+   "date": "2026-06-10T15:00:00-04:00",
+   "display": "Glucose",
+   "fields": {
+    "value": {
+     "value": 90,
+     "unit": "mg/dL"
+    }
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "mychart",
+      "organization_id": "example-family",
+      "fhir_base": "https://portal.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ]
+  },
+  {
+   "id": "r_checkupaaaaaaaaaaaaa",
+   "kind": "encounter",
+   "key": "encounter|checkup|2026-06-10",
+   "date": "2026-06-10T14:30:00-04:00",
+   "display": "Office Visit",
+   "fields": {
+    "class": "AMB",
+    "location": "Example Family Practice",
+    "service_provider": "Example Family Practice",
+    "practitioner": "Casey Sample, MD",
+    "reason": "Annual checkup",
+    "period": {
+     "start": "2026-06-10T14:30:00-04:00",
+     "end": "2026-06-10T15:10:00-04:00"
+    }
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "mychart",
+      "organization_id": "example-family",
+      "fhir_base": "https://portal.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ]
+  },
+  {
+   "id": "r_callbackaaaaaaaaaaaa",
+   "kind": "encounter",
+   "key": "encounter|callback|2026-06-12",
+   "date": "2026-06-12T09:00:00-04:00",
+   "display": "Telephone",
+   "fields": {
+    "class": "Telephone",
+    "service_provider": "Example Family Practice",
+    "period": {
+     "start": "2026-06-12T09:00:00-04:00"
+    }
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "mychart",
+      "organization_id": "example-family",
+      "fhir_base": "https://portal.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ]
+  },
+  {
+   "id": "r_checkupdocaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|example|checkupdoc|2026-06-10",
+   "date": "2026-06-10",
+   "display": "Preventive visit \u00b7 C SAMPLE",
+   "fields": {
+    "provider": "C SAMPLE",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2026-06-10",
+     "end": "2026-06-10"
+    },
+    "type": "professional",
+    "amounts": {
+     "billed": {
+      "amount": "300.00",
+      "currency": "USD"
+     },
+     "allowed": {
+      "amount": "180.00",
+      "currency": "USD"
+     },
+     "plan_paid": {
+      "amount": "180.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "0.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "sequence": 1,
+      "category": "visit",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "99396",
+       "display": "Preventive visit"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "300.00",
+        "currency": "USD"
+       },
+       "allowed": {
+        "amount": "180.00",
+        "currency": "USD"
+       },
+       "plan_paid": {
+        "amount": "180.00",
+        "currency": "USD"
+       },
+       "you_owe": {
+        "amount": "0.00",
+        "currency": "USD"
+       }
+      }
+     }
+    ],
+    "category": "visit"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "uhc",
+      "organization_id": "example-plan",
+      "fhir_base": "https://plan.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ]
+  },
+  {
+   "id": "r_checkuplabaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|example|checkuplab|2026-06-10",
+   "date": "2026-06-10",
+   "display": "Lipid panel \u00b7 Example Labs",
+   "fields": {
+    "provider": "Example Labs",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2026-06-10",
+     "end": "2026-06-10"
+    },
+    "type": "professional",
+    "amounts": {
+     "billed": {
+      "amount": "130.00",
+      "currency": "USD"
+     },
+     "allowed": {
+      "amount": "17.00",
+      "currency": "USD"
+     },
+     "plan_paid": {
+      "amount": "17.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "0.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "sequence": 1,
+      "category": "lab",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "80061",
+       "display": "Lipid panel"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "90.00",
+        "currency": "USD"
+       },
+       "allowed": {
+        "amount": "12.00",
+        "currency": "USD"
+       },
+       "plan_paid": {
+        "amount": "12.00",
+        "currency": "USD"
+       },
+       "you_owe": {
+        "amount": "0.00",
+        "currency": "USD"
+       }
+      },
+      "records": [
+       "r_lipidaaaaaaaaaaaaaaa"
+      ]
+     },
+     {
+      "sequence": 2,
+      "category": "lab",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "82947",
+       "display": "Glucose test"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "40.00",
+        "currency": "USD"
+       },
+       "allowed": {
+        "amount": "5.00",
+        "currency": "USD"
+       },
+       "plan_paid": {
+        "amount": "5.00",
+        "currency": "USD"
+       },
+       "you_owe": {
+        "amount": "0.00",
+        "currency": "USD"
+       }
+      },
+      "records": [
+       "r_glucoseaaaaaaaaaaaaa"
+      ]
+     }
+    ],
+    "category": "lab",
+    "results": [
+     "r_lipidaaaaaaaaaaaaaaa",
+     "r_glucoseaaaaaaaaaaaaa"
+    ]
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "uhc",
+      "organization_id": "example-plan",
+      "fhir_base": "https://plan.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ]
+  },
+  {
+   "id": "r_obvisitaaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|example|obvisit|2026-05-14",
+   "date": "2026-05-14",
+   "display": "Office visit \u00b7 Example Womens Care",
+   "fields": {
+    "provider": "Example Womens Care",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2026-05-14",
+     "end": "2026-05-14"
+    },
+    "type": "professional",
+    "amounts": {
+     "billed": {
+      "amount": "250.00",
+      "currency": "USD"
+     },
+     "allowed": {
+      "amount": "110.00",
+      "currency": "USD"
+     },
+     "plan_paid": {
+      "amount": "110.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "0.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "sequence": 1,
+      "category": "visit",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "99213",
+       "display": "Office visit"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "250.00",
+        "currency": "USD"
+       },
+       "allowed": {
+        "amount": "110.00",
+        "currency": "USD"
+       },
+       "plan_paid": {
+        "amount": "110.00",
+        "currency": "USD"
+       },
+       "you_owe": {
+        "amount": "0.00",
+        "currency": "USD"
+       }
+      }
+     }
+    ],
+    "category": "visit"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "uhc",
+      "organization_id": "example-plan",
+      "fhir_base": "https://plan.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ]
+  },
+  {
+   "id": "r_therapyaaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|example|therapy|2026-08-01",
+   "date": "2026-08-01",
+   "display": "Therapeutic exercise \u00b7 Example Therapy Center",
+   "fields": {
+    "provider": "Example Therapy Center",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2026-08-01",
+     "end": "2026-08-29"
+    },
+    "type": "institutional",
+    "amounts": {
+     "billed": {
+      "amount": "1600.00",
+      "currency": "USD"
+     },
+     "allowed": {
+      "amount": "640.00",
+      "currency": "USD"
+     },
+     "plan_paid": {
+      "amount": "512.00",
+      "currency": "USD"
+     },
+     "coinsurance": {
+      "amount": "128.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "128.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "sequence": 1,
+      "category": "medicine",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "97110",
+       "display": "Therapeutic exercise"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "1600.00",
+        "currency": "USD"
+       },
+       "allowed": {
+        "amount": "640.00",
+        "currency": "USD"
+       },
+       "plan_paid": {
+        "amount": "512.00",
+        "currency": "USD"
+       },
+       "you_owe": {
+        "amount": "128.00",
+        "currency": "USD"
+       }
+      },
+      "revenue": {
+       "system": "https://www.nubc.org/CodeSystem/RevenueCodes",
+       "code": "0420",
+       "display": "Therapeutic exercise"
+      }
+     }
+    ]
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "uhc",
+      "organization_id": "example-plan",
+      "fhir_base": "https://plan.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ]
+  },
+  {
+   "id": "r_therapyevalaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|example|therapyeval|2026-08-12",
+   "date": "2026-08-12",
+   "display": "Office visit \u00b7 R EXAMPLE",
+   "fields": {
+    "provider": "R EXAMPLE",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2026-08-12",
+     "end": "2026-08-12"
+    },
+    "type": "professional",
+    "amounts": {
+     "billed": {
+      "amount": "200.00",
+      "currency": "USD"
+     },
+     "allowed": {
+      "amount": "95.00",
+      "currency": "USD"
+     },
+     "plan_paid": {
+      "amount": "95.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "0.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "sequence": 1,
+      "category": "visit",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "99214",
+       "display": "Office visit"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "200.00",
+        "currency": "USD"
+       },
+       "allowed": {
+        "amount": "95.00",
+        "currency": "USD"
+       },
+       "plan_paid": {
+        "amount": "95.00",
+        "currency": "USD"
+       },
+       "you_owe": {
+        "amount": "0.00",
+        "currency": "USD"
+       }
+      }
+     }
+    ],
+    "category": "visit"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "uhc",
+      "organization_id": "example-plan",
+      "fhir_base": "https://plan.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ]
+  },
+  {
+   "id": "r_filloneaaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|example|fillone|2026-09-02",
+   "date": "2026-09-02",
+   "display": "Amoxicillin 500 mg",
+   "fields": {
+    "provider": "Sample Pharmacy #123",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2026-09-02",
+     "end": "2026-09-02"
+    },
+    "type": "pharmacy",
+    "amounts": {
+     "billed": {
+      "amount": "30.00",
+      "currency": "USD"
+     },
+     "plan_paid": {
+      "amount": "20.00",
+      "currency": "USD"
+     },
+     "copay": {
+      "amount": "10.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "10.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "sequence": 1,
+      "category": "pharmacy",
+      "service": {
+       "system": "http://hl7.org/fhir/sid/ndc",
+       "code": "00000000000",
+       "display": "Amoxicillin 500 mg"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "30.00",
+        "currency": "USD"
+       },
+       "plan_paid": {
+        "amount": "20.00",
+        "currency": "USD"
+       },
+       "you_owe": {
+        "amount": "10.00",
+        "currency": "USD"
+       }
+      }
+     }
+    ],
+    "category": "pharmacy"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "uhc",
+      "organization_id": "example-plan",
+      "fhir_base": "https://plan.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ]
+  },
+  {
+   "id": "r_filltwoaaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|example|filltwo|2026-09-02",
+   "date": "2026-09-02",
+   "display": "Ibuprofen 600 mg",
+   "fields": {
+    "provider": "Sample Pharmacy #123",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2026-09-02",
+     "end": "2026-09-02"
+    },
+    "type": "pharmacy",
+    "amounts": {
+     "billed": {
+      "amount": "30.00",
+      "currency": "USD"
+     },
+     "plan_paid": {
+      "amount": "20.00",
+      "currency": "USD"
+     },
+     "copay": {
+      "amount": "10.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "10.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "sequence": 1,
+      "category": "pharmacy",
+      "service": {
+       "system": "http://hl7.org/fhir/sid/ndc",
+       "code": "00000000000",
+       "display": "Ibuprofen 600 mg"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "30.00",
+        "currency": "USD"
+       },
+       "plan_paid": {
+        "amount": "20.00",
+        "currency": "USD"
+       },
+       "you_owe": {
+        "amount": "10.00",
+        "currency": "USD"
+       }
+      }
+     }
+    ],
+    "category": "pharmacy"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "uhc",
+      "organization_id": "example-plan",
+      "fhir_base": "https://plan.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ]
+  },
+  {
+   "id": "r_flushotaaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|example|flushot|2026-10-15",
+   "date": "2026-10-15",
+   "display": "Influenza vaccine",
+   "fields": {
+    "provider": "Sample Pharmacy #123",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2026-10-15",
+     "end": "2026-10-15"
+    },
+    "type": "pharmacy",
+    "amounts": {
+     "billed": {
+      "amount": "40.00",
+      "currency": "USD"
+     },
+     "plan_paid": {
+      "amount": "40.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "0.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "sequence": 1,
+      "category": "pharmacy",
+      "service": {
+       "system": "http://hl7.org/fhir/sid/ndc",
+       "code": "00000000001",
+       "display": "Influenza vaccine"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "40.00",
+        "currency": "USD"
+       },
+       "plan_paid": {
+        "amount": "40.00",
+        "currency": "USD"
+       },
+       "you_owe": {
+        "amount": "0.00",
+        "currency": "USD"
+       }
+      }
+     }
+    ],
+    "category": "pharmacy"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "uhc",
+      "organization_id": "example-plan",
+      "fhir_base": "https://plan.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ]
+  },
+  {
+   "id": "r_twoaaaaaaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|example|twoa|2026-07-28",
+   "date": "2026-07-28",
+   "display": "Office visit \u00b7 A SAMPLE",
+   "fields": {
+    "provider": "A SAMPLE",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2026-07-28",
+     "end": "2026-07-28"
+    },
+    "type": "professional",
+    "amounts": {
+     "billed": {
+      "amount": "200.00",
+      "currency": "USD"
+     },
+     "allowed": {
+      "amount": "90.00",
+      "currency": "USD"
+     },
+     "plan_paid": {
+      "amount": "90.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "0.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "sequence": 1,
+      "category": "visit",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "99213",
+       "display": "Office visit"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "200.00",
+        "currency": "USD"
+       },
+       "allowed": {
+        "amount": "90.00",
+        "currency": "USD"
+       },
+       "plan_paid": {
+        "amount": "90.00",
+        "currency": "USD"
+       },
+       "you_owe": {
+        "amount": "0.00",
+        "currency": "USD"
+       }
+      }
+     }
+    ],
+    "category": "visit"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "uhc",
+      "organization_id": "example-plan",
+      "fhir_base": "https://plan.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ]
+  },
+  {
+   "id": "r_twobaaaaaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|example|twob|2026-07-28",
+   "date": "2026-07-28",
+   "display": "Office visit \u00b7 B EXAMPLE",
+   "fields": {
+    "provider": "B EXAMPLE",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2026-07-28",
+     "end": "2026-07-28"
+    },
+    "type": "professional",
+    "amounts": {
+     "billed": {
+      "amount": "260.00",
+      "currency": "USD"
+     },
+     "allowed": {
+      "amount": "120.00",
+      "currency": "USD"
+     },
+     "plan_paid": {
+      "amount": "120.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "0.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "sequence": 1,
+      "category": "visit",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "99214",
+       "display": "Office visit"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "260.00",
+        "currency": "USD"
+       },
+       "allowed": {
+        "amount": "120.00",
+        "currency": "USD"
+       },
+       "plan_paid": {
+        "amount": "120.00",
+        "currency": "USD"
+       },
+       "you_owe": {
+        "amount": "0.00",
+        "currency": "USD"
+       }
+      }
+     }
+    ],
+    "category": "visit"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "uhc",
+      "organization_id": "example-plan",
+      "fhir_base": "https://plan.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ]
+  },
+  {
+   "id": "r_twolabaaaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|example|twolab|2026-07-28",
+   "date": "2026-07-28",
+   "display": "Blood count \u00b7 Example Labs",
+   "fields": {
+    "provider": "Example Labs",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2026-07-28",
+     "end": "2026-07-28"
+    },
+    "type": "professional",
+    "amounts": {
+     "billed": {
+      "amount": "50.00",
+      "currency": "USD"
+     },
+     "allowed": {
+      "amount": "8.00",
+      "currency": "USD"
+     },
+     "plan_paid": {
+      "amount": "8.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "0.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "sequence": 1,
+      "category": "lab",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "85025",
+       "display": "Blood count"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "50.00",
+        "currency": "USD"
+       },
+       "allowed": {
+        "amount": "8.00",
+        "currency": "USD"
+       },
+       "plan_paid": {
+        "amount": "8.00",
+        "currency": "USD"
+       },
+       "you_owe": {
+        "amount": "0.00",
+        "currency": "USD"
+       }
+      }
+     }
+    ],
+    "category": "lab"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "uhc",
+      "organization_id": "example-plan",
+      "fhir_base": "https://plan.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ]
+  },
+  {
+   "id": "r_urologyaaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|example|urology|2026-03-02",
+   "date": "2026-03-02",
+   "display": "Office visit \u00b7 K EXAMPLE",
+   "fields": {
+    "provider": "K EXAMPLE",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2026-03-02",
+     "end": "2026-03-02"
+    },
+    "type": "professional",
+    "amounts": {
+     "billed": {
+      "amount": "300.00",
+      "currency": "USD"
+     },
+     "allowed": {
+      "amount": "140.00",
+      "currency": "USD"
+     },
+     "plan_paid": {
+      "amount": "100.00",
+      "currency": "USD"
+     },
+     "copay": {
+      "amount": "40.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "40.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "sequence": 1,
+      "category": "visit",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "99203",
+       "display": "Office visit"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "300.00",
+        "currency": "USD"
+       },
+       "allowed": {
+        "amount": "140.00",
+        "currency": "USD"
+       },
+       "plan_paid": {
+        "amount": "100.00",
+        "currency": "USD"
+       },
+       "you_owe": {
+        "amount": "40.00",
+        "currency": "USD"
+       }
+      }
+     }
+    ],
+    "category": "visit"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "uhc",
+      "organization_id": "example-plan",
+      "fhir_base": "https://plan.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ]
+  }
+ ],
+ "studies": [],
+ "imports": []
+}

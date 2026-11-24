@@ -85,6 +85,10 @@ enum Command {
     /// Filed documents.
     #[command(subcommand)]
     Documents(DocumentsCmd),
+    /// What happened: each visit, ER trip, stay, test or fill, with the
+    /// claims, encounters, results and papers it produced.
+    #[command(subcommand)]
+    Events(EventsCmd),
     /// Dated notes, kept in each person's notes.md.
     #[command(subcommand)]
     Note(NoteCmd),
@@ -586,6 +590,39 @@ struct RecordArgs {
 }
 
 #[derive(Subcommand, Debug)]
+enum EventsCmd {
+    /// Events, newest first.
+    List {
+        #[arg(long)]
+        person: Option<String>,
+        #[command(flatten)]
+        range: RangeArgs,
+        #[command(flatten)]
+        list: ListArgs,
+    },
+    /// One event: its money, members, papers and what is still expected.
+    Show { id: String },
+    /// "Not the same visit": two members never in one event. The one that
+    /// is not the event's anchor leaves it.
+    Apart {
+        /// A record or document id.
+        a: String,
+        /// Another of the same person's.
+        b: String,
+    },
+    /// "Attach to this visit": the second member joins the event holding
+    /// the first.
+    Together { a: String, b: String },
+    /// The household's decisions, which outrank the rules.
+    Decisions {
+        #[arg(long)]
+        person: Option<String>,
+    },
+    /// Drop a decision; the rules decide again.
+    Undo { id: String },
+}
+
+#[derive(Subcommand, Debug)]
 enum DocumentsCmd {
     /// Filed documents, newest first.
     List {
@@ -904,6 +941,7 @@ fn run(cli: &Cli) -> Result<(), CliError> {
         Command::Allergies(a) => records_cmd(cli, &store, a, &["allergy"], "allergy"),
         Command::Immunizations(a) => records_cmd(cli, &store, a, &["immunization"], "immunization"),
         Command::Documents(cmd) => documents_cmd(cli, cmd, &store),
+        Command::Events(cmd) => events_cmd(cli, cmd, &store),
         Command::Note(cmd) => note_cmd(cli, cmd, &store),
         Command::Images(cmd) => images_cmd(cli, cmd, &store),
         Command::Doctor => {
@@ -1143,6 +1181,152 @@ fn read(store: &ConfigStore, cli: &Cli) -> Result<(Folder, medrec::model::Househ
     let f = Folder::open(&cfg, Access::Read)?;
     let h = f.household()?;
     Ok((f, h))
+}
+
+/// The person whose index holds a record or document.
+fn owner_of<'a>(
+    f: &Folder,
+    h: &'a medrec::model::Household,
+    id: &str,
+) -> Result<&'a medrec::model::Person, CliError> {
+    for p in &h.people {
+        let idx = f.index(p)?;
+        if idx.records.iter().any(|r| r.id == id) || idx.documents.iter().any(|d| d.id == id) {
+            return Ok(p);
+        }
+    }
+    Err(CliError::NotFound(format!(
+        "no record or document {}",
+        medrec::printable(id)
+    )))
+}
+
+fn events_cmd(cli: &Cli, cmd: &EventsCmd, store: &ConfigStore) -> Result<(), CliError> {
+    let json = cli.common.json;
+    match cmd {
+        EventsCmd::List {
+            person,
+            range,
+            list,
+        } => {
+            let (f, h) = read(store, cli)?;
+            let rows = medrec::events::list(&f, &h, person.as_deref(), &range.range())?;
+            let shown = list.take(&rows);
+            output::emit(
+                json,
+                "event-list",
+                serde_json::json!({ "items": shown }),
+                |v| {
+                    // The share as a column of the table only; the JSON
+                    // keeps it in `money`.
+                    let mut v = v.clone();
+                    for e in v["items"].as_array_mut().into_iter().flatten() {
+                        e["you_owe"] = e["money"]["you_owe"].clone();
+                    }
+                    table(
+                        &v,
+                        &[
+                            "start",
+                            "end",
+                            "person_name",
+                            "title",
+                            "place",
+                            "you_owe",
+                            "confidence",
+                            "status",
+                            "id",
+                        ],
+                    )
+                },
+            );
+        }
+        EventsCmd::Show { id } => {
+            if !medrec::ids::is_valid("e", id) {
+                return Err(CliError::Usage(format!(
+                    "`{}` is not an event id (e_…)",
+                    medrec::printable(id)
+                )));
+            }
+            let (f, h) = read(store, cli)?;
+            let rows = medrec::events::list(&f, &h, None, &Range::default())?;
+            let e = rows
+                .into_iter()
+                .find(|e| e["id"] == id.as_str())
+                .ok_or_else(|| CliError::NotFound(format!("no event {id}")))?;
+            output::emit_one(json, "event", e);
+        }
+        EventsCmd::Apart { a, b } | EventsCmd::Together { a, b } => {
+            let kind = if matches!(cmd, EventsCmd::Apart { .. }) {
+                "apart"
+            } else {
+                "together"
+            };
+            if a == b {
+                return Err(CliError::Usage("name two different members".into()));
+            }
+            let cfg = load(store, cli)?;
+            let f = Folder::open(&cfg, Access::Write)?;
+            let h = f.household()?;
+            let p = owner_of(&f, &h, a)?;
+            let (d, new) = medrec::events::decide(&f, p, kind, a, b, None, None)?;
+            let mut v = to_value(&d);
+            v["person"] = p.id.clone().into();
+            v["status"] = if new { "recorded" } else { "unchanged" }.into();
+            output::emit(json, "event-decision", v, |v| {
+                println!(
+                    "{} {kind}: {} and {} ({})",
+                    v["status"].as_str().unwrap_or(""),
+                    a,
+                    b,
+                    v["id"].as_str().unwrap_or("")
+                )
+            });
+        }
+        EventsCmd::Decisions { person } => {
+            let (f, h) = read(store, cli)?;
+            let mut items = Vec::new();
+            for p in medrec::people::selected(&h, person.as_deref())? {
+                for d in f.overrides(p)?.events {
+                    let mut v = to_value(&d);
+                    v["person"] = p.id.clone().into();
+                    v["person_name"] = p.name.clone().into();
+                    v["a"] = d.members[0].clone().into();
+                    v["b"] = d.members[1].clone().into();
+                    items.push(v);
+                }
+            }
+            output::emit(
+                json,
+                "event-decisions",
+                serde_json::json!({ "items": items }),
+                |v| table(v, &["id", "person_name", "kind", "a", "b", "at", "by"]),
+            );
+        }
+        EventsCmd::Undo { id } => {
+            if !medrec::ids::is_valid("o", id) {
+                return Err(CliError::Usage(format!(
+                    "`{}` is not a decision id (o_…)",
+                    medrec::printable(id)
+                )));
+            }
+            let cfg = load(store, cli)?;
+            let f = Folder::open(&cfg, Access::Write)?;
+            let h = f.household()?;
+            let mut found = None;
+            for p in &h.people {
+                if f.overrides(p)?.events.iter().any(|d| d.id == *id) {
+                    found = Some(p);
+                    break;
+                }
+            }
+            let p = found.ok_or_else(|| CliError::NotFound(format!("no decision {id}")))?;
+            let d = medrec::events::undo(&f, p, id)?;
+            output::emit(json, "event-decision-undone", to_value(&d), |_| {
+                println!("undone {}", d.id)
+            });
+        }
+    }
+    Ok(())
 }
 
 fn people_cmd(cli: &Cli, cmd: &PeopleCmd, store: &ConfigStore) -> Result<(), CliError> {
