@@ -546,7 +546,8 @@ struct PrivateItems {
     /// of their items may be one the household marked private, so an
     /// answer about the whole household holds all of them back (`held`).
     unreadable: Vec<String>,
-    /// The record, document and event ids of those people.
+    /// The record, document, event and study ids of those people, and
+    /// every study with no report, which nothing judges.
     held: std::collections::BTreeSet<String>,
 }
 
@@ -563,6 +564,7 @@ impl PrivateItems {
                         .iter()
                         .map(|r| r.id.clone())
                         .chain(idx.documents.iter().map(|d| d.id.clone()))
+                        .chain(idx.studies.iter().map(|s| s.id.clone()))
                         .chain(
                             events["events"]
                                 .as_array()
@@ -572,7 +574,9 @@ impl PrivateItems {
                         ),
                 );
             }
-            out.areas.extend(crate::private::Private::of(&v).items);
+            let items = crate::private::Private::of(&v);
+            out.held.extend(items.unreported_studies);
+            out.areas.extend(items.items);
         }
         Ok(out)
     }

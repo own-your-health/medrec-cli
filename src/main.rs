@@ -683,7 +683,7 @@ enum BillsCmd {
 
 #[derive(Subcommand, Debug)]
 enum PrivateCmd {
-    /// A person's private records, documents and events, with why.
+    /// A person's private records, documents, events and imaging studies, with why.
     List {
         #[arg(long)]
         person: Option<String>,
@@ -1524,7 +1524,12 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
                             )
                         })
                 };
-                for kind in ["events", "records", "documents"] {
+                for (kind, singular) in [
+                    ("events", "event"),
+                    ("records", "record"),
+                    ("documents", "document"),
+                    ("studies", "study"),
+                ] {
                     for (id, why) in v[kind].as_object().into_iter().flatten() {
                         let (date, title) = match kind {
                             "records" => idx
@@ -1541,11 +1546,19 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
                                         .unwrap_or_default(),
                                 )
                             }),
+                            "studies" => idx.studies.iter().find(|s| s.id == *id).map(|s| {
+                                (
+                                    s.date.clone(),
+                                    s.description
+                                        .clone()
+                                        .unwrap_or_else(|| "Imaging study".into()),
+                                )
+                            }),
                             _ => event_of(id),
                         }
                         .unwrap_or_default();
                         items.push(serde_json::json!({
-                            "id": id, "kind": kind.trim_end_matches('s'), "area": why["area"],
+                            "id": id, "kind": singular, "area": why["area"],
                             "from": why["from"], "date": date, "title": title,
                             "person": p.id, "person_name": p.name,
                         }));

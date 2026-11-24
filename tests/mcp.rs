@@ -515,6 +515,122 @@ fn events_answer_what_happened_with_each_members_title_and_date() {
     let _ = std::fs::remove_dir_all(&e.root);
 }
 
+/// A letter only a private record links, and studies by their report, stay
+/// out of household-wide answers; an unreported study does too.
+#[test]
+fn linked_letters_and_studies_follow_what_is_private() {
+    let e = Env::new("private-links");
+    household(&e);
+    let h: Value =
+        serde_json::from_slice(&std::fs::read(e.records().join("household.json")).unwrap())
+            .unwrap();
+    let alex = h["people"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["name"] == "Alex Testperson")
+        .unwrap()
+        .clone();
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/private");
+    let mut v: Value =
+        serde_json::from_str(&std::fs::read_to_string(fixtures.join("adult.index.json")).unwrap())
+            .unwrap();
+    v["person"] = alex["id"].clone();
+    // A letter in no event, linked by the depression record alone.
+    let mut letter = v["documents"][0].clone();
+    letter["id"] = json!("d_linkedletteraaaaaaaa");
+    letter["title"] = json!("Zebrafish letter");
+    letter.as_object_mut().unwrap().remove("organization");
+    v["documents"].as_array_mut().unwrap().push(letter);
+    let depression = v["records"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|r| r["id"] == "r_depressionaaaaaaaaaa")
+        .unwrap();
+    depression["documents"] = json!(["d_linkedletteraaaaaaaa"]);
+    let study = |id: &str, title: &str, report: Option<&str>| {
+        let mut s = json!({"id": id, "study_uid": id, "path": format!("Imaging/{id}/"),
+            "date": "2026-10-30", "description": title, "body_part": "kneecap", "series": [], "instances": 0, "size": 0,
+            "filed_at": "2026-11-20T10:00:00Z", "provenance": []});
+        if let Some(r) = report {
+            s["report"] = json!(r);
+        }
+        s
+    };
+    v["studies"] = json!([
+        study(
+            "m_privateaaaaaaaaaaaaa",
+            "Quokka picture",
+            Some("d_linkedletteraaaaaaaa")
+        ),
+        study(
+            "m_openaaaaaaaaaaaaaaaa",
+            "Wombat picture",
+            Some("d_checkupavsaaaaaaaaaa")
+        ),
+        study("m_unreportedaaaaaaaaaa", "Numbat picture", None),
+    ]);
+    std::fs::write(
+        e.records()
+            .join(alex["folder"].as_str().unwrap())
+            .join("index.json"),
+        serde_json::to_vec(&v).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(
+        e.records()
+            .join(alex["folder"].as_str().unwrap())
+            .join("text.json"),
+        serde_json::to_vec(&json!({"schema": "medrec-text/v1", "person": alex["id"],
+            "texts": {"d_linkedletteraaaaaaaa": "kneecap notes"}}))
+        .unwrap(),
+    )
+    .unwrap();
+    let t = e.tools();
+    let ask = |args: Value| {
+        let r = call(&t, SEARCH, args);
+        assert!(!r.is_error(), "{}", r.text());
+        assert_fits(&t, SEARCH, &r).clone()
+    };
+    let found = |v: &Value, id: &str| -> Option<Value> {
+        v["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|i| i["id"] == id)
+            .cloned()
+    };
+    let left_out = |v: &Value| {
+        v["warnings"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|w| w["code"] == "private-left-out")
+    };
+    for (word, id, held) in [
+        ("zebrafish", "d_linkedletteraaaaaaaa", true),
+        ("quokka", "m_privateaaaaaaaaaaaaa", true),
+        ("numbat", "m_unreportedaaaaaaaaaa", true),
+        ("wombat", "m_openaaaaaaaaaaaaaaaa", false),
+    ] {
+        // Not named, household-wide.
+        let v = ask(json!({"query": "kneecap"}));
+        assert_eq!(found(&v, id).is_none(), held, "{id}: {v}");
+        // About the person, all of it.
+        let v = ask(json!({"query": word, "person": "Alex"}));
+        let i = found(&v, id).unwrap_or_else(|| panic!("no {id}: {v}"));
+        let marked = i.get("private").is_some();
+        assert_eq!(marked, matches!(word, "zebrafish" | "quokka"), "{id}: {i}");
+        // Named: included.
+        assert!(found(&ask(json!({"query": word})), id).is_some(), "{id}");
+    }
+    let v = ask(json!({"query": "kneecap"}));
+    assert!(left_out(&v), "{v}");
+    assert_eq!(v["items"].as_array().unwrap().len(), 1, "{v}");
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
 /// One JSON-RPC exchange over the server's stdio: send `msg`, and for a
 /// request, read lines until its answer.
 #[test]
