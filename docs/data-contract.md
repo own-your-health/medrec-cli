@@ -1166,23 +1166,23 @@ matching rules), then the household's decisions (`overrides.json`).
 ```json
 {"schema": "medrec-events/v1", "person": "p_…",
  "events": [
-  {"id": "e_…", "kind": "er", "start": "2026-10-07", "end": "2026-10-08",
+  {"id": "e_…", "kind": "er", "start": "2025-02-11", "end": "2025-02-12",
    "title": "ER visit", "what": "Emergency room visit", "what_from": "claims",
-   "place": "Example General Hospital", "place_from": "claims",
+   "place": "Example Lakeside Hospital", "place_from": "claims",
    "clinicians": ["J SAMPLE"],
    "confidence": "sure", "status": "complete",
-   "money": {"currency": "USD", "billed": "10400.00", "allowed": "1445.00",
-             "discount": "8955.00", "plan_paid": "1185.00", "you_owe": "260.00",
-             "share": {"copay": "200.00", "coinsurance": "60.00"}},
+   "money": {"currency": "USD", "billed": "7060.00", "allowed": "1017.00",
+             "discount": "6043.00", "plan_paid": "819.00", "you_owe": "198.00",
+             "share": {"copay": "150.00", "coinsurance": "48.00"}},
    "members": [
-     {"record": "r_…", "kind": "claim", "title": "…", "date": "2026-10-07",
+     {"record": "r_…", "kind": "claim", "title": "…", "date": "2025-02-11",
       "role": "facility", "rule": "C1", "confidence": "sure",
-      "provider": "Example General Hospital",
-      "billed": "9000.00", "allowed": "1100.00", "plan_paid": "900.00", "you_owe": "200.00"},
-     {"document": "d_…", "kind": "bill", "title": "…", "date": "2026-10-20",
+      "provider": "Example Lakeside Hospital",
+      "billed": "6000.00", "allowed": "740.00", "plan_paid": "590.00", "you_owe": "150.00"},
+     {"document": "d_…", "kind": "bill", "title": "…", "date": "2025-03-20",
       "role": "paper", "rule": "D3s", "confidence": "sure"}
    ],
-   "expected": [{"what": "doctor_claims", "why": "…", "since": "2026-10-08"}],
+   "expected": [{"what": "doctor_claims", "why": "…", "since": "2025-02-12"}],
    "differences": [{"field": "clinician", "values": [{"from": "portal", "value": "…"}, {"from": "claims", "value": "…"}], "rule": "N3"}],
    "links": [{"event": "e_…", "person": "p_…", "relation": "newborn"}],
    "could_join": ["e_…"]}
@@ -1273,25 +1273,25 @@ when they have no bills. It is made from the person's documents, their
 {"schema": "medrec-bills/v1", "person": "p_…",
  "bills": {
    "d_…": {"copies": ["d_…"], "organization": "Example Health",
-    "title": "Statement from Example Health", "date": "2026-10-20", "currency": "USD",
-    "amount_due": "95.00", "due_date": "2026-11-15", "phone": "555-010-0123",
-    "event": "e_…", "rule": "D2", "claim": "r_…", "claim_you_owe": "80.00",
-    "paid": [{"from": "receipt", "document": "d_…", "on": "2026-10-30", "amount": "50.00", "currency": "USD"},
-             {"from": "household", "id": "o_…", "on": "2026-11-10", "amount": "45.00", "currency": "USD"}],
-    "paid_total": "95.00", "left": "0.00", "settled": true}
+    "title": "Statement from Example Health", "date": "2025-12-24", "currency": "USD",
+    "amount_due": "76.00", "due_date": "2026-01-19", "phone": "555-010-0123",
+    "event": "e_…", "rule": "D2", "claim": "r_…", "claim_you_owe": "64.00",
+    "paid": [{"from": "receipt", "document": "d_…", "on": "2026-01-03", "amount": "40.00", "currency": "USD"},
+             {"from": "household", "id": "o_…", "on": "2026-01-14", "amount": "36.00", "currency": "USD"}],
+    "paid_total": "76.00", "left": "0.00", "settled": true}
  },
  "copy_of": {"d_…": "d_…"},
  "receipts": [
-   {"document": "d_…", "organization": "Example Health", "on": "2026-10-30",
-    "amount": "50.00", "currency": "USD", "bill": "d_…"}
+   {"document": "d_…", "organization": "Example Health", "on": "2026-01-03",
+    "amount": "40.00", "currency": "USD", "bill": "d_…"}
  ],
  "worth_a_call": [
    {"reason": "asks_more", "bill": "d_…", "claim": "r_…", "event": "e_…",
-    "asked": "95.00", "owed": "80.00", "currency": "USD"}
+    "asked": "76.00", "owed": "64.00", "currency": "USD"}
  ],
  "not_billed": [
-   {"event": "e_…", "start": "2026-10-02", "provider": "Example Pharmacy",
-    "claims": ["r_…"], "you_owe": "10.00", "currency": "USD", "fill": true}
+   {"event": "e_…", "start": "2025-12-06", "provider": "Sample Pharmacy",
+    "claims": ["r_…"], "you_owe": "8.00", "currency": "USD", "fill": true}
  ]}
 ```
 

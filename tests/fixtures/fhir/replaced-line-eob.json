@@ -17,15 +17,15 @@
     "reference": "Patient/pat-0001"
   },
   "billablePeriod": {
-    "start": "2026-04-02",
-    "end": "2026-04-02"
+    "start": "2025-06-06",
+    "end": "2025-06-06"
   },
-  "created": "2026-04-20T00:00:00Z",
+  "created": "2025-06-24T00:00:00Z",
   "insurer": {
     "display": "Example Health Plan"
   },
   "provider": {
-    "display": "Example Hospital"
+    "display": "Example Lakeside Hospital"
   },
   "item": [
     {
@@ -39,12 +39,12 @@
           }
         ]
       },
-      "servicedDate": "2026-04-02",
+      "servicedDate": "2025-06-06",
       "noteNumber": [
         1
       ],
       "net": {
-        "value": 1500.0,
+        "value": 1200.0,
         "currency": "USD"
       },
       "adjudication": [
@@ -58,7 +58,7 @@
             ]
           },
           "amount": {
-            "value": 1500.0,
+            "value": 1200.0,
             "currency": "USD"
           }
         },
@@ -72,7 +72,7 @@
             ]
           },
           "amount": {
-            "value": 600.0,
+            "value": 480.0,
             "currency": "USD"
           }
         },
@@ -86,7 +86,7 @@
             ]
           },
           "amount": {
-            "value": 900.0,
+            "value": 720.0,
             "currency": "USD"
           }
         },
@@ -100,7 +100,7 @@
             ]
           },
           "amount": {
-            "value": 650.0,
+            "value": 520.0,
             "currency": "USD"
           }
         },
@@ -114,7 +114,7 @@
             ]
           },
           "amount": {
-            "value": 250.0,
+            "value": 200.0,
             "currency": "USD"
           }
         },
@@ -128,7 +128,7 @@
             ]
           },
           "amount": {
-            "value": 250.0,
+            "value": 200.0,
             "currency": "USD"
           }
         }
@@ -154,9 +154,9 @@
           }
         ]
       },
-      "servicedDate": "2026-04-02",
+      "servicedDate": "2025-06-06",
       "net": {
-        "value": 1800.0,
+        "value": 1440.0,
         "currency": "USD"
       },
       "adjudication": [
@@ -170,7 +170,7 @@
             ]
           },
           "amount": {
-            "value": 1800.0,
+            "value": 1440.0,
             "currency": "USD"
           }
         },
@@ -184,7 +184,7 @@
             ]
           },
           "amount": {
-            "value": 1800.0,
+            "value": 1440.0,
             "currency": "USD"
           }
         },
@@ -212,7 +212,7 @@
             ]
           },
           "amount": {
-            "value": 1800.0,
+            "value": 1440.0,
             "currency": "USD"
           }
         },
@@ -226,7 +226,7 @@
             ]
           },
           "amount": {
-            "value": 1800.0,
+            "value": 1440.0,
             "currency": "USD"
           }
         }
@@ -252,9 +252,9 @@
           }
         ]
       },
-      "servicedDate": "2026-04-02",
+      "servicedDate": "2025-06-06",
       "net": {
-        "value": 100.0,
+        "value": 80.0,
         "currency": "USD"
       },
       "adjudication": [
@@ -268,7 +268,7 @@
             ]
           },
           "amount": {
-            "value": 100.0,
+            "value": 80.0,
             "currency": "USD"
           }
         },
@@ -282,7 +282,7 @@
             ]
           },
           "amount": {
-            "value": 60.0,
+            "value": 48.0,
             "currency": "USD"
           }
         },
@@ -296,7 +296,7 @@
             ]
           },
           "amount": {
-            "value": 40.0,
+            "value": 32.0,
             "currency": "USD"
           }
         },
@@ -310,7 +310,7 @@
             ]
           },
           "amount": {
-            "value": 40.0,
+            "value": 32.0,
             "currency": "USD"
           }
         },
@@ -342,7 +342,7 @@
         ]
       },
       "amount": {
-        "value": 1600.0,
+        "value": 1280.0,
         "currency": "USD"
       }
     },
@@ -356,7 +356,7 @@
         ]
       },
       "amount": {
-        "value": 660.0,
+        "value": 528.0,
         "currency": "USD"
       }
     },
@@ -370,7 +370,7 @@
         ]
       },
       "amount": {
-        "value": 690.0,
+        "value": 552.0,
         "currency": "USD"
       }
     },
@@ -384,7 +384,7 @@
         ]
       },
       "amount": {
-        "value": 250.0,
+        "value": 200.0,
         "currency": "USD"
       }
     }

@@ -109,7 +109,7 @@ fn ids(e: &Value) -> Vec<&str> {
         .collect()
 }
 
-const ER: &str = "r_erfacaaaaaaaaaaaaaaa";
+const ER: &str = "r_handfacaaaaaaaaaaaaa";
 
 #[test]
 fn every_claim_is_in_one_event_and_each_shape_is_one_event() {
@@ -143,7 +143,7 @@ fn every_claim_is_in_one_event_and_each_shape_is_one_event() {
     // The same folder makes the same ids.
     assert_eq!(v, events_of(&w, 0, None));
 
-    // An ER visit of four billers is one event; the line the facility's
+    // An emergency visit of four billers is one event; the line the facility's
     // totals leave out counts nowhere, and its statement joins by amount.
     let er = holding(&v, ER);
     assert_eq!(
@@ -153,29 +153,29 @@ fn every_claim_is_in_one_event_and_each_shape_is_one_event() {
     assert_eq!(ids(er).iter().filter(|i| i.starts_with("r_")).count(), 4);
     assert_eq!(
         er["money"],
-        serde_json::json!({"currency": "USD", "billed": "10400.00", "allowed": "1445.00", "discount": "8955.00",
-            "plan_paid": "1185.00", "you_owe": "260.00", "share": {"copay": "200.00", "coinsurance": "60.00"}})
+        serde_json::json!({"currency": "USD", "billed": "7060.00", "allowed": "1017.00", "discount": "6043.00",
+            "plan_paid": "819.00", "you_owe": "198.00", "share": {"copay": "150.00", "coinsurance": "48.00"}})
     );
-    assert_eq!(member(er, "r_erdocaaaaaaaaaaaaaaa")["role"], "hospital");
-    assert_eq!(member(er, "r_erradaaaaaaaaaaaaaaa")["role"], "ancillary");
-    let bill = member(er, "d_erbillaaaaaaaaaaaaaa");
+    assert_eq!(member(er, "r_handdocaaaaaaaaaaaaa")["role"], "hospital");
+    assert_eq!(member(er, "r_handradaaaaaaaaaaaaa")["role"], "ancillary");
+    let bill = member(er, "d_handbillaaaaaaaaaaaa");
     assert_eq!(
         (bill["rule"].as_str(), bill["matches"].as_str()),
         (Some("D3s"), Some(ER))
     );
     assert_eq!(
         (er["place"].as_str(), er["place_from"].as_str()),
-        (Some("Example General Hospital"), Some("claims"))
+        (Some("Example Lakeside Hospital"), Some("claims"))
     );
     assert_eq!(er["status"], "complete");
 
     // A birth stay takes a physicians' group's and the anesthesiologists'
     // claims, and links to the newborn's care.
-    let stay = holding(&v, "r_birthfacaaaaaaaaaaaa");
+    let stay = holding(&v, "r_stayfacaaaaaaaaaaaaa");
     assert_eq!(stay["kind"], "inpatient");
     assert!(
-        ids(stay).contains(&"r_birthanesaaaaaaaaaaa")
-            && ids(stay).contains(&"r_birthrheumaaaaaaaaaa")
+        ids(stay).contains(&"r_stayanesaaaaaaaaaaaa")
+            && ids(stay).contains(&"r_staygroupaaaaaaaaaaa")
     );
     let c = events_of(&w, 1, None);
     let newborn = holding(&c, "r_nboneaaaaaaaaaaaaaaa");
@@ -185,48 +185,48 @@ fn every_claim_is_in_one_event_and_each_shape_is_one_event() {
     // A portal visit: its encounter by the clinician's name (sure), the lab's
     // claim (likely: another provider), its results priced by the lab's
     // lines, the call after it and its summary.
-    let visit = holding(&v, "r_checkupaaaaaaaaaaaaa");
+    let visit = holding(&v, "r_skincheckaaaaaaaaaaa");
     assert_eq!(visit["kind"], "office");
     assert_eq!(
         (visit["what"].as_str(), visit["what_from"].as_str()),
-        (Some("Annual checkup"), Some("portal"))
+        (Some("Skin check"), Some("portal"))
     );
     assert_eq!(
         (visit["place"].as_str(), visit["place_from"].as_str()),
-        (Some("Example Family Practice"), Some("portal"))
+        (Some("Example Primary Care Group"), Some("portal"))
     );
-    assert_eq!(visit["times"][0], "2026-06-10T14:30:00-04:00");
+    assert_eq!(visit["times"][0], "2025-05-13T14:30:00-04:00");
     assert_eq!(
-        member(visit, "r_checkupaaaaaaaaaaaaa")["confidence"],
+        member(visit, "r_skincheckaaaaaaaaaaa")["confidence"],
         "sure"
     );
     assert_eq!(
-        member(visit, "r_checkuplabaaaaaaaaaa")["confidence"],
+        member(visit, "r_skinlabaaaaaaaaaaaaa")["confidence"],
         "likely"
     );
     assert_eq!(visit["confidence"], "likely");
-    assert_eq!(member(visit, "r_callbackaaaaaaaaaaaa")["rule"], "E1");
+    assert_eq!(member(visit, "r_followcallaaaaaaaaaa")["rule"], "E1");
     assert_eq!(
-        member(visit, "r_lipidaaaaaaaaaaaaaaa")["priced_by"],
-        serde_json::json!({"record": "r_checkuplabaaaaaaaaaa", "sequence": 1, "allowed": "12.00"})
+        member(visit, "r_tshaaaaaaaaaaaaaaaaa")["priced_by"],
+        serde_json::json!({"record": "r_skinlabaaaaaaaaaaaaa", "sequence": 1, "allowed": "14.00"})
     );
-    assert_eq!(member(visit, "d_checkupavsaaaaaaaaaa")["rule"], "D4");
+    assert_eq!(member(visit, "d_skinavsaaaaaaaaaaaaa")["rule"], "D4");
     assert_eq!(visit["clinicians"], serde_json::json!(["Casey Sample, MD"]));
 
     // A desk receipt joins its visit, and its second scan is a copy of it.
-    let ob = holding(&v, "r_obvisitaaaaaaaaaaaaa");
+    let ob = holding(&v, "r_eyevisitaaaaaaaaaaaa");
     assert_eq!(
-        member(ob, "d_obreceiptaaaaaaaaaaa")["copies"],
-        serde_json::json!(["d_obreceiptcopyaaaaaaa"])
+        member(ob, "d_eyereceiptaaaaaaaaaa")["copies"],
+        serde_json::json!(["d_eyereceiptcopyaaaaaa"])
     );
 
     // A course of therapy takes no other claims.
-    let series = holding(&v, "r_therapyaaaaaaaaaaaaa");
+    let series = holding(&v, "r_balanceaaaaaaaaaaaaa");
     assert_eq!(
         (series["kind"].as_str(), ids(series).len()),
         (Some("series"), 1)
     );
-    let inside = holding(&v, "r_therapyevalaaaaaaaaa");
+    let inside = holding(&v, "r_balanceevalaaaaaaaaa");
     assert_eq!(inside["kind"], "office");
     assert!(
         inside.get("place").is_none(),
@@ -239,11 +239,11 @@ fn every_claim_is_in_one_event_and_each_shape_is_one_event() {
     assert_eq!(fill["kind"], "fill");
     assert!(ids(fill).contains(&"r_filltwoaaaaaaaaaaaaa"));
     assert_eq!(member(fill, "d_rxpaperaaaaaaaaaaaaa")["rule"], "D5");
-    assert_eq!(fill["what"], "Amoxicillin 500 mg and Ibuprofen 600 mg");
+    assert_eq!(fill["what"], "Naproxen 250 mg and Cetirizine 10 mg");
     assert_eq!(fill["money"]["partial"], serde_json::json!(["allowed"]));
     assert!(fill["money"].get("allowed").is_none());
     assert!(fill.get("expected").is_none());
-    assert_eq!(holding(&v, "r_flushotaaaaaaaaaaaaa")["kind"], "vaccine");
+    assert_eq!(holding(&v, "r_tetanusaaaaaaaaaaaaa")["kind"], "vaccine");
 
     // Two office visits on one day: the day's tests are not assigned.
     let tests = holding(&v, "r_twolabaaaaaaaaaaaaaa");
@@ -271,21 +271,21 @@ fn every_claim_is_in_one_event_and_each_shape_is_one_event() {
 
     // A bill from a practice no claim names, for the only visit that day
     // and its share: sure, and the clinician is learned to belong to it.
-    let pod = holding(&v, "r_podiatryaaaaaaaaaaaa");
+    let pod = holding(&v, "r_allergyaaaaaaaaaaaaa");
     assert_eq!(
         (
-            member(pod, "d_podiatrybillaaaaaaaa")["rule"].as_str(),
-            member(pod, "d_podiatrybillaaaaaaaa")["confidence"].as_str()
+            member(pod, "d_allergybillaaaaaaaaa")["rule"].as_str(),
+            member(pod, "d_allergybillaaaaaaaaa")["confidence"].as_str()
         ),
         (Some("D3"), Some("sure"))
     );
     assert_eq!(
         (pod["place"].as_str(), pod["place_from"].as_str()),
-        (Some("Example Podiatry Associates"), Some("alias"))
+        (Some("Example Allergy Associates"), Some("alias"))
     );
     assert_eq!(v["aliases"][0]["clinician"], "K EXAMPLE");
     // A paper filed under the child before the birth is this visit's.
-    let rx = member(pod, "d_podiatryrxaaaaaaaaaa");
+    let rx = member(pod, "d_allergyrxaaaaaaaaaaa");
     assert_eq!(
         (rx["rule"].as_str(), rx["person"].as_str()),
         (Some("X2"), Some("p_childaaaaaaaaaaaaaaa"))
@@ -300,14 +300,14 @@ fn every_claim_is_in_one_event_and_each_shape_is_one_event() {
     );
     assert_eq!(
         (newborn["place"].as_str(), newborn["place_from"].as_str()),
-        (Some("Example General Hospital"), Some("linked"))
+        (Some("Example Lakeside Hospital"), Some("linked"))
     );
     assert_eq!(newborn["expected"][0]["what"], "facility_claim");
     assert!(c["events"]
         .as_array()
         .unwrap()
         .iter()
-        .all(|e| !ids(e).contains(&"d_podiatryrxaaaaaaaaaa")));
+        .all(|e| !ids(e).contains(&"d_allergyrxaaaaaaaaaaa")));
 }
 
 #[test]
@@ -330,8 +330,8 @@ fn the_households_decisions_outrank_the_rules() {
         // The lab's claim was not that visit's.
         decide(
             "apart",
-            "r_checkupdocaaaaaaaaaa",
-            "r_checkuplabaaaaaaaaaa",
+            "r_skindocaaaaaaaaaaaaa",
+            "r_skinlabaaaaaaaaaaaaa",
             1,
         ),
         // The day's tests were the first office visit's.
@@ -344,8 +344,8 @@ fn the_households_decisions_outrank_the_rules() {
         // The receipt was for something else.
         decide(
             "apart",
-            "r_obvisitaaaaaaaaaaaaa",
-            "d_obreceiptaaaaaaaaaaa",
+            "r_eyevisitaaaaaaaaaaaa",
+            "d_eyereceiptaaaaaaaaaa",
             3,
         ),
     ];
@@ -353,19 +353,19 @@ fn the_households_decisions_outrank_the_rules() {
     let v = events_of(&w, 0, Some(&o));
     assert_eq!(v["overrides"], 3);
 
-    let visit = holding(&v, "r_checkupaaaaaaaaaaaaa");
-    assert!(!ids(visit).contains(&"r_checkuplabaaaaaaaaaa"));
+    let visit = holding(&v, "r_skincheckaaaaaaaaaaa");
+    assert!(!ids(visit).contains(&"r_skinlabaaaaaaaaaaaaa"));
     assert_eq!(visit["confidence"], "sure", "what made it likely has left");
     assert_eq!(
         visit["id"],
-        holding(&before, "r_checkupaaaaaaaaaaaaa")["id"],
+        holding(&before, "r_skincheckaaaaaaaaaaa")["id"],
         "the anchor stays, so the id does"
     );
-    let lab = holding(&v, "r_checkuplabaaaaaaaaaa");
+    let lab = holding(&v, "r_skinlabaaaaaaaaaaaaa");
     assert_eq!(
         (
             lab["kind"].as_str(),
-            member(lab, "r_checkuplabaaaaaaaaaa")["rule"].as_str()
+            member(lab, "r_skinlabaaaaaaaaaaaaa")["rule"].as_str()
         ),
         (Some("tests"), Some("household"))
     );
@@ -378,13 +378,13 @@ fn the_households_decisions_outrank_the_rules() {
         .iter()
         .all(|e| e["status"] != "unsure"));
 
-    let ob = holding(&v, "r_obvisitaaaaaaaaaaaaa");
-    assert_eq!(ids(ob), ["r_obvisitaaaaaaaaaaaaa"]);
+    let ob = holding(&v, "r_eyevisitaaaaaaaaaaaa");
+    assert_eq!(ids(ob), ["r_eyevisitaaaaaaaaaaaa"]);
     assert!(v["events"]
         .as_array()
         .unwrap()
         .iter()
-        .all(|e| !ids(e).contains(&"d_obreceiptaaaaaaaaaaa")));
+        .all(|e| !ids(e).contains(&"d_eyereceiptaaaaaaaaaa")));
 }
 
 #[test]
@@ -392,7 +392,7 @@ fn a_portal_stay_spans_its_days_and_a_days_doses_and_fills_say_what_they_were() 
     let idx: PersonIndex = load("portal.index.json");
     let person: Person = serde_json::from_value(json!({
         "id": idx.person, "name": "Jamie Example", "folder": "Jamie Example",
-        "created_at": "2026-11-10T00:00:00Z"}))
+        "created_at": "2025-03-20T00:00:00Z"}))
     .unwrap();
     let texts = PersonText::new(&person.id);
     let build = |utc_offset: fn(i64) -> Option<i64>| {
@@ -410,21 +410,21 @@ fn a_portal_stay_spans_its_days_and_a_days_doses_and_fills_say_what_they_were() 
 
     // A stay seen only in the portal, from 01:10 on its first day (06:10
     // UTC), is a stay through its last, and a result inside it joins it.
-    let stay = holding(&v, "r_birthstayaaaaaaaaaaa");
+    let stay = holding(&v, "r_kneestayaaaaaaaaaaaa");
     assert_eq!(
         (&stay["kind"], &stay["title"], &stay["start"], &stay["end"]),
         (
             &json!("inpatient"),
             &json!("Hospital stay"),
-            &json!("2026-11-08"),
-            &json!("2026-11-10")
+            &json!("2025-03-18"),
+            &json!("2025-03-20")
         ),
         "{stay}"
     );
     assert_eq!(
         (
-            &member(stay, "r_bilirubinaaaaaaaaaaa")["role"],
-            &member(stay, "r_bilirubinaaaaaaaaaaa")["rule"]
+            &member(stay, "r_hemoglobinaaaaaaaaaa")["role"],
+            &member(stay, "r_hemoglobinaaaaaaaaaa")["rule"]
         ),
         (&json!("satellite"), &json!("E4"))
     );
@@ -435,50 +435,47 @@ fn a_portal_stay_spans_its_days_and_a_days_doses_and_fills_say_what_they_were() 
     }
     let far = build(hawaii);
     assert_eq!(
-        holding(&far, "r_birthstayaaaaaaaaaaa")["start"],
-        "2026-11-07"
+        holding(&far, "r_kneestayaaaaaaaaaaaa")["start"],
+        "2025-03-17"
     );
     // An offset outside the T2 range keeps the first of its days.
     fn none(_: i64) -> Option<i64> {
         None
     }
     assert_eq!(
-        holding(&build(none), "r_birthstayaaaaaaaaaaa")["start"],
-        "2026-11-07"
+        holding(&build(none), "r_kneestayaaaaaaaaaaaa")["start"],
+        "2025-03-17"
     );
 
     // One practice's doses on a day are one visit; another's are not.
-    let shots = holding(&v, "r_dtapaaaaaaaaaaaaaaaa");
+    let shots = holding(&v, "r_hepaaaaaaaaaaaaaaaaa");
     assert_eq!(
         ids(shots),
         [
-            "r_dtapaaaaaaaaaaaaaaaa",
-            "r_hibaaaaaaaaaaaaaaaaa",
-            "r_polioaaaaaaaaaaaaaaa",
-            "r_pcvaaaaaaaaaaaaaaaaa"
+            "r_hepaaaaaaaaaaaaaaaaa",
+            "r_typhoidaaaaaaaaaaaaa",
+            "r_yellowfeveraaaaaaaaa",
+            "r_rabiesaaaaaaaaaaaaaa"
         ]
     );
     assert_eq!(
         (&shots["kind"], &shots["what"], &shots["what_from"]),
         (
             &json!("vaccine"),
-            &json!("DTaP, Hib and 2 more"),
+            &json!("Hepatitis A, Typhoid and 2 more"),
             &json!("portal")
         )
     );
-    let flu = holding(&v, "r_flushotaaaaaaaaaaaaa");
-    assert_eq!(ids(flu), ["r_flushotaaaaaaaaaaaaa"]);
-    assert_eq!(flu["what"], "Influenza");
+    let shingles = holding(&v, "r_shinglesaaaaaaaaaaaa");
+    assert_eq!(ids(shingles), ["r_shinglesaaaaaaaaaaaa"]);
+    assert_eq!(shingles["what"], "Shingles");
 
     // A fill with no claim says which drug it was.
     for (id, what) in [
+        ("r_cetfillaaaaaaaaaaaaa", "Cetirizine 1 mg/mL oral solution"),
         (
-            "r_amoxfillaaaaaaaaaaaa",
-            "Amoxicillin 250 mg/5 mL oral suspension",
-        ),
-        (
-            "r_ibufillaaaaaaaaaaaaa",
-            "Ibuprofen 100 mg/5 mL oral suspension",
+            "r_napfillaaaaaaaaaaaaa",
+            "Naproxen 125 mg/5 mL oral suspension",
         ),
     ] {
         let fill = holding(&v, id);
@@ -516,7 +513,7 @@ fn visits_get_plain_names_and_a_connections_name_is_never_a_place() {
             utc_offset: eastern,
         })
     };
-    let named = [source("Example Pediatrics")];
+    let named = [source("Example Skin Clinic")];
     let v = build(&named);
     let what = |v: &Value, id: &str| {
         let e = holding(v, id);
@@ -534,54 +531,58 @@ fn visits_get_plain_names_and_a_connections_name_is_never_a_place() {
     );
     assert_eq!(
         what(&v, "r_checkupaaaaaaaaaaaaa"),
-        (json!("Well-child checkup"), json!("portal"))
+        (json!("Preventive checkup"), json!("portal"))
     );
     // A reason a person gives stays.
     assert_eq!(
-        what(&v, "r_earpainaaaaaaaaaaaaa"),
-        (json!("Ear pain"), json!("portal"))
+        what(&v, "r_rashvisitaaaaaaaaaaa"),
+        (json!("Rash"), json!("portal"))
     );
     // A code outside the table: its descriptor, never in capitals.
     assert_eq!(
         what(&v, "r_consultaaaaaaaaaaaaa"),
-        (json!("Consult Visit with ENT Review"), json!("portal"))
+        (json!("Consult Visit with Heart Review"), json!("portal"))
     );
 
     // The encounter's location, not the connection's name it gives as its
     // service provider.
     assert_eq!(
-        place(&v, "r_earpainaaaaaaaaaaaaa"),
-        (json!("Example Pediatrics Annex"), json!("portal"))
+        place(&v, "r_rashvisitaaaaaaaaaaa"),
+        (json!("Example Skin Clinic Annex"), json!("portal"))
     );
     // An encounter naming no place takes its source's practice.
     assert_eq!(
         place(&v, "r_newvisitaaaaaaaaaaaa"),
-        (json!("Example Pediatrics"), json!("portal"))
+        (json!("Example Skin Clinic"), json!("portal"))
     );
     // A visit seen only in claims takes its line's visit code's name; a
     // reason from the portal still comes first.
     let w = world();
     let parent = events_of(&w, 0, None);
     assert_eq!(
-        what(&parent, "r_obvisitaaaaaaaaaaaaa"),
+        what(&parent, "r_eyevisitaaaaaaaaaaaa"),
         (json!("Follow-up visit"), json!("claims"))
     );
     assert_eq!(
-        what(&parent, "r_podiatryaaaaaaaaaaaa"),
+        what(&parent, "r_allergyaaaaaaaaaaaaa"),
         (json!("New-patient visit"), json!("claims"))
     );
     assert_eq!(
-        what(&parent, "r_checkupdocaaaaaaaaaa"),
-        (json!("Annual checkup"), json!("portal"))
+        what(&parent, "r_skindocaaaaaaaaaaaaa"),
+        (json!("Skin check"), json!("portal"))
     );
 
     // A doctor's claim for a vaccine and giving it is a vaccine, and the
     // giving names nothing.
-    let flu = holding(&v, "r_fluclaimaaaaaaaaaaaa");
+    let tet = holding(&v, "r_tetclaimaaaaaaaaaaaa");
     assert_eq!(
-        (&flu["kind"], &flu["title"], &flu["what"]),
-        (&json!("vaccine"), &json!("Vaccine"), &json!("Flu vaccine")),
-        "{flu}"
+        (&tet["kind"], &tet["title"], &tet["what"]),
+        (
+            &json!("vaccine"),
+            &json!("Vaccine"),
+            &json!("Tetanus vaccine")
+        ),
+        "{tet}"
     );
 
     // A source named for every practice it serves names none of them.
@@ -592,7 +593,7 @@ fn visits_get_plain_names_and_a_connections_name_is_never_a_place() {
         "{v}"
     );
     assert_eq!(
-        place(&v, "r_earpainaaaaaaaaaaaaa").0,
-        json!("Example Pediatrics Annex")
+        place(&v, "r_rashvisitaaaaaaaaaaa").0,
+        json!("Example Skin Clinic Annex")
     );
 }

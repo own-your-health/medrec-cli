@@ -7,8 +7,8 @@
   {
    "id": "r_newvisitaaaaaaaaaaaa",
    "kind": "encounter",
-   "key": "encounter|newvisit|2026-09-01",
-   "date": "2026-09-01T14:00:00Z",
+   "key": "encounter|newvisit|2025-04-01",
+   "date": "2025-04-01T14:00:00Z",
    "code": {
     "system": "http://www.ama-assn.org/go/cpt",
     "code": "99203",
@@ -19,7 +19,7 @@
    "fields": {
     "class": "AMB",
     "period": {
-     "start": "2026-09-01T14:00:00Z"
+     "start": "2025-04-01T14:00:00Z"
     },
     "reason": "New patient appointment"
    },
@@ -39,10 +39,10 @@
    ]
   },
   {
-   "id": "r_earpainaaaaaaaaaaaaa",
+   "id": "r_rashvisitaaaaaaaaaaa",
    "kind": "encounter",
-   "key": "encounter|earpain|2026-09-10",
-   "date": "2026-09-10T14:00:00Z",
+   "key": "encounter|rashvisit|2025-04-10",
+   "date": "2025-04-10T14:00:00Z",
    "code": {
     "system": "http://www.ama-assn.org/go/cpt",
     "code": "99213",
@@ -53,11 +53,11 @@
    "fields": {
     "class": "AMB",
     "period": {
-     "start": "2026-09-10T14:00:00Z"
+     "start": "2025-04-10T14:00:00Z"
     },
-    "reason": "Ear pain",
+    "reason": "Rash",
     "service_provider": "athenahealth (all practices)",
-    "location": "Example Pediatrics Annex"
+    "location": "Example Skin Clinic Annex"
    },
    "provenance": [
     {
@@ -77,19 +77,19 @@
   {
    "id": "r_consultaaaaaaaaaaaaa",
    "kind": "encounter",
-   "key": "encounter|consult|2026-09-20",
-   "date": "2026-09-20T14:00:00Z",
+   "key": "encounter|consult|2025-04-22",
+   "date": "2025-04-22T14:00:00Z",
    "code": {
     "system": "http://www.ama-assn.org/go/cpt",
     "code": "99243",
-    "display": "CONSULT VISIT WITH ENT REVIEW"
+    "display": "CONSULT VISIT WITH HEART REVIEW"
    },
-   "display": "CONSULT VISIT WITH ENT REVIEW",
+   "display": "CONSULT VISIT WITH HEART REVIEW",
    "status": "finished",
    "fields": {
     "class": "AMB",
     "period": {
-     "start": "2026-09-20T14:00:00Z"
+     "start": "2025-04-22T14:00:00Z"
     }
    },
    "provenance": [
@@ -110,19 +110,19 @@
   {
    "id": "r_checkupaaaaaaaaaaaaa",
    "kind": "encounter",
-   "key": "encounter|checkup|2026-10-01",
-   "date": "2026-10-01T14:00:00Z",
+   "key": "encounter|checkup|2025-05-06",
+   "date": "2025-05-06T14:00:00Z",
    "code": {
     "system": "http://www.ama-assn.org/go/cpt",
-    "code": "99392",
-    "display": "TODDLER CHECKUP RETURNING FAMILY"
+    "code": "99396",
+    "display": "ADULT CHECKUP RETURNING PERSON"
    },
-   "display": "TODDLER CHECKUP RETURNING FAMILY",
+   "display": "ADULT CHECKUP RETURNING PERSON",
    "status": "finished",
    "fields": {
     "class": "AMB",
     "period": {
-     "start": "2026-10-01T14:00:00Z"
+     "start": "2025-05-06T14:00:00Z"
     },
     "reason": "Return appointment"
    },
@@ -142,17 +142,17 @@
    ]
   },
   {
-   "id": "r_fluclaimaaaaaaaaaaaa",
+   "id": "r_tetclaimaaaaaaaaaaaa",
    "kind": "claim",
-   "key": "claim|example|fluclaim|2026-10-20",
-   "date": "2026-10-20",
-   "display": "Flu vaccine and Vaccine given \u00b7 Example Pediatrics",
+   "key": "claim|example|tetclaim|2025-06-03",
+   "date": "2025-06-03",
+   "display": "Tetanus vaccine and Vaccine given · Example Skin Clinic",
    "fields": {
-    "provider": "Example Pediatrics",
+    "provider": "Example Skin Clinic",
     "insurer": "Example Health Plan",
     "billable_period": {
-     "start": "2026-10-20",
-     "end": "2026-10-20"
+     "start": "2025-06-03",
+     "end": "2025-06-03"
     },
     "type": "professional",
     "amounts": {
@@ -179,8 +179,8 @@
       "category": "vaccine",
       "service": {
        "system": "http://www.ama-assn.org/go/cpt",
-       "code": "90686",
-       "display": "Flu vaccine"
+       "code": "90715",
+       "display": "Tetanus vaccine"
       },
       "amounts": {
        "billed": {
