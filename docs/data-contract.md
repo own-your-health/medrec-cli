@@ -1001,7 +1001,10 @@ history (a new source's first import) moves more.
 by name (`display` clipped to 200 characters with `…`), then as `index.json`
 holds them. Each keeps its `index.json` fields `id`, `kind`, `date`,
 `code`, `display`, `status` and `fields` when present. `provenance` is cut
-to its first entry's `source`, with only `fhir_base` and `cli`.
+to its first entry's `source`, with only `fhir_base`, `cli` and, from 0.9.4,
+`organization_id` (`null` when the source has none; absent in a view an
+older medrec wrote). With it a reader tells apart the sign-ins that share a
+FHIR base, as `medrec mcp`'s source labels do.
 
 `names-<kind>.json` lists every distinct name the kind's records carry, as
 `[code, display, code display, [shard numbers]]`. `code` and `code display`
