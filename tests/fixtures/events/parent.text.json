@@ -1,0 +1,7 @@
+{
+ "schema": "medrec-text/v1",
+ "person": "p_parentaaaaaaaaaaaaaa",
+ "texts": {
+  "d_erbillaaaaaaaaaaaaaa": "Example General Hospital\nStatement\nAmount due 200.00"
+ }
+}

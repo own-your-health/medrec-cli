@@ -490,6 +490,54 @@ fn counts(r: &import::Report) -> BTreeMap<String, u64> {
 }
 
 /// One pass: the scheduled one, or a person's `medrec refresh`.
+/// Apply a request's event decision: `ok` once it is in the person's
+/// `overrides.json` (the views follow as the folder closes), `invalid` when
+/// a member is not that person's, `failed` when the folder could not be
+/// written.
+fn event_request(
+    location: &Location,
+    cfg: &Config,
+    h: &crate::model::Household,
+    v: &requests::Valid,
+) -> (&'static str, String) {
+    let Scope::Event {
+        person,
+        kind,
+        members,
+    } = &v.scope
+    else {
+        return ("invalid", "not an event request".into());
+    };
+    let Some(p) = h.person(person) else {
+        return (
+            "invalid",
+            "its event names no person in household.json".into(),
+        );
+    };
+    let by = v.requested_by_name();
+    let f = match Folder::open_at(location, Access::Write, cfg.store_budget()) {
+        Ok(f) => f,
+        Err(e) => return ("failed", e.message().to_string()),
+    };
+    match crate::events::decide(
+        &f,
+        p,
+        kind,
+        &members[0],
+        &members[1],
+        by.as_deref(),
+        Some(&v.id),
+    ) {
+        Ok((d, true)) => ("ok", format!("recorded {kind} as {}", d.id)),
+        Ok((d, false)) => ("ok", format!("{kind} was already recorded as {}", d.id)),
+        Err(CliError::NotFound(_)) => (
+            "invalid",
+            "a member it names is not one of the person's records or documents".into(),
+        ),
+        Err(e) => ("failed", e.message().to_string()),
+    }
+}
+
 pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport, CliError> {
     let location = cfg.folder_location()?;
     let Some(_lock) = state::try_lock(&location)? else {
@@ -689,6 +737,7 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
                 .map(|e| e.source.clone())
                 .collect(),
             Scope::Source(s) => vec![s.clone()],
+            Scope::Event { .. } => Vec::new(),
         };
         for id in ids {
             let w = want.entry(id).or_default();
@@ -1049,6 +1098,10 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
         }
         let (sources, outcome, message): (Vec<HandledSource>, String, String) = match p {
             Parsed::Invalid(i) => (Vec::new(), "invalid".into(), clip(&i.why, MESSAGE_MAX)),
+            Parsed::Valid(v) if matches!(v.scope, Scope::Event { .. }) => {
+                let (outcome, message) = event_request(&location, cfg, &h, v);
+                (Vec::new(), outcome.into(), clip(&message, MESSAGE_MAX))
+            }
             Parsed::Valid(v) => {
                 let ids: Vec<&String> = want
                     .iter()

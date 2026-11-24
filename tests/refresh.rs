@@ -1394,3 +1394,207 @@ fn a_scheduled_pass_never_waits_on_the_drive_sign_ins_keychain_approval() {
     }
     let _ = std::fs::remove_dir_all(&e.root);
 }
+
+/// A pending request file carrying an event decision.
+fn event_request(e: &Env, id: &str, event: Value) {
+    let dir = e.records().join("_requests");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join(format!("20261124T120000Z_{id}.json")),
+        serde_json::to_vec(&json!({
+            "schema": "medrec-request/v1",
+            "id": id,
+            "requested_at": "2026-11-24T12:00:00Z",
+            "requested_by": {"email": "alex@example.com", "name": "Alex Testperson"},
+            "event": event,
+            "app": {"name": "own-your-health-app", "version": "0.1.0"},
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+}
+
+/// A person's events view, by the name views.json gives it.
+fn events_view(e: &Env, pid: &str) -> Value {
+    let views = e.json_at("views/views.json");
+    let md5 = views["people"][pid]["files"]["events.json"]
+        .as_str()
+        .unwrap();
+    e.json_at(&format!("views/{pid}/events.{}.json", &md5[..12]))
+}
+
+fn holding<'a>(v: &'a Value, id: &str) -> &'a Value {
+    v["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|ev| {
+            ev["members"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|m| m["record"] == id || m["document"] == id)
+        })
+        .unwrap()
+}
+
+#[test]
+fn an_event_request_records_the_households_decision_and_the_views_follow() {
+    let e = Env::new("events");
+    let src = setup(&e);
+    e.ok(&[
+        "--profile",
+        "home",
+        "refresh",
+        "add",
+        "--source",
+        &src,
+        "--provider-profile",
+        "adult1",
+    ]);
+    // Alex's records are the invented parent's (tests/fixtures/events).
+    let h = e.json_at("household.json");
+    let person = |name: &str| {
+        h["people"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["name"] == name)
+            .unwrap()
+            .clone()
+    };
+    let (alex, robin) = (person("Alex Testperson"), person("Robin Testperson"));
+    let aid = alex["id"].as_str().unwrap();
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/events");
+    for (from, to) in [
+        ("parent.index.json", "index.json"),
+        ("parent.text.json", "text.json"),
+    ] {
+        let mut v: Value =
+            serde_json::from_str(&std::fs::read_to_string(fixtures.join(from)).unwrap()).unwrap();
+        v["person"] = json!(aid);
+        std::fs::write(
+            e.records().join(alex["folder"].as_str().unwrap()).join(to),
+            serde_json::to_vec(&v).unwrap(),
+        )
+        .unwrap();
+    }
+    e.ok(&["views", "write"]);
+
+    // Every person has an events view; Alex's names Robin's index, a
+    // child's, among what it was made from.
+    let views = e.json_at("views/views.json");
+    let entry = &views["people"][aid];
+    assert_eq!(entry["overrides"], Value::Null, "{entry}");
+    let rid = robin["id"].as_str().unwrap();
+    assert_eq!(
+        entry["linked"][rid].as_str(),
+        Some(
+            md5_of(
+                &e.records()
+                    .join(robin["folder"].as_str().unwrap())
+                    .join("index.json")
+            )
+            .as_str()
+        )
+    );
+    let before = events_view(&e, aid);
+    assert_eq!(before["schema"], "medrec-events/v1");
+    assert!(events_view(&e, rid)["events"].is_array());
+    let listed = e.ok(&["events", "list", "--person", "Alex"]);
+    assert_eq!(
+        listed["items"].as_array().unwrap().len(),
+        before["events"].as_array().unwrap().len()
+    );
+    let (doc, lab) = ("r_checkupdocaaaaaaaaaa", "r_checkuplabaaaaaaaaaa");
+    let visit = holding(&before, doc)["id"].as_str().unwrap().to_string();
+    assert_eq!(holding(&before, lab)["id"], visit.as_str());
+    let shown = e.ok(&["events", "show", &visit]);
+    assert_eq!(shown["person"], aid);
+
+    // "Not the same visit", from the app: the next pass records it and the
+    // views follow.
+    event_request(
+        &e,
+        "x_eventaaaaaaaaaaaaaaa",
+        json!({"person": aid, "apart": [doc, lab]}),
+    );
+    // A member that is not the person's is refused.
+    event_request(
+        &e,
+        "x_eventbbbbbbbbbbbbbbb",
+        json!({"person": aid, "together": [doc, "r_notalexsaaaaaaaaaaa"]}),
+    );
+    e.ok(&["refresh", "--scheduled"]);
+    let done = e.json_at("_requests/done/20261124T120000Z_x_eventaaaaaaaaaaaaaaa.json");
+    assert_eq!(done["handled"]["outcome"], "ok", "{done}");
+    assert_eq!(done["event"], json!({"person": aid, "apart": [doc, lab]}));
+    let refused = e.json_at("_requests/done/20261124T120000Z_x_eventbbbbbbbbbbbbbbb.json");
+    assert_eq!(refused["handled"]["outcome"], "invalid", "{refused}");
+    let o = e.json_at(&format!(
+        "{}/overrides.json",
+        alex["folder"].as_str().unwrap()
+    ));
+    assert_eq!(o["schema"], "medrec-overrides/v1");
+    let decisions = o["events"].as_array().unwrap();
+    assert_eq!(decisions.len(), 1);
+    assert_eq!(
+        (
+            decisions[0]["kind"].as_str(),
+            decisions[0]["request"].as_str(),
+            decisions[0]["by"].as_str()
+        ),
+        (
+            Some("apart"),
+            Some("x_eventaaaaaaaaaaaaaaa"),
+            Some("Alex Testperson")
+        )
+    );
+    let after = events_view(&e, aid);
+    assert_eq!(after["overrides"], 1);
+    assert_eq!(
+        holding(&after, doc)["id"],
+        visit.as_str(),
+        "the anchor stays"
+    );
+    assert_ne!(holding(&after, lab)["id"], visit.as_str());
+    assert!(e.json_at("views/views.json")["people"][aid]["overrides"].is_string());
+
+    // From a terminal: the decisions, undone, and made again the other way.
+    let d = e.ok(&["events", "decisions", "--person", "Alex"]);
+    let id = d["items"][0]["id"].as_str().unwrap().to_string();
+    e.ok(&["events", "undo", &id]);
+    assert_eq!(holding(&events_view(&e, aid), lab)["id"], visit.as_str());
+    let t = e.ok(&[
+        "events",
+        "together",
+        "r_twoaaaaaaaaaaaaaaaaa",
+        "r_twolabaaaaaaaaaaaaaa",
+    ]);
+    assert_eq!(t["status"], "recorded");
+    assert_eq!(
+        e.ok(&[
+            "events",
+            "together",
+            "r_twoaaaaaaaaaaaaaaaaa",
+            "r_twolabaaaaaaaaaaaaaa"
+        ])["status"],
+        "unchanged"
+    );
+    assert_eq!(
+        holding(&events_view(&e, aid), "r_twolabaaaaaaaaaaaaaa")["id"],
+        holding(&events_view(&e, aid), "r_twoaaaaaaaaaaaaaaaaa")["id"]
+    );
+    let (code, _) = e.code(&[
+        "events",
+        "apart",
+        "r_twoaaaaaaaaaaaaaaaaa",
+        "r_nosucharecordaaaaaa",
+    ]);
+    assert_eq!(code, Some(4));
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
+fn md5_of(path: &Path) -> String {
+    medrec::hash::md5_hex(&std::fs::read(path).unwrap())
+}

@@ -239,10 +239,11 @@ pub enum Kind {
     Documents,
     Notes,
     Timeline,
+    Events,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 15] = [
+    pub const ALL: [Kind; 16] = [
         Kind::Medications,
         Kind::Conditions,
         Kind::Allergies,
@@ -258,6 +259,7 @@ impl Kind {
         Kind::Documents,
         Kind::Notes,
         Kind::Timeline,
+        Kind::Events,
     ];
 
     /// Its name in calls, `medications`.
@@ -281,15 +283,17 @@ impl Kind {
             Kind::Reports => "report",
             Kind::Claims => "claim",
             Kind::Coverage => "coverage",
-            Kind::Bills | Kind::Documents | Kind::Notes | Kind::Timeline => return None,
+            Kind::Bills | Kind::Documents | Kind::Notes | Kind::Timeline | Kind::Events => {
+                return None
+            }
         })
     }
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct RecordsArgs {
-    /// `visits` are encounters; `tests` is the latest result of each test;
-    /// `bills` are statements filed as documents; `timeline` is everything.
+    /// `visits` are encounters; `tests` each test's latest result; `bills`
+    /// statements filed as documents; `timeline` everything.
     pub kind: Kind,
     /// A name, alias or id.
     #[serde(default)]
@@ -300,15 +304,18 @@ pub struct RecordsArgs {
     /// YYYY-MM-DD, inclusive.
     #[serde(default)]
     pub until: Option<String>,
-    /// Only those not stopped, completed or resolved.
+    /// Current ones only.
     #[serde(default)]
     pub active: Option<bool>,
-    /// A code (`4548-4`) or words of the name (`a1c`).
+    /// A code (`4548-4`) or words (`a1c`).
     #[serde(default)]
     pub name: Option<String>,
-    /// For `documents`: `lab_report`, `visit_summary`, `bill`, `eob`...
+    /// `lab_report`, `bill`, `eob`... (`documents`).
     #[serde(default)]
     pub doc_type: Option<String>,
+    /// One event (`events`).
+    #[serde(default)]
+    pub id: Option<String>,
     #[serde(flatten)]
     pub list: ListArgs,
 }
@@ -322,6 +329,7 @@ struct RecordsFilter<'a> {
     active: bool,
     name: Option<&'a str>,
     doc_type: Option<&'a str>,
+    id: Option<&'a str>,
 }
 
 #[derive(Debug, Default, Serialize, JsonSchema)]
@@ -330,6 +338,8 @@ pub struct Item {
     pub person: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub date: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end: Option<String>,
     pub title: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
@@ -359,6 +369,8 @@ pub struct Item {
     pub doc_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub has_text: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub you_owe: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fields: Option<Map<String, Value>>,
 }
@@ -413,7 +425,8 @@ impl Toolset for MedrecTools {
                 "medrec keeps the household's medical records, imported from patient portals \
                  and insurers and filed from scans, in one folder; these tools read it and \
                  change nothing. Start with medrec_summary; medrec_search finds anything by its \
-                 words. Give the date and source of each fact you use, and say when the records \
+                 words. For what happened or what it cost, use medrec_records kind events: one \
+                 item per visit, ER trip, stay, test or fill, with the household's share. Give the date and source of each fact you use, and say when the records \
                  do not answer the question. Each result carries its lab's own reference range \
                  and flag, and labs may report one test in different units. For decisions about \
                  care, suggest the user ask their clinician.",
@@ -443,9 +456,9 @@ impl Toolset for MedrecTools {
             ToolDef::read(
                 RECORDS,
                 "List records by kind",
-                "Lists one kind of record, newest first; results with name is one test over \
-                 time. Use active for current medicines or conditions. Results carry value, \
-                 unit, range and flag; bills amount_due and due_date; documents has_text.",
+                "Lists one kind of record, newest first. events: what happened, one per visit, \
+                 stay or fill, with you_owe; id gives one in full. results with name: one test \
+                 over time, with its range and flag.",
             )
             .input::<RecordsArgs>()
             .output::<Page<Item>>(),
@@ -491,6 +504,80 @@ fn range(since: &Option<String>, until: &Option<String>) -> Result<Range, ToolEr
 
 fn person_error(e: CliError) -> ToolError {
     ToolError::from(e).with_fix("Call medrec_summary with no arguments for the household's people")
+}
+
+/// An `events.json` event as a list item: `source` is where it happened,
+/// and `detail` what it was, who, how sure the grouping is and what is
+/// still expected. `detailed` adds its money, members and evidence in
+/// `fields`.
+fn event_item(e: &Value, detailed: bool) -> Item {
+    let s = |k: &str| e[k].as_str().map(str::to_string);
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(w) = s("what") {
+        parts.push(w);
+    }
+    let clinicians: Vec<&str> = e["clinicians"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
+    if !clinicians.is_empty() {
+        parts.push(clinicians.join(", "));
+    }
+    if let Some(c) = s("confidence").filter(|c| c != "sure") {
+        parts.push(format!("grouping {c}"));
+    }
+    let expected: Vec<&str> = e["expected"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|x| x["what"].as_str())
+        .map(|w| match w {
+            "doctor_claims" => "doctors' claims",
+            "facility_claim" => "the facility's claim",
+            "claim" => "a claim",
+            "bill" => "a bill",
+            other => other,
+        })
+        .collect();
+    if !expected.is_empty() {
+        parts.push(format!("still expected: {}", expected.join(", ")));
+    }
+    let fields = detailed.then(|| {
+        [
+            "confidence",
+            "money",
+            "members",
+            "expected",
+            "differences",
+            "links",
+            "could_join",
+        ]
+        .into_iter()
+        .filter_map(|k| {
+            e.get(k)
+                .filter(|v| !v.is_null())
+                .map(|v| (k.to_string(), v.clone()))
+        })
+        .collect()
+    });
+    Item {
+        kind: s("kind").unwrap_or_default(),
+        person: s("person_name").unwrap_or_default(),
+        date: s("start"),
+        end: s("end").filter(|end| Some(end) != s("start").as_ref()),
+        title: s("title").unwrap_or_default(),
+        detail: (!parts.is_empty()).then(|| clip(&parts.join("; "), CLIP)),
+        status: s("status"),
+        source: s("place"),
+        id: s("id").unwrap_or_default(),
+        you_owe: e["money"]["you_owe"]
+            .as_str()
+            .map(|o| format!("{o} {}", e["money"]["currency"].as_str().unwrap_or("USD"))),
+        fields,
+        ..Default::default()
+    }
 }
 
 fn money(m: &crate::model::Amount) -> String {
@@ -557,6 +644,10 @@ impl MedrecTools {
         let doc_type = given(&a.doc_type);
         let active = a.active.unwrap_or(false);
         let r = range(&a.since, &a.until)?;
+        let id = given(&a.id);
+        if id.is_some() && a.kind != Kind::Events {
+            return Err(ToolError::usage("id applies to kind `events` only"));
+        }
         if let Some(t) = doc_type {
             if a.kind != Kind::Documents {
                 return Err(ToolError::usage(
@@ -581,9 +672,13 @@ impl MedrecTools {
                 active,
                 name,
                 doc_type,
+                id,
             },
         )?;
         let detailed = a.list.format().is_detailed();
+        if a.kind == Kind::Events {
+            return self.events(person, name, &r, id, detailed, page);
+        }
         let (f, h) = self.open()?;
         let selected = people::selected(&h, person).map_err(person_error)?;
         let named =
@@ -701,6 +796,59 @@ impl MedrecTools {
         }
         items.sort_by(|a, b| b.date.cmp(&a.date).then(a.title.cmp(&b.title)));
         ToolOutput::new(&page.page(items, "person, since/until, active or name")?)
+    }
+
+    /// `kind: "events"`: what happened, in the order of `events.json`;
+    /// `id` one event with its money, members and evidence.
+    fn events(
+        &self,
+        person: Option<&str>,
+        name: Option<&str>,
+        r: &Range,
+        id: Option<&str>,
+        detailed: bool,
+        page: PageRequest,
+    ) -> Result<ToolOutput, ToolError> {
+        if let Some(id) = id {
+            if person.is_some() || name.is_some() || r.since.is_some() || r.until.is_some() {
+                return Err(ToolError::usage(
+                    "id names one event: pass it without person, name, since or until",
+                ));
+            }
+            if !crate::ids::is_valid("e", id) {
+                return Err(ToolError::usage(format!("`{id}` is not an event id (e_…)")));
+            }
+        }
+        let (f, h) = self.open()?;
+        people::selected(&h, person).map_err(person_error)?;
+        let fold = name.map(classify::fold);
+        let items: Vec<Item> = crate::events::list(&f, &h, person, r)?
+            .iter()
+            .filter(|e| id.is_none_or(|id| e["id"] == id))
+            .filter(|e| {
+                fold.as_ref().is_none_or(|n| {
+                    ["kind", "title", "what", "place"]
+                        .iter()
+                        .filter_map(|k| e[*k].as_str())
+                        .chain(
+                            e["clinicians"]
+                                .as_array()
+                                .into_iter()
+                                .flatten()
+                                .filter_map(Value::as_str),
+                        )
+                        .any(|t| classify::fold(t).contains(n.as_str()))
+                })
+            })
+            .map(|e| event_item(e, detailed || id.is_some()))
+            .collect();
+        if let (Some(id), true) = (id, items.is_empty()) {
+            return Err(
+                ToolError::from(CliError::NotFound(format!("no event {id}")))
+                    .with_fix("List events with medrec_records kind events to find the id"),
+            );
+        }
+        ToolOutput::new(&page.page(items, "person, since/until or name")?)
     }
 
     fn document(&self, a: DocumentArgs) -> Result<ToolOutput, ToolError> {

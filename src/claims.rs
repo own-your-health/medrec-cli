@@ -212,7 +212,7 @@ pub fn amount_name(category: &Value) -> Option<(&'static str, u8)> {
 }
 
 /// A decimal amount in ten-thousandths, so two of them add exactly.
-fn units(s: &str) -> Option<i128> {
+pub(crate) fn units(s: &str) -> Option<i128> {
     let s = s.trim();
     let (neg, s) = s.strip_prefix('-').map_or((false, s), |r| (true, r));
     let (int, frac) = s.split_once('.').unwrap_or((s, ""));
@@ -226,7 +226,7 @@ fn units(s: &str) -> Option<i128> {
 }
 
 /// Ten-thousandths as a decimal with two places, or four when it has them.
-fn decimal(u: i128) -> String {
+pub(crate) fn decimal(u: i128) -> String {
     let sign = if u < 0 { "-" } else { "" };
     let (int, frac) = (u.abs() / 10_000, u.abs() % 10_000);
     if frac % 100 == 0 {

@@ -208,6 +208,24 @@ impl Folder {
         self.write_json(&text_rel(p), t)
     }
 
+    /// A person's `overrides.json`; an empty one when none was written.
+    pub fn overrides(&self, p: &Person) -> Result<crate::events::Overrides, CliError> {
+        let rel = crate::events::overrides_rel(p);
+        let o: crate::events::Overrides = self
+            .read_json(&rel)?
+            .unwrap_or_else(|| crate::events::Overrides::new(&p.id));
+        if o.person != p.id {
+            return Err(CliError::Other(format!("{rel} names another person")));
+        }
+        Ok(o)
+    }
+
+    /// Write a person's `overrides.json`; the views follow.
+    pub fn save_overrides(&self, p: &Person, o: &crate::events::Overrides) -> Result<(), CliError> {
+        self.written.set(true);
+        self.write_json(&crate::events::overrides_rel(p), o)
+    }
+
     pub fn review(&self) -> Result<ReviewQueue, CliError> {
         Ok(self.read_json(REVIEW_FILE)?.unwrap_or_default())
     }

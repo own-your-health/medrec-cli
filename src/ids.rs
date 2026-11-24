@@ -16,6 +16,12 @@ pub fn new(prefix: &str) -> String {
     format!("{prefix}_{}", &base32(&bytes)[..20])
 }
 
+/// `<prefix>_<20 base32 chars>` from a digest: an id that names the same
+/// thing every time it is made from the same input.
+pub fn from_digest(prefix: &str, digest: &[u8]) -> String {
+    format!("{prefix}_{}", &base32(&digest[..13])[..20])
+}
+
 fn base32(bytes: &[u8]) -> String {
     let mut out = String::new();
     let mut buffer: u32 = 0;

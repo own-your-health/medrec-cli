@@ -11,6 +11,13 @@ pub enum Scope {
     All,
     Person(String),
     Source(String),
+    /// Not an import: the household's decision on an event, "Not the same
+    /// visit" (`apart`) or "Attach to this visit" (`together`).
+    Event {
+        person: String,
+        kind: String,
+        members: [String; 2],
+    },
 }
 
 /// A request medrec will serve.
@@ -26,6 +33,15 @@ pub struct Valid {
 /// A request refused by rule 1.
 impl Valid {
     /// When the request was made (Unix seconds).
+    /// The requester's name as shown, never trusted.
+    pub fn requested_by_name(&self) -> Option<String> {
+        let by = self.kept.get("requested_by")?;
+        by.get("name")
+            .or_else(|| by.get("email"))
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    }
+
     pub fn requested_at(&self) -> Option<i64> {
         self.kept
             .get("requested_at")
@@ -143,7 +159,40 @@ pub fn parse(name: &str, body: &[u8], known: &dyn Known) -> Parsed {
     let Some(requested_at) = requested_at.filter(|t| time::parse(t).is_some()) else {
         return bad("its requested_at is not an RFC 3339 time".into());
     };
+    let is_member = |s: &str| crate::ids::is_valid("r", s) || crate::ids::is_valid("d", s);
+    let event = match (v.get("event"), v.get("scope")) {
+        (Some(_), Some(_)) => return bad("it has both a scope and an event".into()),
+        (Some(Value::Object(e)), None) => {
+            let person = e.get("person").and_then(Value::as_str).unwrap_or("");
+            if !(crate::ids::is_valid("p", person) && known.person(person)) {
+                return bad("its event names no person in household.json".into());
+            }
+            let kinds: Vec<&str> = ["apart", "together"]
+                .into_iter()
+                .filter(|k| e.contains_key(*k))
+                .collect();
+            let [kind] = kinds.as_slice() else {
+                return bad("its event is not one of apart or together".into());
+            };
+            let members: Vec<&str> = e
+                .get(*kind)
+                .and_then(Value::as_array)
+                .map(|a| a.iter().filter_map(Value::as_str).collect())
+                .unwrap_or_default();
+            match members.as_slice() {
+                [a, b] if a != b && is_member(a) && is_member(b) => Some(Scope::Event {
+                    person: person.into(),
+                    kind: (*kind).into(),
+                    members: [(*a).into(), (*b).into()],
+                }),
+                _ => return bad(format!("its {kind} is not two record or document ids")),
+            }
+        }
+        (Some(_), None) => return bad("its event is not an object".into()),
+        (None, _) => None,
+    };
     let scope = match v.get("scope") {
+        _ if event.is_some() => event.expect("checked"),
         Some(Value::Object(s)) if s.len() == 1 && s.get("all") == Some(&Value::Bool(true)) => {
             Scope::All
         }
@@ -172,12 +221,22 @@ pub fn parse(name: &str, body: &[u8], known: &dyn Known) -> Parsed {
         Scope::All => json!({"all": true}),
         Scope::Person(p) => json!({ "person": p }),
         Scope::Source(s) => json!({ "source": s }),
+        Scope::Event {
+            person,
+            kind,
+            members,
+        } => json!({ "person": person, kind.as_str(): members }),
     };
     let mut kept = Map::new();
     kept.insert("schema".into(), REQUEST_SCHEMA.into());
     kept.insert("id".into(), name_id.clone().into());
     kept.insert("requested_at".into(), requested_at.into());
-    kept.insert("scope".into(), scope_json);
+    let key = if matches!(scope, Scope::Event { .. }) {
+        "event"
+    } else {
+        "scope"
+    };
+    kept.insert(key.into(), scope_json);
     kept.insert(
         "requested_by".into(),
         shown(v.get("requested_by"), &["email", "name"]),

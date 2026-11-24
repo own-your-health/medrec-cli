@@ -53,6 +53,13 @@ const UNDATED: i64 = -1;
 /// is past due. Readers work out `past_due` for the day they answer.
 const NO_DAY: &str = "0000-00-00";
 
+struct Loaded {
+    index_md5: Option<String>,
+    text_md5: Option<String>,
+    idx: PersonIndex,
+    texts: PersonText,
+}
+
 /// `views/views.json`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ViewsIndex {
@@ -71,6 +78,13 @@ pub struct PersonViews {
     /// made from them; null when the file is absent.
     pub index: Option<String>,
     pub text: Option<String>,
+    /// The MD5 of the person's `overrides.json`, null when there is none;
+    /// and those of the indexes of the guardians and children whose records
+    /// their events read, by person id. Both make only `events.json` stale.
+    #[serde(default)]
+    pub overrides: Option<String>,
+    #[serde(default)]
+    pub linked: BTreeMap<String, String>,
     pub row: Row,
     pub records: BTreeMap<String, Run>,
     pub timeline: Run,
@@ -204,10 +218,21 @@ pub fn sync(f: &Folder, all: bool) -> Result<Synced, CliError> {
 
     // Whose views stand: their files have the MD5s the views were made from.
     let mut kept: BTreeMap<String, PersonViews> = BTreeMap::new();
+    let linked_md5s = |p: &Person| -> Result<BTreeMap<String, String>, CliError> {
+        let mut m = BTreeMap::new();
+        for q in crate::events::linked_people(&h, p) {
+            if let Some(md5) = store.md5(&folder::index_rel(q))? {
+                m.insert(q.id.clone(), md5);
+            }
+        }
+        Ok(m)
+    };
     for p in &h.people {
         if let Some(was) = current.and_then(|o| o.people.get(&p.id)) {
             if store.md5(&folder::index_rel(p))? == was.index
                 && store.md5(&folder::text_rel(p))? == was.text
+                && store.md5(&crate::events::overrides_rel(p))? == was.overrides
+                && linked_md5s(p)? == was.linked
             {
                 kept.insert(p.id.clone(), was.clone());
             }
@@ -236,10 +261,15 @@ pub fn sync(f: &Folder, all: bool) -> Result<Synced, CliError> {
 
     let mut people = BTreeMap::new();
     let mut files = BTreeMap::new();
-    for p in &h.people {
-        if let Some(v) = kept.get(&p.id) {
-            people.insert(p.id.clone(), v.clone());
-            continue;
+    // Each person's files read once, whoever's events need them.
+    let mut loaded: BTreeMap<String, Loaded> = BTreeMap::new();
+    fn load(
+        store: &crate::store::Store,
+        loaded: &mut BTreeMap<String, Loaded>,
+        p: &Person,
+    ) -> Result<(), CliError> {
+        if loaded.contains_key(&p.id) {
+            return Ok(());
         }
         let (irel, trel) = (folder::index_rel(p), folder::text_rel(p));
         let itext = store.read_text(&irel)?;
@@ -256,7 +286,64 @@ pub fn sync(f: &Folder, all: bool) -> Result<Synced, CliError> {
             None => PersonText::new(&p.id),
         };
         let md5 = |t: &Option<String>| t.as_deref().map(|t| md5_hex(t.as_bytes()));
-        let v = person(&h, p, &idx, &texts, md5(&itext), md5(&ttext), &mut files)?;
+        loaded.insert(
+            p.id.clone(),
+            Loaded {
+                index_md5: md5(&itext),
+                text_md5: md5(&ttext),
+                idx,
+                texts,
+            },
+        );
+        Ok(())
+    }
+    for p in &h.people {
+        if let Some(v) = kept.get(&p.id) {
+            people.insert(p.id.clone(), v.clone());
+            continue;
+        }
+        let linked = crate::events::linked_people(&h, p);
+        load(store, &mut loaded, p)?;
+        for q in &linked {
+            load(store, &mut loaded, q)?;
+        }
+        let orel = crate::events::overrides_rel(p);
+        let otext = store.read_text(&orel)?;
+        let overrides: Option<crate::events::Overrides> =
+            otext.as_deref().map(|t| parse(t, &orel)).transpose()?;
+        let me = &loaded[&p.id];
+        let events = crate::events::build(&crate::events::Input {
+            person: p,
+            index: &me.idx,
+            texts: &me.texts,
+            overrides: overrides.as_ref().filter(|o| o.person == p.id),
+            linked: linked
+                .iter()
+                .map(|q| crate::events::Linked {
+                    person: q,
+                    index: &loaded[&q.id].idx,
+                    texts: Some(&loaded[&q.id].texts),
+                })
+                .collect(),
+        });
+        let from = EventsFrom {
+            events,
+            overrides: otext.as_deref().map(|t| md5_hex(t.as_bytes())),
+            linked: linked
+                .iter()
+                .filter_map(|q| loaded[&q.id].index_md5.clone().map(|m| (q.id.clone(), m)))
+                .collect(),
+        };
+        let v = person(
+            &h,
+            p,
+            &me.idx,
+            &me.texts,
+            me.index_md5.clone(),
+            me.text_md5.clone(),
+            from,
+            &mut files,
+        )?;
         people.insert(p.id.clone(), v);
     }
     let index = fresh(people);
@@ -544,6 +631,14 @@ fn name_of(r: &Record) -> Name {
 
 /// Every view file of one person into `out`, by path in the folder, and
 /// the person's entry in `views.json`.
+/// What a person's `events.json` is made from beyond their own files.
+pub(crate) struct EventsFrom {
+    pub events: Value,
+    pub overrides: Option<String>,
+    pub linked: BTreeMap<String, String>,
+}
+
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn person(
     h: &Household,
     p: &Person,
@@ -551,12 +646,14 @@ pub(crate) fn person(
     texts: &PersonText,
     index_md5: Option<String>,
     text_md5: Option<String>,
+    from: EventsFrom,
     out: &mut BTreeMap<String, Vec<u8>>,
 ) -> Result<PersonViews, CliError> {
     let dir = format!("{DIR}/{}", p.id);
     let mut put = |name: &str, bytes: Vec<u8>| {
         out.insert(format!("{dir}/{name}"), bytes);
     };
+    put("events.json", json(&from.events));
 
     let s = summary::of_index(
         h,
@@ -845,6 +942,8 @@ pub(crate) fn person(
     Ok(PersonViews {
         index: index_md5,
         text: text_md5,
+        overrides: from.overrides,
+        linked: from.linked,
         row: Row {
             documents: row.documents,
             records: row.records,
@@ -1030,6 +1129,11 @@ mod tests {
             &PersonText::new("p_test"),
             None,
             None,
+            EventsFrom {
+                events: serde_json::json!({"schema": crate::events::SCHEMA, "events": []}),
+                overrides: None,
+                linked: BTreeMap::new(),
+            },
             &mut out,
         )
         .unwrap();
