@@ -2,6 +2,7 @@
 //! (piekstra-cli/1). The command tree and output live here; the mechanisms
 //! live in the library.
 
+use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::PathBuf;
 
@@ -378,6 +379,16 @@ other files and Drive folders are copied. --move moves named files too; --keep c
 struct IntakeArgs {
     /// Files to file.
     files: Vec<PathBuf>,
+    /// File the files a list names, each with its own values: one JSON
+    /// object per line (`{"file", "person", "type", "date", "org",
+    /// "classified_by"}`), or `-` for standard input. Every line is checked
+    /// first; the views are written once, at the end.
+    #[arg(
+        long,
+        value_name = "FILE|-",
+        conflicts_with_all = ["files", "inbox", "drive", "person", "doc_type", "date", "org"]
+    )]
+    from: Option<String>,
     /// Drain the inbox (config `inbox`, default `inbox/` in the records
     /// folder).
     #[arg(long)]
@@ -418,9 +429,20 @@ enum ReviewCmd {
     },
     /// File an item, with the values it was unsure of (or be asked).
     File {
-        id: String,
+        #[arg(required_unless_present = "from")]
+        id: Option<String>,
         #[command(flatten)]
         given: GivenArgs,
+        /// File the items a list names, each with its own values: one JSON
+        /// object per line (`{"id", "person", "type", "date", "org"}`), or
+        /// `-` for standard input. Every line is checked first; the views
+        /// are written once, at the end.
+        #[arg(
+            long,
+            value_name = "FILE|-",
+            conflicts_with_all = ["id", "person", "doc_type", "date", "org"]
+        )]
+        from: Option<String>,
     },
     /// Discard an item and its file.
     Drop {
@@ -1211,9 +1233,12 @@ fn given(g: &GivenArgs, classified_by: Option<String>) -> Given {
 
 fn intake_cmd(cli: &Cli, a: &IntakeArgs, store: &ConfigStore) -> Result<(), CliError> {
     let json = cli.common.json;
+    if let Some(from) = &a.from {
+        return intake_list(cli, a, from, store);
+    }
     if a.files.is_empty() && !a.inbox && a.drive.is_none() {
         return Err(CliError::Usage(
-            "name files, or pass --inbox or --drive <folder>".into(),
+            "name files, or pass --inbox, --drive <folder> or --from <list>".into(),
         ));
     }
     // Arguments first: a bad --type or --date never costs a folder read.
@@ -1244,7 +1269,85 @@ fn intake_cmd(cli: &Cli, a: &IntakeArgs, store: &ConfigStore) -> Result<(), CliE
         interactive: cli.common.interactive(),
     };
     let (report, ok) = intake::run(&f, &cfg, &req)?;
-    let v = to_value(&report);
+    print_intake(json, &report);
+    // `exit` runs no destructors: the folder closes first, so what was
+    // filed before a failure reaches the views.
+    drop(f);
+    if !ok {
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
+/// `intake --from`: every line checked, then each filed in order in one
+/// folder session, so the views are written once.
+fn intake_list(cli: &Cli, a: &IntakeArgs, from: &str, store: &ConfigStore) -> Result<(), CliError> {
+    let lines: Vec<(usize, medrec::batch::IntakeLine)> = medrec::batch::read(from)?;
+    let classified_by = a.classified_by.as_deref();
+    let given: Vec<(usize, intake::Given)> = lines
+        .iter()
+        .map(|(n, l)| (*n, l.given(classified_by)))
+        .collect();
+    medrec::batch::validate(&given)?;
+    let cfg = load(store, cli)?;
+    let f = Folder::open(
+        &cfg,
+        if a.dry_run {
+            Access::Read
+        } else {
+            Access::Write
+        },
+    )?;
+    let mut report = intake::Report {
+        dry_run: a.dry_run,
+        items: Vec::new(),
+        counts: BTreeMap::new(),
+    };
+    let mut all_ok = true;
+    let total = lines.len();
+    for (k, ((_, line), (n, given))) in lines.iter().zip(given).enumerate() {
+        note(
+            cli,
+            &format!("filing {} of {total} (list line {n}) ...", k + 1),
+        );
+        let req = intake::Request {
+            files: vec![line.file.clone()],
+            inbox: None,
+            drive: None,
+            given,
+            keep: a.keep,
+            move_files: a.move_files,
+            dry_run: a.dry_run,
+            interactive: false,
+        };
+        let (items, ok) = match intake::run(&f, &cfg, &req) {
+            Ok((r, ok)) => (r.items, ok),
+            Err(e) => (
+                vec![intake::Outcome::failed(
+                    &line.file.display().to_string(),
+                    &e,
+                )],
+                false,
+            ),
+        };
+        all_ok &= ok;
+        for mut o in items {
+            o.line = Some(n);
+            *report.counts.entry(o.status.clone()).or_default() += 1;
+            report.items.push(o);
+        }
+    }
+    print_intake(cli.common.json, &report);
+    // The folder closes, writing the views once, before the exit.
+    drop(f);
+    if !all_ok {
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
+fn print_intake(json: bool, report: &intake::Report) {
+    let v = to_value(report);
     output::emit(json, "intake", v, |v| {
         output::table(&output::table_view(
             &output::rows_of(v, "items"),
@@ -1279,10 +1382,6 @@ fn intake_cmd(cli: &Cli, a: &IntakeArgs, store: &ConfigStore) -> Result<(), CliE
             );
         }
     });
-    if !ok {
-        std::process::exit(1);
-    }
-    Ok(())
 }
 
 fn review_cmd(cli: &Cli, cmd: &ReviewCmd, store: &ConfigStore) -> Result<(), CliError> {
@@ -1301,14 +1400,18 @@ fn review_cmd(cli: &Cli, cmd: &ReviewCmd, store: &ConfigStore) -> Result<(), Cli
             let d = review::show(&f, id, *text)?;
             output::emit_one(json, "review-item", to_value(&d));
         }
-        ReviewCmd::File { id, given: g } => {
+        ReviewCmd::File {
+            from: Some(from), ..
+        } => review_list(cli, &cfg, from)?,
+        ReviewCmd::File { id, given: g, .. } => {
+            let id = id.clone().unwrap_or_default();
             let given = given(g, None);
             intake::validate_given(&given)?;
             let f = Folder::open(&cfg, Access::Write)?;
             let r = review::file(
                 &f,
                 &review::FileRequest {
-                    id: id.clone(),
+                    id,
                     given,
                     interactive: cli.common.interactive(),
                 },
@@ -1332,6 +1435,77 @@ fn review_cmd(cli: &Cli, cmd: &ReviewCmd, store: &ConfigStore) -> Result<(), Cli
                 println!("dropped {}", r.review)
             });
         }
+    }
+    Ok(())
+}
+
+/// `review file --from`: every line checked, then each item filed in order
+/// in one folder session, so the views are written once. A line that fails
+/// is reported and the rest are still filed.
+fn review_list(cli: &Cli, cfg: &Config, from: &str) -> Result<(), CliError> {
+    let lines: Vec<(usize, medrec::batch::ReviewLine)> = medrec::batch::read(from)?;
+    let given: Vec<(usize, intake::Given)> = lines.iter().map(|(n, l)| (*n, l.given())).collect();
+    medrec::batch::validate(&given)?;
+    let f = Folder::open(cfg, Access::Write)?;
+    let mut items = Vec::new();
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    let total = lines.len();
+    for (k, ((n, line), (_, given))) in lines.iter().zip(given).enumerate() {
+        note(
+            cli,
+            &format!("filing {} of {total} (list line {n}) ...", k + 1),
+        );
+        let row = match review::file(
+            &f,
+            &review::FileRequest {
+                id: line.id.clone(),
+                given,
+                interactive: false,
+            },
+        ) {
+            Ok(r) => {
+                let mut v = to_value(&r);
+                v["line"] = (*n).into();
+                v
+            }
+            Err(e) => serde_json::json!({
+                "line": n,
+                "review": line.id,
+                "status": "failed",
+                "error": e.message(),
+                "error_code": e.code(),
+            }),
+        };
+        let status = row["status"].as_str().unwrap_or("failed").to_string();
+        *counts.entry(status).or_default() += 1;
+        items.push(row);
+    }
+    let failed = counts.get("failed").copied().unwrap_or(0);
+    output::emit(
+        cli.common.json,
+        "review-filed-list",
+        serde_json::json!({ "items": items, "counts": counts }),
+        |v| {
+            output::table(&output::table_view(
+                &output::rows_of(v, "items"),
+                &[
+                    "line",
+                    "status",
+                    "review",
+                    "doc_type",
+                    "person_name",
+                    "path",
+                    "error",
+                ],
+            ));
+            let c: Vec<String> = counts.iter().map(|(k, n)| format!("{n} {k}")).collect();
+            println!("{}", c.join(", "));
+        },
+    );
+    // The folder closes, writing the views once, before the exit.
+    drop(f);
+    if failed > 0 {
+        std::process::exit(1);
     }
     Ok(())
 }
