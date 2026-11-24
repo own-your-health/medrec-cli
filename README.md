@@ -290,7 +290,7 @@ medrec meds --active
 medrec note add Robin "Ask about the recheck" --tag question --about <record id>
 
 medrec verify                                   # every indexed file against the index
-medrec reindex                                  # claims shaped again from their raw files, after an upgrade
+medrec reindex                                  # claims shaped again from their raw files, and bills and receipts read again, after an upgrade
 medrec backup --to "/Volumes/Backup/Medical Records"
 ```
 
@@ -509,8 +509,11 @@ that asks more or less than its claim says is owed, a bill with no claim
 behind it, a copay paid at the desk that the claims say was not owed. It
 then lists the shares the claims say are owed that no bill has asked for
 yet, with pharmacy fills marked, since those are usually paid at the
-counter. `paid` takes a `bill` document's id (`d_…`) and `undo` a payment
-id (`o_…`) that `bills payments` lists. Receipts give what was paid and
+counter. `--limit` bounds the bills; the other two lists are shown whole.
+`paid` takes a `bill` document's id (`d_…`) and `undo` a payment id
+(`o_…`) that `bills payments` lists. Payments are kept in the person's
+`marks.json`, apart from the event decisions in `overrides.json`.
+Receipts give what was paid and
 when from their text, and statements the number to call; after upgrading
 to 0.9.1, `medrec reindex` reads the bills and receipts filed before. Each
 person's bills are also a view, `views/<person id>/bills.json`

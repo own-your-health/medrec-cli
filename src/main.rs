@@ -629,7 +629,8 @@ enum EventsCmd {
 #[derive(Subcommand, Debug)]
 enum BillsCmd {
     /// Bills, newest first, with what is paid and left; then those worth
-    /// a call and the shares not billed yet.
+    /// a call and the shares not billed yet. `--limit` bounds the bills;
+    /// the other two lists are given whole.
     List {
         #[arg(long)]
         person: Option<String>,
@@ -1242,10 +1243,27 @@ fn bills_cmd(cli: &Cli, cmd: &BillsCmd, store: &ConfigStore) -> Result<(), CliEr
         BillsCmd::List { person, list } => {
             let (f, h) = read(store, cli)?;
             let (mut items, mut calls, mut not_billed) = (Vec::new(), Vec::new(), Vec::new());
+            let mut unreadable: Vec<String> = Vec::new();
             for p in medrec::people::selected(&h, person.as_deref())? {
                 let v = medrec::bills::of_person(&f, &h, p)?;
+                if v["marks_unreadable"] == true {
+                    unreadable.push(p.id.clone());
+                    note(
+                        cli,
+                        &format!(
+                            "{}'s marks.json does not read: the payments marked are left out",
+                            medrec::printable(&p.name)
+                        ),
+                    );
+                }
+                for (id, b) in v["bills"].as_object().into_iter().flatten() {
+                    let mut row = b.clone();
+                    row["document"] = id.clone().into();
+                    row["person"] = p.id.clone().into();
+                    row["person_name"] = p.name.clone().into();
+                    items.push(row);
+                }
                 for (key, into) in [
-                    ("bills", &mut items),
                     ("worth_a_call", &mut calls),
                     ("not_billed", &mut not_billed),
                 ] {
@@ -1257,50 +1275,53 @@ fn bills_cmd(cli: &Cli, cmd: &BillsCmd, store: &ConfigStore) -> Result<(), CliEr
                 }
             }
             let date = |v: &serde_json::Value, k: &str| v[k].as_str().unwrap_or("").to_string();
-            items.sort_by_key(|v| std::cmp::Reverse(date(v, "date")));
+            items.sort_by(|a, b| {
+                date(b, "date")
+                    .cmp(&date(a, "date"))
+                    .then(date(a, "document").cmp(&date(b, "document")))
+            });
             not_billed.sort_by_key(|v| std::cmp::Reverse(date(v, "start")));
             let shown = list.take(&items);
-            output::emit(
-                json,
-                "bill-list",
-                serde_json::json!({ "items": shown, "worth_a_call": calls, "not_billed": not_billed }),
-                |v| {
+            let mut doc = serde_json::json!({ "items": shown, "worth_a_call": calls, "not_billed": not_billed });
+            if !unreadable.is_empty() {
+                doc["marks_unreadable"] = unreadable.into();
+            }
+            output::emit(json, "bill-list", doc, |v| {
+                table(
+                    &serde_json::json!({ "items": v["items"] }),
+                    &[
+                        "date",
+                        "person_name",
+                        "organization",
+                        "amount_due",
+                        "paid_total",
+                        "left",
+                        "settled",
+                        "document",
+                    ],
+                );
+                if !calls.is_empty() {
+                    println!();
                     table(
-                        &serde_json::json!({ "items": v["items"] }),
+                        &serde_json::json!({ "items": v["worth_a_call"] }),
+                        &["reason", "person_name", "asked", "owed", "bill", "claim"],
+                    );
+                }
+                if !not_billed.is_empty() {
+                    println!();
+                    table(
+                        &serde_json::json!({ "items": v["not_billed"] }),
                         &[
-                            "date",
+                            "start",
                             "person_name",
-                            "organization",
-                            "amount_due",
-                            "paid_total",
-                            "left",
-                            "settled",
-                            "document",
+                            "provider",
+                            "you_owe",
+                            "event",
+                            "fill",
                         ],
                     );
-                    if !calls.is_empty() {
-                        println!();
-                        table(
-                            &serde_json::json!({ "items": v["worth_a_call"] }),
-                            &["reason", "person_name", "asked", "owed", "bill", "claim"],
-                        );
-                    }
-                    if !not_billed.is_empty() {
-                        println!();
-                        table(
-                            &serde_json::json!({ "items": v["not_billed"] }),
-                            &[
-                                "start",
-                                "person_name",
-                                "provider",
-                                "you_owe",
-                                "event",
-                                "fill",
-                            ],
-                        );
-                    }
-                },
-            );
+                }
+            });
         }
         BillsCmd::Paid {
             document,
@@ -1339,11 +1360,10 @@ fn bills_cmd(cli: &Cli, cmd: &BillsCmd, store: &ConfigStore) -> Result<(), CliEr
             let (f, h) = read(store, cli)?;
             let mut items = Vec::new();
             for p in medrec::people::selected(&h, person.as_deref())? {
-                for pm in f.overrides(p)?.payments {
+                for pm in f.marks(p)?.payments {
                     let mut v = to_value(&pm);
                     v["person"] = p.id.clone().into();
                     v["person_name"] = p.name.clone().into();
-                    v["paid"] = pm.amount.amount.clone().into();
                     items.push(v);
                 }
             }
@@ -1352,9 +1372,19 @@ fn bills_cmd(cli: &Cli, cmd: &BillsCmd, store: &ConfigStore) -> Result<(), CliEr
                 "bill-payments",
                 serde_json::json!({ "items": items }),
                 |v| {
+                    // The amount as one column of the table only.
+                    let mut v = v.clone();
+                    for i in v["items"].as_array_mut().into_iter().flatten() {
+                        i["amount"] = format!(
+                            "{} {}",
+                            i["amount"]["amount"].as_str().unwrap_or(""),
+                            i["amount"]["currency"].as_str().unwrap_or("")
+                        )
+                        .into();
+                    }
                     table(
-                        v,
-                        &["id", "person_name", "document", "on", "paid", "at", "by"],
+                        &v,
+                        &["id", "person_name", "document", "on", "amount", "at", "by"],
                     )
                 },
             );
@@ -1371,7 +1401,7 @@ fn bills_cmd(cli: &Cli, cmd: &BillsCmd, store: &ConfigStore) -> Result<(), CliEr
             let h = f.household()?;
             let mut found = None;
             for p in &h.people {
-                if f.overrides(p)?.payments.iter().any(|pm| pm.id == *id) {
+                if f.marks(p)?.payments.iter().any(|pm| pm.id == *id) {
                     found = Some(p);
                     break;
                 }

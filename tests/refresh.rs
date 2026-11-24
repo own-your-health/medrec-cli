@@ -1475,12 +1475,26 @@ fn bills_view(e: &Env, pid: &str) -> Value {
 
 fn bill_row(v: &Value, id: &str) -> Value {
     v["bills"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|b| b["document"] == id)
+        .get(id)
         .unwrap_or_else(|| panic!("no bill {id}: {v}"))
         .clone()
+}
+
+/// The folder's write lock, held as another medrec writing it would.
+fn hold_folder_lock(e: &Env) -> std::fs::File {
+    let mut lock = None;
+    walk(&e.root.join("cache/medrec/locks"), &mut |p| {
+        let name = p.file_name().unwrap().to_string_lossy().into_owned();
+        if name.ends_with(".lock") && !name.starts_with("refresh-") {
+            lock = Some(p.to_path_buf());
+        }
+    });
+    let held = std::fs::OpenOptions::new()
+        .write(true)
+        .open(lock.expect("a write left the folder's lock file"))
+        .unwrap();
+    held.lock().unwrap();
+    held
 }
 
 #[test]
@@ -1499,10 +1513,8 @@ fn a_bill_marked_paid_from_the_app_or_a_terminal_is_settled_in_the_bills_view() 
     );
 
     // Mistakes change nothing.
-    let file = e
-        .records()
-        .join(alex["folder"].as_str().unwrap())
-        .join("overrides.json");
+    let dir = e.records().join(alex["folder"].as_str().unwrap());
+    let file = dir.join("marks.json");
     for (args, code) in [
         (
             vec!["bills", "paid", bill, "--on", "2026-03-20", "--amount", "0"],
@@ -1583,12 +1595,23 @@ fn a_bill_marked_paid_from_the_app_or_a_terminal_is_settled_in_the_bills_view() 
     );
 
     // The rest from the app, and a request naming a paper that is no bill.
+    // While another writer holds the folder, the request waits.
+    let held = hold_folder_lock(&e);
     decision_request(
         &e,
         "x_paidaaaaaaaaaaaaaaaa",
         "paid",
         json!({"person": aid, "document": bill, "on": "2026-04-01", "amount": "20.00"}),
     );
+    let v = e.ok(&["refresh", "--scheduled"]);
+    drop(held);
+    assert!(v["requests"].as_array().unwrap().is_empty(), "{v}");
+    assert!(e
+        .records()
+        .join("_requests/20261124T120000Z_x_paidaaaaaaaaaaaaaaaa.json")
+        .exists());
+    let m: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    assert_eq!(m["payments"].as_array().unwrap().len(), 1, "{m}");
     decision_request(
         &e,
         "x_paidbbbbbbbbbbbbbbbb",
@@ -1631,8 +1654,9 @@ fn a_bill_marked_paid_from_the_app_or_a_terminal_is_settled_in_the_bills_view() 
         .unwrap();
     assert_eq!(item["settled"], true, "{listed}");
 
-    // Both payments are listed; one undone leaves the bill half paid, and
-    // the file keeps the other next to the event decisions.
+    // Both payments are listed; one undone leaves the bill half paid. The
+    // payments are in marks.json, the event decisions in overrides.json, so
+    // a medrec before 0.9.1 rewriting overrides.json never drops them.
     e.ok(&[
         "events",
         "apart",
@@ -1648,15 +1672,33 @@ fn a_bill_marked_paid_from_the_app_or_a_terminal_is_settled_in_the_bills_view() 
         (&json!("20.00"), &json!(false)),
         "{b}"
     );
-    let o: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    let o: Value =
+        serde_json::from_slice(&std::fs::read(dir.join("overrides.json")).unwrap()).unwrap();
+    let m: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    assert_eq!(o["events"].as_array().unwrap().len(), 1, "{o}");
+    assert!(o.get("payments").is_none(), "{o}");
     assert_eq!(
-        (
-            o["events"].as_array().unwrap().len(),
-            o["payments"].as_array().unwrap().len()
-        ),
-        (1, 1),
-        "{o}"
+        (&m["schema"], m["payments"].as_array().unwrap().len()),
+        (&json!("medrec-marks/v1"), 1),
+        "{m}"
     );
+
+    // A marks file that does not read: the views say so and show the bill
+    // unpaid, the list says so, and nothing writes over it.
+    std::fs::write(&file, b"{not json").unwrap();
+    e.ok(&["views", "write"]);
+    let v = bills_view(&e, aid);
+    assert_eq!(v["marks_unreadable"], true, "{v}");
+    assert_eq!(bill_row(&v, bill)["left"], "40.00");
+    let listed = e.ok(&["bills", "list", "--person", "Alex"]);
+    assert_eq!(listed["marks_unreadable"], json!([aid]), "{listed}");
+    let out = e.run(&["bills", "list", "--person", "Alex"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{err}");
+    assert!(err.contains("marks.json does not read"), "{err}");
+    let (got, text) = e.code(&["bills", "paid", bill, "--on", "2026-04-02", "--amount", "1"]);
+    assert_ne!(got, Some(0), "{text}");
+    assert_eq!(std::fs::read(&file).unwrap(), b"{not json");
     let _ = std::fs::remove_dir_all(&e.root);
 }
 

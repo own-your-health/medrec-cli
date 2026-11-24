@@ -762,17 +762,17 @@ impl MedrecTools {
                     let standing: std::collections::BTreeMap<String, (bool, Option<String>)> =
                         if bills {
                             crate::bills::of_person(&f, &h, p)?["bills"]
-                                .as_array()
+                                .as_object()
                                 .into_iter()
                                 .flatten()
-                                .filter_map(|b| {
-                                    Some((
-                                        b["document"].as_str()?.to_string(),
+                                .map(|(id, b)| {
+                                    (
+                                        id.clone(),
                                         (
                                             b["settled"] == true,
                                             b["left"].as_str().map(str::to_string),
                                         ),
-                                    ))
+                                    )
                                 })
                                 .collect()
                         } else {

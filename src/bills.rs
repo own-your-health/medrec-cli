@@ -3,7 +3,7 @@
 //! and payments the household marked), whether it is settled, the bills and
 //! desk payments worth a call, and the shares the claims say are owed that
 //! no bill or payment has met yet. Built from the person's documents, their
-//! events (`crate::events`) and the payments in their `overrides.json`.
+//! events (`crate::events`) and the payments in their `marks.json`.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -15,6 +15,37 @@ use crate::events::same_org;
 use crate::model::{Amount, Document, Person, PersonIndex};
 
 pub const SCHEMA: &str = "medrec-bills/v1";
+pub const MARKS_SCHEMA: &str = "medrec-marks/v1";
+
+pub fn marks_rel(p: &Person) -> String {
+    format!("{}/marks.json", p.folder)
+}
+
+/// A person's `marks.json`: what the household marked that no rule
+/// decides, in a file of its own so a medrec before 0.9.1, which rewrites
+/// `overrides.json` with only the fields it knows, never drops it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Marks {
+    pub schema: String,
+    pub person: String,
+    /// Bills the household marked paid.
+    #[serde(default)]
+    pub payments: Vec<Payment>,
+    /// What a later medrec writes here, kept as it is.
+    #[serde(flatten)]
+    pub other: Map<String, Value>,
+}
+
+impl Marks {
+    pub fn new(person: &str) -> Self {
+        Marks {
+            schema: MARKS_SCHEMA.into(),
+            person: person.into(),
+            payments: Vec::new(),
+            other: Map::new(),
+        }
+    }
+}
 
 /// How long after a bill's date a receipt can be its payment.
 const RECEIPT_DAYS: i64 = 120;
@@ -236,7 +267,7 @@ pub fn build(p: &Person, idx: &PersonIndex, events: &Value, payments: &[Payment]
         });
     }
 
-    let mut out_bills = Vec::new();
+    let mut out_bills = Map::new();
     let mut calls = Vec::new();
     // The claims a bill or a payment has met: no longer "not billed yet".
     let mut met: BTreeSet<String> = BTreeSet::new();
@@ -290,12 +321,22 @@ pub fn build(p: &Person, idx: &PersonIndex, events: &Value, payments: &[Payment]
             .unwrap_or_else(|| "USD".into());
         let mut paid: Vec<Value> = Vec::new();
         let mut paid_u: i128 = 0;
-        for r in receipts.iter().filter(|r| r.bill == Some(d.id.as_str())) {
-            if r.paid.1 == currency {
-                paid_u += r.paid.0;
+        // A payment in another currency is listed, not counted.
+        let mut count = |u: i128, c: &str, mut row: Value| {
+            if c == currency {
+                paid_u = paid_u.saturating_add(u);
+            } else {
+                row["counted"] = json!(false);
             }
-            paid.push(json!({"from": "receipt", "document": r.doc.id, "on": r.on,
-                             "amount": money(r.paid.0), "currency": r.paid.1}));
+            paid.push(row);
+        };
+        for r in receipts.iter().filter(|r| r.bill == Some(d.id.as_str())) {
+            count(
+                r.paid.0,
+                &r.paid.1,
+                json!({"from": "receipt", "document": r.doc.id, "on": r.on,
+                       "amount": money(r.paid.0), "currency": r.paid.1}),
+            );
         }
         for pm in payments
             .iter()
@@ -304,11 +345,12 @@ pub fn build(p: &Person, idx: &PersonIndex, events: &Value, payments: &[Payment]
             let Some((u, c)) = amount_units(&pm.amount) else {
                 continue;
             };
-            if c == currency {
-                paid_u += u;
-            }
-            paid.push(json!({"from": "household", "id": pm.id, "on": pm.on,
-                             "amount": money(u), "currency": c}));
+            count(
+                u,
+                &c,
+                json!({"from": "household", "id": pm.id, "on": pm.on,
+                       "amount": money(u), "currency": c}),
+            );
         }
         paid.sort_by(|a, b| {
             (s(a, "on"), s(a, "document").or(s(a, "id")))
@@ -320,7 +362,6 @@ pub fn build(p: &Person, idx: &PersonIndex, events: &Value, payments: &[Payment]
             .map(|o| o.doc.id.clone())
             .next();
         let mut row = Map::new();
-        row.insert("document".into(), json!(d.id));
         if !b.copies.is_empty() {
             row.insert("copies".into(), json!(b.copies));
         }
@@ -353,7 +394,7 @@ pub fn build(p: &Person, idx: &PersonIndex, events: &Value, payments: &[Payment]
         row.insert("paid".into(), json!(paid));
         row.insert("paid_total".into(), json!(money(paid_u)));
         if let Some((due, _)) = &b.due {
-            let left = due - paid_u;
+            let left = due.saturating_sub(paid_u);
             row.insert("left".into(), json!(money(left.max(0))));
             row.insert("settled".into(), json!(left <= 0));
         } else {
@@ -362,7 +403,7 @@ pub fn build(p: &Person, idx: &PersonIndex, events: &Value, payments: &[Payment]
         if let Some(o) = &superseded_by {
             row.insert("superseded_by".into(), json!(o));
         }
-        out_bills.push(Value::Object(row));
+        out_bills.insert(d.id.clone(), Value::Object(row));
 
         // Worth a call: what the bill asks against what the claim says.
         let due = b
@@ -430,7 +471,9 @@ pub fn build(p: &Person, idx: &PersonIndex, events: &Value, payments: &[Payment]
                     met.insert(id.to_string());
                 }
             }
-            let owed_sum: Option<i128> = these.iter().map(|c| owed(c)).sum();
+            let owed_sum: Option<i128> = these
+                .iter()
+                .try_fold(0i128, |sum, c| sum.checked_add(owed(c)?));
             if let (Some(o), false) = (owed_sum, these.is_empty()) {
                 if r.paid.1 == currency_of(ev) && r.paid.0 > o {
                     calls.push(json!({
@@ -468,7 +511,7 @@ pub fn build(p: &Person, idx: &PersonIndex, events: &Value, payments: &[Payment]
                 .entry(s(c, "provider").unwrap_or("").to_string())
                 .or_default();
             e.0.push(id.to_string());
-            e.1 += o;
+            e.1 = e.1.saturating_add(o);
         }
         for (provider, (claims, sum)) in by_provider {
             let fill = s(ev, "kind") == Some("fill")
@@ -494,6 +537,11 @@ pub fn build(p: &Person, idx: &PersonIndex, events: &Value, payments: &[Payment]
         "schema": SCHEMA,
         "person": p.id,
         "bills": out_bills,
+        "copy_of": first_of
+            .iter()
+            .filter(|(copy, first)| copy != first)
+            .map(|(copy, first)| (copy.to_string(), json!(first)))
+            .collect::<Map<String, Value>>(),
         "receipts": out_receipts,
         "worth_a_call": calls,
         "not_billed": not_billed,
@@ -503,11 +551,11 @@ pub fn build(p: &Person, idx: &PersonIndex, events: &Value, payments: &[Payment]
 /// The bills a `bills.json` says are settled, by document id.
 pub fn settled(bills: &Value) -> BTreeSet<String> {
     bills["bills"]
-        .as_array()
+        .as_object()
         .into_iter()
         .flatten()
-        .filter(|b| b["settled"] == true)
-        .filter_map(|b| b["document"].as_str().map(str::to_string))
+        .filter(|(_, b)| b["settled"] == true)
+        .map(|(id, _)| id.clone())
         .collect()
 }
 
@@ -519,8 +567,21 @@ pub fn of_person(
 ) -> Result<Value, pk_cli_core::CliError> {
     let events = crate::events::of_person(folder, h, p)?;
     let idx = folder.index(p)?;
-    let payments = folder.overrides(p).map(|o| o.payments).unwrap_or_default();
-    Ok(build(p, &idx, &events, &payments))
+    // A marks file that does not read is left out, and the bills say so.
+    let marks = folder.marks_if_readable(p)?;
+    let mut v = build(
+        p,
+        &idx,
+        &events,
+        marks
+            .as_ref()
+            .map(|m| m.payments.as_slice())
+            .unwrap_or_default(),
+    );
+    if marks.is_none() {
+        v["marks_unreadable"] = Value::Bool(true);
+    }
+    Ok(v)
 }
 
 /// Mark a bill paid: `amount` on `on`. The same payment again (the same
@@ -567,7 +628,7 @@ pub fn mark_paid(
         amount: decimal(units(&amount.amount).unwrap_or(0)),
         currency: amount.currency.clone(),
     };
-    let mut o = folder.overrides(p)?;
+    let mut o = folder.marks(p)?;
     if let Some(pm) = o
         .payments
         .iter()
@@ -585,7 +646,7 @@ pub fn mark_paid(
         request: request.map(str::to_string),
     };
     o.payments.push(pm.clone());
-    folder.save_overrides(p, &o)?;
+    folder.save_marks(p, &o)?;
     Ok((pm, true))
 }
 
@@ -595,7 +656,7 @@ pub fn undo(
     p: &Person,
     id: &str,
 ) -> Result<Payment, pk_cli_core::CliError> {
-    let mut o = folder.overrides(p)?;
+    let mut o = folder.marks(p)?;
     let Some(i) = o.payments.iter().position(|pm| pm.id == id) else {
         return Err(pk_cli_core::CliError::NotFound(format!(
             "no payment {} for {}",
@@ -604,7 +665,7 @@ pub fn undo(
         )));
     };
     let pm = o.payments.remove(i);
-    folder.save_overrides(p, &o)?;
+    folder.save_marks(p, &o)?;
     Ok(pm)
 }
 
@@ -644,6 +705,12 @@ mod tests {
         .unwrap()
     }
 
+    fn bill<'a>(v: &'a Value, id: &str) -> &'a Value {
+        v["bills"]
+            .get(id)
+            .unwrap_or_else(|| panic!("no bill {id}: {v}"))
+    }
+
     fn row<'a>(v: &'a Value, list: &str, key: &str, id: &str) -> &'a Value {
         v[list]
             .as_array()
@@ -668,13 +735,23 @@ mod tests {
             by: None,
             request: None,
         };
-        let v = build(&person(), &index(), &events, &[paid]);
+        // A payment marked in another currency is listed and not counted.
+        let euros = Payment {
+            id: "o_euroaaaaaaaaaaaaaaaa".into(),
+            on: "2026-10-16".into(),
+            amount: Amount {
+                amount: "5.00".into(),
+                currency: "EUR".into(),
+            },
+            ..paid.clone()
+        };
+        let v = build(&person(), &index(), &events, &[paid, euros]);
         assert_eq!(v["schema"], SCHEMA);
         let order: Vec<&str> = v["bills"]
-            .as_array()
+            .as_object()
             .unwrap()
-            .iter()
-            .map(|b| b["document"].as_str().unwrap())
+            .keys()
+            .map(String::as_str)
             .collect();
         assert_eq!(
             order,
@@ -685,11 +762,15 @@ mod tests {
                 "d_doctorbillaaaaaaaaaa",
                 "d_erbillaaaaaaaaaaaaaa"
             ],
-            "newest first, a copy only under its first"
+            "keyed by document, newest first, a copy only under its first"
+        );
+        assert_eq!(
+            v["copy_of"],
+            json!({"d_erbillcopyaaaaaaaaaa": "d_erbillaaaaaaaaaaaaaa"})
         );
 
         // The ER's statement: its claim by amount, paid by the receipt.
-        let er = row(&v, "bills", "document", "d_erbillaaaaaaaaaaaaaa");
+        let er = bill(&v, "d_erbillaaaaaaaaaaaaaa");
         assert_eq!(er["copies"], json!(["d_erbillcopyaaaaaaaaaa"]));
         assert_eq!(
             (&er["event"], &er["rule"]),
@@ -704,21 +785,26 @@ mod tests {
         );
 
         // The ER doctor's: more than its claim says, half marked paid.
-        let doc = row(&v, "bills", "document", "d_doctorbillaaaaaaaaaa");
+        let doc = bill(&v, "d_doctorbillaaaaaaaaaa");
         assert_eq!(
             doc["claim"], "r_erdoctoraaaaaaaaaaaa",
             "the event's claim from its biller"
         );
         assert_eq!(doc["paid"][0]["from"], "household");
+        assert!(doc["paid"][0].get("counted").is_none());
+        assert_eq!(
+            (&doc["paid"][1]["currency"], &doc["paid"][1]["counted"]),
+            (&json!("EUR"), &json!(false))
+        );
         assert_eq!(
             (&doc["paid_total"], &doc["left"], &doc["settled"]),
             (&json!("50.00"), &json!("45.00"), &json!(false))
         );
 
         // The lab's first statement, and the later one that repeats it.
-        let lab = row(&v, "bills", "document", "d_labbillaaaaaaaaaaaaa");
+        let lab = bill(&v, "d_labbillaaaaaaaaaaaaa");
         assert_eq!(lab["superseded_by"], "d_labbilllateraaaaaaaa");
-        assert!(row(&v, "bills", "document", "d_labbilllateraaaaaaaa")
+        assert!(bill(&v, "d_labbilllateraaaaaaaa")
             .get("superseded_by")
             .is_none());
 

@@ -446,7 +446,8 @@ fn events_answer_what_happened_with_each_members_title_and_date() {
         );
     }
 
-    // A bill says what is left once something is paid, and that it is paid.
+    // A bill past its due date says so until it is paid, then what is left
+    // once something is paid, and that it is paid.
     let bill = "d_urologybillaaaaaaaaa";
     let detail = || -> String {
         let r = call(&t, RECORDS, json!({"kind": "bills", "person": "Alex"}));
@@ -479,7 +480,7 @@ fn events_answer_what_happened_with_each_members_title_and_date() {
             })
             .unwrap_or_default()
     };
-    assert_eq!(detail(), "Bill");
+    assert_eq!(detail(), "Bill, past due");
     assert!(
         summary_bills().iter().any(|b| b == bill),
         "{:?}",
@@ -494,7 +495,7 @@ fn events_answer_what_happened_with_each_members_title_and_date() {
         "--amount",
         "15.00",
     ]);
-    assert_eq!(detail(), "Bill, 25.00 left");
+    assert_eq!(detail(), "Bill, past due, 25.00 left");
     e.ok(&[
         "bills",
         "paid",
@@ -504,7 +505,7 @@ fn events_answer_what_happened_with_each_members_title_and_date() {
         "--amount",
         "25.00",
     ]);
-    assert_eq!(detail(), "Bill, paid");
+    assert_eq!(detail(), "Bill, paid", "a settled bill is never past due");
     assert!(
         !summary_bills().iter().any(|b| b == bill),
         "a settled bill is not one to pay: {:?}",
