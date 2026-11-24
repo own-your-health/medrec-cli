@@ -93,6 +93,11 @@ enum Command {
     /// left; those worth a call; and shares no bill has asked for yet.
     #[command(subcommand)]
     Bills(BillsCmd),
+    /// Private items: mental health, reproductive and sexual health and
+    /// substance use, kept off shared screens and household-wide answers.
+    /// Discretion, not access control.
+    #[command(subcommand)]
+    Private(PrivateCmd),
     /// Dated notes, kept in each person's notes.md.
     #[command(subcommand)]
     Note(NoteCmd),
@@ -658,6 +663,23 @@ enum BillsCmd {
 }
 
 #[derive(Subcommand, Debug)]
+enum PrivateCmd {
+    /// A person's private records, documents and events, with why.
+    List {
+        #[arg(long)]
+        person: Option<String>,
+        #[command(flatten)]
+        list: ListArgs,
+    },
+    /// Mark a record, document or event private, whatever the rules say.
+    Mark { id: String },
+    /// Mark a record, document or event not private, whatever the rules say.
+    Unmark { id: String },
+    /// Drop the household's mark on an item: the rules decide again.
+    Reset { id: String },
+}
+
+#[derive(Subcommand, Debug)]
 enum DocumentsCmd {
     /// Filed documents, newest first.
     List {
@@ -978,6 +1000,7 @@ fn run(cli: &Cli) -> Result<(), CliError> {
         Command::Documents(cmd) => documents_cmd(cli, cmd, &store),
         Command::Events(cmd) => events_cmd(cli, cmd, &store),
         Command::Bills(cmd) => bills_cmd(cli, cmd, &store),
+        Command::Private(cmd) => private_cmd(cli, cmd, &store),
         Command::Note(cmd) => note_cmd(cli, cmd, &store),
         Command::Images(cmd) => images_cmd(cli, cmd, &store),
         Command::Doctor => {
@@ -1413,6 +1436,126 @@ fn bills_cmd(cli: &Cli, cmd: &BillsCmd, store: &ConfigStore) -> Result<(), CliEr
             });
         }
     }
+    Ok(())
+}
+
+fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), CliError> {
+    let json = cli.common.json;
+    let (id, private) = match cmd {
+        PrivateCmd::List { person, list } => {
+            let (f, h) = read(store, cli)?;
+            let mut items = Vec::new();
+            let mut unreadable: Vec<String> = Vec::new();
+            for p in medrec::people::selected(&h, person.as_deref())? {
+                let idx = f.index(p)?;
+                let (v, events) = medrec::private::with_events(&f, &h, p, &idx)?;
+                if v.get("marks_unreadable").is_some() {
+                    unreadable.push(p.id.clone());
+                }
+                let event_of = |id: &str| {
+                    events["events"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .find(|e| e["id"] == id)
+                        .map(|e| {
+                            (
+                                e["start"].as_str().map(str::to_string),
+                                e["title"].as_str().unwrap_or("").to_string(),
+                            )
+                        })
+                };
+                for kind in ["events", "records", "documents"] {
+                    for (id, why) in v[kind].as_object().into_iter().flatten() {
+                        let (date, title) = match kind {
+                            "records" => idx
+                                .records
+                                .iter()
+                                .find(|r| r.id == *id)
+                                .map(|r| (r.date.clone(), r.display.clone())),
+                            "documents" => idx.documents.iter().find(|d| d.id == *id).map(|d| {
+                                (
+                                    d.date.clone(),
+                                    d.title
+                                        .clone()
+                                        .or(d.original_name.clone())
+                                        .unwrap_or_default(),
+                                )
+                            }),
+                            _ => event_of(id),
+                        }
+                        .unwrap_or_default();
+                        items.push(serde_json::json!({
+                            "id": id, "kind": kind.trim_end_matches('s'), "area": why["area"],
+                            "from": why["from"], "date": date, "title": title,
+                            "person": p.id, "person_name": p.name,
+                        }));
+                    }
+                }
+            }
+            let day = |v: &serde_json::Value| {
+                v["date"]
+                    .as_str()
+                    .unwrap_or("")
+                    .get(..10)
+                    .map(str::to_string)
+            };
+            items.sort_by(|a, b| {
+                day(b)
+                    .cmp(&day(a))
+                    .then(a["id"].as_str().cmp(&b["id"].as_str()))
+            });
+            let shown = list.take(&items);
+            let mut doc = serde_json::json!({ "items": shown });
+            if !unreadable.is_empty() {
+                for p in h.people.iter().filter(|p| unreadable.contains(&p.id)) {
+                    note(
+                        cli,
+                        &format!(
+                            "{}'s marks.json does not read: the household's marks are left out",
+                            medrec::printable(&p.name)
+                        ),
+                    );
+                }
+                doc["marks_unreadable"] = unreadable.into();
+            }
+            output::emit(json, "private-list", doc, |v| {
+                table(
+                    v,
+                    &["date", "person_name", "kind", "area", "from", "title", "id"],
+                )
+            });
+            return Ok(());
+        }
+        PrivateCmd::Mark { id } => (id, Some(true)),
+        PrivateCmd::Unmark { id } => (id, Some(false)),
+        PrivateCmd::Reset { id } => (id, None),
+    };
+    if !["r", "d", "e"].iter().any(|k| medrec::ids::is_valid(k, id)) {
+        return Err(CliError::Usage(format!(
+            "`{}` is not a record, document or event id (r_…, d_…, e_…)",
+            medrec::printable(id)
+        )));
+    }
+    let cfg = load(store, cli)?;
+    let f = Folder::open(&cfg, Access::Write)?;
+    let h = f.household()?;
+    let p = medrec::private::holder(&f, &h, id)?
+        .ok_or_else(|| CliError::NotFound(format!("no record, document or event {id}")))?;
+    let (m, changed) = medrec::private::mark(&f, &h, p, id, private, None, None)?;
+    let v = serde_json::json!({
+        "item": id, "person": p.id, "private": private,
+        "mark": m.map(|m| to_value(&m)),
+        "status": if changed { "recorded" } else { "unchanged" },
+    });
+    output::emit(json, "private-mark", v, |v| {
+        let what = match private {
+            Some(true) => "private",
+            Some(false) => "not private",
+            None => "back to the rules",
+        };
+        println!("{} {id} {what}", v["status"].as_str().unwrap_or(""))
+    });
     Ok(())
 }
 

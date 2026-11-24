@@ -45,6 +45,15 @@ real record, document, study or provider response.
   masked account number, and `receipt.txt` is a payment receipt. The two
   statements are one statement, read two ways.
 
+- `events/` holds invented people's indexes and texts for the event rules:
+  `parent` and `child` (claims, a portal visit, papers and a newborn's
+  stay), `portal` (portal records with no claim), with `make.py`.
+- `private/adult.index.json` and `adult.text.json` are an invented adult's
+  records, written by `private/make.py`: a mental health condition (ICD-10
+  `F32.0`), a medicine, and a visit and letter from a behavioral health
+  practice, which the rules keep private, beside a condition, a medicine, a
+  visit, a result and a visit summary they do not.
+
 The scans, DICOM studies and the fake provider script are generated at test
 time by `medrec::testdata` (and by `cargo run --example synth -- <DIR>` for
 dogfooding).

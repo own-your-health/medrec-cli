@@ -20,7 +20,6 @@
 //! and `overrides.json`, and, for the X rules, a guardian's or child's
 //! index. Nothing here is a source.
 
-use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
 
@@ -150,42 +149,57 @@ fn local_days(s: &str) -> BTreeSet<Day> {
     .into()
 }
 
-thread_local! {
-    /// `Input::utc_offset` while `build` runs.
-    static OFFSET: Cell<fn(i64) -> Option<i64>> = const { Cell::new(no_offset) };
+/// How a record's days are shown: on its date at `Input::utc_offset`.
+#[derive(Clone, Copy)]
+struct Dates {
+    offset: fn(i64) -> Option<i64>,
 }
 
-fn no_offset(_: i64) -> Option<i64> {
-    None
-}
-
-/// Sets `OFFSET` for one `build`, and puts the one before back after it.
-struct Offset(fn(i64) -> Option<i64>);
-
-impl Offset {
-    fn set(f: fn(i64) -> Option<i64>) -> Self {
-        Offset(OFFSET.with(|o| o.replace(f)))
-    }
-}
-
-impl Drop for Offset {
-    fn drop(&mut self) {
-        OFFSET.with(|o| o.set(self.0));
-    }
-}
-
-/// The day a time is shown on: of its local days (T2), the one it falls
-/// on at the offset `build` was given, else the first.
-fn shown_day(s: &str) -> Option<Day> {
-    let days = local_days(s);
-    if days.len() > 1 {
-        let at = crate::refresh::time::parse(s)
-            .and_then(|secs| Some((secs + OFFSET.with(Cell::get)(secs)?).div_euclid(86_400)));
-        if let Some(d) = at.filter(|d| days.contains(d)) {
-            return Some(d);
+impl Dates {
+    /// The day a time is shown on: of its local days (T2), the one it
+    /// falls on at the offset, else the first.
+    fn shown_day(self, s: &str) -> Option<Day> {
+        let days = local_days(s);
+        if days.len() > 1 {
+            let at = crate::refresh::time::parse(s)
+                .and_then(|secs| Some((secs + (self.offset)(secs)?).div_euclid(86_400)));
+            if let Some(d) = at.filter(|d| days.contains(d)) {
+                return Some(d);
+            }
         }
+        days.first().copied()
     }
-    days.first().copied()
+
+    /// The day a record is shown as starting on.
+    fn record_day(self, r: &Record) -> Option<Day> {
+        record_start(r).and_then(|s| self.shown_day(s))
+    }
+
+    /// The days a record is shown as starting and ending on: its period's
+    /// end, when it has one, on or after the start and at most
+    /// `LONGEST_PERIOD` days later; else its start.
+    fn record_dates(self, r: &Record) -> Option<(Day, Day)> {
+        let start = self.record_day(r)?;
+        let end = r
+            .fields
+            .get("period")
+            .and_then(|p| p.get("end"))
+            .and_then(Value::as_str)
+            .and_then(|s| self.shown_day(s))
+            .filter(|e| *e >= start && *e - start <= LONGEST_PERIOD)
+            .unwrap_or(start);
+        Some((start, end))
+    }
+
+    /// Every day a record can fall on: its local start days and each day
+    /// through its period's end.
+    fn record_span(self, r: &Record) -> BTreeSet<Day> {
+        let mut days = record_days(r);
+        if let Some((s, e)) = self.record_dates(r) {
+            days.extend(s..=e);
+        }
+        days
+    }
 }
 
 // ---------------------------------------------------------------- amounts
@@ -1270,48 +1284,18 @@ fn record_days(r: &Record) -> BTreeSet<Day> {
     record_start(r).map(local_days).unwrap_or_default()
 }
 
-/// The day a record is shown as starting on.
-fn record_day(r: &Record) -> Option<Day> {
-    record_start(r).and_then(shown_day)
-}
-
 /// The longest period, in days, read as one stay rather than an error.
 const LONGEST_PERIOD: Day = 90;
 
-/// The days a record is shown as starting and ending on: its period's end,
-/// when it has one, on or after the start and at most `LONGEST_PERIOD`
-/// days later; else its start.
-fn record_dates(r: &Record) -> Option<(Day, Day)> {
-    let start = record_day(r)?;
-    let end = r
-        .fields
-        .get("period")
-        .and_then(|p| p.get("end"))
-        .and_then(Value::as_str)
-        .and_then(shown_day)
-        .filter(|e| *e >= start && *e - start <= LONGEST_PERIOD)
-        .unwrap_or(start);
-    Some((start, end))
-}
-
-/// Every day a record can fall on: its local start days and each day
-/// through its period's end.
-fn record_span(r: &Record) -> BTreeSet<Day> {
-    let mut days = record_days(r);
-    if let Some((s, e)) = record_dates(r) {
-        days.extend(s..=e);
-    }
-    days
-}
-
 fn record_member(
+    dates: Dates,
     r: &Record,
     role: &'static str,
     rule: &'static str,
     conf: Conf,
     spans: bool,
 ) -> Member {
-    let dates = record_dates(r);
+    let span = dates.record_dates(r);
     Member {
         id: r.id.clone(),
         document: false,
@@ -1321,7 +1305,7 @@ fn record_member(
         conf,
         person: None,
         days: if spans {
-            Some(dates.unwrap_or((0, 0)))
+            Some(span.unwrap_or((0, 0)))
         } else {
             None
         },
@@ -1354,7 +1338,12 @@ fn event_names(ev: &Ev, idx: &BTreeMap<&str, &Record>) -> Vec<String> {
 }
 
 /// E2 to E5: portal visits to claim events, and their records to them.
-fn portal_into_events(evs: &mut Vec<Ev>, records: &[Record], first_claim: Option<Day>) {
+fn portal_into_events(
+    evs: &mut Vec<Ev>,
+    records: &[Record],
+    first_claim: Option<Day>,
+    dates: Dates,
+) {
     let idx: BTreeMap<&str, &Record> = records.iter().map(|r| (r.id.as_str(), r)).collect();
     let live = |r: &&Record| {
         !r.status
@@ -1375,7 +1364,9 @@ fn portal_into_events(evs: &mut Vec<Ev>, records: &[Record], first_claim: Option
     }
     let mut pvs: Vec<Pv> = Vec::new();
     let mut visits: Vec<&Record> = encounters.iter().copied().filter(|r| is_visit(r)).collect();
-    visits.sort_by(|a, b| (record_day(a), &a.date, &a.id).cmp(&(record_day(b), &b.date, &b.id)));
+    visits.sort_by(|a, b| {
+        (dates.record_day(a), &a.date, &a.id).cmp(&(dates.record_day(b), &b.date, &b.id))
+    });
     for e in visits {
         let days = record_days(e);
         if days.is_empty() {
@@ -1419,7 +1410,7 @@ fn portal_into_events(evs: &mut Vec<Ev>, records: &[Record], first_claim: Option
         let members = |rule: &'static str, conf: Conf| -> Vec<Member> {
             v.encs
                 .iter()
-                .map(|e| record_member(e, "portal", rule, conf, true))
+                .map(|e| record_member(dates, e, "portal", rule, conf, true))
                 .collect()
         };
         if cands.len() == 1 {
@@ -1490,7 +1481,7 @@ fn portal_into_events(evs: &mut Vec<Ev>, records: &[Record], first_claim: Option
 
     // E1: a contact joins a visit of its organization within 3 days.
     for e in encounters.iter().filter(|r| !is_visit(r)) {
-        let Some(d) = record_day(e) else {
+        let Some(d) = dates.record_day(e) else {
             continue;
         };
         let key = source_key(&e.provenance);
@@ -1524,7 +1515,7 @@ fn portal_into_events(evs: &mut Vec<Ev>, records: &[Record], first_claim: Option
         if let Some((_, i)) = best {
             evs[i]
                 .members
-                .push(record_member(e, "contact", "E1", Conf::Sure, false));
+                .push(record_member(dates, e, "contact", "E1", Conf::Sure, false));
         }
     }
 
@@ -1560,7 +1551,7 @@ fn portal_into_events(evs: &mut Vec<Ev>, records: &[Record], first_claim: Option
                     m.role == "portal"
                         && idx.get(m.id.as_str()).is_some_and(|enc| {
                             source_key(&enc.provenance) == key
-                                && record_span(enc).iter().any(|ed| {
+                                && dates.record_span(enc).iter().any(|ed| {
                                     days.contains(ed)
                                         || (matches!(r.kind.as_str(), "result" | "report")
                                             && days.contains(&(ed - 1)))
@@ -1571,9 +1562,14 @@ fn portal_into_events(evs: &mut Vec<Ev>, records: &[Record], first_claim: Option
             .map(|(i, _)| i)
             .collect();
         if cands.len() == 1 {
-            evs[cands[0]]
-                .members
-                .push(record_member(r, "satellite", "E4", Conf::Sure, false));
+            evs[cands[0]].members.push(record_member(
+                dates,
+                r,
+                "satellite",
+                "E4",
+                Conf::Sure,
+                false,
+            ));
         }
     }
 
@@ -1610,7 +1606,7 @@ fn portal_into_events(evs: &mut Vec<Ev>, records: &[Record], first_claim: Option
                             usize::MAX,
                             Member {
                                 extra: priced,
-                                ..record_member(r, "satellite", "", Conf::Sure, false)
+                                ..record_member(dates, r, "satellite", "", Conf::Sure, false)
                             },
                         ));
                         continue;
@@ -1618,7 +1614,8 @@ fn portal_into_events(evs: &mut Vec<Ev>, records: &[Record], first_claim: Option
                     if adds.iter().any(|(_, a)| a.id == id) {
                         continue;
                     }
-                    let mut mem = record_member(r, "satellite", "claim_link", Conf::Likely, false);
+                    let mut mem =
+                        record_member(dates, r, "satellite", "claim_link", Conf::Likely, false);
                     mem.extra.insert("priced_by".into(), Value::Object(priced));
                     adds.push((i, mem));
                 }
@@ -1654,7 +1651,7 @@ fn portal_into_events(evs: &mut Vec<Ev>, records: &[Record], first_claim: Option
         if placed.contains(&r.id) {
             continue;
         }
-        let Some(d) = record_day(r) else {
+        let Some(d) = dates.record_day(r) else {
             continue;
         };
         let fam = vaccine_family(&r.display);
@@ -1692,16 +1689,23 @@ fn portal_into_events(evs: &mut Vec<Ev>, records: &[Record], first_claim: Option
             })
         };
         match target {
-            Some(i) => evs[i]
-                .members
-                .push(record_member(r, "satellite", "E5", Conf::Sure, false)),
+            Some(i) => evs[i].members.push(record_member(
+                dates,
+                r,
+                "satellite",
+                "E5",
+                Conf::Sure,
+                false,
+            )),
             None => match same_visit() {
-                Some(i) => evs[i]
-                    .members
-                    .push(record_member(r, "vaccine", "E5", Conf::Sure, true)),
+                Some(i) => {
+                    evs[i]
+                        .members
+                        .push(record_member(dates, r, "vaccine", "E5", Conf::Sure, true))
+                }
                 None => evs.push(Ev::new(
                     "vaccine",
-                    record_member(r, "vaccine", "E5", Conf::Sure, true),
+                    record_member(dates, r, "vaccine", "E5", Conf::Sure, true),
                 )),
             },
         }
@@ -1714,7 +1718,7 @@ fn portal_into_events(evs: &mut Vec<Ev>, records: &[Record], first_claim: Option
         .filter(|r| r.kind == "medication" && str_field(r, "source") == Some("dispense"))
         .filter(live)
     {
-        let Some(d) = record_day(r) else {
+        let Some(d) = dates.record_day(r) else {
             continue;
         };
         let pharmacy = str_field(r, "pharmacy").unwrap_or("");
@@ -1739,15 +1743,15 @@ fn portal_into_events(evs: &mut Vec<Ev>, records: &[Record], first_claim: Option
         if let [i] = by_name.as_slice() {
             evs[*i]
                 .members
-                .push(record_member(r, "fill", "C6", Conf::Sure, true));
+                .push(record_member(dates, r, "fill", "C6", Conf::Sure, true));
         } else if let [i] = same_day.as_slice() {
             evs[*i]
                 .members
-                .push(record_member(r, "fill", "C6", Conf::Likely, true));
+                .push(record_member(dates, r, "fill", "C6", Conf::Likely, true));
         } else {
             evs.push(Ev::new(
                 "fill",
-                record_member(r, "fill", "C6", Conf::Sure, true),
+                record_member(dates, r, "fill", "C6", Conf::Sure, true),
             ));
         }
     }
@@ -2087,7 +2091,7 @@ struct Base {
     undated: Vec<String>,
 }
 
-fn base(idx: &PersonIndex, texts: Option<&PersonText>) -> Base {
+fn base(idx: &PersonIndex, texts: Option<&PersonText>, dates: Dates) -> Base {
     let live_claims: Vec<&Record> = idx
         .records
         .iter()
@@ -2108,7 +2112,7 @@ fn base(idx: &PersonIndex, texts: Option<&PersonText>) -> Base {
     }
     let first_claim = cs.iter().map(|c| c.start).min();
     let mut evs = claims_into_events(&cs);
-    portal_into_events(&mut evs, &idx.records, first_claim);
+    portal_into_events(&mut evs, &idx.records, first_claim, dates);
     let empty = PersonText::new(&idx.person);
     let (pending, aliases) = papers_into_events(
         &mut evs,
@@ -2136,7 +2140,7 @@ fn event_id(person: &str, anchor: &str) -> String {
 /// member to the event holding the first; `apart` moves the one that is not
 /// the event's anchor out, to an event of its own (a claim or an
 /// encounter) or out of every event (a paper or a record).
-fn apply(evs: &mut Vec<Ev>, idx: &PersonIndex, decisions: &[Decision]) -> usize {
+fn apply(evs: &mut Vec<Ev>, idx: &PersonIndex, decisions: &[Decision], dates: Dates) -> usize {
     let recs: BTreeMap<&str, &Record> = idx.records.iter().map(|r| (r.id.as_str(), r)).collect();
     let docs: BTreeMap<&str, &Document> =
         idx.documents.iter().map(|d| (d.id.as_str(), d)).collect();
@@ -2175,6 +2179,7 @@ fn apply(evs: &mut Vec<Ev>, idx: &PersonIndex, decisions: &[Decision]) -> usize 
             };
             return Some((
                 record_member(
+                    dates,
                     r,
                     if r.kind == "encounter" {
                         "portal"
@@ -2229,7 +2234,7 @@ fn apply(evs: &mut Vec<Ev>, idx: &PersonIndex, decisions: &[Decision]) -> usize 
                     if m.days.is_none() {
                         m.days = recs
                             .get(out.as_str())
-                            .and_then(|r| record_day(r).map(|d| (d, d)));
+                            .and_then(|r| dates.record_day(r).map(|d| (d, d)));
                     }
                     evs.push(Ev::new(kind, m));
                 }
@@ -2644,9 +2649,11 @@ fn render(
 
 /// A person's events document.
 pub fn build(inp: &Input) -> Value {
-    let _offset = Offset::set(inp.utc_offset);
+    let dates = Dates {
+        offset: inp.utc_offset,
+    };
     let pid = &inp.person.id;
-    let mut b = base(inp.index, Some(inp.texts));
+    let mut b = base(inp.index, Some(inp.texts), dates);
     let recs: BTreeMap<&str, &Record> = inp
         .index
         .records
@@ -2656,7 +2663,7 @@ pub fn build(inp: &Input) -> Value {
 
     // X1 and X2 need the other person's events as the rules make them.
     for l in &inp.linked {
-        let other = base(l.index, l.texts);
+        let other = base(l.index, l.texts, dates);
         let orecs: BTreeMap<&str, &Record> =
             l.index.records.iter().map(|r| (r.id.as_str(), r)).collect();
         let stays = |evs: &[Ev]| -> Vec<(usize, Day, Day)> {
@@ -2764,7 +2771,7 @@ pub fn build(inp: &Input) -> Value {
 
     let applied = inp
         .overrides
-        .map(|o| apply(&mut b.evs, inp.index, &o.events))
+        .map(|o| apply(&mut b.evs, inp.index, &o.events, dates))
         .unwrap_or(0);
 
     let mut labels = Labels::new();

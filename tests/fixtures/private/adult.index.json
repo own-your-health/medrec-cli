@@ -1,0 +1,242 @@
+{
+ "schema": "medrec-index/v1",
+ "person": "p_privateadultaaaaaaaa",
+ "rev": 1,
+ "documents": [
+  {
+   "id": "d_therapyletteraaaaaaa",
+   "path": "Documents/2026/2026-09-05_therapyletter.pdf",
+   "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+   "md5": "00000000000000000000000000000000",
+   "size": 1000,
+   "media_type": "application/pdf",
+   "doc_type": "letter",
+   "date": "2026-09-05",
+   "organization": "Example Counseling Center",
+   "filed_at": "2026-09-05T12:00:00Z",
+   "origin": {
+    "kind": "file",
+    "action": "copied"
+   },
+   "provenance": {
+    "source": {
+     "kind": "file"
+    },
+    "method": "file",
+    "filed_at": "2026-11-20T10:00:00Z",
+    "filed_by": "medrec 0.9.0"
+   },
+   "title": "Letter"
+  },
+  {
+   "id": "d_checkupavsaaaaaaaaaa",
+   "path": "Documents/2026/2026-06-01_checkupavs.pdf",
+   "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+   "md5": "00000000000000000000000000000000",
+   "size": 1000,
+   "media_type": "application/pdf",
+   "doc_type": "visit_summary",
+   "date": "2026-06-01",
+   "organization": "Example Family Practice",
+   "filed_at": "2026-06-01T12:00:00Z",
+   "origin": {
+    "kind": "file",
+    "action": "copied"
+   },
+   "provenance": {
+    "source": {
+     "kind": "file"
+    },
+    "method": "file",
+    "filed_at": "2026-11-20T10:00:00Z",
+    "filed_by": "medrec 0.9.0"
+   },
+   "title": "After Visit Summary"
+  }
+ ],
+ "records": [
+  {
+   "id": "r_depressionaaaaaaaaaa",
+   "kind": "condition",
+   "key": "condition|depression|2026-08-01",
+   "date": "2026-08-01",
+   "display": "Major depressive disorder, single episode, mild",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "mychart",
+      "organization_id": "example-family",
+      "fhir_base": "https://portal.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ],
+   "code": {
+    "system": "http://hl7.org/fhir/sid/icd-10-cm",
+    "code": "F32.0",
+    "display": "Major depressive disorder, single episode, mild"
+   },
+   "status": "active"
+  },
+  {
+   "id": "r_hypertensionaaaaaaaa",
+   "kind": "condition",
+   "key": "condition|hypertension|2026-05-01",
+   "date": "2026-05-01",
+   "display": "Essential hypertension",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "mychart",
+      "organization_id": "example-family",
+      "fhir_base": "https://portal.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ],
+   "code": {
+    "system": "http://hl7.org/fhir/sid/icd-10-cm",
+    "code": "I10",
+    "display": "Essential (primary) hypertension"
+   },
+   "status": "active"
+  },
+  {
+   "id": "r_sertralineaaaaaaaaaa",
+   "kind": "medication",
+   "key": "medication|sertraline|2026-08-02",
+   "date": "2026-08-02",
+   "display": "Sertraline 50 mg tablet",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "mychart",
+      "organization_id": "example-family",
+      "fhir_base": "https://portal.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ],
+   "status": "active"
+  },
+  {
+   "id": "r_lisinoprilaaaaaaaaaa",
+   "kind": "medication",
+   "key": "medication|lisinopril|2026-05-02",
+   "date": "2026-05-02",
+   "display": "Lisinopril 10 mg tablet",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "mychart",
+      "organization_id": "example-family",
+      "fhir_base": "https://portal.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ],
+   "status": "active"
+  },
+  {
+   "id": "r_therapyvisitaaaaaaaa",
+   "kind": "encounter",
+   "key": "encounter|therapyvisit|2026-09-01",
+   "date": "2026-09-01T14:00:00Z",
+   "display": "Office Visit",
+   "fields": {
+    "class": "AMB",
+    "service_provider": "Example Behavioral Health",
+    "period": {
+     "start": "2026-09-01T14:00:00Z",
+     "end": "2026-09-01T15:00:00Z"
+    }
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "mychart",
+      "organization_id": "example-behavioral",
+      "fhir_base": "https://portal.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ]
+  },
+  {
+   "id": "r_checkupaaaaaaaaaaaaa",
+   "kind": "encounter",
+   "key": "encounter|checkup|2026-06-01",
+   "date": "2026-06-01T13:00:00Z",
+   "display": "Office Visit",
+   "fields": {
+    "class": "AMB",
+    "service_provider": "Example Family Practice",
+    "period": {
+     "start": "2026-06-01T13:00:00Z",
+     "end": "2026-06-01T13:30:00Z"
+    }
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "mychart",
+      "organization_id": "example-family",
+      "fhir_base": "https://portal.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ]
+  },
+  {
+   "id": "r_glucoseaaaaaaaaaaaaa",
+   "kind": "result",
+   "key": "result|glucose|2026-06-01",
+   "date": "2026-06-01T13:20:00Z",
+   "display": "Glucose, fasting",
+   "fields": {
+    "value": {
+     "value": 92,
+     "unit": "mg/dL"
+    },
+    "reference_range": "70-99 mg/dL"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "mychart",
+      "organization_id": "example-family",
+      "fhir_base": "https://portal.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ]
+  }
+ ],
+ "studies": [],
+ "imports": []
+}

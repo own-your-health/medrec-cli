@@ -234,15 +234,15 @@ impl Folder {
     }
 
     /// A person's `marks.json`; an empty one when none was written.
-    pub fn marks(&self, p: &Person) -> Result<crate::bills::Marks, CliError> {
-        let rel = crate::bills::marks_rel(p);
-        let m: crate::bills::Marks = self
+    pub fn marks(&self, p: &Person) -> Result<crate::marks::Marks, CliError> {
+        let rel = crate::marks::rel(p);
+        let m: crate::marks::Marks = self
             .read_json(&rel)?
-            .unwrap_or_else(|| crate::bills::Marks::new(&p.id));
-        if m.person != p.id || m.schema != crate::bills::MARKS_SCHEMA {
+            .unwrap_or_else(|| crate::marks::Marks::new(&p.id));
+        if m.person != p.id || m.schema != crate::marks::SCHEMA {
             return Err(CliError::Other(format!(
                 "{rel} is not this person's {}",
-                crate::bills::MARKS_SCHEMA
+                crate::marks::SCHEMA
             )));
         }
         Ok(m)
@@ -250,19 +250,19 @@ impl Folder {
 
     /// A person's `marks.json` for reading only: `None` when it is there and
     /// does not read as theirs. Reading it at all failing is an error.
-    pub fn marks_if_readable(&self, p: &Person) -> Result<Option<crate::bills::Marks>, CliError> {
-        let Some(text) = self.store.read_text(&crate::bills::marks_rel(p))? else {
-            return Ok(Some(crate::bills::Marks::new(&p.id)));
+    pub fn marks_if_readable(&self, p: &Person) -> Result<Option<crate::marks::Marks>, CliError> {
+        let Some(text) = self.store.read_text(&crate::marks::rel(p))? else {
+            return Ok(Some(crate::marks::Marks::new(&p.id)));
         };
-        Ok(serde_json::from_str::<crate::bills::Marks>(&text)
+        Ok(serde_json::from_str::<crate::marks::Marks>(&text)
             .ok()
-            .filter(|m| m.person == p.id && m.schema == crate::bills::MARKS_SCHEMA))
+            .filter(|m| m.person == p.id && m.schema == crate::marks::SCHEMA))
     }
 
     /// Write a person's `marks.json`; the views follow.
-    pub fn save_marks(&self, p: &Person, m: &crate::bills::Marks) -> Result<(), CliError> {
+    pub fn save_marks(&self, p: &Person, m: &crate::marks::Marks) -> Result<(), CliError> {
         self.written.set(true);
-        self.write_json(&crate::bills::marks_rel(p), m)
+        self.write_json(&crate::marks::rel(p), m)
     }
 
     /// Write a person's `overrides.json`; the views follow.

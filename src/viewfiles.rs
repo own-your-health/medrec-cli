@@ -81,11 +81,12 @@ pub struct PersonViews {
     /// The MD5 of the person's `overrides.json`, null when there is none;
     /// and those of the index and text of each guardian or child whose
     /// records their events read, by person id. Both make only
-    /// `events.json` and `bills.json` stale.
+    /// `events.json`, `bills.json` and `private.json` stale.
     #[serde(default)]
     pub overrides: Option<String>,
     /// The MD5 of the person's `marks.json`, null when there is none
-    /// (0.9.1 and later); it too makes only `bills.json` stale.
+    /// (0.9.1 and later); it makes only `bills.json` and `private.json`
+    /// stale.
     #[serde(default)]
     pub marks: Option<String>,
     #[serde(default)]
@@ -241,7 +242,7 @@ pub fn sync(f: &Folder, all: bool) -> Result<Synced, CliError> {
             if store.md5(&folder::index_rel(p))? == was.index
                 && store.md5(&folder::text_rel(p))? == was.text
                 && store.md5(&crate::events::overrides_rel(p))? == was.overrides
-                && store.md5(&crate::bills::marks_rel(p))? == was.marks
+                && store.md5(&crate::marks::rel(p))? == was.marks
                 && linked_md5s(p)? == was.linked
             {
                 kept.insert(p.id.clone(), was.clone());
@@ -346,13 +347,13 @@ pub fn sync(f: &Folder, all: bool) -> Result<Synced, CliError> {
         if matches!(overrides, Some(Err(()))) {
             events["overrides_unreadable"] = Value::Bool(true);
         }
-        let mrel = crate::bills::marks_rel(p);
+        let mrel = crate::marks::rel(p);
         let mtext = store.read_text(&mrel)?;
         // So is a marks file that does not read: the bills say so.
-        let marks: Option<Result<crate::bills::Marks, ()>> = mtext.as_deref().map(|t| {
-            parse::<crate::bills::Marks>(t, &mrel)
+        let marks: Option<Result<crate::marks::Marks, ()>> = mtext.as_deref().map(|t| {
+            parse::<crate::marks::Marks>(t, &mrel)
                 .ok()
-                .filter(|m| m.person == p.id && m.schema == crate::bills::MARKS_SCHEMA)
+                .filter(|m| m.person == p.id && m.schema == crate::marks::SCHEMA)
                 .ok_or(())
         });
         let payments = marks
@@ -361,11 +362,19 @@ pub fn sync(f: &Folder, all: bool) -> Result<Synced, CliError> {
             .map(|m| m.payments.as_slice())
             .unwrap_or_default();
         let mut bills = crate::bills::build(p, &me.idx, &events, payments);
+        let private_marks = marks
+            .as_ref()
+            .and_then(|m| m.as_ref().ok())
+            .map(|m| m.private.as_slice())
+            .unwrap_or_default();
+        let mut private = crate::private::build(p, &me.idx, &events, private_marks);
         if matches!(marks, Some(Err(()))) {
             bills["marks_unreadable"] = Value::Bool(true);
+            private["marks_unreadable"] = Value::Bool(true);
         }
         let from = EventsFrom {
             bills,
+            private,
             events,
             overrides: otext.as_deref().map(|t| md5_hex(t.as_bytes())),
             marks: mtext.as_deref().map(|t| md5_hex(t.as_bytes())),
@@ -686,10 +695,11 @@ pub struct LinkedFiles {
 }
 
 /// What a person's `events.json` is made from beyond their own files, and
-/// the `bills.json` made from it.
+/// the `bills.json` and `private.json` made from it.
 pub(crate) struct EventsFrom {
     pub events: Value,
     pub bills: Value,
+    pub private: Value,
     pub overrides: Option<String>,
     pub marks: Option<String>,
     pub linked: BTreeMap<String, LinkedFiles>,
@@ -714,6 +724,7 @@ pub(crate) fn person(
     };
     put("events.json", json(&from.events));
     put("bills.json", json(&from.bills));
+    put("private.json", json(&from.private));
 
     let s = summary::of_index(
         h,
@@ -1194,6 +1205,7 @@ mod tests {
             EventsFrom {
                 events: serde_json::json!({"schema": crate::events::SCHEMA, "events": []}),
                 bills: serde_json::json!({"schema": crate::bills::SCHEMA, "bills": {}}),
+                private: serde_json::json!({"schema": crate::private::SCHEMA}),
                 overrides: None,
                 marks: None,
                 linked: BTreeMap::new(),

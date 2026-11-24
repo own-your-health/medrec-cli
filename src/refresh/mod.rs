@@ -504,6 +504,32 @@ fn decision_request(
     h: &crate::model::Household,
     v: &requests::Valid,
 ) -> (&'static str, String) {
+    if let Scope::Private {
+        person,
+        item,
+        private,
+    } = &v.scope
+    {
+        let Some(p) = h.person(person) else {
+            return (
+                "invalid",
+                "its private names no person in household.json".into(),
+            );
+        };
+        let by = v.requested_by_name();
+        return match crate::private::mark(folder, h, p, item, *private, by.as_deref(), Some(&v.id))
+        {
+            Ok((Some(m), true)) => ("ok", format!("recorded the mark as {}", m.id)),
+            Ok((Some(m), false)) => ("ok", format!("the mark was already recorded as {}", m.id)),
+            Ok((None, _)) => ("ok", "the item follows the rules".into()),
+            Err(CliError::NotFound(_)) => (
+                "invalid",
+                "the item it names is not one of the person's".into(),
+            ),
+            Err(CliError::Usage(m)) => ("invalid", m),
+            Err(e) => ("failed", e.message().to_string()),
+        };
+    }
     if let Scope::Paid {
         person,
         document,
@@ -779,7 +805,7 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
                 .map(|e| e.source.clone())
                 .collect(),
             Scope::Source(s) => vec![s.clone()],
-            Scope::Event { .. } | Scope::Paid { .. } => Vec::new(),
+            Scope::Event { .. } | Scope::Paid { .. } | Scope::Private { .. } => Vec::new(),
         };
         for id in ids {
             let w = want.entry(id).or_default();
