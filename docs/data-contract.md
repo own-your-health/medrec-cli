@@ -257,19 +257,19 @@ The last column is the FHIR element the value comes from.
 | `claim` | `outcome` | text | `outcome` |
 | `claim` | `use` | text | `use` |
 | `claim` | `type` | text | `type` |
-| `claim` | `category` | above | its counted lines |
+| `claim` | `category` | text, the claim's one `category` below | its counted lines |
 | `claim` | `billable_period` | `{start, end}` | `billablePeriod` |
-| `claim` | `benefit_period` | above | `benefitPeriod` |
+| `claim` | `benefit_period` | `{start, end}` | `benefitPeriod` |
 | `claim` | `total` | `[{category, amount}]` | `total` |
 | `claim` | `payment` | an amount | `payment.amount` |
-| `claim` | `amounts` | above | `total`, its lines and `payment` |
-| `claim` | `items` | above | `item` |
-| `claim` | `payer_notes` | above | `processNote` |
-| `claim` | `diagnoses` | above | `diagnosis` |
-| `claim` | `benefit_balance` | above | `benefitBalance` |
-| `claim` | `days_supply` | as written | `supportingInfo` (`dayssupply`) |
-| `claim` | `refill_number` | as written | `supportingInfo` (`refillnum`) |
-| `claim` | `refills_authorized` | as written | `supportingInfo` (`refillsauthorized`) |
+| `claim` | `amounts` | `{<name>: {amount, currency}}`, the names below | `total`, its lines and `payment` |
+| `claim` | `items` | a list of lines, each `{sequence, category, amounts, service, …}`, below | `item` |
+| `claim` | `payer_notes` | a list of text | `processNote` no line points at |
+| `claim` | `diagnoses` | `[{sequence, code: {system, code, display}}]` | `diagnosis` |
+| `claim` | `benefit_balance` | `[{category, network, unit, term, financial: [{type, allowed, used}]}]` | `benefitBalance` |
+| `claim` | `days_supply` | a number, or text as the payer wrote it | `supportingInfo` (`dayssupply`) |
+| `claim` | `refill_number` | a number, or text as the payer wrote it | `supportingInfo` (`refillnum`) |
+| `claim` | `refills_authorized` | a number, or text as the payer wrote it | `supportingInfo` (`refillsauthorized`) |
 | `claim` | `brand_generic` | text | `supportingInfo` (`brandgenericindicator`) |
 | `claim` | `visit` | a record id | its links, below |
 | `claim` | `results` | a list of record ids | its links, below |
