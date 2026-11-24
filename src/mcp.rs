@@ -14,6 +14,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use crate::code_names::Names;
 use crate::config::Config;
 use crate::folder::{Access, Folder};
 use crate::intake::classify;
@@ -174,6 +175,10 @@ pub struct Section {
 #[derive(Debug, Default, Serialize, JsonSchema)]
 pub struct Line {
     pub name: String,
+    // A condition's plain name, from `code-names.json`; `name` is the
+    // source's own. Not a doc comment: the tools' descriptions have a budget.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plain_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub date: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -184,6 +189,9 @@ pub struct Line {
     pub id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub private: Option<String>,
+    /// The key of a condition's plain name.
+    #[serde(skip)]
+    pub name_key: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -345,6 +353,9 @@ pub struct Item {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub end: Option<String>,
     pub title: String,
+    // For `conditions`; `title` is the source's own.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plain_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -354,6 +365,11 @@ pub struct Item {
     pub id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub code: Option<String>,
+    /// For `conditions`: the key of the plain name, and whose record it is.
+    #[serde(skip)]
+    pub name_key: Option<String>,
+    #[serde(skip)]
+    pub person_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -454,10 +470,9 @@ impl Toolset for MedrecTools {
         vec![
             ToolDef::read(
                 SUMMARY,
-                "Household and person summary",
-                "The household's people, and with person their summary. Use it first. It \
-                 has current medications, conditions, allergies, immunizations, latest \
-                 results, visits and bills due.",
+                "Household or person summary",
+                "The people, and with person their summary. Use it first. Medicines, \
+                 conditions, allergies, vaccines, results, visits, bills.",
             )
             .input::<SummaryArgs>()
             .output::<SummaryOut>(),
@@ -712,8 +727,14 @@ impl MedrecTools {
                 )?;
                 let mut s = sections(s);
                 let private = PrivateItems::of(&f, &h, &[p])?;
+                let names = Names::read(&f, &h, p);
                 for line in s.sections.iter_mut().flat_map(|s| s.items.iter_mut()) {
                     line.private = line.id.as_deref().and_then(|id| private.area(id));
+                    line.plain_name = line
+                        .name_key
+                        .as_deref()
+                        .and_then(|k| names.name(k, false, line.private.is_some()))
+                        .map(str::to_string);
                 }
                 Some(s)
             }
@@ -856,7 +877,9 @@ impl MedrecTools {
                         {
                             continue;
                         }
-                        items.push(record_item(&h, &p.name, x, detailed));
+                        let mut item = record_item(&h, &p.name, x, detailed);
+                        item.person_id = p.id.clone();
+                        items.push(item);
                     }
                 }
             }
@@ -977,6 +1000,22 @@ impl MedrecTools {
             person.is_some() || name.is_some_and(|n| crate::private::names(&i.title, n))
         });
         let mut out = page.page(items, "person, since/until, active or name")?;
+        // Only for the people on the page, and after the private items are
+        // out: what is kept is decided from the source's own words.
+        if a.kind == Kind::Conditions {
+            for p in &selected {
+                if out.items.iter().any(|i| i.person_id == p.id) {
+                    let names = Names::read(&f, &h, p);
+                    for i in out.items.iter_mut().filter(|i| i.person_id == p.id) {
+                        i.plain_name = i
+                            .name_key
+                            .as_deref()
+                            .and_then(|k| names.name(k, person.is_none(), i.private.is_some()))
+                            .map(str::to_string);
+                    }
+                }
+            }
+        }
         private.warn(&mut out, page.offset(), &left_out);
         ToolOutput::new(&out)
     }
@@ -1174,7 +1213,7 @@ fn sections(s: summary::Summary) -> PersonSummary {
                 )),
                 source: v.source,
                 id: v.id,
-                private: None,
+                ..Line::default()
             })
             .collect(),
     );
@@ -1190,7 +1229,7 @@ fn sections(s: summary::Summary) -> PersonSummary {
                 date: day(r.date.as_deref()),
                 source: r.source,
                 id: r.id,
-                private: None,
+                ..Line::default()
             })
             .collect(),
     );
@@ -1216,7 +1255,7 @@ fn sections(s: summary::Summary) -> PersonSummary {
                 )),
                 source: b.organization,
                 id: Some(b.document),
-                private: None,
+                ..Line::default()
             })
             .collect(),
     );
@@ -1240,7 +1279,8 @@ fn line(l: summary::Line) -> Line {
         detail,
         source: l.source,
         id: l.id,
-        private: None,
+        name_key: l.name_key,
+        ..Line::default()
     }
 }
 
@@ -1332,6 +1372,7 @@ fn record_item(h: &Household, person: &str, r: Record, detailed: bool) -> Item {
         status: r.status.clone(),
         source: record_source(h, &r),
         code: r.code.as_ref().and_then(|c| c.code.clone()),
+        name_key: crate::code_names::condition_key(&r),
         fields: detailed.then(|| r.fields.clone()),
         ..Default::default()
     };

@@ -6,6 +6,7 @@ pub mod batch;
 pub mod bill;
 pub mod bills;
 pub mod claims;
+pub mod code_names;
 pub mod config;
 pub mod dicom;
 pub mod documents;
@@ -34,6 +35,7 @@ pub mod review;
 pub mod store;
 pub mod stream;
 pub mod summary;
+pub mod tables;
 #[doc(hidden)]
 pub mod testdata;
 pub mod version;

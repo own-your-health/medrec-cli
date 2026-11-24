@@ -103,6 +103,12 @@ pub struct PersonViews {
     pub marks: Option<String>,
     #[serde(default)]
     pub linked: BTreeMap<String, LinkedFiles>,
+    /// The code table these views' names were made with, absent when the
+    /// pass that made them had none (0.9.4 and later), whatever names it
+    /// carried over. A reader need not check it: a pass on a machine with
+    /// another table makes the views again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code_table: Option<String>,
     pub row: Row,
     pub records: BTreeMap<String, Run>,
     pub timeline: Run,
@@ -205,6 +211,15 @@ fn is_stored_name(name: &str) -> bool {
 /// `views.json`, then the views it no longer names are deleted. Nothing is
 /// deleted but files of a stored view's shape in a person's directory.
 pub fn sync(f: &Folder, all: bool) -> Result<Synced, CliError> {
+    sync_with(f, all, crate::code_names::titles())
+}
+
+/// [`sync`] on a machine with these code titles, or none.
+fn sync_with(
+    f: &Folder,
+    all: bool,
+    titles: Option<crate::tables::Titles>,
+) -> Result<Synced, CliError> {
     let store = &f.store;
     let household_text = store.read_text(folder::HOUSEHOLD)?.ok_or_else(|| {
         CliError::Other(format!(
@@ -234,6 +249,8 @@ pub fn sync(f: &Folder, all: bool) -> Result<Synced, CliError> {
         people,
     };
 
+    let code_table = titles.as_ref().map(|_| crate::tables::Titles::identity());
+
     // Whose views stand: their files have the MD5s the views were made from.
     let mut kept: BTreeMap<String, PersonViews> = BTreeMap::new();
     let linked_md5s = |p: &Person| -> Result<BTreeMap<String, LinkedFiles>, CliError> {
@@ -256,6 +273,7 @@ pub fn sync(f: &Folder, all: bool) -> Result<Synced, CliError> {
                 && store.md5(&crate::events::overrides_rel(p))? == was.overrides
                 && store.md5(&crate::marks::rel(p))? == was.marks
                 && linked_md5s(p)? == was.linked
+                && (code_table.is_none() || was.code_table == code_table)
                 && EVERY_PERSON.iter().all(|f| was.files.contains_key(*f))
             {
                 kept.insert(p.id.clone(), was.clone());
@@ -386,10 +404,30 @@ pub fn sync(f: &Folder, all: bool) -> Result<Synced, CliError> {
             bills["marks_unreadable"] = Value::Bool(true);
             private["marks_unreadable"] = Value::Bool(true);
         }
+        // A machine without the table keeps the names another wrote.
+        let last = old
+            .as_ref()
+            .filter(|o| o.schema == SCHEMA)
+            .and_then(|o| o.people.get(&p.id));
+        let before = match (&titles, last) {
+            (None, Some(v)) => last_code_names(store, p, v)?,
+            _ => None,
+        };
+        let source = match (&titles, &before) {
+            (Some(t), _) => Some(crate::code_names::Source::Table(t)),
+            (None, Some(v)) => Some(crate::code_names::Source::Previous(v)),
+            (None, None) => None,
+        };
+        let code_names =
+            source.and_then(|s| crate::code_names::build(p, &me.idx, &private, private_marks, &s));
         let from = EventsFrom {
             bills,
             private,
             events,
+            code_names,
+            // Absent without the table: the names carried are not all a
+            // table would give, so a machine with one makes them again.
+            code_table: code_table.clone(),
             overrides: otext.as_deref().map(|t| md5_hex(t.as_bytes())),
             marks: mtext.as_deref().map(|t| md5_hex(t.as_bytes())),
             linked: linked
@@ -502,6 +540,73 @@ pub fn sync(f: &Folder, all: bool) -> Result<Synced, CliError> {
         }
     }
     Ok(out)
+}
+
+/// One of a person's views, when the views are those of the folder's files
+/// as they are now; none when it is missing, stale, or another pass's.
+pub fn current_view(
+    f: &Folder,
+    h: &Household,
+    p: &Person,
+    name: &str,
+) -> Result<Option<Vec<u8>>, CliError> {
+    let md5 = |rel: &str| -> Result<Option<String>, CliError> {
+        Ok(f.store.read_text(rel)?.map(|t| md5_hex(t.as_bytes())))
+    };
+    let Some(index) = f
+        .store
+        .read_text(INDEX)?
+        .and_then(|t| serde_json::from_str::<ViewsIndex>(&t).ok())
+    else {
+        return Ok(None);
+    };
+    if index.schema != SCHEMA || md5(folder::HOUSEHOLD)?.as_deref() != Some(&*index.household) {
+        return Ok(None);
+    }
+    let Some(v) = index.people.get(&p.id) else {
+        return Ok(None);
+    };
+    let Some(want) = v.files.get(name) else {
+        return Ok(None);
+    };
+    if md5(&folder::index_rel(p))? != v.index
+        || md5(&folder::text_rel(p))? != v.text
+        || md5(&crate::events::overrides_rel(p))? != v.overrides
+        || md5(&crate::marks::rel(p))? != v.marks
+    {
+        return Ok(None);
+    }
+    let linked = crate::events::linked_people(h, p);
+    if linked.len() != v.linked.len() {
+        return Ok(None);
+    }
+    for q in linked {
+        let now = LinkedFiles {
+            index: md5(&folder::index_rel(q))?,
+            text: md5(&folder::text_rel(q))?,
+        };
+        if v.linked.get(&q.id) != Some(&now) {
+            return Ok(None);
+        }
+    }
+    let text = f.store.read_text(&stored_rel(&p.id, name, want))?;
+    Ok(text.map(String::into_bytes).filter(|b| md5_hex(b) == *want))
+}
+
+/// The person's `code-names.json` as the last pass wrote it.
+fn last_code_names(
+    store: &crate::store::Store,
+    p: &Person,
+    v: &PersonViews,
+) -> Result<Option<Value>, CliError> {
+    let name = crate::code_names::FILE;
+    let Some(want) = v.files.get(name) else {
+        return Ok(None);
+    };
+    Ok(store
+        .read_text(&stored_rel(&p.id, name, want))?
+        .filter(|t| md5_hex(t.as_bytes()) == *want)
+        .and_then(|t| crate::code_names::previous(&t, &p.id)))
 }
 
 /// Upload every view, stopping at the first error; the caller writes
@@ -724,6 +829,10 @@ pub(crate) struct EventsFrom {
     pub events: Value,
     pub bills: Value,
     pub private: Value,
+    /// `code-names.json`, when any code of theirs has a name, and the table
+    /// on this machine it was made with.
+    pub code_names: Option<Value>,
+    pub code_table: Option<String>,
     pub overrides: Option<String>,
     pub marks: Option<String>,
     pub linked: BTreeMap<String, LinkedFiles>,
@@ -749,6 +858,9 @@ pub(crate) fn person(
     put("events.json", json(&from.events));
     put("bills.json", json(&from.bills));
     put("private.json", json(&from.private));
+    if let Some(v) = &from.code_names {
+        put(crate::code_names::FILE, json(v));
+    }
 
     let s = summary::of_index(
         h,
@@ -1041,6 +1153,7 @@ pub(crate) fn person(
         overrides: from.overrides,
         marks: from.marks,
         linked: from.linked,
+        code_table: from.code_table,
         row: Row {
             documents: row.documents,
             records: row.records,
@@ -1187,6 +1300,98 @@ mod tests {
         assert_eq!(all_undated, vec![0]);
     }
 
+    /// Two machines writing one folder in turn, one with the table.
+    #[test]
+    fn a_machine_without_the_table_keeps_names_and_one_with_it_fills_them_in() {
+        use crate::tables::Titles;
+
+        let root = std::env::temp_dir().join(format!("medrec-vf-tables-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let loc = crate::store::Location::Dir(root.clone());
+        let folder = || Folder::open_at(&loc, Access::Read, Duration::from_secs(60)).unwrap();
+        let put = |rel: &str, v: &Value| {
+            let p = root.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, serde_json::to_vec(v).unwrap()).unwrap();
+        };
+        const PID: &str = "p_exampleaaaaaaaaaaaaa";
+        let mut h = household();
+        h.folder_id = "f_exampleaaaaaaaaaaaaa".into();
+        h.people[0].id = PID.into();
+        put("household.json", &serde_json::to_value(&h).unwrap());
+        let condition = |id: &str, code: &str| -> Record {
+            serde_json::from_value(serde_json::json!({
+                "id": id, "kind": "condition", "key": id, "display": "Source words",
+                "fields": {}, "provenance": [],
+                "code": {"system": crate::normalize::ICD10, "code": code}
+            }))
+            .unwrap()
+        };
+        let records = |list: Vec<Record>| {
+            let mut idx = PersonIndex::new(PID);
+            idx.records = list;
+            put(
+                "Robin Testperson/index.json",
+                &serde_json::to_value(idx).unwrap(),
+            )
+        };
+        let titles = || {
+            Some(Titles::invented(&[
+                ("J309", "Sample sneezes"),
+                ("R51", "Sample aches"),
+            ]))
+        };
+        let entry = || -> PersonViews {
+            let t = std::fs::read_to_string(root.join(INDEX)).unwrap();
+            serde_json::from_str::<ViewsIndex>(&t).unwrap().people[PID].clone()
+        };
+        let names = || -> Vec<String> {
+            let Some(md5) = entry().files.get(crate::code_names::FILE).cloned() else {
+                return Vec::new();
+            };
+            let rel = stored_rel(PID, crate::code_names::FILE, &md5);
+            let v: Value =
+                serde_json::from_str(&std::fs::read_to_string(root.join(rel)).unwrap()).unwrap();
+            v["codes"].as_object().unwrap().keys().cloned().collect()
+        };
+        let rebuilt = |titles| sync_with(&folder(), false, titles).unwrap().people_rebuilt;
+
+        records(vec![condition("r_a", "J30.9")]);
+        assert_eq!(rebuilt(titles()), 1);
+        assert_eq!(names(), ["icd10cm|J30.9"]);
+        assert_eq!(entry().code_table, Some(Titles::identity()));
+
+        // Without the table: an unchanged person stands, table and all.
+        assert_eq!(rebuilt(None), 0);
+        assert_eq!(entry().code_table, Some(Titles::identity()));
+
+        // A changed one keeps the names it had, and the new code gets none.
+        records(vec![condition("r_a", "J30.9"), condition("r_b", "R51")]);
+        assert_eq!(rebuilt(None), 1);
+        assert_eq!(names(), ["icd10cm|J30.9"]);
+        assert_eq!(entry().code_table, None);
+
+        // With it: made once more, with the name that was missing.
+        assert_eq!(rebuilt(titles()), 1);
+        assert_eq!(names(), ["icd10cm|J30.9", "icd10cm|R51"]);
+        assert_eq!(rebuilt(titles()), 0);
+        assert_eq!(rebuilt(None), 0);
+
+        // A lost names file is not carried, and comes back the same way.
+        let md5 = entry().files[crate::code_names::FILE].clone();
+        std::fs::write(
+            root.join(stored_rel(PID, crate::code_names::FILE, &md5)),
+            b"{}",
+        )
+        .unwrap();
+        sync_with(&folder(), true, None).unwrap();
+        assert!(names().is_empty());
+        assert_eq!(rebuilt(titles()), 1);
+        assert_eq!(names(), ["icd10cm|J30.9", "icd10cm|R51"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     fn household() -> Household {
         let mut h = Household::new("f_test");
         h.people.push(
@@ -1233,6 +1438,8 @@ mod tests {
                 overrides: None,
                 marks: None,
                 linked: BTreeMap::new(),
+                code_names: None,
+                code_table: None,
             },
             &mut out,
         )

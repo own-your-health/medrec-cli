@@ -85,7 +85,7 @@ impl Why {
 // ---------------------------------------------------------------- the rules
 
 /// The area of an ICD-10 code.
-fn icd10_area(code: &str) -> Option<&'static str> {
+pub(crate) fn icd10_area(code: &str) -> Option<&'static str> {
     let c: String = code
         .chars()
         .filter(char::is_ascii_alphanumeric)

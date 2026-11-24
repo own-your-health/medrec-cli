@@ -78,6 +78,9 @@ pub struct Line {
     /// The record's id (0.9.1 and later).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
+    /// For a condition: its key in `code-names.json` (0.9.4 and later).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name_key: Option<String>,
 }
 
 /// One vaccine: its doses on file and the last one.
@@ -334,6 +337,7 @@ fn line(h: &Household, r: &Record) -> Line {
         status: r.status.clone(),
         source: record_source(h, r),
         id: Some(r.id.clone()),
+        name_key: crate::code_names::condition_key(r),
     }
 }
 
