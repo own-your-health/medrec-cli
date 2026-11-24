@@ -182,6 +182,8 @@ pub struct Line {
     pub source: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub private: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -218,6 +220,8 @@ pub struct SearchItem {
     pub date: Option<String>,
     pub title: String,
     pub snippet: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub private: Option<String>,
 }
 
 /// What `medrec_records` lists.
@@ -292,8 +296,8 @@ impl Kind {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct RecordsArgs {
-    /// `visits` are encounters; `tests` each test's latest result; `bills`
-    /// statements filed as documents; `timeline` everything.
+    /// visits: encounters. tests: each test's latest result. bills: filed
+    /// statements. timeline: all.
     pub kind: Kind,
     /// A name, alias or id.
     #[serde(default)]
@@ -372,6 +376,8 @@ pub struct Item {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub you_owe: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub private: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub fields: Option<Map<String, Value>>,
 }
 
@@ -414,6 +420,8 @@ pub struct DocumentOut {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub records: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub private: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub hint: Option<String>,
 }
 
@@ -426,7 +434,12 @@ impl Toolset for MedrecTools {
                  and insurers and filed from scans, in one folder; these tools read it and \
                  change nothing. Start with medrec_summary; medrec_search finds anything by its \
                  words. For what happened or what it cost, use medrec_records kind events: one \
-                 item per visit, ER trip, stay, test or fill, with the household's share. Give the date and source of each fact you use, and say when the records \
+                 item per visit, ER trip, stay, test or fill, with the household's share. Items \
+                 about mental health, reproductive or sexual health or substance use carry \
+                 private, with its area: an answer about the whole household leaves them out \
+                 and its warnings say how many; they are in answers about that person, or \
+                 that name the item. Keep them out of anything shared. Give the date and \
+                 source of each fact you use, and say when the records \
                  do not answer the question. Each result carries its lab's own reference range \
                  and flag, and labs may report one test in different units. For decisions about \
                  care, suggest the user ask their clinician.",
@@ -438,37 +451,36 @@ impl Toolset for MedrecTools {
             ToolDef::read(
                 SUMMARY,
                 "Household and person summary",
-                "Lists the household's people, and with person their summary. Use it first. \
-                 A summary has current medications, conditions, allergies, immunizations, \
-                 latest results, visits and bills due.",
+                "The household's people, and with person their summary. Use it first. It \
+                 has current medications, conditions, allergies, immunizations, latest \
+                 results, visits and bills due.",
             )
             .input::<SummaryArgs>()
             .output::<SummaryOut>(),
             ToolDef::read(
                 SEARCH,
                 "Search records",
-                "Finds documents, records, studies and notes with every word of query, best \
-                 first; labs or blood tests also finds every lab result. Use it for a named \
-                 doctor, test, medicine or clinic. Filter by person and dates.",
+                "Documents, records, studies and notes with every word of query, best first. \
+                 For a named doctor, test, medicine or clinic. labs or blood tests finds \
+                 every lab result.",
             )
             .input::<SearchArgs>()
             .output::<Page<SearchItem>>(),
             ToolDef::read(
                 RECORDS,
                 "List records by kind",
-                "Lists one kind of record, newest first. events: what happened, one per visit, \
-                 stay or fill, with you_owe; id gives one in full. results with name: one test \
-                 over time, with its range and flag.",
+                "One kind of record, newest first. events: what happened, one per visit, stay \
+                 or fill, with you_owe; id gives one in full. results with name: one test over \
+                 time, with range and flag.",
             )
             .input::<RecordsArgs>()
             .output::<Page<Item>>(),
             ToolDef::read(
                 DOCUMENT,
                 "Read a document's text",
-                "Returns a filed document's extracted text, with its \
-                 title, date, type and organization. Use it to read a visit summary, lab \
-                 report, letter or bill. Long text comes in parts: pass next_offset as \
-                 offset, or page to jump.",
+                "A filed document's text, with its title, date, type and organization. Read \
+                 a visit summary, lab report, letter or bill. Long text comes in parts: pass \
+                 next_offset as offset, or page to jump.",
             )
             .input::<DocumentArgs>()
             .output::<DocumentOut>(),
@@ -504,6 +516,82 @@ fn range(since: &Option<String>, until: &Option<String>) -> Result<Range, ToolEr
 
 fn person_error(e: CliError) -> ToolError {
     ToolError::from(e).with_fix("Call medrec_summary with no arguments for the household's people")
+}
+
+/// The private items of the people an answer covers (`private.json`).
+#[derive(Debug, Default)]
+struct PrivateItems {
+    /// By id, with their area.
+    areas: std::collections::BTreeMap<String, String>,
+    /// The people, by name, whose `marks.json` does not read. Any of their
+    /// items may be one the household marked private, so an answer about
+    /// the whole household holds all of them back.
+    unreadable: Vec<String>,
+}
+
+impl PrivateItems {
+    fn of(f: &Folder, h: &Household, people: &[&crate::model::Person]) -> Result<Self, CliError> {
+        let mut out = PrivateItems::default();
+        for p in people {
+            let v = crate::private::of_person(f, h, p)?;
+            if v.get("marks_unreadable").is_some() {
+                out.unreadable.push(p.name.clone());
+            }
+            out.areas.extend(crate::private::Private::of(&v).items);
+        }
+        Ok(out)
+    }
+
+    fn area(&self, id: &str) -> Option<String> {
+        self.areas.get(id).cloned()
+    }
+
+    /// Whether an item of `person` (by name) stays out of an answer about
+    /// the whole household that does not name it.
+    fn held_back(&self, id: &str, person: &str) -> bool {
+        self.areas.contains_key(id) || self.unreadable.iter().any(|n| n == person)
+    }
+
+    /// Marks an answer's private items with their area when the call is
+    /// about one person or names the item (`open`); otherwise leaves them
+    /// out. How many it left out.
+    fn keep(&self, items: &mut Vec<Item>, open: impl Fn(&Item) -> bool) -> usize {
+        let before = items.len();
+        items.retain_mut(|i| {
+            if !self.held_back(&i.id, &i.person) {
+                return true;
+            }
+            if !open(i) {
+                return false;
+            }
+            i.private = self.area(&i.id);
+            true
+        });
+        before - items.len()
+    }
+
+    /// Says on a page how many items it left out, and whose marks did not
+    /// read.
+    fn warn<T>(&self, page: &mut Page<T>, left_out: usize) {
+        if left_out > 0 {
+            page.warn(
+                "private-left-out",
+                format!(
+                    "{left_out} private item{} left out of this household-wide answer: ask about one person, or name the item, to include {}",
+                    if left_out == 1 { "" } else { "s" },
+                    if left_out == 1 { "it" } else { "them" },
+                ),
+            );
+        }
+        for name in &self.unreadable {
+            page.warn(
+                "private-marks-unreadable",
+                format!(
+                    "{name}'s marks.json does not read, so the household's private marks are not applied: {name}'s items are left out of household-wide answers until it is fixed"
+                ),
+            );
+        }
+    }
 }
 
 /// An `events.json` event as a list item: `source` is where it happened,
@@ -601,7 +689,12 @@ impl MedrecTools {
                         per_list: SUMMARY_LINES,
                     },
                 )?;
-                Some(sections(s))
+                let mut s = sections(s);
+                let private = PrivateItems::of(&f, &h, &[p])?;
+                for line in s.sections.iter_mut().flat_map(|s| s.items.iter_mut()) {
+                    line.private = line.id.as_deref().and_then(|id| private.area(id));
+                }
+                Some(s)
             }
         };
         ToolOutput::new(&SummaryOut { people, summary })
@@ -623,10 +716,18 @@ impl MedrecTools {
         if let Some(q) = person {
             people::resolve(&h, q).map_err(person_error)?;
         }
-        let hits = views::search(&f, &h, person, &a.query, &r, page.wanted())?;
+        let private = PrivateItems::of(&f, &h, &people::selected(&h, person)?)?;
+        // Household-wide, a private hit is left out unless the query names it.
+        let (hits, left_out) =
+            views::search_leaving_out(&f, &h, person, &a.query, &r, page.wanted(), &|x| {
+                person.is_none()
+                    && private.held_back(&x.id, &x.person_name)
+                    && !crate::private::names(&x.title, &a.query)
+            })?;
         let items = hits
             .into_iter()
             .map(|x| SearchItem {
+                private: private.area(&x.id),
                 person: x.person_name,
                 kind: x.kind,
                 id: x.id,
@@ -635,7 +736,9 @@ impl MedrecTools {
                 snippet: x.snippet,
             })
             .collect();
-        ToolOutput::new(&page.page(items, "person, since/until, or more words")?)
+        let mut out = page.page(items, "person, since/until, or more words")?;
+        private.warn(&mut out, left_out);
+        ToolOutput::new(&out)
     }
 
     fn records(&self, a: RecordsArgs) -> Result<ToolOutput, ToolError> {
@@ -832,7 +935,13 @@ impl MedrecTools {
             }
         }
         items.sort_by(|a, b| b.date.cmp(&a.date).then(a.title.cmp(&b.title)));
-        ToolOutput::new(&page.page(items, "person, since/until, active or name")?)
+        let private = PrivateItems::of(&f, &h, &selected)?;
+        let left_out = private.keep(&mut items, |i| {
+            person.is_some() || name.is_some_and(|n| crate::private::names(&i.title, n))
+        });
+        let mut out = page.page(items, "person, since/until, active or name")?;
+        private.warn(&mut out, left_out);
+        ToolOutput::new(&out)
     }
 
     /// `kind: "events"`: what happened, in the order of `events.json`;
@@ -857,9 +966,9 @@ impl MedrecTools {
             }
         }
         let (f, h) = self.open()?;
-        people::selected(&h, person).map_err(person_error)?;
+        let selected = people::selected(&h, person).map_err(person_error)?;
         let fold = name.map(classify::fold);
-        let items: Vec<Item> = crate::events::list(&f, &h, person, r)?
+        let mut items: Vec<Item> = crate::events::list(&f, &h, person, r)?
             .iter()
             .filter(|e| id.is_none_or(|id| e["id"] == id))
             .filter(|e| {
@@ -885,7 +994,24 @@ impl MedrecTools {
                     .with_fix("List events with medrec_records kind events to find the id"),
             );
         }
-        ToolOutput::new(&page.page(items, "person, since/until or name")?)
+        let private = PrivateItems::of(&f, &h, &selected)?;
+        let left_out = private.keep(&mut items, |i| {
+            person.is_some()
+                || id.is_some()
+                || name.is_some_and(|n| {
+                    [
+                        Some(i.title.as_str()),
+                        i.detail.as_deref(),
+                        i.source.as_deref(),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .any(|t| crate::private::names(t, n))
+                })
+        });
+        let mut out = page.page(items, "person, since/until or name")?;
+        private.warn(&mut out, left_out);
+        ToolOutput::new(&out)
     }
 
     fn document(&self, a: DocumentArgs) -> Result<ToolOutput, ToolError> {
@@ -943,6 +1069,8 @@ impl MedrecTools {
             last_page: 1,
             text_pages,
             records,
+            // Asked for by id: a private document is the person's, named.
+            private: PrivateItems::of(&f, &h, &[&p])?.area(&d.id),
             ..Default::default()
         };
         if chars.is_empty() {
@@ -1008,7 +1136,8 @@ fn sections(s: summary::Summary) -> PersonSummary {
                     if v.doses == 1 { "" } else { "s" }
                 )),
                 source: v.source,
-                id: None,
+                id: v.id,
+                private: None,
             })
             .collect(),
     );
@@ -1023,7 +1152,8 @@ fn sections(s: summary::Summary) -> PersonSummary {
                 name: r.test,
                 date: day(r.date.as_deref()),
                 source: r.source,
-                id: None,
+                id: r.id,
+                private: None,
             })
             .collect(),
     );
@@ -1049,6 +1179,7 @@ fn sections(s: summary::Summary) -> PersonSummary {
                 )),
                 source: b.organization,
                 id: Some(b.document),
+                private: None,
             })
             .collect(),
     );
@@ -1071,7 +1202,8 @@ fn line(l: summary::Line) -> Line {
         date: l.date,
         detail,
         source: l.source,
-        id: None,
+        id: l.id,
+        private: None,
     }
 }
 

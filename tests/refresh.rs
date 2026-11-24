@@ -1474,6 +1474,31 @@ fn bills_view(e: &Env, pid: &str) -> Value {
     e.json_at(&format!("views/{pid}/bills.{}.json", &md5[..12]))
 }
 
+fn private_view(e: &Env, pid: &str) -> Value {
+    let views = e.json_at("views/views.json");
+    let md5 = views["people"][pid]["files"]["private.json"]
+        .as_str()
+        .unwrap();
+    e.json_at(&format!("views/{pid}/private.{}.json", &md5[..12]))
+}
+
+/// The ids of a `private.json` kind, each with its area and where it came
+/// from.
+fn private_rows(v: &Value, kind: &str) -> Vec<(String, String, String)> {
+    v[kind]
+        .as_object()
+        .unwrap_or_else(|| panic!("no {kind}: {v}"))
+        .iter()
+        .map(|(id, w)| {
+            (
+                id.clone(),
+                w["area"].as_str().unwrap().to_string(),
+                w["from"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect()
+}
+
 fn bill_row(v: &Value, id: &str) -> Value {
     v["bills"]
         .get(id)
@@ -1747,6 +1772,251 @@ fn with_event_fixtures(e: &Env) -> (Value, Value) {
         .unwrap();
     }
     (alex, robin)
+}
+
+/// Alex's records are the invented adult's of `tests/fixtures/private`.
+fn with_private_fixtures(e: &Env) -> Value {
+    let h = e.json_at("household.json");
+    let alex = h["people"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["name"] == "Alex Testperson")
+        .unwrap()
+        .clone();
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/private");
+    for (from, to) in [
+        ("adult.index.json", "index.json"),
+        ("adult.text.json", "text.json"),
+    ] {
+        let mut v: Value =
+            serde_json::from_str(&std::fs::read_to_string(fixtures.join(from)).unwrap()).unwrap();
+        v["person"] = alex["id"].clone();
+        std::fs::write(
+            e.records().join(alex["folder"].as_str().unwrap()).join(to),
+            serde_json::to_vec(&v).unwrap(),
+        )
+        .unwrap();
+    }
+    alex
+}
+
+#[test]
+fn private_items_follow_the_rules_until_the_household_marks_them() {
+    let e = Env::new("private");
+    setup(&e);
+    let alex = with_private_fixtures(&e);
+    let aid = alex["id"].as_str().unwrap();
+    let robin = e.json_at("household.json")["people"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["name"] == "Robin Testperson")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    e.ok(&["views", "write"]);
+    let (depression, sertraline, visit, letter) = (
+        "r_depressionaaaaaaaaaa",
+        "r_sertralineaaaaaaaaaa",
+        "r_therapyvisitaaaaaaaa",
+        "d_therapyletteraaaaaaa",
+    );
+    let (hypertension, lisinopril) = ("r_hypertensionaaaaaaaa", "r_lisinoprilaaaaaaaaaa");
+    let mh = || "mental_health".to_string();
+    let v = private_view(&e, aid);
+    assert_eq!(v["schema"], "medrec-private/v1");
+    assert_eq!(v["person"], aid);
+    assert_eq!(
+        private_rows(&v, "records"),
+        vec![
+            (depression.into(), mh(), "code".into()),
+            (sertraline.into(), mh(), "medicine".into()),
+            (visit.into(), mh(), "provider".into()),
+        ]
+    );
+    assert_eq!(
+        private_rows(&v, "documents"),
+        vec![(letter.into(), mh(), "provider".into())]
+    );
+    let events = private_rows(&v, "events");
+    assert_eq!(events.len(), 1, "the therapy visit's event: {v}");
+    assert_eq!(
+        (&events[0].1, &events[0].2),
+        (&mh(), &"members".to_string())
+    );
+    let visit_event = events[0].0.clone();
+    assert!(events_view(&e, aid).get("private").is_none());
+    // Views a build of the same version wrote before private.json existed
+    // are made again.
+    let mut index = e.json_at("views/views.json");
+    index["people"][aid]["files"]
+        .as_object_mut()
+        .unwrap()
+        .remove("private.json");
+    std::fs::write(
+        e.records().join("views/views.json"),
+        serde_json::to_vec(&index).unwrap(),
+    )
+    .unwrap();
+    let w = e.ok(&["views", "write"]);
+    assert_eq!(w["people_rebuilt"], 1, "{w}");
+    assert_eq!(private_view(&e, aid)["person"], aid);
+    // Robin has nothing private, and a view all the same.
+    let r = private_view(&e, &robin);
+    assert!(r["records"].as_object().unwrap().is_empty(), "{r}");
+
+    let listed = e.ok(&["private", "list"]);
+    let items = listed["items"].as_array().unwrap();
+    assert_eq!(items.len(), 5, "{listed}");
+    assert_eq!(items[0]["id"], letter.to_string(), "newest first: {listed}");
+    assert!(items
+        .iter()
+        .all(|i| i["person"] == aid && i["area"] == "mental_health"));
+    assert_eq!(
+        items
+            .iter()
+            .filter(|i| i["kind"] == "event")
+            .map(|i| i["id"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec![visit_event.as_str()]
+    );
+
+    // Mistakes change nothing.
+    let file = e
+        .records()
+        .join(alex["folder"].as_str().unwrap())
+        .join("marks.json");
+    for (args, code) in [
+        (vec!["private", "mark", "not-an-id"], 2),
+        (vec!["private", "mark", "o_aaaaaaaaaaaaaaaaaaaa"], 2),
+        (vec!["private", "mark", "r_nosuchrecordaaaaaaaa"], 4),
+        (vec!["private", "reset", "e_nosucheventaaaaaaaaa"], 4),
+    ] {
+        let (got, text) = e.code(&args);
+        assert_eq!(got, Some(code), "{args:?}: {text}");
+    }
+    assert!(!file.exists(), "no mark was written");
+
+    // A terminal marks one medicine private and another not; the same again
+    // is unchanged.
+    let m = e.ok(&["private", "mark", lisinopril]);
+    assert_eq!(
+        (&m["status"], &m["person"]),
+        (&json!("recorded"), &json!(aid)),
+        "{m}"
+    );
+    assert_eq!(
+        e.ok(&["private", "mark", lisinopril])["status"],
+        "unchanged"
+    );
+    assert_eq!(
+        e.ok(&["private", "unmark", sertraline])["status"],
+        "recorded"
+    );
+    e.ok(&["views", "write"]);
+    let v = private_view(&e, aid);
+    let records = private_rows(&v, "records");
+    assert!(
+        records.contains(&(lisinopril.into(), "household".into(), "household".into())),
+        "{v}"
+    );
+    assert!(!records.iter().any(|r| r.0 == sertraline), "{v}");
+
+    // The app marks a condition private and names an item that is not the
+    // person's; an unmarked event's members stay private by the event.
+    decision_request(
+        &e,
+        "x_privateaaaaaaaaaaaaa",
+        "private",
+        json!({"person": aid, "item": hypertension, "private": true}),
+    );
+    decision_request(
+        &e,
+        "x_privatebbbbbbbbbbbbb",
+        "private",
+        json!({"person": aid, "item": "r_nosuchrecordaaaaaaaa", "private": true}),
+    );
+    decision_request(
+        &e,
+        "x_privateccccccccccccc",
+        "private",
+        json!({"person": aid, "item": visit_event, "private": false}),
+    );
+    e.ok(&["refresh", "--scheduled"]);
+    let done = e.json_at("_requests/done/20261124T120000Z_x_privateaaaaaaaaaaaaa.json");
+    assert_eq!(done["handled"]["outcome"], "ok", "{done}");
+    assert_eq!(
+        done["private"],
+        json!({"person": aid, "item": hypertension, "private": true})
+    );
+    let refused = e.json_at("_requests/done/20261124T120000Z_x_privatebbbbbbbbbbbbb.json");
+    assert_eq!(refused["handled"]["outcome"], "invalid", "{refused}");
+    assert!(refused["handled"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("not one of the person's"));
+    let marks: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    assert_eq!(marks["schema"], "medrec-marks/v1");
+    let by_app = marks["private"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["item"] == hypertension)
+        .unwrap();
+    assert_eq!(
+        (&by_app["private"], &by_app["request"], &by_app["by"]),
+        (
+            &json!(true),
+            &json!("x_privateaaaaaaaaaaaaa"),
+            &json!("Alex Testperson")
+        ),
+        "{by_app}"
+    );
+    let v = private_view(&e, aid);
+    let records = private_rows(&v, "records");
+    assert!(
+        records.contains(&(hypertension.into(), "household".into(), "household".into())),
+        "{v}"
+    );
+    assert!(
+        v["events"].get(&visit_event).is_none(),
+        "the event is unmarked: {v}"
+    );
+    // Its visit is private by its place still.
+    assert!(
+        records.contains(&(visit.into(), mh(), "provider".into())),
+        "{v}"
+    );
+
+    // Reset gives the rules back.
+    assert_eq!(
+        e.ok(&["private", "reset", sertraline])["status"],
+        "recorded"
+    );
+    assert_eq!(
+        e.ok(&["private", "reset", sertraline])["status"],
+        "unchanged"
+    );
+    e.ok(&["views", "write"]);
+    let records = private_rows(&private_view(&e, aid), "records");
+    assert!(records.contains(&(sertraline.into(), mh(), "medicine".into())));
+
+    // A marks.json that does not read is left out, and said so; no mark is
+    // written over it.
+    std::fs::write(&file, b"{not json").unwrap();
+    e.ok(&["views", "write"]);
+    let v = private_view(&e, aid);
+    assert_eq!(v["marks_unreadable"], true, "{v}");
+    assert!(!private_rows(&v, "records")
+        .iter()
+        .any(|r| r.0 == hypertension));
+    let listed = e.ok(&["private", "list", "--person", "Alex"]);
+    assert_eq!(listed["marks_unreadable"], json!([aid]), "{listed}");
+    let (code, _) = e.code(&["private", "mark", lisinopril]);
+    assert_ne!(code, Some(0));
+    assert_eq!(std::fs::read(&file).unwrap(), b"{not json");
 }
 
 #[test]

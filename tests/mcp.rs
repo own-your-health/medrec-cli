@@ -517,6 +517,178 @@ fn events_answer_what_happened_with_each_members_title_and_date() {
 
 /// One JSON-RPC exchange over the server's stdio: send `msg`, and for a
 /// request, read lines until its answer.
+#[test]
+fn private_items_stay_out_of_household_wide_answers_unless_asked_about() {
+    let e = Env::new("private");
+    household(&e);
+    // Alex's records are the invented adult's (tests/fixtures/private).
+    let h: Value =
+        serde_json::from_slice(&std::fs::read(e.records().join("household.json")).unwrap())
+            .unwrap();
+    let alex = h["people"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["name"] == "Alex Testperson")
+        .unwrap()
+        .clone();
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/private");
+    for (from, to) in [
+        ("adult.index.json", "index.json"),
+        ("adult.text.json", "text.json"),
+    ] {
+        let mut v: Value =
+            serde_json::from_str(&std::fs::read_to_string(fixtures.join(from)).unwrap()).unwrap();
+        v["person"] = alex["id"].clone();
+        std::fs::write(
+            e.records().join(alex["folder"].as_str().unwrap()).join(to),
+            serde_json::to_vec(&v).unwrap(),
+        )
+        .unwrap();
+    }
+    let (depression, sertraline, letter) = (
+        "r_depressionaaaaaaaaaa",
+        "r_sertralineaaaaaaaaaa",
+        "d_therapyletteraaaaaaa",
+    );
+    let t = e.tools();
+    let ask = |tool: &str, args: Value| {
+        let r = call(&t, tool, args);
+        assert!(!r.is_error(), "{tool}: {}", r.text());
+        assert_fits(&t, tool, &r).clone()
+    };
+    let ids = |v: &Value| -> Vec<String> {
+        v["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|i| i["id"].as_str().unwrap_or("").to_string())
+            .collect()
+    };
+    let left_out = |v: &Value| -> Option<String> {
+        v["warnings"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|w| w["code"] == "private-left-out")
+            .map(|w| w["message"].as_str().unwrap().to_string())
+    };
+    let item = |v: &Value, id: &str| -> Value {
+        v["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|i| i["id"] == id)
+            .unwrap_or_else(|| panic!("no {id}: {v}"))
+            .clone()
+    };
+
+    // Household-wide: left out, and the warning says how many.
+    let v = ask(RECORDS, json!({"kind": "conditions"}));
+    assert!(!ids(&v).contains(&depression.to_string()), "{v}");
+    assert!(
+        ids(&v).contains(&"r_hypertensionaaaaaaaa".to_string()),
+        "{v}"
+    );
+    let warn = left_out(&v).expect("a private-left-out warning");
+    assert!(warn.starts_with("1 private item left out"), "{warn}");
+    let v = ask(RECORDS, json!({"kind": "medications", "name": "tablet"}));
+    assert!(
+        !ids(&v).contains(&sertraline.to_string()),
+        "a form names no medicine: {v}"
+    );
+    assert!(left_out(&v).is_some(), "{v}");
+    let v = ask(RECORDS, json!({"kind": "events"}));
+    assert!(
+        v["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|i| i["source"] != "Example Behavioral Health"),
+        "{v}"
+    );
+    assert!(left_out(&v).is_some(), "{v}");
+    let v = ask(SEARCH, json!({"query": "session"}));
+    assert!(!ids(&v).contains(&letter.to_string()), "{v}");
+    assert!(left_out(&v).is_some(), "{v}");
+    let v = ask(SEARCH, json!({"query": "recheck"}));
+    assert!(left_out(&v).is_none(), "nothing private matched: {v}");
+
+    // About the person, or naming the item: in, and marked.
+    let v = ask(RECORDS, json!({"kind": "conditions", "person": "Alex"}));
+    assert_eq!(item(&v, depression)["private"], "mental_health");
+    assert!(item(&v, "r_hypertensionaaaaaaaa").get("private").is_none());
+    assert!(left_out(&v).is_none(), "{v}");
+    let v = ask(
+        RECORDS,
+        json!({"kind": "medications", "name": "sertraline"}),
+    );
+    assert_eq!(item(&v, sertraline)["private"], "mental_health");
+    let v = ask(SEARCH, json!({"query": "sertraline"}));
+    assert_eq!(item(&v, sertraline)["private"], "mental_health");
+    let v = ask(SEARCH, json!({"query": "session", "person": "Alex"}));
+    assert_eq!(item(&v, letter)["private"], "mental_health");
+    let v = ask(RECORDS, json!({"kind": "events", "name": "behavioral"}));
+    let ev = &v["items"][0];
+    assert_eq!(
+        (&ev["source"], &ev["private"]),
+        (&json!("Example Behavioral Health"), &json!("mental_health")),
+        "{v}"
+    );
+    let v = ask(DOCUMENT, json!({"id": letter}));
+    assert_eq!(v["private"], "mental_health");
+    let v = ask(DOCUMENT, json!({"id": "d_checkupavsaaaaaaaaaa"}));
+    assert!(v.get("private").is_none(), "{v}");
+    let v = ask(SUMMARY, json!({"person": "Alex"}));
+    let lines: Vec<&Value> = v["summary"]["sections"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|s| s["items"].as_array().unwrap())
+        .collect();
+    let marked: Vec<&str> = lines
+        .iter()
+        .filter(|l| l["private"] == "mental_health")
+        .map(|l| l["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        marked,
+        vec![sertraline, depression, "r_therapyvisitaaaaaaaa"],
+        "{v}"
+    );
+    assert!(lines.iter().filter(|l| l.get("private").is_none()).count() >= 3);
+
+    // A marks.json that does not read: any of Alex's items may be one the
+    // household marked, so a household-wide answer holds them all back.
+    std::fs::write(
+        e.records()
+            .join(alex["folder"].as_str().unwrap())
+            .join("marks.json"),
+        b"{not json",
+    )
+    .unwrap();
+    let v = ask(RECORDS, json!({"kind": "conditions"}));
+    assert!(
+        v["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|i| i["person"] != "Alex Testperson"),
+        "{v}"
+    );
+    assert!(left_out(&v).unwrap().starts_with("2 private items"), "{v}");
+    let unreadable: Vec<&Value> = v["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|w| w["code"] == "private-marks-unreadable")
+        .collect();
+    assert_eq!(unreadable.len(), 1, "{v}");
+    let v = ask(RECORDS, json!({"kind": "conditions", "person": "Alex"}));
+    assert_eq!(item(&v, depression)["private"], "mental_health");
+    assert!(item(&v, "r_hypertensionaaaaaaaa").get("private").is_none());
+}
+
 fn rpc(stdin: &mut impl Write, stdout: &mut impl BufRead, msg: Value) -> Option<Value> {
     writeln!(stdin, "{msg}").unwrap();
     stdin.flush().unwrap();

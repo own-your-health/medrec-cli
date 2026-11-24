@@ -75,6 +75,9 @@ pub struct Line {
     /// The organization or provider CLI it came from.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    /// The record's id (0.9.1 and later).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
 }
 
 /// One vaccine: its doses on file and the last one.
@@ -88,6 +91,9 @@ pub struct Vaccine {
     pub last_date: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    /// The last dose's record id (0.9.1 and later).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
 }
 
 /// One lab result: its value as the lab reported it, with the lab's own
@@ -120,7 +126,7 @@ pub struct ResultRow {
     /// The first result's date (in a list of tests).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub first_date: Option<String>,
-    /// The record's id (detailed).
+    /// The record's id; of a test's latest result (0.9.1 and later).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
 }
@@ -327,6 +333,7 @@ fn line(h: &Household, r: &Record) -> Line {
             .map(|d| clip(&d, CLIP)),
         status: r.status.clone(),
         source: record_source(h, r),
+        id: Some(r.id.clone()),
     }
 }
 
@@ -348,6 +355,7 @@ fn vaccines(h: &Household, records: &[&Record]) -> Vec<Vaccine> {
                     doses: 1,
                     last_date: day(r.date.as_deref()),
                     source: record_source(h, r),
+                    id: Some(r.id.clone()),
                 },
             )),
         }
@@ -390,7 +398,7 @@ pub(crate) fn result_row(h: &Household, r: &Record) -> ResultRow {
         source: record_source(h, r),
         results: None,
         first_date: None,
-        id: None,
+        id: Some(r.id.clone()),
     }
 }
 

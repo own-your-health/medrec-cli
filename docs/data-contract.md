@@ -467,17 +467,21 @@ which outrank the matching rules. It is absent until the first decision.
 
 ## marks.json (`medrec-marks/v1`, 0.9.1 and later)
 
-What the household marked on a person's papers that no rule decides: for
-now, the bills they marked paid (`bills.json`, below). It is a file of its
-own so that a medrec before 0.9.1, which rewrites `overrides.json` with
-only the fields it knows, never drops a mark. It is absent until the first
-mark.
+What the household marked on a person's records that the rules do not
+decide: the bills they marked paid (`bills.json`, below) and the items they
+marked private or not (`private.json`, below). It is a file of its own so
+that a medrec before 0.9.1, which rewrites `overrides.json` with only the
+fields it knows, never drops a mark. It is absent until the first mark.
 
 ```json
 {"schema": "medrec-marks/v1", "person": "p_…",
  "payments": [
    {"id": "o_…", "document": "d_…", "on": "2026-11-20",
     "amount": {"amount": "120.00", "currency": "USD"},
+    "at": "2026-11-24T12:00:00Z", "by": "Alex Testperson", "request": "x_…"}
+ ],
+ "private": [
+   {"id": "o_…", "item": "r_…", "private": true,
     "at": "2026-11-24T12:00:00Z", "by": "Alex Testperson", "request": "x_…"}
  ]}
 ```
@@ -486,13 +490,24 @@ mark.
   person's) was paid `amount` on `on`, as a receipt never filed would. A
   bill may have several. The same bill, day and amount again changes
   nothing.
+- A private mark is the household saying an item (`item`, one of this
+  person's record, document or event ids) is private (`true`) or not
+  (`false`), whatever the rules say. An item has at most one mark: another
+  replaces it, the same again changes nothing, and `medrec private reset`
+  drops it. `private` is absent until the first such mark.
+- A mark on an event also lists the event's own `members` (record and
+  document ids) when it was made. An event keeps its id only while its
+  anchor member stays (Events, below); when the id changes, the mark
+  follows its members to the event that holds any of them.
 - `by` and `request` are as in `overrides.json`: who asked and the request
   it came from, `null` from a terminal, neither trusted.
-- medrec writes it (`medrec bills paid|undo`, and paid requests in
-  `_requests/`, below). Readers read it only to judge the freshness of the
+- medrec writes it (`medrec bills paid|undo`, `medrec private
+  mark|unmark|reset`, and paid and private requests in `_requests/`,
+  below). Readers read it only to judge the freshness of the
   views made from it (views, below).
 - A file that does not read as this person's `medrec-marks/v1` is left
-  out: `bills.json` says `marks_unreadable`, `medrec bills list` says so,
+  out: `bills.json` and `private.json` say `marks_unreadable`, `medrec
+  bills list` and `medrec private list` say so,
   and medrec writes no mark over it until it is fixed or removed.
 - A field a later medrec adds is kept when an earlier one rewrites the
   file.
@@ -757,7 +772,7 @@ with `event` in place of `scope`:
 
 - `event` holds `person` and exactly one of `apart` or `together`, each two
   different record (`r_…`) or document (`d_…`) ids. A request with more
-  than one of `scope`, `event` and `paid` (below), or with none, is
+  than one of `scope`, `event`, `paid` and `private` (below), or with none, is
   `invalid` (rule 1), as is one whose `person` is not in `household.json`.
 - The next pass writes the decision to the person's `overrides.json`, and
   the views follow before it releases the lock, once for all of a pass's
@@ -783,13 +798,34 @@ The app's "Mark paid" is a request with `paid` in place of `scope`:
 - `amount` is a decimal string in US dollars, above zero with at most two
   places, or `{"amount", "currency"}` with a three-letter currency code.
   `on` is a `YYYY-MM-DD` day. A request with more than one of `scope`,
-  `event` and `paid`, or whose `person` is not in `household.json`, is
-  `invalid` (rule 1).
+  `event`, `paid` and `private`, or whose `person` is not in
+  `household.json`, is `invalid` (rule 1).
 - It is applied as an event request is: by the next pass, to the person's
   `marks.json` `payments`, pending while another writer holds the
   folder. Its `done/` file keeps `paid`, with `amount` as two places.
   `handled.outcome` is `invalid` when the document is not one of that
   person's, or not a `bill`.
+
+### Private requests (0.9.1 and later)
+
+The app's "Keep private" and "Not private" are a request with `private` in
+place of `scope`:
+
+```json
+{"schema": "medrec-request/v1", "id": "x_…", "requested_at": "…",
+ "requested_by": {…}, "app": {…},
+ "private": {"person": "p_…", "item": "r_…", "private": true}}
+```
+
+- `item` is one of the person's record, document or event ids (`r_…`,
+  `d_…`, `e_…`). `private` is `true`, `false`, or `null` to drop the
+  household's mark and leave the item to the rules. A request with more
+  than one of `scope`, `event`, `paid` and `private`, or whose `person` is
+  not in `household.json`, is `invalid` (rule 1).
+- It is applied as an event request is: by the next pass, to the person's
+  `marks.json` `private`, pending while another writer holds the folder.
+  Its `done/` file keeps `private`. `handled.outcome` is `invalid` when the
+  item is not one of that person's.
 
 ## views/ (`medrec-views/v2`, 0.8.0 and later)
 
@@ -802,7 +838,8 @@ CPU per request, and parsing a 2.5 MB index alone takes about 6 ms.
 Every view is derived from `household.json` and the person's `index.json`
 and `text.json`. `events.json` also reads the person's `overrides.json`, and
 the `index.json` and `text.json` of the people linked to them (Events,
-below); `bills.json` reads the same and the person's `marks.json`.
+below); `bills.json` and `private.json` read the same and the person's
+`marks.json`.
 `notes.md` has no view. It is small, the app may change
 it, and readers read it as it is. Nothing in `views/` is a source: deleting
 it loses nothing, and `medrec views write` makes it again.
@@ -825,6 +862,7 @@ views/<person id>/search-hay-<n>.bin
 views/<person id>/search-labs-<n>.json
 views/<person id>/events.json            0.9.0 and later
 views/<person id>/bills.json             0.9.1 and later
+views/<person id>/private.json           0.9.1 and later
 ```
 
 A person's directory is named by their id in `household.json`, not their
@@ -852,7 +890,10 @@ last.
   medrec version. Otherwise their views are made
   again, and only views the folder does not already hold under their
   stored names are uploaded. An unchanged view keeps its name and is not
-  written again.
+  written again. A person whose views lack one every person has
+  (`summary.json`, `tests.json`, `documents.json`, `events.json`,
+  `bills.json`, `private.json`) gets them made again: a build of the same
+  version wrote them before that view existed.
 - **`views.json` last.** It records the MD5 of every view, so a reader
   checks each view it reads and never mixes two passes, whatever order an
   uploader sends them in. Views that it no longer names, a person's who
@@ -883,13 +924,17 @@ A reader decides freshness by MD5, as Drive reports it (`md5Checksum`):
 
   | Differs from `views.json` | Stale |
   |---|---|
-  | `overrides.json`'s MD5 from `overrides` | `events.json`, `bills.json` |
-  | a linked person's `index.json` or `text.json` MD5 from `linked` | `events.json`, `bills.json` |
-  | `marks.json`'s MD5 from `marks` (0.9.1 and later) | `bills.json` |
+  | `overrides.json`'s MD5 from `overrides` | `events.json`, `bills.json`, `private.json` |
+  | a linked person's `index.json` or `text.json` MD5 from `linked` | `events.json`, `bills.json`, `private.json` |
+  | `marks.json`'s MD5 from `marks` (0.9.1 and later) | `bills.json`, `private.json` |
 
   No other view reads those files: `summary.json` and `documents.json`
-  say nothing of payments, and a reader applies `bills.json` to them as
-  it answers (Readers, below).
+  say nothing of payments or privacy, and a reader applies `bills.json`
+  and `private.json` to them as it answers (Readers, below).
+- `events.json`'s dates are those of the zone of the machine that wrote
+  it (Events, below). That zone is no input `views.json` records: a
+  change of it makes nothing stale, and the dates change with the next
+  pass that makes the person's events again.
 - A view that is missing, or whose MD5 is not the one `files` gives,
   belongs to a pass still arriving.
 
@@ -989,7 +1034,10 @@ order. Notes are not in it; a reader adds them from `notes.md`.
 is `{items, more}`, at most 25 items. It is computed as of no day, so no
 bill is `past_due`; a reader works `past_due` out for the day it answers.
 It is made without the household's payments: a reader leaves out the
-bills `bills.json` has `settled` as it answers (0.9.1 and later).
+bills `bills.json` has `settled` as it answers (0.9.1 and later). Each
+medicine, condition, allergy and visit carries its record's `id`, a
+vaccine its last dose's and a latest result its own (0.9.1 and later), so
+a reader finds them in `private.json`.
 
 ### documents.json and text-<n>.bin
 
@@ -1093,7 +1141,7 @@ matching rules), then the household's decisions (`overrides.json`).
 | Field | What |
 |---|---|
 | `id` | `e_` and 20 base32 characters of the SHA-256 of the person's id and the event's anchor member: the claim that opened it (a facility's, a stay's first hospital claim, a day's first), else its encounter, record or paper. It holds while that member stays the anchor. |
-| `kind` | `er`, `inpatient`, `outpatient`, `office`, `service`, `tests`, `dental`, `vaccine`, `fill`, `series`, `stay_no_facility` (a stay's doctors' claims, no facility claim yet), `er_no_facility` or `portal` (a portal visit with no claim). From 0.9.1 a portal visit with no claim whose encounter class is inpatient is `inpatient`, and one whose class is emergency is `er`. A reader shows an unknown kind by its `title`. |
+| `kind` | `er`, `inpatient`, `outpatient`, `office`, `service`, `tests`, `dental`, `vaccine`, `fill`, `series`, `stay_no_facility` (a stay's doctors' claims, no facility claim yet), `er_no_facility` or `portal` (a portal visit with no claim). From 0.9.1 a portal visit with no claim whose encounter class is inpatient is `inpatient`, and one whose class is emergency is `er`: an `inpatient` or `er` event can have no claim member, and then expects `claim`, not `doctor_claims`. A reader shows an unknown kind by its `title`. |
 | `start`, `end` | Local calendar dates, `YYYY-MM-DD`; equal for a one-day event. A time with an offset is on its own date. From 0.9.1 a UTC time is on its date in the zone of the machine that writes the views, when that is one of the US dates it can be (UTC−4 to UTC−10), else on the earlier of them; and a portal visit runs to its period's end, up to 90 days. |
 | `title` | Plain words for the kind; the reader adds the place. |
 | `what`, `what_from` | The portal's reason, else the claims' services in plain words, else the papers'; `portal`, `claims` or `papers`. A fill's or a vaccine's is its claims' names, else (0.9.1 and later) the fills' or doses' own names from the portal, as "A", "A and B" or "A, B and N more". Absent when nothing says. |
@@ -1103,7 +1151,7 @@ matching rules), then the household's decisions (`overrides.json`).
 | `status` | `unsure` when the confidence is; else `waiting` when something is `expected`; else `complete`. |
 | `money` | The claim members' claim-level amounts, summed, as decimal strings: `billed`, `allowed`, `plan_paid`, `you_owe`, `discount` (`billed` − `allowed`) and `share`, the reasons for `you_owe` that the claims give (`deductible`, `copay`, `coinsurance`, `not_covered`). An amount some claim lacks is left out and named in `partial`. A claim with no `you_owe` of its own counts its share's parts added up, and `you_owe_added` is then `true`. A claim whose `allowed` is below zero counts `plan_paid` + `you_owe` as its allowed, and one with neither leaves `allowed` out. Absent with no claim. |
 | `members` | Every record and document in the event, each with `record` or `document`, its `kind` (a record kind, or a document type), its `title` (at most 120 characters) and `date`, its `role`, the `rule` that placed it and that placement's `confidence`. A claim adds `provider` and its amounts. A bill joined by its amount due (D3s) adds `matches`, the claim whose share it bills. `person` marks another person's paper (X2). `role` is `facility`, `hospital`, `ancillary`, `office`, `dental`, `fill`, `vaccine`, `portal`, `contact`, `satellite` or `paper`; a reader ignores one it does not know. |
-| `expected` | What has not arrived: `doctor_claims`, `facility_claim`, `claim` or `bill`, with `why` in words and `since`, the day it was first expected. A fill or a vaccine expects no bill. |
+| `expected` | What has not arrived: `doctor_claims`, `facility_claim`, `claim` or `bill`, with `why` in words and `since`, the day it was first expected. `doctor_claims` is expected of an `er` or `inpatient` event that has a facility claim and no other; `claim`, of a portal visit with no claim, whatever its `kind`. A fill or a vaccine expects no bill. |
 | `differences` | Where the sources disagree (a clinician's name, a date), each source's value, and the rule. |
 | `links` | Related events of a linked person: `newborn` (from a parent's stay to the child's care in it) and `born_during` (back). A reader ignores a relation it does not know. |
 | `could_join` | For an `unsure` event, the events it may belong to. |
@@ -1138,14 +1186,11 @@ matching rules), then the household's decisions (`overrides.json`).
   claims takes about 150 KB. A reader parses it whole; it stays one file up
   to 1 MB, and a person past that would take a later schema that cuts it
   the way the timeline is cut.
-- **Planned, not yet written: `private`.** A later release (0.9.1) marks
-  an event about mental health, reproductive and fertility care, sexual
-  health or substance use with `private: true`. No release writes it yet,
-  so until one does its absence means "not judged", never "not
-  sensitive". It will be discretion, not access control: a reader leaves
-  such an event off shared screens and household-wide answers, and shows
-  it on that person's own pages, or when a question is about that person
-  or names the item. Anyone who can read the folder can read it.
+- **No `private` field.** A private event is listed in the person's
+  `private.json` (Private, below), with the records and documents, so that
+  a household's mark changes no `events.json`. A reader before 0.9.1, or
+  of views without `private.json`, has not judged any item: its absence
+  never means "not sensitive".
 
 ### Bills (`bills.json`, `medrec-bills/v1`, 0.9.1 and later)
 
@@ -1233,6 +1278,58 @@ when they have no bills. It is made from the person's documents, their
 - Amounts are decimal strings with two places. A reader treats a field it
   does not know as unknown.
 
+### Private (`private.json`, `medrec-private/v1`, 0.9.1 and later)
+
+The person's records, documents and events about mental health,
+reproductive and fertility care, sexual health or substance use, and the
+medicines tied to them. **It is discretion, not access control.** A reader
+keeps them off shared screens (the household's Home, its Everyone calendar,
+a doctor sheet for someone else) and out of answers about the whole
+household. It shows them on that person's own pages, and in answers about
+that person or that name the item. Anyone who can read the folder can read
+every one of them. Every person has a `private.json`, with empty maps when
+nothing is private.
+
+```json
+{"schema": "medrec-private/v1", "person": "p_…",
+ "records": {"r_…": {"area": "mental_health", "from": "code"}},
+ "documents": {"d_…": {"area": "mental_health", "from": "provider"}},
+ "events": {"e_…": {"area": "mental_health", "from": "members"}}}
+```
+
+- **`area`**: `mental_health`, `reproductive`, `sexual_health`,
+  `substance_use`, or `household` for an item the household marked private
+  that no rule gives an area. A reader treats an area it does not know as
+  private all the same.
+- **`from`**, why it is private:
+
+  | `from` | The item |
+  |---|---|
+  | `source` | came from a portal whose records are all of one area: a behavioral health or a fertility clinic's record system |
+  | `code` | is a condition whose ICD-10 code is in an area, or a claim whose principal diagnosis (the lowest `sequence`) is: F10–F19 and Z71.4–Z71.5 substance use; the other F codes mental health; Z30–Z32, Z33.2, O00–O08, N46 and N96–N98 reproductive; A50–A64, B20, Z21, Z11.3–Z11.4, Z20.2, Z20.6 and Z72.5 sexual health |
+  | `provider` | was made by a practice or clinician whose name or credential says its area: a claim's provider or facility, a visit's place, location or clinician, a medicine's prescriber, a result's performer, a document's organization |
+  | `medicine` | is a medicine of an area by its name or code: antidepressants, antipsychotics, anxiolytics, stimulants and lithium; fertility drugs and contraceptives; HIV medicines and those for erectile dysfunction; medicines for substance use and smoking |
+  | `test` | is a result or report of a test of an area: sexually transmitted infections, pregnancy and fertility, drug screens |
+  | `members` | is an event with a private claim or portal visit, or whose own members are all private |
+  | `event` | is a member of a private event |
+  | `household` | was marked private by the household; its `area` is the one the rules give it, else `household` |
+
+- An event's own members are those without `person`. A paper an event shows
+  from another person (X2) is judged as that person's.
+- **The household has the last word** (`marks.json` `private`, above). A
+  mark `true` makes an item private, with the area the rules give it, else
+  `household`. A mark `false` takes it out, even as a member of a private
+  event. Marks on records and documents apply before events are judged,
+  marks on events after. An event's own mark comes first; else the last
+  mark on an event id the person no longer has that shares a member with
+  it (`marks.json`, above). A mark naming a record or document the person
+  no longer has, or an event none of whose members remain, is skipped.
+- **`marks_unreadable`**: `true` when the person's `marks.json` does not
+  read, so no household mark applies. Absent otherwise. Any of the
+  person's items may then be one the household marked private, so a
+  reader holds all of them back from shared screens and household-wide
+  answers until it reads.
+
 ## Readers
 
 Anything that only reads the folder follows the files above and writes
@@ -1270,6 +1367,19 @@ readers ship with medrec:
     `detail` what it was, who, a grouping that is not sure and what is
     still expected, and `you_owe` the share with its currency. `id` gives
     one event, with its money, members and evidence in `fields`.
+  - private items (`private.json`, 0.9.1 and later) are left out of an
+    answer about the whole household, which says how many in a
+    `private-left-out` warning. An answer about one person (`person`)
+    includes them, and so does one that names the item: `medrec_records`
+    with a `name`, or `medrec_search` with a query, each of whose words
+    starts a word of the item's title (for an event, its title, detail or
+    place), one of them a word of its own rather than a form, unit or kind
+    of record ("sertraline", not "tablets"); an event or a document asked
+    for by `id`. Each private item an answer includes carries `private`,
+    its area. A person whose `marks.json` does not read has all their
+    items held back from answers about the whole household, with a
+    `private-marks-unreadable` warning naming them. The commands are the
+    household's own terminal and leave nothing out.
 
 Both search the same way: every item whose text holds all the query's
 words, as word prefixes, with case, accents and punctuation ignored. A

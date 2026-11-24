@@ -15,38 +15,6 @@ use crate::events::same_org;
 use crate::model::{Amount, Document, Person, PersonIndex};
 
 pub const SCHEMA: &str = "medrec-bills/v1";
-pub const MARKS_SCHEMA: &str = "medrec-marks/v1";
-
-pub fn marks_rel(p: &Person) -> String {
-    format!("{}/marks.json", p.folder)
-}
-
-/// A person's `marks.json`: what the household marked that no rule
-/// decides, in a file of its own so a medrec before 0.9.1, which rewrites
-/// `overrides.json` with only the fields it knows, never drops it.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Marks {
-    pub schema: String,
-    pub person: String,
-    /// Bills the household marked paid.
-    #[serde(default)]
-    pub payments: Vec<Payment>,
-    /// What a later medrec writes here, kept as it is.
-    #[serde(flatten)]
-    pub other: Map<String, Value>,
-}
-
-impl Marks {
-    pub fn new(person: &str) -> Self {
-        Marks {
-            schema: MARKS_SCHEMA.into(),
-            person: person.into(),
-            payments: Vec::new(),
-            other: Map::new(),
-        }
-    }
-}
-
 /// How long after a bill's date a receipt can be its payment.
 const RECEIPT_DAYS: i64 = 120;
 

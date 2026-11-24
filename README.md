@@ -284,6 +284,7 @@ medrec import --from uhc --from-profile adult1 --patient <a> --person Alex --pat
 medrec timeline --person Robin --since 2026-01-01
 medrec events list --person Robin               # what happened: one line per visit, stay, test or fill
 medrec bills list --person Robin                # each bill: its claim, what is paid and left
+medrec private list --person Robin              # what stays off shared screens, and why
 medrec search hemoglobin
 medrec results --code 718-7
 medrec meds --active
@@ -519,6 +520,29 @@ to 0.9.1, `medrec reindex` reads the bills and receipts filed before. Each
 person's bills are also a view, `views/<person id>/bills.json`
 ([docs/data-contract.md](docs/data-contract.md), "Bills").
 
+### Private items
+
+Records, documents and events about mental health, reproductive and
+fertility care, sexual health or substance use, and the medicines tied to
+them, are private: the app keeps them off shared screens (Home, the
+Everyone calendar, a doctor sheet for someone else) and shows them on that
+person's own pages, and Claude leaves them out of answers about the whole
+household. medrec finds them by their codes, medicines, tests and the
+practice that made them. The household has the last word.
+
+```sh
+medrec private list --person Robin          # each private item, its area and why
+medrec private mark <record, document or event id>     # private, whatever the rules say
+medrec private unmark <id>                  # not private, whatever the rules say
+medrec private reset <id>                   # back to the rules
+```
+
+This is discretion, not access control: anyone who can read the folder
+can read every record in it. Marks are kept in the person's `marks.json`
+with the payments, and each person's private items are a view,
+`views/<person id>/private.json`
+([docs/data-contract.md](docs/data-contract.md), "Private").
+
 ### Views
 
 `views/` at the top of the records folder holds each person's records again,
@@ -647,6 +671,11 @@ supported.
 | `medrec_search` | Documents, records, imaging studies and notes holding every word of a query; a query naming lab tests (`blood tests`, `labs`) also finds every lab result, report and lab claim |
 | `medrec_records` | One kind, newest first: `medications`, `conditions`, `allergies`, `immunizations`, `visits`, `procedures`, `results` (with `name`, one test over time), `tests` (the latest result of each), `reports`, `claims`, `coverage`, `bills`, `documents`, `notes`, `timeline` or `events` (what happened: one per visit, ER trip, stay, test or fill, with `you_owe`; `id` gives one with its money and members); `active` keeps current ones (not for `events`, whose `status` says which are still waiting) |
 | `medrec_document` | A filed document's extracted text, in parts of up to 16,000 characters, with page breaks marked |
+
+Private items (above) are left out of an answer about the whole household,
+whose warnings say how many. An answer about one person includes them, and
+so does one that names the item ("sertraline", not "tablets"), each marked
+`private` with its area.
 
 Claude Desktop: install the release's `medrec-<version>.mcpb` (open the
 file, or Settings > Extensions > Install Extension) and enter the profile's

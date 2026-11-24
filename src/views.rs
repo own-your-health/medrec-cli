@@ -544,6 +544,20 @@ pub fn search(
     range: &Range,
     limit: usize,
 ) -> Result<Vec<Hit>, CliError> {
+    Ok(search_leaving_out(folder, h, person, query, range, limit, &|_| false)?.0)
+}
+
+/// As `search`, leaving out the hits `leave_out` names, before the limit:
+/// the hits and how many were left out.
+pub fn search_leaving_out(
+    folder: &Folder,
+    h: &Household,
+    person: Option<&str>,
+    query: &str,
+    range: &Range,
+    limit: usize,
+    leave_out: &dyn Fn(&Hit) -> bool,
+) -> Result<(Vec<Hit>, usize), CliError> {
     range.validate()?;
     let terms: Vec<String> = classify::fold(query)
         .split(|c: char| !c.is_alphanumeric())
@@ -579,9 +593,12 @@ pub fn search(
             }
         }
     }
+    let before = hits.len();
+    hits.retain(|x| !leave_out(x));
+    let left_out = before - hits.len();
     hits.sort_by(|a, b| b.score.cmp(&a.score).then(b.date.cmp(&a.date)));
     hits.truncate(limit.max(1));
-    Ok(hits)
+    Ok((hits, left_out))
 }
 
 /// One item `search` looks through: its title and the text after it.

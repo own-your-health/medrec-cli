@@ -28,13 +28,23 @@ pub enum Scope {
         amount: String,
         currency: String,
     },
+    /// Not an import: the household marking an item private, not private,
+    /// or (`None`) back to the rules.
+    Private {
+        person: String,
+        item: String,
+        private: Option<bool>,
+    },
 }
 
 impl Scope {
     /// Whether it is the household's decision, written to a person's
-    /// `overrides.json`, rather than an import.
+    /// `overrides.json` or `marks.json`, rather than an import.
     pub fn is_decision(&self) -> bool {
-        matches!(self, Scope::Event { .. } | Scope::Paid { .. })
+        matches!(
+            self,
+            Scope::Event { .. } | Scope::Paid { .. } | Scope::Private { .. }
+        )
     }
 }
 
@@ -178,13 +188,40 @@ pub fn parse(name: &str, body: &[u8], known: &dyn Known) -> Parsed {
         return bad("its requested_at is not an RFC 3339 time".into());
     };
     let is_member = |s: &str| crate::ids::is_valid("r", s) || crate::ids::is_valid("d", s);
-    let given = ["scope", "event", "paid"]
+    let given = ["scope", "event", "paid", "private"]
         .into_iter()
         .filter(|k| v.get(*k).is_some())
         .count();
     if given > 1 {
-        return bad("it has more than one of a scope, an event and a paid".into());
+        return bad("it has more than one of a scope, an event, a paid and a private".into());
     }
+    let private = match v.get("private") {
+        Some(Value::Object(e)) => {
+            let person = e.get("person").and_then(Value::as_str).unwrap_or("");
+            if !(crate::ids::is_valid("p", person) && known.person(person)) {
+                return bad("its private names no person in household.json".into());
+            }
+            let item = e.get("item").and_then(Value::as_str).unwrap_or("");
+            let private = match e.get("private") {
+                Some(Value::Bool(b)) => Some(*b),
+                Some(Value::Null) => None,
+                _ => return bad("its private's private is not true, false or null".into()),
+            };
+            if !["r", "d", "e"]
+                .iter()
+                .any(|k| crate::ids::is_valid(k, item))
+            {
+                return bad("its private's item is not a record, document or event id".into());
+            }
+            Some(Scope::Private {
+                person: person.into(),
+                item: item.into(),
+                private,
+            })
+        }
+        Some(_) => return bad("its private is not an object".into()),
+        None => None,
+    };
     let paid = match v.get("paid") {
         Some(Value::Object(e)) => {
             let person = e.get("person").and_then(Value::as_str).unwrap_or("");
@@ -229,8 +266,8 @@ pub fn parse(name: &str, body: &[u8], known: &dyn Known) -> Parsed {
         Some(_) => return bad("its paid is not an object".into()),
         None => None,
     };
-    let event = match (v.get("event"), paid) {
-        (_, Some(paid)) => Some(paid),
+    let event = match (v.get("event"), paid.or(private)) {
+        (_, Some(decision)) => Some(decision),
         (Some(Value::Object(e)), None) => {
             let person = e.get("person").and_then(Value::as_str).unwrap_or("");
             if !(crate::ids::is_valid("p", person) && known.person(person)) {
@@ -310,6 +347,11 @@ pub fn parse(name: &str, body: &[u8], known: &dyn Known) -> Parsed {
             }
             p
         }
+        Scope::Private {
+            person,
+            item,
+            private,
+        } => json!({"person": person, "item": item, "private": private}),
     };
     let mut kept = Map::new();
     kept.insert("schema".into(), REQUEST_SCHEMA.into());
@@ -318,6 +360,7 @@ pub fn parse(name: &str, body: &[u8], known: &dyn Known) -> Parsed {
     let key = match scope {
         Scope::Event { .. } => "event",
         Scope::Paid { .. } => "paid",
+        Scope::Private { .. } => "private",
         _ => "scope",
     };
     kept.insert(key.into(), scope_json);
@@ -514,7 +557,7 @@ mod tests {
                 "above zero",
             ),
             (
-                json!({"paid": {"person": "p_nosuchpersonaaaaaaa", "document": d, "on": "2026-11-20", "amount": "5.00"}}),
+                json!({"paid": {"person": "p_nosuchpersonaaaaaaaa", "document": d, "on": "2026-11-20", "amount": "5.00"}}),
                 "no person",
             ),
             (json!({"paid": "yes"}), "not an object"),
@@ -525,6 +568,70 @@ mod tests {
         ] {
             let why = why(parse(NAME, &body(paid.clone()), &K));
             assert!(why.contains(want), "{paid}: {why}");
+        }
+    }
+
+    #[test]
+    fn a_private_request_names_a_person_an_item_and_true_false_or_null() {
+        let body = |extra: Value| {
+            let mut v = json!({
+                "schema": REQUEST_SCHEMA,
+                "id": "x_aaaaaaaaaaaaaaaaaaaa",
+                "requested_at": "2026-11-22T20:03:12Z",
+            });
+            for (k, x) in extra.as_object().unwrap() {
+                v[k] = x.clone();
+            }
+            serde_json::to_vec(&v).unwrap()
+        };
+        let pid = "p_aaaaaaaaaaaaaaaaaaaa";
+        for (item, private, want) in [
+            ("r_aaaaaaaaaaaaaaaaaaaa", json!(true), Some(true)),
+            ("d_bbbbbbbbbbbbbbbbbbbb", json!(false), Some(false)),
+            ("e_cccccccccccccccccccc", json!(null), None),
+        ] {
+            let req = json!({"private": {"person": pid, "item": item, "private": private}});
+            match parse(NAME, &body(req), &K) {
+                Parsed::Valid(v) => {
+                    assert_eq!(
+                        v.scope,
+                        Scope::Private {
+                            person: pid.into(),
+                            item: item.into(),
+                            private: want,
+                        }
+                    );
+                    assert!(v.scope.is_decision());
+                    assert_eq!(v.kept["private"]["private"], private);
+                }
+                Parsed::Invalid(i) => panic!("{}", i.why),
+            }
+        }
+        for (req, want) in [
+            (
+                json!({"private": {"person": pid, "item": "o_aaaaaaaaaaaaaaaaaaaa", "private": true}}),
+                "not a record, document or event id",
+            ),
+            (
+                json!({"private": {"person": pid, "item": "r_aaaaaaaaaaaaaaaaaaaa", "private": "yes"}}),
+                "true, false or null",
+            ),
+            (
+                json!({"private": {"person": pid, "item": "r_aaaaaaaaaaaaaaaaaaaa"}}),
+                "true, false or null",
+            ),
+            (
+                json!({"private": {"person": "p_nosuchpersonaaaaaaaa", "item": "r_aaaaaaaaaaaaaaaaaaaa", "private": true}}),
+                "no person",
+            ),
+            (json!({"private": true}), "not an object"),
+            (
+                json!({"private": {"person": pid, "item": "r_aaaaaaaaaaaaaaaaaaaa", "private": true}, "scope": {"all": true}}),
+                "more than one",
+            ),
+        ] {
+            let why = why(parse(NAME, &body(req.clone()), &K));
+            assert!(why.contains(want), "{req}: {why}");
         }
     }
 
@@ -584,7 +691,7 @@ mod tests {
                 "two record or document ids",
             ),
             (
-                json!({"event": {"person": "p_nosuchpersonaaaaaaa", "apart": [a, b]}}),
+                json!({"event": {"person": "p_nosuchpersonaaaaaaaa", "apart": [a, b]}}),
                 "no person",
             ),
             (json!({"event": [a, b]}), "not an object"),
