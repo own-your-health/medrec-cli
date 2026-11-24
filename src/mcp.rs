@@ -470,9 +470,9 @@ impl Toolset for MedrecTools {
         vec![
             ToolDef::read(
                 SUMMARY,
-                "Household summary",
-                "The household's people; with person, their summary. Use it first. Medicines, \
-                 conditions, allergies, vaccines, results, visits, bills due.",
+                "Household or person summary",
+                "The people, and with person their summary. Use it first. Medicines, \
+                 conditions, allergies, vaccines, results, visits, bills.",
             )
             .input::<SummaryArgs>()
             .output::<SummaryOut>(),

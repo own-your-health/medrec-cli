@@ -1005,7 +1005,7 @@ A reader decides freshness by MD5, as Drive reports it (`md5Checksum`):
 | `people.<id>.overrides` | The MD5 of the person's `overrides.json` as read; `null` when there is none (0.9.0 and later). |
 | `people.<id>.marks` | The MD5 of the person's `marks.json` as read; `null` when there is none (0.9.1 and later). |
 | `people.<id>.linked` | For each person linked to this one (Events, below), the MD5s of their `index.json` and `text.json` as read, as `{"index", "text"}`, each `null` when the file is absent; `{}` when no one is linked (0.9.0 and later). |
-| `people.<id>.code_table` | The code table the person's names were made with (`icd10cm FY2027`); absent when no pass had one (0.9.4 and later). A pass on a machine with another table makes the person's views again; one on a machine with none leaves them. |
+| `people.<id>.code_table` | The code table the person's names were made with (`icd10cm FY2027`); absent when the pass that made the views had none, whatever names it carried over (0.9.4 and later). A pass on a machine with another table makes the person's views again, which fills in the names; one on a machine with none leaves them. |
 | `row` | `documents`, `records`, `studies`, and `newest` and `last_import` when there are any: the person's line in `medrec_summary`'s people list, without `notes`. |
 | `records` | For each record kind, `{"shards": [[newest day, oldest day, count], …], "undated": count}`: its dated shards by number, and how many records its undated file holds. |
 | `timeline` | The timeline's shards, the same way. |

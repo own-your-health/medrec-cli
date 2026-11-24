@@ -1009,11 +1009,13 @@ fn a_condition_has_its_plain_name_from_the_folders_views() {
     let after: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
     assert_eq!(
         after["people"][&pid]["code_table"], "icd10cm FY2027",
-        "the table the names came from is kept"
+        "a person who stands keeps the table recorded"
     );
+    // Made again without the table, they keep the names and say no table
+    // made them: a machine with one makes them again.
     e.ok(&["views", "write", "--all"]);
     let after: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-    assert_eq!(after["people"][&pid]["code_table"], "icd10cm FY2027");
+    assert!(after["people"][&pid].get("code_table").is_none());
     assert!(view().is_some());
 
     // A last view whose bytes are not the ones recorded is not carried.
