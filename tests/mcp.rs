@@ -683,6 +683,63 @@ fn private_items_stay_out_of_household_wide_answers_unless_asked_about() {
     );
     assert!(lines.iter().filter(|l| l.get("private").is_none()).count() >= 3);
 
+    // A series of tests holding one private result is private: a
+    // household-wide answer leaves the whole series out and counts it once,
+    // even when its latest result is not the private one.
+    let folder = e.records().join(alex["folder"].as_str().unwrap());
+    let mut idx: Value =
+        serde_json::from_slice(&std::fs::read(folder.join("index.json")).unwrap()).unwrap();
+    let mut earlier = idx["records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["id"] == "r_glucoseaaaaaaaaaaaaa")
+        .unwrap()
+        .clone();
+    earlier["id"] = json!("r_glucoseearlieraaaaaa");
+    earlier["key"] = json!("result|glucose|2026-03-01");
+    earlier["date"] = json!("2026-03-01T13:20:00Z");
+    idx["records"].as_array_mut().unwrap().push(earlier);
+    std::fs::write(folder.join("index.json"), serde_json::to_vec(&idx).unwrap()).unwrap();
+    let series = |v: &Value| -> Option<Value> {
+        v["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|i| i["title"] == "Glucose, fasting")
+            .cloned()
+    };
+    let v = ask(RECORDS, json!({"kind": "tests"}));
+    assert_eq!(series(&v).unwrap()["results"], 2, "{v}");
+    std::fs::write(
+        folder.join("marks.json"),
+        serde_json::to_vec(&json!({
+            "schema": "medrec-marks/v1", "person": alex["id"], "payments": [],
+            "private": [{"id": "o_glucosemarkaaaaaaaa", "item": "r_glucoseearlieraaaaaa",
+                         "private": true, "at": "2026-11-20T10:00:00Z"}]}))
+        .unwrap(),
+    )
+    .unwrap();
+    let v = ask(RECORDS, json!({"kind": "tests"}));
+    assert!(series(&v).is_none(), "{v}");
+    let before = left_out(&v).map_or(0, |w| {
+        w.split(' ').next().unwrap().parse::<usize>().unwrap()
+    });
+    assert!(before >= 1, "{v}");
+    // About Alex, the series is there, marked with its private result's
+    // area.
+    let v = ask(RECORDS, json!({"kind": "tests", "person": "Alex"}));
+    let s = series(&v).expect("Alex's own answer holds the series");
+    assert_eq!(
+        (&s["results"], &s["private"]),
+        (&json!(2), &json!("household")),
+        "{v}"
+    );
+    // Naming the test includes it too.
+    let v = ask(RECORDS, json!({"kind": "tests", "name": "glucose"}));
+    assert!(series(&v).is_some(), "{v}");
+    std::fs::remove_file(folder.join("marks.json")).unwrap();
+
     // A marks.json that does not read: any of Alex's items may be one the
     // household marked, so a household-wide answer holds them all back.
     std::fs::write(

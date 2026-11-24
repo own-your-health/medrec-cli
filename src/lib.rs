@@ -24,6 +24,7 @@ pub mod normalize;
 pub mod notes;
 pub mod pdfgen;
 pub mod people;
+pub mod plain;
 pub mod private;
 pub mod proc;
 pub mod prompt;

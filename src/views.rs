@@ -351,13 +351,46 @@ pub(crate) fn value_text(v: &Value) -> String {
 }
 
 pub(crate) fn record_source(h: &Household, r: &Record) -> Option<String> {
-    let p = r.provenance.first()?;
-    let base = p.source.fhir_base.as_deref();
-    h.organizations
+    source_label(h, r.provenance.first()?)
+}
+
+/// The name of the organization a record came through: its own sign-in's
+/// (the household source with its CLI, organization and FHIR base), else
+/// the household organization at its FHIR base, else its CLI. One base
+/// can serve many practices (athenahealth's), so the sign-in comes first.
+pub(crate) fn source_label(h: &Household, pv: &crate::model::Provenance) -> Option<String> {
+    let base = pv
+        .source
+        .fhir_base
+        .as_deref()
+        .map(|b| b.trim_end_matches('/'));
+    h.sources
         .iter()
-        .find(|o| base.is_some() && o.fhir_base.as_deref() == base)
-        .map(|o| o.name.clone())
-        .or_else(|| p.source.cli.clone())
+        .filter(|s| {
+            s.cli.is_some()
+                && s.cli == pv.source.cli
+                && s.organization.is_some()
+                && s.organization == pv.source.organization_id
+                && (base.is_none()
+                    || s.fhir_base.as_deref().map(|b| b.trim_end_matches('/')) == base)
+        })
+        .find_map(|s| {
+            s.organization_name
+                .as_deref()
+                .map(str::trim)
+                .filter(|n| !n.is_empty())
+                .map(str::to_string)
+        })
+        .or_else(|| {
+            h.organizations
+                .iter()
+                .find(|o| {
+                    base.is_some()
+                        && o.fhir_base.as_deref().map(|b| b.trim_end_matches('/')) == base
+                })
+                .map(|o| o.name.clone())
+        })
+        .or_else(|| pv.source.cli.clone())
 }
 
 /// One row of a record list.
@@ -458,14 +491,7 @@ fn row(h: &Household, p: &Person, r: Record) -> RecordRow {
     let mut sources: Vec<String> = r
         .provenance
         .iter()
-        .filter_map(|pv| {
-            let base = pv.source.fhir_base.as_deref();
-            h.organizations
-                .iter()
-                .find(|o| base.is_some() && o.fhir_base.as_deref() == base)
-                .map(|o| o.name.clone())
-                .or_else(|| pv.source.cli.clone())
-        })
+        .filter_map(|pv| source_label(h, pv))
         .collect();
     sources.dedup();
     let detail = record_detail(&r).filter(|d| Some(d) != r.status.as_ref());
