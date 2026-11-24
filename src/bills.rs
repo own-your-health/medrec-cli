@@ -654,10 +654,10 @@ mod tests {
                 "id": id, "path": format!("Robin/Claims/2026/{id}.pdf"), "sha256": id, "md5": id,
                 "size": 1, "media_type": "application/pdf", "doc_type": p["type"],
                 "organization": p["org"], "date": p["date"], "statement": p["statement"],
-                "filed_at": "2026-11-21T00:00:00Z",
+                "filed_at": "2026-01-25T00:00:00Z",
                 "origin": {"kind": "file", "action": "copied"},
                 "provenance": {"source": {"kind": "scan"}, "method": "file",
-                               "filed_at": "2026-11-21T00:00:00Z", "filed_by": "medrec 0.9.1"}
+                               "filed_at": "2026-01-25T00:00:00Z", "filed_by": "medrec 0.9.1"}
             });
             if let Some(s) = p.get("same_statement_as") {
                 d["same_statement_as"] = s.clone();
@@ -669,7 +669,7 @@ mod tests {
 
     fn person() -> Person {
         serde_json::from_value(json!({"id": "p_test", "name": "Robin Testperson",
-            "folder": "Robin Testperson", "created_at": "2026-01-01T00:00:00Z"}))
+            "folder": "Robin Testperson", "created_at": "2025-03-07T00:00:00Z"}))
         .unwrap()
     }
 
@@ -694,21 +694,21 @@ mod tests {
         let paid = Payment {
             id: "o_paidaaaaaaaaaaaaaaaa".into(),
             document: "d_doctorbillaaaaaaaaaa".into(),
-            on: "2026-10-15".into(),
+            on: "2025-12-19".into(),
             amount: Amount {
-                amount: "50.00".into(),
+                amount: "40.00".into(),
                 currency: "USD".into(),
             },
-            at: "2026-10-15T12:00:00Z".into(),
+            at: "2025-12-19T12:00:00Z".into(),
             by: None,
             request: None,
         };
         // A payment marked in another currency is listed and not counted.
         let euros = Payment {
             id: "o_euroaaaaaaaaaaaaaaaa".into(),
-            on: "2026-10-16".into(),
+            on: "2025-12-20".into(),
             amount: Amount {
-                amount: "5.00".into(),
+                amount: "4.00".into(),
                 currency: "EUR".into(),
             },
             ..paid.clone()
@@ -749,7 +749,7 @@ mod tests {
         assert_eq!(er["paid"][0]["document"], "d_errcptaaaaaaaaaaaaaa");
         assert_eq!(
             (&er["paid_total"], &er["left"], &er["settled"]),
-            (&json!("250.00"), &json!("0.00"), &json!(true))
+            (&json!("200.00"), &json!("0.00"), &json!(true))
         );
 
         // The ER doctor's: more than its claim says, half marked paid.
@@ -766,7 +766,7 @@ mod tests {
         );
         assert_eq!(
             (&doc["paid_total"], &doc["left"], &doc["settled"]),
-            (&json!("50.00"), &json!("45.00"), &json!(false))
+            (&json!("40.00"), &json!("36.00"), &json!(false))
         );
 
         // The lab's first statement, and the later one that repeats it.
@@ -797,7 +797,7 @@ mod tests {
         assert_eq!(
             (&desk["asked"], &desk["owed"], &desk["claim"]),
             (
-                &json!("40.00"),
+                &json!("32.00"),
                 &json!("0.00"),
                 &json!("r_visitaaaaaaaaaaaaaaa")
             )
@@ -805,7 +805,7 @@ mod tests {
         let more = row(&v, "worth_a_call", "reason", "asks_more");
         assert_eq!(
             (&more["asked"], &more["owed"]),
-            (&json!("95.00"), &json!("80.00"))
+            (&json!("76.00"), &json!("64.00"))
         );
 
         // Receipts: to a bill, to a visit, or to neither.
@@ -839,8 +839,8 @@ mod tests {
         assert_eq!(
             nb,
             [
-                ("e_fillaaaaaaaaaaaaaaaa", "10.00", Some(true)),
-                ("e_oldaaaaaaaaaaaaaaaaa", "15.00", None),
+                ("e_fillaaaaaaaaaaaaaaaa", "8.00", Some(true)),
+                ("e_oldaaaaaaaaaaaaaaaaa", "12.00", None),
             ]
         );
     }

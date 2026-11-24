@@ -45,35 +45,35 @@ def doc(stem, date, doc_type, title, org):
 
 
 records = [
-    rec("depression", "condition", "2026-08-01", "Major depressive disorder, single episode, mild",
-        {}, "example-family", icd("F32.0", "Major depressive disorder, single episode, mild"),
+    rec("phobia", "condition", "2025-07-07", "Social phobia, unspecified",
+        {}, "example-family", icd("F40.10", "Social phobia, unspecified"),
         "active"),
-    rec("hypertension", "condition", "2026-05-01", "Essential hypertension", {},
-        "example-family", icd("I10", "Essential (primary) hypertension"), "active"),
-    rec("sertraline", "medication", "2026-08-02", "Sertraline 50 mg tablet", {},
+    rec("anemia", "condition", "2025-03-04", "Iron deficiency anemia", {},
+        "example-family", icd("D50.9", "Iron deficiency anemia, unspecified"), "active"),
+    rec("escitalopram", "medication", "2025-07-08", "Escitalopram 10 mg tablet", {},
         "example-family", status="active"),
-    rec("lisinopril", "medication", "2026-05-02", "Lisinopril 10 mg tablet", {},
+    rec("ferrous", "medication", "2025-03-05", "Ferrous sulfate 325 mg tablet", {},
         "example-family", status="active"),
-    rec("therapyvisit", "encounter", "2026-09-01T14:00:00Z", "Office Visit",
+    rec("counselvisit", "encounter", "2025-08-12T14:00:00Z", "Office Visit",
         {"class": "AMB", "service_provider": "Example Behavioral Health",
-         "period": {"start": "2026-09-01T14:00:00Z", "end": "2026-09-01T15:00:00Z"}},
+         "period": {"start": "2025-08-12T14:00:00Z", "end": "2025-08-12T15:00:00Z"}},
         "example-behavioral"),
-    rec("checkup", "encounter", "2026-06-01T13:00:00Z", "Office Visit",
+    rec("physical", "encounter", "2025-04-15T13:00:00Z", "Office Visit",
         {"class": "AMB", "service_provider": "Example Family Practice",
-         "period": {"start": "2026-06-01T13:00:00Z", "end": "2026-06-01T13:30:00Z"}},
+         "period": {"start": "2025-04-15T13:00:00Z", "end": "2025-04-15T13:30:00Z"}},
         "example-family"),
-    rec("glucose", "result", "2026-06-01T13:20:00Z", "Glucose, fasting",
-        {"value": {"value": 92, "unit": "mg/dL"}, "reference_range": "70-99 mg/dL"},
+    rec("ferritin", "result", "2025-04-15T13:20:00Z", "Ferritin",
+        {"value": {"value": 40, "unit": "ng/mL"}, "reference_range": "15-150 ng/mL"},
         "example-family"),
 ]
 documents = [
-    doc("therapyletter", "2026-09-05", "letter", "Letter", "Example Counseling Center"),
-    doc("checkupavs", "2026-06-01", "visit_summary", "After Visit Summary",
+    doc("counselletter", "2025-08-16", "letter", "Letter", "Example Counseling Center"),
+    doc("physicalavs", "2025-04-15", "visit_summary", "After Visit Summary",
         "Example Family Practice"),
 ]
 texts = {
-    pad("d", "therapyletter"): "Example Counseling Center\nLetter\nNext session in four weeks.",
-    pad("d", "checkupavs"): "Example Family Practice\nAfter Visit Summary\nBlood pressure recheck in "
+    pad("d", "counselletter"): "Example Counseling Center\nLetter\nNext session in four weeks.",
+    pad("d", "physicalavs"): "Example Family Practice\nAfter Visit Summary\nBlood count recheck in "
                             "three months.",
 }
 idx = {"schema": "medrec-index/v1", "person": PERSON, "rev": 1, "documents": documents,

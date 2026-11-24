@@ -5,18 +5,18 @@
  "documents": [],
  "records": [
   {
-   "id": "r_birthstayaaaaaaaaaaa",
+   "id": "r_kneestayaaaaaaaaaaaa",
    "kind": "encounter",
-   "key": "encounter|birthstay|2026-11-08",
-   "date": "2026-11-08T06:10:00Z",
+   "key": "encounter|kneestay|2025-03-18",
+   "date": "2025-03-18T06:10:00Z",
    "display": "Hospital Encounter",
    "fields": {
     "class": "inpatient",
-    "location": "Example Hospital Maternity",
+    "location": "Example Hospital Orthopedics",
     "service_provider": "Example Hospital",
     "period": {
-     "start": "2026-11-08T06:10:00Z",
-     "end": "2026-11-10T15:00:00Z"
+     "start": "2025-03-18T06:10:00Z",
+     "end": "2025-03-20T15:00:00Z"
     }
    },
    "provenance": [
@@ -34,11 +34,11 @@
    ]
   },
   {
-   "id": "r_bilirubinaaaaaaaaaaa",
+   "id": "r_hemoglobinaaaaaaaaaa",
    "kind": "result",
-   "key": "result|bilirubin|2026-11-09",
-   "date": "2026-11-09T13:20:00Z",
-   "display": "Bilirubin, total",
+   "key": "result|hemoglobin|2025-03-19",
+   "date": "2025-03-19T13:20:00Z",
+   "display": "Hemoglobin",
    "fields": {
     "value": {
      "value": 6.1,
@@ -60,11 +60,11 @@
    ]
   },
   {
-   "id": "r_dtapaaaaaaaaaaaaaaaa",
+   "id": "r_hepaaaaaaaaaaaaaaaaa",
    "kind": "immunization",
-   "key": "immunization|dtap|2022-01-10",
-   "date": "2022-01-10",
-   "display": "DTaP",
+   "key": "immunization|hepa|2025-01-14",
+   "date": "2025-01-14",
+   "display": "Hepatitis A",
    "fields": {},
    "provenance": [
     {
@@ -81,11 +81,11 @@
    ]
   },
   {
-   "id": "r_hibaaaaaaaaaaaaaaaaa",
+   "id": "r_typhoidaaaaaaaaaaaaa",
    "kind": "immunization",
-   "key": "immunization|hib|2022-01-10",
-   "date": "2022-01-10",
-   "display": "Hib",
+   "key": "immunization|typhoid|2025-01-14",
+   "date": "2025-01-14",
+   "display": "Typhoid",
    "fields": {},
    "provenance": [
     {
@@ -102,11 +102,11 @@
    ]
   },
   {
-   "id": "r_polioaaaaaaaaaaaaaaa",
+   "id": "r_yellowfeveraaaaaaaaa",
    "kind": "immunization",
-   "key": "immunization|polio|2022-01-10",
-   "date": "2022-01-10",
-   "display": "Polio (IPV)",
+   "key": "immunization|yellowfever|2025-01-14",
+   "date": "2025-01-14",
+   "display": "Yellow fever",
    "fields": {},
    "provenance": [
     {
@@ -123,11 +123,11 @@
    ]
   },
   {
-   "id": "r_pcvaaaaaaaaaaaaaaaaa",
+   "id": "r_rabiesaaaaaaaaaaaaaa",
    "kind": "immunization",
-   "key": "immunization|pcv|2022-01-10",
-   "date": "2022-01-10",
-   "display": "Pneumococcal (PCV)",
+   "key": "immunization|rabies|2025-01-14",
+   "date": "2025-01-14",
+   "display": "Rabies",
    "fields": {},
    "provenance": [
     {
@@ -144,11 +144,11 @@
    ]
   },
   {
-   "id": "r_flushotaaaaaaaaaaaaa",
+   "id": "r_shinglesaaaaaaaaaaaa",
    "kind": "immunization",
-   "key": "immunization|flushot|2022-01-10",
-   "date": "2022-01-10",
-   "display": "Influenza",
+   "key": "immunization|shingles|2025-01-14",
+   "date": "2025-01-14",
+   "display": "Shingles",
    "fields": {},
    "provenance": [
     {
@@ -165,11 +165,11 @@
    ]
   },
   {
-   "id": "r_amoxfillaaaaaaaaaaaa",
+   "id": "r_cetfillaaaaaaaaaaaaa",
    "kind": "medication",
-   "key": "medication|amoxfill|2026-10-28",
-   "date": "2026-10-28",
-   "display": "Amoxicillin 250 mg/5 mL oral suspension",
+   "key": "medication|cetfill|2025-08-12",
+   "date": "2025-08-12",
+   "display": "Cetirizine 1 mg/mL oral solution",
    "fields": {
     "source": "dispense",
     "pharmacy": "Example Pharmacy"
@@ -189,11 +189,11 @@
    ]
   },
   {
-   "id": "r_ibufillaaaaaaaaaaaaa",
+   "id": "r_napfillaaaaaaaaaaaaa",
    "kind": "medication",
-   "key": "medication|ibufill|2026-10-29",
-   "date": "2026-10-29",
-   "display": "Ibuprofen 100 mg/5 mL oral suspension",
+   "key": "medication|napfill|2025-08-13",
+   "date": "2025-08-13",
+   "display": "Naproxen 125 mg/5 mL oral suspension",
    "fields": {
     "source": "dispense",
     "pharmacy": "Example Pharmacy"

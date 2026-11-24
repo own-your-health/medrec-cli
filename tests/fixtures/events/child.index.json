@@ -4,16 +4,16 @@
  "rev": 1,
  "documents": [
   {
-   "id": "d_podiatryrxaaaaaaaaaa",
-   "path": "Documents/2026/2026-03-02_podiatryrx.pdf",
-   "sha256": "28d5b71e6792e2d1a88c93365268eacc045a5b72bf3b5ce53c73ab8ae4fa5ace",
-   "md5": "aa8eeb965caec2f3f16121c5684cdae7",
+   "id": "d_allergyrxaaaaaaaaaaa",
+   "path": "Documents/2024/2024-06-17_allergyrx.pdf",
+   "sha256": "cbcb96b5bf1c8cf0482859704a22fbde700a3a211cd812b2ddb500f0b6b17e20",
+   "md5": "65a837659d4b47be23969c61e23afa64",
    "size": 1000,
    "media_type": "application/pdf",
    "doc_type": "prescription",
-   "date": "2026-03-02",
-   "organization": "Example Podiatry for Kids",
-   "filed_at": "2026-03-02T12:00:00Z",
+   "date": "2024-06-17",
+   "organization": "Example Allergy for Kids",
+   "filed_at": "2024-06-17T12:00:00Z",
    "origin": {
     "kind": "file",
     "action": "copied"
@@ -33,28 +33,28 @@
   {
    "id": "r_nboneaaaaaaaaaaaaaaa",
    "kind": "claim",
-   "key": "claim|example|nbone|2026-03-06",
-   "date": "2026-03-06",
-   "display": "Newborn care \u00b7 Sample Neonatal Physicians",
+   "key": "claim|example|nbone|2024-08-21",
+   "date": "2024-08-21",
+   "display": "Newborn care \u00b7 Sample Newborn Care Group",
    "fields": {
-    "provider": "Sample Neonatal Physicians",
+    "provider": "Sample Newborn Care Group",
     "insurer": "Example Health Plan",
     "billable_period": {
-     "start": "2026-03-06",
-     "end": "2026-03-06"
+     "start": "2024-08-21",
+     "end": "2024-08-21"
     },
     "type": "professional",
     "amounts": {
      "billed": {
-      "amount": "300.00",
+      "amount": "280.00",
       "currency": "USD"
      },
      "allowed": {
-      "amount": "120.00",
+      "amount": "110.00",
       "currency": "USD"
      },
      "plan_paid": {
-      "amount": "120.00",
+      "amount": "110.00",
       "currency": "USD"
      },
      "you_owe": {
@@ -73,15 +73,15 @@
       },
       "amounts": {
        "billed": {
-        "amount": "300.00",
+        "amount": "280.00",
         "currency": "USD"
        },
        "allowed": {
-        "amount": "120.00",
+        "amount": "110.00",
         "currency": "USD"
        },
        "plan_paid": {
-        "amount": "120.00",
+        "amount": "110.00",
         "currency": "USD"
        },
        "you_owe": {
@@ -110,28 +110,28 @@
   {
    "id": "r_nbtwoaaaaaaaaaaaaaaa",
    "kind": "claim",
-   "key": "claim|example|nbtwo|2026-03-07",
-   "date": "2026-03-07",
-   "display": "Newborn care \u00b7 Sample Neonatal Physicians",
+   "key": "claim|example|nbtwo|2024-08-22",
+   "date": "2024-08-22",
+   "display": "Newborn care \u00b7 Sample Newborn Care Group",
    "fields": {
-    "provider": "Sample Neonatal Physicians",
+    "provider": "Sample Newborn Care Group",
     "insurer": "Example Health Plan",
     "billable_period": {
-     "start": "2026-03-07",
-     "end": "2026-03-07"
+     "start": "2024-08-22",
+     "end": "2024-08-22"
     },
     "type": "professional",
     "amounts": {
      "billed": {
-      "amount": "300.00",
+      "amount": "280.00",
       "currency": "USD"
      },
      "allowed": {
-      "amount": "120.00",
+      "amount": "110.00",
       "currency": "USD"
      },
      "plan_paid": {
-      "amount": "120.00",
+      "amount": "110.00",
       "currency": "USD"
      },
      "you_owe": {
@@ -150,15 +150,15 @@
       },
       "amounts": {
        "billed": {
-        "amount": "300.00",
+        "amount": "280.00",
         "currency": "USD"
        },
        "allowed": {
-        "amount": "120.00",
+        "amount": "110.00",
         "currency": "USD"
        },
        "plan_paid": {
-        "amount": "120.00",
+        "amount": "110.00",
         "currency": "USD"
        },
        "you_owe": {
@@ -187,28 +187,28 @@
   {
    "id": "r_nbthreeaaaaaaaaaaaaa",
    "kind": "claim",
-   "key": "claim|example|nbthree|2026-03-08",
-   "date": "2026-03-08",
-   "display": "Day of discharge \u00b7 Sample Neonatal Physicians",
+   "key": "claim|example|nbthree|2024-08-23",
+   "date": "2024-08-23",
+   "display": "Day of discharge \u00b7 Sample Newborn Care Group",
    "fields": {
-    "provider": "Sample Neonatal Physicians",
+    "provider": "Sample Newborn Care Group",
     "insurer": "Example Health Plan",
     "billable_period": {
-     "start": "2026-03-08",
-     "end": "2026-03-08"
+     "start": "2024-08-23",
+     "end": "2024-08-23"
     },
     "type": "professional",
     "amounts": {
      "billed": {
-      "amount": "300.00",
+      "amount": "280.00",
       "currency": "USD"
      },
      "allowed": {
-      "amount": "120.00",
+      "amount": "110.00",
       "currency": "USD"
      },
      "plan_paid": {
-      "amount": "120.00",
+      "amount": "110.00",
       "currency": "USD"
      },
      "you_owe": {
@@ -227,15 +227,15 @@
       },
       "amounts": {
        "billed": {
-        "amount": "300.00",
+        "amount": "280.00",
         "currency": "USD"
        },
        "allowed": {
-        "amount": "120.00",
+        "amount": "110.00",
         "currency": "USD"
        },
        "plan_paid": {
-        "amount": "120.00",
+        "amount": "110.00",
         "currency": "USD"
        },
        "you_owe": {

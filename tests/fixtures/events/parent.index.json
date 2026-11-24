@@ -4,16 +4,16 @@
  "rev": 1,
  "documents": [
   {
-   "id": "d_erbillaaaaaaaaaaaaaa",
-   "path": "Documents/2026/2026-11-02_erbill.pdf",
-   "sha256": "3cb0087200aa56286d50d9bb2c440e5b86889d0bd8c29b62679bc3fde0813501",
-   "md5": "9d0c58c092701c26ff7ea9433eabd8f2",
+   "id": "d_handbillaaaaaaaaaaaa",
+   "path": "Documents/2025/2025-03-20_handbill.pdf",
+   "sha256": "c4c8e8fb74f7e59ed3f2ba26b1511bda2ca1342bb4f95c493e03b01666eb5ed1",
+   "md5": "8e9c74674bf1b72fd6689dd4e64f0af3",
    "size": 1000,
    "media_type": "application/pdf",
    "doc_type": "bill",
-   "date": "2026-11-02",
-   "organization": "Example General Hospital",
-   "filed_at": "2026-11-02T12:00:00Z",
+   "date": "2025-03-20",
+   "organization": "Example Lakeside Hospital",
+   "filed_at": "2025-03-20T12:00:00Z",
    "origin": {
     "kind": "file",
     "action": "copied"
@@ -28,24 +28,24 @@
    },
    "title": "Statement",
    "statement": {
-    "statement_date": "2026-11-02",
+    "statement_date": "2025-03-20",
     "amount_due": {
-     "amount": "200.00",
+     "amount": "150.00",
      "currency": "USD"
     }
    }
   },
   {
-   "id": "d_checkupavsaaaaaaaaaa",
-   "path": "Documents/2026/2026-06-10_checkupavs.pdf",
-   "sha256": "06c8c2eb3b52c1e0a12efd1e43c0e29b293d7dab0981fd6bb32f24d4993cb97f",
-   "md5": "c4c2431ab232d303d98e0d695e6626ff",
+   "id": "d_skinavsaaaaaaaaaaaaa",
+   "path": "Documents/2025/2025-05-13_skinavs.pdf",
+   "sha256": "74d6494e9221f1eb6a82845e69d7aa0737e0a311b4d4fe2c557e43e69c0dab61",
+   "md5": "675803b0a66a3186d9441b847e856807",
    "size": 1000,
    "media_type": "application/pdf",
    "doc_type": "visit_summary",
-   "date": "2026-06-10",
-   "organization": "Example Family Practice",
-   "filed_at": "2026-06-10T12:00:00Z",
+   "date": "2025-05-13",
+   "organization": "Example Primary Care Group",
+   "filed_at": "2025-05-13T12:00:00Z",
    "origin": {
     "kind": "file",
     "action": "copied"
@@ -64,16 +64,16 @@
    "title": "After Visit Summary"
   },
   {
-   "id": "d_obreceiptaaaaaaaaaaa",
-   "path": "Documents/2026/2026-05-14_obreceipt.pdf",
-   "sha256": "724d64dec711661e01b2ec7f80d3014253443e42a8e87dbc97ceceeb29363922",
-   "md5": "25bbc609e6efa68822f81958602fbfec",
+   "id": "d_eyereceiptaaaaaaaaaa",
+   "path": "Documents/2025/2025-04-08_eyereceipt.pdf",
+   "sha256": "49ee26d15f111770b9f30edc95e17d81823c6e9ebf305a82c86c1732aea5b46d",
+   "md5": "41a1705f2121a0f231af867f79915df5",
    "size": 1000,
    "media_type": "application/pdf",
    "doc_type": "receipt",
-   "date": "2026-05-14",
-   "organization": "Example Womens Care",
-   "filed_at": "2026-05-14T12:00:00Z",
+   "date": "2025-04-08",
+   "organization": "Example Eye Clinic",
+   "filed_at": "2025-04-08T12:00:00Z",
    "origin": {
     "kind": "file",
     "action": "copied"
@@ -89,16 +89,16 @@
    "title": "Payment receipt"
   },
   {
-   "id": "d_obreceiptcopyaaaaaaa",
-   "path": "Documents/2026/2026-05-14_obreceiptcopy.pdf",
-   "sha256": "c8b56da0f0b58594926a01f87bb89ee2c4c083081332831fbc8da51141cc9740",
-   "md5": "4d9ca3a75f5989a8ec935f4f91aa1e44",
+   "id": "d_eyereceiptcopyaaaaaa",
+   "path": "Documents/2025/2025-04-08_eyereceiptcopy.pdf",
+   "sha256": "98c66517eb5af7d875f8f63efb5ba3df708c2dc17635cc40038a187a6402e59a",
+   "md5": "e690ef701691cfc815244418f7095d22",
    "size": 1000,
    "media_type": "application/pdf",
    "doc_type": "receipt",
-   "date": "2026-05-14",
-   "organization": "Example Womens Care",
-   "filed_at": "2026-05-14T12:00:00Z",
+   "date": "2025-04-08",
+   "organization": "Example Eye Clinic",
+   "filed_at": "2025-04-08T12:00:00Z",
    "origin": {
     "kind": "file",
     "action": "copied"
@@ -114,22 +114,22 @@
    "title": "Payment receipt",
    "near_duplicates": [
     {
-     "document": "d_obreceiptaaaaaaaaaaa",
+     "document": "d_eyereceiptaaaaaaaaaa",
      "similarity": 0.97
     }
    ]
   },
   {
    "id": "d_rxpaperaaaaaaaaaaaaa",
-   "path": "Documents/2026/2026-09-01_rxpaper.pdf",
+   "path": "Documents/2025/2025-10-05_rxpaper.pdf",
    "sha256": "29d643382a753a0275b668786766fcd05ffe72d611ccac5025e372a295e57442",
    "md5": "9af45146194a6356554aa567afa8a746",
    "size": 1000,
    "media_type": "application/pdf",
    "doc_type": "prescription",
-   "date": "2026-09-01",
+   "date": "2025-10-05",
    "organization": "Sample Pharmacy",
-   "filed_at": "2026-09-01T12:00:00Z",
+   "filed_at": "2025-10-05T12:00:00Z",
    "origin": {
     "kind": "file",
     "action": "copied"
@@ -145,16 +145,16 @@
    "title": "Prescription"
   },
   {
-   "id": "d_podiatrybillaaaaaaaa",
-   "path": "Documents/2026/2026-03-02_podiatrybill.pdf",
-   "sha256": "f7da115dddc6b36633c13d0e1f028b5f922425d93f38b6217ad5c769d3751d6e",
-   "md5": "cdf24d24fc6cbe8a6353268e4576f948",
+   "id": "d_allergybillaaaaaaaaa",
+   "path": "Documents/2024/2024-06-17_allergybill.pdf",
+   "sha256": "a53e3aacab3040a63e81c6fad9c7dafd7604721a4fc274e9130b151abb15f15c",
+   "md5": "8a4dcb515082e472016078d054000642",
    "size": 1000,
    "media_type": "application/pdf",
    "doc_type": "bill",
-   "date": "2026-03-02",
-   "organization": "Example Podiatry Associates",
-   "filed_at": "2026-03-02T12:00:00Z",
+   "date": "2024-06-17",
+   "organization": "Example Allergy Associates",
+   "filed_at": "2024-06-17T12:00:00Z",
    "origin": {
     "kind": "file",
     "action": "copied"
@@ -169,49 +169,49 @@
    },
    "title": "Statement",
    "statement": {
-    "statement_date": "2026-03-02",
+    "statement_date": "2024-06-17",
     "amount_due": {
-     "amount": "40.00",
+     "amount": "35.00",
      "currency": "USD"
     },
-    "due_date": "2026-03-30"
+    "due_date": "2024-07-15"
    }
   }
  ],
  "records": [
   {
-   "id": "r_erfacaaaaaaaaaaaaaaa",
+   "id": "r_handfacaaaaaaaaaaaaa",
    "kind": "claim",
-   "key": "claim|example|erfac|2026-10-07",
-   "date": "2026-10-07",
-   "display": "Emergency room visit \u00b7 Example General Hospital",
+   "key": "claim|example|handfac|2025-02-11",
+   "date": "2025-02-11",
+   "display": "Emergency room visit \u00b7 Example Lakeside Hospital",
    "fields": {
-    "provider": "Example General Hospital",
+    "provider": "Example Lakeside Hospital",
     "insurer": "Example Health Plan",
     "billable_period": {
-     "start": "2026-10-07",
-     "end": "2026-10-08"
+     "start": "2025-02-11",
+     "end": "2025-02-12"
     },
     "type": "institutional",
     "amounts": {
      "billed": {
-      "amount": "9000.00",
+      "amount": "6000.00",
       "currency": "USD"
      },
      "allowed": {
-      "amount": "1100.00",
+      "amount": "740.00",
       "currency": "USD"
      },
      "plan_paid": {
-      "amount": "900.00",
+      "amount": "590.00",
       "currency": "USD"
      },
      "copay": {
-      "amount": "200.00",
+      "amount": "150.00",
       "currency": "USD"
      },
      "you_owe": {
-      "amount": "200.00",
+      "amount": "150.00",
       "currency": "USD"
      }
     },
@@ -226,7 +226,7 @@
       },
       "amounts": {
        "billed": {
-        "amount": "7000.00",
+        "amount": "5200.00",
         "currency": "USD"
        },
        "plan_paid": {
@@ -234,7 +234,7 @@
         "currency": "USD"
        },
        "you_owe": {
-        "amount": "7000.00",
+        "amount": "5200.00",
         "currency": "USD"
        }
       },
@@ -255,19 +255,19 @@
       },
       "amounts": {
        "billed": {
-        "amount": "7000.00",
+        "amount": "5200.00",
         "currency": "USD"
        },
        "allowed": {
-        "amount": "900.00",
+        "amount": "640.00",
         "currency": "USD"
        },
        "plan_paid": {
-        "amount": "700.00",
+        "amount": "490.00",
         "currency": "USD"
        },
        "you_owe": {
-        "amount": "200.00",
+        "amount": "150.00",
         "currency": "USD"
        }
       },
@@ -287,15 +287,15 @@
       },
       "amounts": {
        "billed": {
-        "amount": "2000.00",
+        "amount": "800.00",
         "currency": "USD"
        },
        "allowed": {
-        "amount": "200.00",
+        "amount": "100.00",
         "currency": "USD"
        },
        "plan_paid": {
-        "amount": "200.00",
+        "amount": "100.00",
         "currency": "USD"
        },
        "you_owe": {
@@ -326,38 +326,38 @@
    ]
   },
   {
-   "id": "r_erdocaaaaaaaaaaaaaaa",
+   "id": "r_handdocaaaaaaaaaaaaa",
    "kind": "claim",
-   "key": "claim|example|erdoc|2026-10-07",
-   "date": "2026-10-07",
+   "key": "claim|example|handdoc|2025-02-11",
+   "date": "2025-02-11",
    "display": "Emergency room visit \u00b7 J SAMPLE",
    "fields": {
     "provider": "J SAMPLE",
     "insurer": "Example Health Plan",
     "billable_period": {
-     "start": "2026-10-07",
-     "end": "2026-10-07"
+     "start": "2025-02-11",
+     "end": "2025-02-11"
     },
     "type": "professional",
     "amounts": {
      "billed": {
-      "amount": "1200.00",
+      "amount": "900.00",
       "currency": "USD"
      },
      "allowed": {
-      "amount": "300.00",
-      "currency": "USD"
-     },
-     "plan_paid": {
       "amount": "240.00",
       "currency": "USD"
      },
+     "plan_paid": {
+      "amount": "192.00",
+      "currency": "USD"
+     },
      "coinsurance": {
-      "amount": "60.00",
+      "amount": "48.00",
       "currency": "USD"
      },
      "you_owe": {
-      "amount": "60.00",
+      "amount": "48.00",
       "currency": "USD"
      }
     },
@@ -372,19 +372,19 @@
       },
       "amounts": {
        "billed": {
-        "amount": "1200.00",
+        "amount": "900.00",
         "currency": "USD"
        },
        "allowed": {
-        "amount": "300.00",
-        "currency": "USD"
-       },
-       "plan_paid": {
         "amount": "240.00",
         "currency": "USD"
        },
+       "plan_paid": {
+        "amount": "192.00",
+        "currency": "USD"
+       },
        "you_owe": {
-        "amount": "60.00",
+        "amount": "48.00",
         "currency": "USD"
        }
       }
@@ -407,30 +407,30 @@
    ]
   },
   {
-   "id": "r_erradaaaaaaaaaaaaaaa",
+   "id": "r_handradaaaaaaaaaaaaa",
    "kind": "claim",
-   "key": "claim|example|errad|2026-10-07",
-   "date": "2026-10-07",
-   "display": "Chest x-ray \u00b7 Example Radiology Associates",
+   "key": "claim|example|handrad|2025-02-11",
+   "date": "2025-02-11",
+   "display": "Hand x-ray \u00b7 Example Imaging Partners",
    "fields": {
-    "provider": "Example Radiology Associates",
+    "provider": "Example Imaging Partners",
     "insurer": "Example Health Plan",
     "billable_period": {
-     "start": "2026-10-07",
-     "end": "2026-10-07"
+     "start": "2025-02-11",
+     "end": "2025-02-11"
     },
     "type": "professional",
     "amounts": {
      "billed": {
-      "amount": "120.00",
+      "amount": "100.00",
       "currency": "USD"
      },
      "allowed": {
-      "amount": "30.00",
+      "amount": "25.00",
       "currency": "USD"
      },
      "plan_paid": {
-      "amount": "30.00",
+      "amount": "25.00",
       "currency": "USD"
      },
      "you_owe": {
@@ -444,20 +444,20 @@
       "category": "imaging",
       "service": {
        "system": "http://www.ama-assn.org/go/cpt",
-       "code": "71046",
-       "display": "Chest x-ray"
+       "code": "73130",
+       "display": "Hand x-ray"
       },
       "amounts": {
        "billed": {
-        "amount": "120.00",
+        "amount": "100.00",
         "currency": "USD"
        },
        "allowed": {
-        "amount": "30.00",
+        "amount": "25.00",
         "currency": "USD"
        },
        "plan_paid": {
-        "amount": "30.00",
+        "amount": "25.00",
         "currency": "USD"
        },
        "you_owe": {
@@ -484,30 +484,30 @@
    ]
   },
   {
-   "id": "r_erlabaaaaaaaaaaaaaaa",
+   "id": "r_handlabaaaaaaaaaaaaa",
    "kind": "claim",
-   "key": "claim|example|erlab|2026-10-08",
-   "date": "2026-10-08",
-   "display": "Chemistry tests \u00b7 Sample Pathology Labs",
+   "key": "claim|example|handlab|2025-02-12",
+   "date": "2025-02-12",
+   "display": "Chemistry tests \u00b7 Sample Laboratory Group",
    "fields": {
-    "provider": "Sample Pathology Labs",
+    "provider": "Sample Laboratory Group",
     "insurer": "Example Health Plan",
     "billable_period": {
-     "start": "2026-10-08",
-     "end": "2026-10-08"
+     "start": "2025-02-12",
+     "end": "2025-02-12"
     },
     "type": "professional",
     "amounts": {
      "billed": {
-      "amount": "80.00",
+      "amount": "60.00",
       "currency": "USD"
      },
      "allowed": {
-      "amount": "15.00",
+      "amount": "12.00",
       "currency": "USD"
      },
      "plan_paid": {
-      "amount": "15.00",
+      "amount": "12.00",
       "currency": "USD"
      },
      "you_owe": {
@@ -526,15 +526,15 @@
       },
       "amounts": {
        "billed": {
-        "amount": "80.00",
+        "amount": "60.00",
         "currency": "USD"
        },
        "allowed": {
-        "amount": "15.00",
+        "amount": "12.00",
         "currency": "USD"
        },
        "plan_paid": {
-        "amount": "15.00",
+        "amount": "12.00",
         "currency": "USD"
        },
        "you_owe": {
@@ -561,38 +561,38 @@
    ]
   },
   {
-   "id": "r_birthfacaaaaaaaaaaaa",
+   "id": "r_stayfacaaaaaaaaaaaaa",
    "kind": "claim",
-   "key": "claim|example|birthfac|2026-03-05",
-   "date": "2026-03-05",
-   "display": "Room and board \u00b7 Example General Hospital",
+   "key": "claim|example|stayfac|2024-08-20",
+   "date": "2024-08-20",
+   "display": "Room and board \u00b7 Example Lakeside Hospital",
    "fields": {
-    "provider": "Example General Hospital",
+    "provider": "Example Lakeside Hospital",
     "insurer": "Example Health Plan",
     "billable_period": {
-     "start": "2026-03-05",
-     "end": "2026-03-08"
+     "start": "2024-08-20",
+     "end": "2024-08-23"
     },
     "type": "institutional",
     "amounts": {
      "billed": {
-      "amount": "20000.00",
+      "amount": "16000.00",
       "currency": "USD"
      },
      "allowed": {
-      "amount": "9000.00",
+      "amount": "7200.00",
       "currency": "USD"
      },
      "plan_paid": {
-      "amount": "8000.00",
+      "amount": "6500.00",
       "currency": "USD"
      },
      "deductible": {
-      "amount": "1000.00",
+      "amount": "700.00",
       "currency": "USD"
      },
      "you_owe": {
-      "amount": "1000.00",
+      "amount": "700.00",
       "currency": "USD"
      }
     },
@@ -607,19 +607,19 @@
       },
       "amounts": {
        "billed": {
-        "amount": "20000.00",
+        "amount": "16000.00",
         "currency": "USD"
        },
        "allowed": {
-        "amount": "9000.00",
+        "amount": "7200.00",
         "currency": "USD"
        },
        "plan_paid": {
-        "amount": "8000.00",
+        "amount": "6500.00",
         "currency": "USD"
        },
        "you_owe": {
-        "amount": "1000.00",
+        "amount": "700.00",
         "currency": "USD"
        }
       },
@@ -646,30 +646,30 @@
    ]
   },
   {
-   "id": "r_birthrheumaaaaaaaaaa",
+   "id": "r_staygroupaaaaaaaaaaa",
    "kind": "claim",
-   "key": "claim|example|birthrheum|2026-03-08",
-   "date": "2026-03-08",
-   "display": "Day of discharge \u00b7 Sample Rheumatology Group",
+   "key": "claim|example|staygroup|2024-08-23",
+   "date": "2024-08-23",
+   "display": "Day of discharge \u00b7 Sample Hospitalist Group",
    "fields": {
-    "provider": "Sample Rheumatology Group",
+    "provider": "Sample Hospitalist Group",
     "insurer": "Example Health Plan",
     "billable_period": {
-     "start": "2026-03-08",
-     "end": "2026-03-08"
+     "start": "2024-08-23",
+     "end": "2024-08-23"
     },
     "type": "professional",
     "amounts": {
      "billed": {
-      "amount": "400.00",
+      "amount": "350.00",
       "currency": "USD"
      },
      "allowed": {
-      "amount": "150.00",
+      "amount": "130.00",
       "currency": "USD"
      },
      "plan_paid": {
-      "amount": "150.00",
+      "amount": "130.00",
       "currency": "USD"
      },
      "you_owe": {
@@ -688,15 +688,15 @@
       },
       "amounts": {
        "billed": {
-        "amount": "400.00",
+        "amount": "350.00",
         "currency": "USD"
        },
        "allowed": {
-        "amount": "150.00",
+        "amount": "130.00",
         "currency": "USD"
        },
        "plan_paid": {
-        "amount": "150.00",
+        "amount": "130.00",
         "currency": "USD"
        },
        "you_owe": {
@@ -723,30 +723,30 @@
    ]
   },
   {
-   "id": "r_birthanesaaaaaaaaaaa",
+   "id": "r_stayanesaaaaaaaaaaaa",
    "kind": "claim",
-   "key": "claim|example|birthanes|2026-03-06",
-   "date": "2026-03-06",
-   "display": "Anesthesia for labor \u00b7 Example Anesthesia Partners",
+   "key": "claim|example|stayanes|2024-08-21",
+   "date": "2024-08-21",
+   "display": "Anesthesia for labor \u00b7 Sample Anesthesia Services",
    "fields": {
-    "provider": "Example Anesthesia Partners",
+    "provider": "Sample Anesthesia Services",
     "insurer": "Example Health Plan",
     "billable_period": {
-     "start": "2026-03-06",
-     "end": "2026-03-06"
+     "start": "2024-08-21",
+     "end": "2024-08-21"
     },
     "type": "professional",
     "amounts": {
      "billed": {
-      "amount": "2500.00",
+      "amount": "2100.00",
       "currency": "USD"
      },
      "allowed": {
-      "amount": "700.00",
+      "amount": "600.00",
       "currency": "USD"
      },
      "plan_paid": {
-      "amount": "700.00",
+      "amount": "600.00",
       "currency": "USD"
      },
      "you_owe": {
@@ -765,15 +765,15 @@
       },
       "amounts": {
        "billed": {
-        "amount": "2500.00",
+        "amount": "2100.00",
         "currency": "USD"
        },
        "allowed": {
-        "amount": "700.00",
+        "amount": "600.00",
         "currency": "USD"
        },
        "plan_paid": {
-        "amount": "700.00",
+        "amount": "600.00",
         "currency": "USD"
        },
        "you_owe": {
@@ -800,15 +800,15 @@
    ]
   },
   {
-   "id": "r_lipidaaaaaaaaaaaaaaa",
+   "id": "r_tshaaaaaaaaaaaaaaaaa",
    "kind": "result",
-   "key": "result|lipid|2026-06-10",
-   "date": "2026-06-10T15:00:00-04:00",
-   "display": "Cholesterol",
+   "key": "result|tsh|2025-05-13",
+   "date": "2025-05-13T15:00:00-04:00",
+   "display": "Thyroid test",
    "fields": {
     "value": {
-     "value": 180,
-     "unit": "mg/dL"
+     "value": 2.1,
+     "unit": "mIU/L"
     }
    },
    "provenance": [
@@ -826,15 +826,15 @@
    ]
   },
   {
-   "id": "r_glucoseaaaaaaaaaaaaa",
+   "id": "r_bloodcountaaaaaaaaaa",
    "kind": "result",
-   "key": "result|glucose|2026-06-10",
-   "date": "2026-06-10T15:00:00-04:00",
-   "display": "Glucose",
+   "key": "result|bloodcount|2025-05-13",
+   "date": "2025-05-13T15:00:00-04:00",
+   "display": "Blood count",
    "fields": {
     "value": {
-     "value": 90,
-     "unit": "mg/dL"
+     "value": 14,
+     "unit": "g/dL"
     }
    },
    "provenance": [
@@ -852,20 +852,20 @@
    ]
   },
   {
-   "id": "r_checkupaaaaaaaaaaaaa",
+   "id": "r_skincheckaaaaaaaaaaa",
    "kind": "encounter",
-   "key": "encounter|checkup|2026-06-10",
-   "date": "2026-06-10T14:30:00-04:00",
+   "key": "encounter|skincheck|2025-05-13",
+   "date": "2025-05-13T14:30:00-04:00",
    "display": "Office Visit",
    "fields": {
     "class": "AMB",
-    "location": "Example Family Practice",
-    "service_provider": "Example Family Practice",
+    "location": "Example Primary Care Group",
+    "service_provider": "Example Primary Care Group",
     "practitioner": "Casey Sample, MD",
-    "reason": "Annual checkup",
+    "reason": "Skin check",
     "period": {
-     "start": "2026-06-10T14:30:00-04:00",
-     "end": "2026-06-10T15:10:00-04:00"
+     "start": "2025-05-13T14:30:00-04:00",
+     "end": "2025-05-13T15:10:00-04:00"
     }
    },
    "provenance": [
@@ -883,16 +883,16 @@
    ]
   },
   {
-   "id": "r_callbackaaaaaaaaaaaa",
+   "id": "r_followcallaaaaaaaaaa",
    "kind": "encounter",
-   "key": "encounter|callback|2026-06-12",
-   "date": "2026-06-12T09:00:00-04:00",
+   "key": "encounter|followcall|2025-05-15",
+   "date": "2025-05-15T09:00:00-04:00",
    "display": "Telephone",
    "fields": {
     "class": "Telephone",
-    "service_provider": "Example Family Practice",
+    "service_provider": "Example Primary Care Group",
     "period": {
-     "start": "2026-06-12T09:00:00-04:00"
+     "start": "2025-05-15T09:00:00-04:00"
     }
    },
    "provenance": [
@@ -910,221 +910,30 @@
    ]
   },
   {
-   "id": "r_checkupdocaaaaaaaaaa",
+   "id": "r_skindocaaaaaaaaaaaaa",
    "kind": "claim",
-   "key": "claim|example|checkupdoc|2026-06-10",
-   "date": "2026-06-10",
-   "display": "Preventive visit \u00b7 C SAMPLE",
+   "key": "claim|example|skindoc|2025-05-13",
+   "date": "2025-05-13",
+   "display": "Office visit \u00b7 C SAMPLE",
    "fields": {
     "provider": "C SAMPLE",
     "insurer": "Example Health Plan",
     "billable_period": {
-     "start": "2026-06-10",
-     "end": "2026-06-10"
+     "start": "2025-05-13",
+     "end": "2025-05-13"
     },
     "type": "professional",
     "amounts": {
      "billed": {
-      "amount": "300.00",
+      "amount": "220.00",
       "currency": "USD"
      },
      "allowed": {
-      "amount": "180.00",
+      "amount": "120.00",
       "currency": "USD"
      },
      "plan_paid": {
-      "amount": "180.00",
-      "currency": "USD"
-     },
-     "you_owe": {
-      "amount": "0.00",
-      "currency": "USD"
-     }
-    },
-    "items": [
-     {
-      "sequence": 1,
-      "category": "visit",
-      "service": {
-       "system": "http://www.ama-assn.org/go/cpt",
-       "code": "99396",
-       "display": "Preventive visit"
-      },
-      "amounts": {
-       "billed": {
-        "amount": "300.00",
-        "currency": "USD"
-       },
-       "allowed": {
-        "amount": "180.00",
-        "currency": "USD"
-       },
-       "plan_paid": {
-        "amount": "180.00",
-        "currency": "USD"
-       },
-       "you_owe": {
-        "amount": "0.00",
-        "currency": "USD"
-       }
-      }
-     }
-    ],
-    "category": "visit"
-   },
-   "provenance": [
-    {
-     "source": {
-      "kind": "fhir",
-      "cli": "uhc",
-      "organization_id": "example-plan",
-      "fhir_base": "https://plan.example.test/fhir"
-     },
-     "method": "fhir-api",
-     "filed_at": "2026-11-20T10:00:00Z",
-     "filed_by": "medrec 0.9.0"
-    }
-   ]
-  },
-  {
-   "id": "r_checkuplabaaaaaaaaaa",
-   "kind": "claim",
-   "key": "claim|example|checkuplab|2026-06-10",
-   "date": "2026-06-10",
-   "display": "Cholesterol tests \u00b7 Example Labs",
-   "fields": {
-    "provider": "Example Labs",
-    "insurer": "Example Health Plan",
-    "billable_period": {
-     "start": "2026-06-10",
-     "end": "2026-06-10"
-    },
-    "type": "professional",
-    "amounts": {
-     "billed": {
-      "amount": "130.00",
-      "currency": "USD"
-     },
-     "allowed": {
-      "amount": "17.00",
-      "currency": "USD"
-     },
-     "plan_paid": {
-      "amount": "17.00",
-      "currency": "USD"
-     },
-     "you_owe": {
-      "amount": "0.00",
-      "currency": "USD"
-     }
-    },
-    "items": [
-     {
-      "sequence": 1,
-      "category": "lab",
-      "service": {
-       "system": "http://www.ama-assn.org/go/cpt",
-       "code": "80061",
-       "display": "Cholesterol tests"
-      },
-      "amounts": {
-       "billed": {
-        "amount": "90.00",
-        "currency": "USD"
-       },
-       "allowed": {
-        "amount": "12.00",
-        "currency": "USD"
-       },
-       "plan_paid": {
-        "amount": "12.00",
-        "currency": "USD"
-       },
-       "you_owe": {
-        "amount": "0.00",
-        "currency": "USD"
-       }
-      },
-      "records": [
-       "r_lipidaaaaaaaaaaaaaaa"
-      ]
-     },
-     {
-      "sequence": 2,
-      "category": "lab",
-      "service": {
-       "system": "http://www.ama-assn.org/go/cpt",
-       "code": "82947",
-       "display": "Glucose test"
-      },
-      "amounts": {
-       "billed": {
-        "amount": "40.00",
-        "currency": "USD"
-       },
-       "allowed": {
-        "amount": "5.00",
-        "currency": "USD"
-       },
-       "plan_paid": {
-        "amount": "5.00",
-        "currency": "USD"
-       },
-       "you_owe": {
-        "amount": "0.00",
-        "currency": "USD"
-       }
-      },
-      "records": [
-       "r_glucoseaaaaaaaaaaaaa"
-      ]
-     }
-    ],
-    "category": "lab",
-    "results": [
-     "r_lipidaaaaaaaaaaaaaaa",
-     "r_glucoseaaaaaaaaaaaaa"
-    ]
-   },
-   "provenance": [
-    {
-     "source": {
-      "kind": "fhir",
-      "cli": "uhc",
-      "organization_id": "example-plan",
-      "fhir_base": "https://plan.example.test/fhir"
-     },
-     "method": "fhir-api",
-     "filed_at": "2026-11-20T10:00:00Z",
-     "filed_by": "medrec 0.9.0"
-    }
-   ]
-  },
-  {
-   "id": "r_obvisitaaaaaaaaaaaaa",
-   "kind": "claim",
-   "key": "claim|example|obvisit|2026-05-14",
-   "date": "2026-05-14",
-   "display": "Office visit \u00b7 Example Womens Care",
-   "fields": {
-    "provider": "Example Womens Care",
-    "insurer": "Example Health Plan",
-    "billable_period": {
-     "start": "2026-05-14",
-     "end": "2026-05-14"
-    },
-    "type": "professional",
-    "amounts": {
-     "billed": {
-      "amount": "250.00",
-      "currency": "USD"
-     },
-     "allowed": {
-      "amount": "110.00",
-      "currency": "USD"
-     },
-     "plan_paid": {
-      "amount": "110.00",
+      "amount": "120.00",
       "currency": "USD"
      },
      "you_owe": {
@@ -1143,15 +952,15 @@
       },
       "amounts": {
        "billed": {
-        "amount": "250.00",
+        "amount": "220.00",
         "currency": "USD"
        },
        "allowed": {
-        "amount": "110.00",
+        "amount": "120.00",
         "currency": "USD"
        },
        "plan_paid": {
-        "amount": "110.00",
+        "amount": "120.00",
         "currency": "USD"
        },
        "you_owe": {
@@ -1178,38 +987,229 @@
    ]
   },
   {
-   "id": "r_therapyaaaaaaaaaaaaa",
+   "id": "r_skinlabaaaaaaaaaaaaa",
    "kind": "claim",
-   "key": "claim|example|therapy|2026-08-01",
-   "date": "2026-08-01",
-   "display": "Guided stretching \u00b7 Example Therapy Center",
+   "key": "claim|example|skinlab|2025-05-13",
+   "date": "2025-05-13",
+   "display": "Thyroid test \u00b7 Example Labs",
    "fields": {
-    "provider": "Example Therapy Center",
+    "provider": "Example Labs",
     "insurer": "Example Health Plan",
     "billable_period": {
-     "start": "2026-08-01",
-     "end": "2026-08-29"
+     "start": "2025-05-13",
+     "end": "2025-05-13"
+    },
+    "type": "professional",
+    "amounts": {
+     "billed": {
+      "amount": "115.00",
+      "currency": "USD"
+     },
+     "allowed": {
+      "amount": "18.00",
+      "currency": "USD"
+     },
+     "plan_paid": {
+      "amount": "18.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "0.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "sequence": 1,
+      "category": "lab",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "84443",
+       "display": "Thyroid test"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "80.00",
+        "currency": "USD"
+       },
+       "allowed": {
+        "amount": "14.00",
+        "currency": "USD"
+       },
+       "plan_paid": {
+        "amount": "14.00",
+        "currency": "USD"
+       },
+       "you_owe": {
+        "amount": "0.00",
+        "currency": "USD"
+       }
+      },
+      "records": [
+       "r_tshaaaaaaaaaaaaaaaaa"
+      ]
+     },
+     {
+      "sequence": 2,
+      "category": "lab",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "85025",
+       "display": "Blood count"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "35.00",
+        "currency": "USD"
+       },
+       "allowed": {
+        "amount": "4.00",
+        "currency": "USD"
+       },
+       "plan_paid": {
+        "amount": "4.00",
+        "currency": "USD"
+       },
+       "you_owe": {
+        "amount": "0.00",
+        "currency": "USD"
+       }
+      },
+      "records": [
+       "r_bloodcountaaaaaaaaaa"
+      ]
+     }
+    ],
+    "category": "lab",
+    "results": [
+     "r_tshaaaaaaaaaaaaaaaaa",
+     "r_bloodcountaaaaaaaaaa"
+    ]
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "uhc",
+      "organization_id": "example-plan",
+      "fhir_base": "https://plan.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ]
+  },
+  {
+   "id": "r_eyevisitaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|example|eyevisit|2025-04-08",
+   "date": "2025-04-08",
+   "display": "Office visit \u00b7 Example Eye Clinic",
+   "fields": {
+    "provider": "Example Eye Clinic",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2025-04-08",
+     "end": "2025-04-08"
+    },
+    "type": "professional",
+    "amounts": {
+     "billed": {
+      "amount": "190.00",
+      "currency": "USD"
+     },
+     "allowed": {
+      "amount": "85.00",
+      "currency": "USD"
+     },
+     "plan_paid": {
+      "amount": "85.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "0.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "sequence": 1,
+      "category": "visit",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "99213",
+       "display": "Office visit"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "190.00",
+        "currency": "USD"
+       },
+       "allowed": {
+        "amount": "85.00",
+        "currency": "USD"
+       },
+       "plan_paid": {
+        "amount": "85.00",
+        "currency": "USD"
+       },
+       "you_owe": {
+        "amount": "0.00",
+        "currency": "USD"
+       }
+      }
+     }
+    ],
+    "category": "visit"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "uhc",
+      "organization_id": "example-plan",
+      "fhir_base": "https://plan.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ]
+  },
+  {
+   "id": "r_balanceaaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|example|balance|2025-09-02",
+   "date": "2025-09-02",
+   "display": "Balance exercises \u00b7 Example Balance Center",
+   "fields": {
+    "provider": "Example Balance Center",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2025-09-02",
+     "end": "2025-09-30"
     },
     "type": "institutional",
     "amounts": {
      "billed": {
-      "amount": "1600.00",
+      "amount": "1400.00",
       "currency": "USD"
      },
      "allowed": {
-      "amount": "640.00",
+      "amount": "560.00",
       "currency": "USD"
      },
      "plan_paid": {
-      "amount": "512.00",
+      "amount": "448.00",
       "currency": "USD"
      },
      "coinsurance": {
-      "amount": "128.00",
+      "amount": "112.00",
       "currency": "USD"
      },
      "you_owe": {
-      "amount": "128.00",
+      "amount": "112.00",
       "currency": "USD"
      }
     },
@@ -1219,31 +1219,31 @@
       "category": "medicine",
       "service": {
        "system": "http://www.ama-assn.org/go/cpt",
-       "code": "97110",
-       "display": "Guided stretching"
+       "code": "97112",
+       "display": "Balance exercises"
       },
       "amounts": {
        "billed": {
-        "amount": "1600.00",
+        "amount": "1400.00",
         "currency": "USD"
        },
        "allowed": {
-        "amount": "640.00",
+        "amount": "560.00",
         "currency": "USD"
        },
        "plan_paid": {
-        "amount": "512.00",
+        "amount": "448.00",
         "currency": "USD"
        },
        "you_owe": {
-        "amount": "128.00",
+        "amount": "112.00",
         "currency": "USD"
        }
       },
       "revenue": {
        "system": "https://www.nubc.org/CodeSystem/RevenueCodes",
        "code": "0420",
-       "display": "Guided stretching"
+       "display": "Balance exercises"
       }
      }
     ]
@@ -1263,30 +1263,30 @@
    ]
   },
   {
-   "id": "r_therapyevalaaaaaaaaa",
+   "id": "r_balanceevalaaaaaaaaa",
    "kind": "claim",
-   "key": "claim|example|therapyeval|2026-08-12",
-   "date": "2026-08-12",
+   "key": "claim|example|balanceeval|2025-09-16",
+   "date": "2025-09-16",
    "display": "Office visit \u00b7 R EXAMPLE",
    "fields": {
     "provider": "R EXAMPLE",
     "insurer": "Example Health Plan",
     "billable_period": {
-     "start": "2026-08-12",
-     "end": "2026-08-12"
+     "start": "2025-09-16",
+     "end": "2025-09-16"
     },
     "type": "professional",
     "amounts": {
      "billed": {
-      "amount": "200.00",
+      "amount": "180.00",
       "currency": "USD"
      },
      "allowed": {
-      "amount": "95.00",
+      "amount": "80.00",
       "currency": "USD"
      },
      "plan_paid": {
-      "amount": "95.00",
+      "amount": "80.00",
       "currency": "USD"
      },
      "you_owe": {
@@ -1305,15 +1305,15 @@
       },
       "amounts": {
        "billed": {
-        "amount": "200.00",
+        "amount": "180.00",
         "currency": "USD"
        },
        "allowed": {
-        "amount": "95.00",
+        "amount": "80.00",
         "currency": "USD"
        },
        "plan_paid": {
-        "amount": "95.00",
+        "amount": "80.00",
         "currency": "USD"
        },
        "you_owe": {
@@ -1342,32 +1342,32 @@
   {
    "id": "r_filloneaaaaaaaaaaaaa",
    "kind": "claim",
-   "key": "claim|example|fillone|2026-09-02",
-   "date": "2026-09-02",
-   "display": "Amoxicillin 500 mg",
+   "key": "claim|example|fillone|2025-10-06",
+   "date": "2025-10-06",
+   "display": "Naproxen 250 mg",
    "fields": {
-    "provider": "Sample Pharmacy #123",
+    "provider": "Sample Pharmacy #456",
     "insurer": "Example Health Plan",
     "billable_period": {
-     "start": "2026-09-02",
-     "end": "2026-09-02"
+     "start": "2025-10-06",
+     "end": "2025-10-06"
     },
     "type": "pharmacy",
     "amounts": {
      "billed": {
-      "amount": "30.00",
+      "amount": "24.00",
       "currency": "USD"
      },
      "plan_paid": {
-      "amount": "20.00",
+      "amount": "16.00",
       "currency": "USD"
      },
      "copay": {
-      "amount": "10.00",
+      "amount": "8.00",
       "currency": "USD"
      },
      "you_owe": {
-      "amount": "10.00",
+      "amount": "8.00",
       "currency": "USD"
      }
     },
@@ -1378,19 +1378,19 @@
       "service": {
        "system": "http://hl7.org/fhir/sid/ndc",
        "code": "00000000000",
-       "display": "Amoxicillin 500 mg"
+       "display": "Naproxen 250 mg"
       },
       "amounts": {
        "billed": {
-        "amount": "30.00",
+        "amount": "24.00",
         "currency": "USD"
        },
        "plan_paid": {
-        "amount": "20.00",
+        "amount": "16.00",
         "currency": "USD"
        },
        "you_owe": {
-        "amount": "10.00",
+        "amount": "8.00",
         "currency": "USD"
        }
       }
@@ -1415,32 +1415,32 @@
   {
    "id": "r_filltwoaaaaaaaaaaaaa",
    "kind": "claim",
-   "key": "claim|example|filltwo|2026-09-02",
-   "date": "2026-09-02",
-   "display": "Ibuprofen 600 mg",
+   "key": "claim|example|filltwo|2025-10-06",
+   "date": "2025-10-06",
+   "display": "Cetirizine 10 mg",
    "fields": {
-    "provider": "Sample Pharmacy #123",
+    "provider": "Sample Pharmacy #456",
     "insurer": "Example Health Plan",
     "billable_period": {
-     "start": "2026-09-02",
-     "end": "2026-09-02"
+     "start": "2025-10-06",
+     "end": "2025-10-06"
     },
     "type": "pharmacy",
     "amounts": {
      "billed": {
-      "amount": "30.00",
+      "amount": "24.00",
       "currency": "USD"
      },
      "plan_paid": {
-      "amount": "20.00",
+      "amount": "16.00",
       "currency": "USD"
      },
      "copay": {
-      "amount": "10.00",
+      "amount": "8.00",
       "currency": "USD"
      },
      "you_owe": {
-      "amount": "10.00",
+      "amount": "8.00",
       "currency": "USD"
      }
     },
@@ -1451,19 +1451,19 @@
       "service": {
        "system": "http://hl7.org/fhir/sid/ndc",
        "code": "00000000000",
-       "display": "Ibuprofen 600 mg"
+       "display": "Cetirizine 10 mg"
       },
       "amounts": {
        "billed": {
-        "amount": "30.00",
+        "amount": "24.00",
         "currency": "USD"
        },
        "plan_paid": {
-        "amount": "20.00",
+        "amount": "16.00",
         "currency": "USD"
        },
        "you_owe": {
-        "amount": "10.00",
+        "amount": "8.00",
         "currency": "USD"
        }
       }
@@ -1486,17 +1486,17 @@
    ]
   },
   {
-   "id": "r_flushotaaaaaaaaaaaaa",
+   "id": "r_tetanusaaaaaaaaaaaaa",
    "kind": "claim",
-   "key": "claim|example|flushot|2026-10-15",
-   "date": "2026-10-15",
-   "display": "Influenza vaccine",
+   "key": "claim|example|tetanus|2025-11-03",
+   "date": "2025-11-03",
+   "display": "Tetanus vaccine",
    "fields": {
-    "provider": "Sample Pharmacy #123",
+    "provider": "Sample Pharmacy #456",
     "insurer": "Example Health Plan",
     "billable_period": {
-     "start": "2026-10-15",
-     "end": "2026-10-15"
+     "start": "2025-11-03",
+     "end": "2025-11-03"
     },
     "type": "pharmacy",
     "amounts": {
@@ -1520,7 +1520,7 @@
       "service": {
        "system": "http://hl7.org/fhir/sid/ndc",
        "code": "00000000001",
-       "display": "Influenza vaccine"
+       "display": "Tetanus vaccine"
       },
       "amounts": {
        "billed": {
@@ -1557,28 +1557,28 @@
   {
    "id": "r_twoaaaaaaaaaaaaaaaaa",
    "kind": "claim",
-   "key": "claim|example|twoa|2026-07-28",
-   "date": "2026-07-28",
+   "key": "claim|example|twoa|2025-06-24",
+   "date": "2025-06-24",
    "display": "Office visit \u00b7 A SAMPLE",
    "fields": {
     "provider": "A SAMPLE",
     "insurer": "Example Health Plan",
     "billable_period": {
-     "start": "2026-07-28",
-     "end": "2026-07-28"
+     "start": "2025-06-24",
+     "end": "2025-06-24"
     },
     "type": "professional",
     "amounts": {
      "billed": {
-      "amount": "200.00",
+      "amount": "160.00",
       "currency": "USD"
      },
      "allowed": {
-      "amount": "90.00",
+      "amount": "75.00",
       "currency": "USD"
      },
      "plan_paid": {
-      "amount": "90.00",
+      "amount": "75.00",
       "currency": "USD"
      },
      "you_owe": {
@@ -1597,15 +1597,15 @@
       },
       "amounts": {
        "billed": {
-        "amount": "200.00",
+        "amount": "160.00",
         "currency": "USD"
        },
        "allowed": {
-        "amount": "90.00",
+        "amount": "75.00",
         "currency": "USD"
        },
        "plan_paid": {
-        "amount": "90.00",
+        "amount": "75.00",
         "currency": "USD"
        },
        "you_owe": {
@@ -1634,28 +1634,28 @@
   {
    "id": "r_twobaaaaaaaaaaaaaaaa",
    "kind": "claim",
-   "key": "claim|example|twob|2026-07-28",
-   "date": "2026-07-28",
+   "key": "claim|example|twob|2025-06-24",
+   "date": "2025-06-24",
    "display": "Office visit \u00b7 B EXAMPLE",
    "fields": {
     "provider": "B EXAMPLE",
     "insurer": "Example Health Plan",
     "billable_period": {
-     "start": "2026-07-28",
-     "end": "2026-07-28"
+     "start": "2025-06-24",
+     "end": "2025-06-24"
     },
     "type": "professional",
     "amounts": {
      "billed": {
-      "amount": "260.00",
+      "amount": "230.00",
       "currency": "USD"
      },
      "allowed": {
-      "amount": "120.00",
+      "amount": "105.00",
       "currency": "USD"
      },
      "plan_paid": {
-      "amount": "120.00",
+      "amount": "105.00",
       "currency": "USD"
      },
      "you_owe": {
@@ -1674,15 +1674,15 @@
       },
       "amounts": {
        "billed": {
-        "amount": "260.00",
+        "amount": "230.00",
         "currency": "USD"
        },
        "allowed": {
-        "amount": "120.00",
+        "amount": "105.00",
         "currency": "USD"
        },
        "plan_paid": {
-        "amount": "120.00",
+        "amount": "105.00",
         "currency": "USD"
        },
        "you_owe": {
@@ -1711,28 +1711,28 @@
   {
    "id": "r_twolabaaaaaaaaaaaaaa",
    "kind": "claim",
-   "key": "claim|example|twolab|2026-07-28",
-   "date": "2026-07-28",
+   "key": "claim|example|twolab|2025-06-24",
+   "date": "2025-06-24",
    "display": "Blood cell test \u00b7 Example Labs",
    "fields": {
     "provider": "Example Labs",
     "insurer": "Example Health Plan",
     "billable_period": {
-     "start": "2026-07-28",
-     "end": "2026-07-28"
+     "start": "2025-06-24",
+     "end": "2025-06-24"
     },
     "type": "professional",
     "amounts": {
      "billed": {
-      "amount": "50.00",
+      "amount": "45.00",
       "currency": "USD"
      },
      "allowed": {
-      "amount": "8.00",
+      "amount": "7.00",
       "currency": "USD"
      },
      "plan_paid": {
-      "amount": "8.00",
+      "amount": "7.00",
       "currency": "USD"
      },
      "you_owe": {
@@ -1751,15 +1751,15 @@
       },
       "amounts": {
        "billed": {
-        "amount": "50.00",
+        "amount": "45.00",
         "currency": "USD"
        },
        "allowed": {
-        "amount": "8.00",
+        "amount": "7.00",
         "currency": "USD"
        },
        "plan_paid": {
-        "amount": "8.00",
+        "amount": "7.00",
         "currency": "USD"
        },
        "you_owe": {
@@ -1786,38 +1786,38 @@
    ]
   },
   {
-   "id": "r_podiatryaaaaaaaaaaaa",
+   "id": "r_allergyaaaaaaaaaaaaa",
    "kind": "claim",
-   "key": "claim|example|podiatry|2026-03-02",
-   "date": "2026-03-02",
+   "key": "claim|example|allergy|2024-06-17",
+   "date": "2024-06-17",
    "display": "Office visit \u00b7 K EXAMPLE",
    "fields": {
     "provider": "K EXAMPLE",
     "insurer": "Example Health Plan",
     "billable_period": {
-     "start": "2026-03-02",
-     "end": "2026-03-02"
+     "start": "2024-06-17",
+     "end": "2024-06-17"
     },
     "type": "professional",
     "amounts": {
      "billed": {
-      "amount": "300.00",
+      "amount": "260.00",
       "currency": "USD"
      },
      "allowed": {
-      "amount": "140.00",
+      "amount": "125.00",
       "currency": "USD"
      },
      "plan_paid": {
-      "amount": "100.00",
+      "amount": "90.00",
       "currency": "USD"
      },
      "copay": {
-      "amount": "40.00",
+      "amount": "35.00",
       "currency": "USD"
      },
      "you_owe": {
-      "amount": "40.00",
+      "amount": "35.00",
       "currency": "USD"
      }
     },
@@ -1832,19 +1832,19 @@
       },
       "amounts": {
        "billed": {
-        "amount": "300.00",
+        "amount": "260.00",
         "currency": "USD"
        },
        "allowed": {
-        "amount": "140.00",
+        "amount": "125.00",
         "currency": "USD"
        },
        "plan_paid": {
-        "amount": "100.00",
+        "amount": "90.00",
         "currency": "USD"
        },
        "you_owe": {
-        "amount": "40.00",
+        "amount": "35.00",
         "currency": "USD"
        }
       }

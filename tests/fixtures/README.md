@@ -28,7 +28,7 @@ real record, document, study or provider response.
   the same fill with its prescription contained, naming an `Example
   Prescriber`.
 - `fhir/replaced-line-eob.json` is an emergency claim (an
-  ExplanationOfBenefit at "Example Hospital") whose payer replaced the
+  ExplanationOfBenefit at "Example Lakeside Hospital") whose payer replaced the
   billed visit code: it lists the replacement, the billed code at the
   member's whole cost, and a lab line, and its totals count the first and
   the last. Its two processing notes, one a line points at and one no line
@@ -50,7 +50,7 @@ real record, document, study or provider response.
   stay), `portal` (portal records with no claim), with `make.py`.
 - `private/adult.index.json` and `adult.text.json` are an invented adult's
   records, written by `private/make.py`: a mental health condition (ICD-10
-  `F32.0`), a medicine, and a visit and letter from a behavioral health
+  `F40.10`), a medicine, and a visit and letter from a behavioral health
   practice, which the rules keep private, beside a condition, a medicine, a
   visit, a result and a visit summary they do not.
 

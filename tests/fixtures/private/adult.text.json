@@ -2,7 +2,7 @@
  "schema": "medrec-text/v1",
  "person": "p_privateadultaaaaaaaa",
  "texts": {
-  "d_therapyletteraaaaaaa": "Example Counseling Center\nLetter\nNext session in four weeks.",
-  "d_checkupavsaaaaaaaaaa": "Example Family Practice\nAfter Visit Summary\nBlood pressure recheck in three months."
+  "d_counselletteraaaaaaa": "Example Counseling Center\nLetter\nNext session in four weeks.",
+  "d_physicalavsaaaaaaaaa": "Example Family Practice\nAfter Visit Summary\nBlood count recheck in three months."
  }
 }

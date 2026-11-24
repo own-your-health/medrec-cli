@@ -2531,7 +2531,7 @@ fn a_claim_line_its_totals_leave_out_is_marked_and_kept_through_reindex() {
     let claims = e.ok(&["timeline", "--kind", "claim"]);
     assert_eq!(
         claims["items"][0]["detail"],
-        "billed 1600.0 USD, plan paid 690.0 USD, you owe 250.0 USD"
+        "billed 1280.0 USD, plan paid 552.0 USD, you owe 200.0 USD"
     );
     // A line's processing note is searchable.
     let hits = e.ok(&["search", "coding policy"]);

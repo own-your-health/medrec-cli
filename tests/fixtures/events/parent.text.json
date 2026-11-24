@@ -2,6 +2,6 @@
  "schema": "medrec-text/v1",
  "person": "p_parentaaaaaaaaaaaaaa",
  "texts": {
-  "d_erbillaaaaaaaaaaaaaa": "Example General Hospital\nStatement\nAmount due 200.00"
+  "d_handbillaaaaaaaaaaaa": "Example Lakeside Hospital\nStatement\nAmount due 150.00"
  }
 }

@@ -1065,16 +1065,16 @@ mod tests {
         assert!(items[2].get("counted").is_none());
         // Its amounts stay as the payer wrote them; the claim's are the
         // totals.
-        assert_eq!(items[1]["amounts"]["you_owe"]["amount"], "1800.0");
-        assert_eq!(f["amounts"]["you_owe"]["amount"], "250.0");
-        assert_eq!(f["amounts"]["billed"]["amount"], "1600.0");
+        assert_eq!(items[1]["amounts"]["you_owe"]["amount"], "1440.0");
+        assert_eq!(f["amounts"]["you_owe"]["amount"], "200.0");
+        assert_eq!(f["amounts"]["billed"]["amount"], "1280.0");
         // A name no total gives sums the counted lines only.
         assert_eq!(f["amounts"]["not_covered"], Value::Null);
-        assert_eq!(f["amounts"]["copay"]["amount"], "250.0");
+        assert_eq!(f["amounts"]["copay"]["amount"], "200.0");
         // The title names what the counted lines paid for.
         assert_eq!(
             rec.display,
-            "Emergency visit, moderate and Blood cell test · Example Hospital"
+            "Emergency visit, moderate and Blood cell test · Example Lakeside Hospital"
         );
         assert_eq!(f["category"], "mixed");
         // Each line keeps the processing notes it points at; the claim
@@ -1099,7 +1099,7 @@ mod tests {
         assert!(items.iter().all(|i| i.get("counted").is_none()));
         assert_eq!(
             rec.display,
-            "Emergency visit, moderate and Blood cell test · Example Hospital"
+            "Emergency visit, moderate and Blood cell test · Example Lakeside Hospital"
         );
     }
 
