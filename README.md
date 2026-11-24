@@ -478,8 +478,12 @@ medrec events decisions --person Robin                  # the household's decisi
 medrec events undo <decision id>                        # the rules decide again
 ```
 
-`apart` and `together` name two of a person's records or documents, never
-an event, so a decision survives every rebuild. They go to the person's
+`show` takes an event id (`e_…`), and `undo` a decision id (`o_…`), which
+`events decisions` lists. `apart` and `together` take two of a person's
+record (`r_…`) or document (`d_…`) ids, never an event id. An event's id
+comes from the claim or record that opened it, so it changes when that
+member leaves the event; a decision names members so that it survives
+every rebuild. They go to the person's
 `overrides.json`, which outranks the rules. The app asks for the same
 through `_requests/`, and the refreshing machine records it on its next
 pass. Each person's events are also a view, `views/<person id>/events.json`,

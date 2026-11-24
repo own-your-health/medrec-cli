@@ -79,12 +79,13 @@ pub struct PersonViews {
     pub index: Option<String>,
     pub text: Option<String>,
     /// The MD5 of the person's `overrides.json`, null when there is none;
-    /// and those of the indexes of the guardians and children whose records
-    /// their events read, by person id. Both make only `events.json` stale.
+    /// and those of the index and text of each guardian or child whose
+    /// records their events read, by person id. Both make only
+    /// `events.json` stale.
     #[serde(default)]
     pub overrides: Option<String>,
     #[serde(default)]
-    pub linked: BTreeMap<String, String>,
+    pub linked: BTreeMap<String, LinkedFiles>,
     pub row: Row,
     pub records: BTreeMap<String, Run>,
     pub timeline: Run,
@@ -218,12 +219,16 @@ pub fn sync(f: &Folder, all: bool) -> Result<Synced, CliError> {
 
     // Whose views stand: their files have the MD5s the views were made from.
     let mut kept: BTreeMap<String, PersonViews> = BTreeMap::new();
-    let linked_md5s = |p: &Person| -> Result<BTreeMap<String, String>, CliError> {
+    let linked_md5s = |p: &Person| -> Result<BTreeMap<String, LinkedFiles>, CliError> {
         let mut m = BTreeMap::new();
         for q in crate::events::linked_people(&h, p) {
-            if let Some(md5) = store.md5(&folder::index_rel(q))? {
-                m.insert(q.id.clone(), md5);
-            }
+            m.insert(
+                q.id.clone(),
+                LinkedFiles {
+                    index: store.md5(&folder::index_rel(q))?,
+                    text: store.md5(&folder::text_rel(q))?,
+                },
+            );
         }
         Ok(m)
     };
@@ -309,14 +314,20 @@ pub fn sync(f: &Folder, all: bool) -> Result<Synced, CliError> {
         }
         let orel = crate::events::overrides_rel(p);
         let otext = store.read_text(&orel)?;
-        let overrides: Option<crate::events::Overrides> =
-            otext.as_deref().map(|t| parse(t, &orel)).transpose()?;
+        // A decisions file that does not read is left out of the events,
+        // not allowed to stop the person's views: the events say so.
+        let overrides: Option<Result<crate::events::Overrides, ()>> = otext.as_deref().map(|t| {
+            parse::<crate::events::Overrides>(t, &orel)
+                .ok()
+                .filter(|o| o.person == p.id && o.schema == crate::events::OVERRIDES_SCHEMA)
+                .ok_or(())
+        });
         let me = &loaded[&p.id];
-        let events = crate::events::build(&crate::events::Input {
+        let mut events = crate::events::build(&crate::events::Input {
             person: p,
             index: &me.idx,
             texts: &me.texts,
-            overrides: overrides.as_ref().filter(|o| o.person == p.id),
+            overrides: overrides.as_ref().and_then(|o| o.as_ref().ok()),
             linked: linked
                 .iter()
                 .map(|q| crate::events::Linked {
@@ -326,12 +337,24 @@ pub fn sync(f: &Folder, all: bool) -> Result<Synced, CliError> {
                 })
                 .collect(),
         });
+        if matches!(overrides, Some(Err(()))) {
+            events["overrides_unreadable"] = Value::Bool(true);
+        }
         let from = EventsFrom {
             events,
             overrides: otext.as_deref().map(|t| md5_hex(t.as_bytes())),
             linked: linked
                 .iter()
-                .filter_map(|q| loaded[&q.id].index_md5.clone().map(|m| (q.id.clone(), m)))
+                .map(|q| {
+                    let l = &loaded[&q.id];
+                    (
+                        q.id.clone(),
+                        LinkedFiles {
+                            index: l.index_md5.clone(),
+                            text: l.text_md5.clone(),
+                        },
+                    )
+                })
                 .collect(),
         };
         let v = person(
@@ -631,11 +654,18 @@ fn name_of(r: &Record) -> Name {
 
 /// Every view file of one person into `out`, by path in the folder, and
 /// the person's entry in `views.json`.
+/// A linked person's files as a person's events read them.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct LinkedFiles {
+    pub index: Option<String>,
+    pub text: Option<String>,
+}
+
 /// What a person's `events.json` is made from beyond their own files.
 pub(crate) struct EventsFrom {
     pub events: Value,
     pub overrides: Option<String>,
-    pub linked: BTreeMap<String, String>,
+    pub linked: BTreeMap<String, LinkedFiles>,
 }
 
 #[allow(clippy::too_many_arguments)]

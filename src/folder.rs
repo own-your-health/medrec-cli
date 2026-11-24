@@ -96,6 +96,16 @@ impl Folder {
         Folder::open_within(location, access, budget, LOCK_WAIT)
     }
 
+    /// Open, waiting up to `wait` for another writer to finish.
+    pub fn open_at_within(
+        location: &Location,
+        access: Access,
+        budget: Duration,
+        wait: Duration,
+    ) -> Result<Folder, CliError> {
+        Folder::open_within(location, access, budget, wait)
+    }
+
     fn open_within(
         location: &Location,
         access: Access,
@@ -214,8 +224,11 @@ impl Folder {
         let o: crate::events::Overrides = self
             .read_json(&rel)?
             .unwrap_or_else(|| crate::events::Overrides::new(&p.id));
-        if o.person != p.id {
-            return Err(CliError::Other(format!("{rel} names another person")));
+        if o.person != p.id || o.schema != crate::events::OVERRIDES_SCHEMA {
+            return Err(CliError::Other(format!(
+                "{rel} is not this person's {}",
+                crate::events::OVERRIDES_SCHEMA
+            )));
         }
         Ok(o)
     }

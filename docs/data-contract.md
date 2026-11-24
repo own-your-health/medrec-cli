@@ -712,8 +712,10 @@ with `event` in place of `scope`:
   `scope` and `event`, or with neither, is `invalid` (rule 1), as is one
   whose `person` is not in `household.json`.
 - The next pass writes the decision to the person's `overrides.json`, and
-  the views follow before it releases the lock. It imports nothing, so no
-  guard or interval applies.
+  the views follow before it releases the lock, once for all of a pass's
+  decisions. It imports nothing, so no guard or interval applies. While
+  another writer holds the folder, the request stays pending, with no
+  `done/` file, for the next pass.
 - Its `done/` file keeps `event` where a refresh's keeps `scope`.
   `handled.outcome` is `ok` once recorded (a decision already recorded is
   `ok` too), `invalid` when a member is not one of that person's records or
@@ -775,7 +777,7 @@ last.
   it on demand, and `--all` makes every person's again.
 - **Only what changed.** A person keeps their views when their `index.json`,
   `text.json` and `overrides.json` and their linked people's `index.json`
-  have the MD5s `views.json` recorded, under the same `household.json` and
+  and `text.json` have the MD5s `views.json` recorded, under the same `household.json` and
   medrec version. Otherwise their views are made
   again, and only views the folder does not already hold under their
   stored names are uploaded. An unchanged view keeps its name and is not
@@ -806,8 +808,8 @@ A reader decides freshness by MD5, as Drive reports it (`md5Checksum`):
   has stale views.
 - A different `household.json` MD5 makes every person's views stale.
 - A person whose `overrides.json` MD5 differs from `overrides`, or one of
-  whose linked people's `index.json` MD5 differs from `linked`, has a
-  stale `events.json` only. A reader that does not read `events.json`
+  whose linked people's `index.json` or `text.json` MD5 differs from
+  `linked`, has a stale `events.json` only. A reader that does not read `events.json`
   ignores both.
 - A view that is missing, or whose MD5 is not the one `files` gives,
   belongs to a pass still arriving.
@@ -816,7 +818,7 @@ A reader decides freshness by MD5, as Drive reports it (`md5Checksum`):
 
 ```json
 {"schema":"medrec-views/v2","medrec":"0.9.0","household":"<md5>",
- "people":{"p_…":{"index":"<md5>","text":"<md5>","overrides":null,"linked":{"p_…":"<md5>"},
+ "people":{"p_…":{"index":"<md5>","text":"<md5>","overrides":null,"linked":{"p_…":{"index":"<md5>","text":"<md5>"}},
                   "row":{…},"records":{…},"timeline":{…},"search":{…},
                   "files":{"summary.json":"<md5>","records-result-0.json":"<md5>",…}}}}
 ```
@@ -827,7 +829,7 @@ A reader decides freshness by MD5, as Drive reports it (`md5Checksum`):
 | `household` | The MD5 (hex) of `household.json` as the views were made from it. |
 | `people.<id>.index`, `.text` | The MD5s of the person's `index.json` and `text.json` as read; `null` when the file is absent. |
 | `people.<id>.overrides` | The MD5 of the person's `overrides.json` as read; `null` when there is none (0.9.0 and later). |
-| `people.<id>.linked` | For each person linked to this one (Events, below) whose `index.json` exists, that file's MD5 as read; `{}` when none (0.9.0 and later). |
+| `people.<id>.linked` | For each person linked to this one (Events, below), the MD5s of their `index.json` and `text.json` as read, as `{"index", "text"}`, each `null` when the file is absent; `{}` when no one is linked (0.9.0 and later). |
 | `row` | `documents`, `records`, `studies`, and `newest` and `last_import` when there are any: the person's line in `medrec_summary`'s people list, without `notes`. |
 | `records` | For each record kind, `{"shards": [[newest day, oldest day, count], …], "undated": count}`: its dated shards by number, and how many records its undated file holds. |
 | `timeline` | The timeline's shards, the same way. |
@@ -1027,6 +1029,15 @@ matching rules), then the household's decisions (`overrides.json`).
 | `aliases` | Clinicians learned to belong to a practice, with the paper that says so. |
 | `undated` | Claims with no date, in no event. |
 | `overrides` | How many of the household's decisions applied. |
+| `overrides_unreadable` | `true` when the person's `overrides.json` does not read as `medrec-overrides/v1`: the events are the rules' alone, and medrec writes no decision over the file until it is fixed or removed. Absent otherwise. |
+
+`money` for an office visit whose one claim gave no `allowed` and no
+`you_owe`, only its deductible:
+
+```json
+{"currency": "USD", "billed": "300.00", "plan_paid": "180.00", "you_owe": "40.00",
+ "you_owe_added": true, "share": {"deductible": "40.00"}, "partial": ["allowed"]}
+```
 
 - **Every claim is in exactly one event.** A portal visit, a result or a
   paper joins at most one.
@@ -1040,12 +1051,14 @@ matching rules), then the household's decisions (`overrides.json`).
   claims takes about 150 KB. A reader parses it whole; it stays one file up
   to 1 MB, and a person past that would take a later schema that cuts it
   the way the timeline is cut.
-- **`private`** (0.9.1 and later): `true` on an event about mental health,
-  reproductive and fertility care, sexual health or substance use, absent
-  otherwise. It is discretion, not access control: a reader leaves it off
-  shared screens and household-wide answers, and shows it on that person's
-  own pages, or when a question is about that person or names the item.
-  Anyone who can read the folder can read it.
+- **Planned, not yet written: `private`.** A later release (0.9.1) marks
+  an event about mental health, reproductive and fertility care, sexual
+  health or substance use with `private: true`. No release writes it yet,
+  so until one does its absence means "not judged", never "not
+  sensitive". It will be discretion, not access control: a reader leaves
+  such an event off shared screens and household-wide answers, and shows
+  it on that person's own pages, or when a question is about that person
+  or names the item. Anyone who can read the folder can read it.
 
 ## Readers
 

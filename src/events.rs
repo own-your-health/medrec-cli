@@ -2689,17 +2689,23 @@ pub fn of_person(
 ) -> Result<Value, pk_cli_core::CliError> {
     let idx = folder.index(p)?;
     let texts = folder.text(p)?;
-    let overrides = folder.overrides(p)?;
+    // As the views do: a decisions file that does not parse is left out;
+    // one the store cannot reach fails the call.
+    let overrides = match folder.overrides(p) {
+        Ok(o) => Ok(o),
+        Err(pk_cli_core::CliError::Other(_)) => Err(()),
+        Err(e) => return Err(e),
+    };
     let linked_people = linked_people(h, p);
     let mut linked = Vec::new();
     for q in &linked_people {
         linked.push((*q, folder.index(q)?, folder.text(q)?));
     }
-    Ok(build(&Input {
+    let mut v = build(&Input {
         person: p,
         index: &idx,
         texts: &texts,
-        overrides: Some(&overrides),
+        overrides: overrides.as_ref().ok(),
         linked: linked
             .iter()
             .map(|(q, i, t)| Linked {
@@ -2708,7 +2714,11 @@ pub fn of_person(
                 texts: Some(t),
             })
             .collect(),
-    }))
+    });
+    if overrides.is_err() {
+        v["overrides_unreadable"] = Value::Bool(true);
+    }
+    Ok(v)
 }
 
 /// Record a decision: `apart` or `together`, naming two of the person's

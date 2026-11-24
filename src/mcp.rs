@@ -648,6 +648,11 @@ impl MedrecTools {
         if id.is_some() && a.kind != Kind::Events {
             return Err(ToolError::usage("id applies to kind `events` only"));
         }
+        if active && a.kind == Kind::Events {
+            return Err(ToolError::usage(
+                "active does not apply to kind `events`; status says which are still waiting",
+            ));
+        }
         if let Some(t) = doc_type {
             if a.kind != Kind::Documents {
                 return Err(ToolError::usage(

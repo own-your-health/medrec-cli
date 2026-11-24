@@ -1211,22 +1211,20 @@ fn events_cmd(cli: &Cli, cmd: &EventsCmd, store: &ConfigStore) -> Result<(), Cli
         } => {
             let (f, h) = read(store, cli)?;
             let rows = medrec::events::list(&f, &h, person.as_deref(), &range.range())?;
-            let shown: Vec<Value> = list
-                .take(&rows)
-                .iter()
-                .map(|e| {
-                    let mut e = e.clone();
-                    e["you_owe"] = e["money"]["you_owe"].clone();
-                    e
-                })
-                .collect();
+            let shown = list.take(&rows);
             output::emit(
                 json,
                 "event-list",
                 serde_json::json!({ "items": shown }),
                 |v| {
+                    // The share as a column of the table only; the JSON
+                    // keeps it in `money`.
+                    let mut v = v.clone();
+                    for e in v["items"].as_array_mut().into_iter().flatten() {
+                        e["you_owe"] = e["money"]["you_owe"].clone();
+                    }
                     table(
-                        v,
+                        &v,
                         &[
                             "start",
                             "end",

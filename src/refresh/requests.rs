@@ -30,9 +30,7 @@ pub struct Valid {
     kept: Map<String, Value>,
 }
 
-/// A request refused by rule 1.
 impl Valid {
-    /// When the request was made (Unix seconds).
     /// The requester's name as shown, never trusted.
     pub fn requested_by_name(&self) -> Option<String> {
         let by = self.kept.get("requested_by")?;
@@ -42,6 +40,7 @@ impl Valid {
             .map(str::to_string)
     }
 
+    /// When the request was made (Unix seconds).
     pub fn requested_at(&self) -> Option<i64> {
         self.kept
             .get("requested_at")
@@ -50,6 +49,7 @@ impl Valid {
     }
 }
 
+/// A request refused by rule 1.
 #[derive(Debug, Clone)]
 pub struct Invalid {
     pub name: String,
@@ -191,12 +191,14 @@ pub fn parse(name: &str, body: &[u8], known: &dyn Known) -> Parsed {
         (Some(_), None) => return bad("its event is not an object".into()),
         (None, _) => None,
     };
-    let scope = match v.get("scope") {
-        _ if event.is_some() => event.expect("checked"),
-        Some(Value::Object(s)) if s.len() == 1 && s.get("all") == Some(&Value::Bool(true)) => {
+    let scope = match (event, v.get("scope")) {
+        (Some(event), _) => event,
+        (None, Some(Value::Object(s)))
+            if s.len() == 1 && s.get("all") == Some(&Value::Bool(true)) =>
+        {
             Scope::All
         }
-        Some(Value::Object(s)) if s.len() == 1 => {
+        (None, Some(Value::Object(s))) if s.len() == 1 => {
             match (
                 s.get("person").and_then(Value::as_str),
                 s.get("source").and_then(Value::as_str),
@@ -365,6 +367,76 @@ mod tests {
         ))
         .contains("scope"));
         assert!(why(parse(NAME, &body(json!("all")), &K)).contains("scope"));
+    }
+
+    #[test]
+    fn an_event_request_names_a_person_and_two_of_their_records_or_documents() {
+        let body = |extra: Value| {
+            let mut v = json!({
+                "schema": REQUEST_SCHEMA,
+                "id": "x_aaaaaaaaaaaaaaaaaaaa",
+                "requested_at": "2026-11-22T20:03:12Z",
+            });
+            for (k, x) in extra.as_object().unwrap() {
+                v[k] = x.clone();
+            }
+            serde_json::to_vec(&v).unwrap()
+        };
+        let pid = "p_aaaaaaaaaaaaaaaaaaaa";
+        let (a, b) = ("r_aaaaaaaaaaaaaaaaaaaa", "d_bbbbbbbbbbbbbbbbbbbb");
+        match parse(
+            NAME,
+            &body(json!({"event": {"person": pid, "apart": [a, b]}})),
+            &K,
+        ) {
+            Parsed::Valid(v) => assert_eq!(
+                v.scope,
+                Scope::Event {
+                    person: pid.into(),
+                    kind: "apart".into(),
+                    members: [a.into(), b.into()],
+                }
+            ),
+            Parsed::Invalid(i) => panic!("{}", i.why),
+        }
+        for (event, want) in [
+            (
+                json!({"event": {"person": pid, "merge": [a, b]}}),
+                "apart or together",
+            ),
+            (
+                json!({"event": {"person": pid, "apart": [a, b], "together": [a, b]}}),
+                "apart or together",
+            ),
+            (
+                json!({"event": {"person": pid, "apart": [a, a]}}),
+                "two record or document ids",
+            ),
+            (
+                json!({"event": {"person": pid, "apart": [a]}}),
+                "two record or document ids",
+            ),
+            (
+                json!({"event": {"person": pid, "apart": [a, b, a]}}),
+                "two record or document ids",
+            ),
+            (
+                json!({"event": {"person": pid, "apart": [a, "e_cccccccccccccccccccc"]}}),
+                "two record or document ids",
+            ),
+            (
+                json!({"event": {"person": "p_nosuchpersonaaaaaaa", "apart": [a, b]}}),
+                "no person",
+            ),
+            (json!({"event": [a, b]}), "not an object"),
+            (
+                json!({"event": {"person": pid, "apart": [a, b]}, "scope": {"all": true}}),
+                "both",
+            ),
+        ] {
+            let why = why(parse(NAME, &body(event.clone()), &K));
+            assert!(why.contains(want), "{event}: {why}");
+        }
     }
 
     #[test]

@@ -489,14 +489,17 @@ fn counts(r: &import::Report) -> BTreeMap<String, u64> {
     out
 }
 
-/// One pass: the scheduled one, or a person's `medrec refresh`.
-/// Apply a request's event decision: `ok` once it is in the person's
-/// `overrides.json` (the views follow as the folder closes), `invalid` when
-/// a member is not that person's, `failed` when the folder could not be
-/// written.
+/// How long a pass waits for another writer before it leaves the
+/// household's event decisions pending for the next pass (at most the
+/// import's wait).
+const EVENT_LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// Apply a request's event decision through the pass's one write `folder`,
+/// whose views follow once, as it closes: `ok` once it is in the person's
+/// `overrides.json`, `invalid` when a member is not that person's, `failed`
+/// when the folder could not be written.
 fn event_request(
-    location: &Location,
-    cfg: &Config,
+    folder: &Folder,
     h: &crate::model::Household,
     v: &requests::Valid,
 ) -> (&'static str, String) {
@@ -515,12 +518,8 @@ fn event_request(
         );
     };
     let by = v.requested_by_name();
-    let f = match Folder::open_at(location, Access::Write, cfg.store_budget()) {
-        Ok(f) => f,
-        Err(e) => return ("failed", e.message().to_string()),
-    };
     match crate::events::decide(
-        &f,
+        folder,
         p,
         kind,
         &members[0],
@@ -538,6 +537,7 @@ fn event_request(
     }
 }
 
+/// One pass: the scheduled one, or a person's `medrec refresh`.
 pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport, CliError> {
     let location = cfg.folder_location()?;
     let Some(_lock) = state::try_lock(&location)? else {
@@ -1085,8 +1085,12 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
         return Err(err);
     }
 
-    // Each request's outcome, then the pending file goes.
+    // Each request's outcome, then the pending file goes. The event
+    // decisions share one write handle, opened at the first, so the views
+    // follow them once; while another writer holds the folder they stay
+    // pending for the next pass.
     let picked = time::fmt(started);
+    let mut events_folder: Option<Result<Folder, CliError>> = None;
     for p in &parsed {
         if let Parsed::Valid(v) = p {
             let waits = want
@@ -1095,11 +1099,28 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
             if waits {
                 continue;
             }
+            if matches!(v.scope, Scope::Event { .. }) {
+                let f = events_folder.get_or_insert_with(|| {
+                    Folder::open_at_within(
+                        &location,
+                        Access::Write,
+                        cfg.store_budget(),
+                        EVENT_LOCK_WAIT.min(cfg.import_timeout()),
+                    )
+                });
+                if f.as_ref().is_err_and(folder::is_lock_busy) {
+                    continue;
+                }
+            }
         }
         let (sources, outcome, message): (Vec<HandledSource>, String, String) = match p {
             Parsed::Invalid(i) => (Vec::new(), "invalid".into(), clip(&i.why, MESSAGE_MAX)),
             Parsed::Valid(v) if matches!(v.scope, Scope::Event { .. }) => {
-                let (outcome, message) = event_request(&location, cfg, &h, v);
+                let (outcome, message) = match events_folder.as_ref() {
+                    Some(Ok(f)) => event_request(f, &h, v),
+                    Some(Err(e)) => ("failed", e.message().to_string()),
+                    None => ("failed", "the folder was not opened to write".into()),
+                };
                 (Vec::new(), outcome.into(), clip(&message, MESSAGE_MAX))
             }
             Parsed::Valid(v) => {
@@ -1165,6 +1186,9 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
             outcome,
         });
     }
+
+    // The event decisions' views, once.
+    drop(events_folder);
 
     // Old outcomes go, once a day.
     if started - local.pruned_at >= 86400 {

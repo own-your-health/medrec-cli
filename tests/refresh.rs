@@ -771,8 +771,38 @@ fn a_folder_another_writer_holds_records_nothing_and_keeps_the_request() {
     held.lock().unwrap();
 
     e.request("x_aaaaaaaaaaaaaaaaaaaa", json!({"all": true}));
+    // And a decision on Robin's events, which waits for the folder too.
+    let h = e.json_at("household.json");
+    let robin = h["people"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["name"] == "Robin Testperson")
+        .unwrap()
+        .clone();
+    let idx = e.json_at(&format!("{}/index.json", robin["folder"].as_str().unwrap()));
+    let ids: Vec<&str> = idx["records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .take(2)
+        .map(|r| r["id"].as_str().unwrap())
+        .collect();
+    event_request(
+        &e,
+        "x_eventaaaaaaaaaaaaaaa",
+        json!({"person": robin["id"], "apart": ids}),
+    );
+    let pending = e
+        .records()
+        .join("_requests/20261124T120000Z_x_eventaaaaaaaaaaaaaaa.json");
     let v = e.ok(&["refresh", "--scheduled"]);
     drop(held);
+    assert!(pending.exists(), "the decision stays pending");
+    assert!(!e
+        .records()
+        .join("_requests/done/20261124T120000Z_x_eventaaaaaaaaaaaaaaa.json")
+        .exists());
     assert_eq!(v["attempts"][0]["outcome"], "busy", "{v}");
     assert!(v["requests"].as_array().unwrap().is_empty(), "{v}");
     assert_eq!(attempt_lines(&e).len(), lines, "an attempt was recorded");
@@ -784,9 +814,16 @@ fn a_folder_another_writer_holds_records_nothing_and_keeps_the_request() {
         .join("_requests/20261122T200312Z_x_aaaaaaaaaaaaaaaaaaaa.json")
         .exists());
 
-    // The next pass, with the folder free, serves it.
+    // The next pass, with the folder free, serves both.
     let v = e.ok(&["refresh", "--scheduled"]);
-    assert_eq!(v["requests"][0]["outcome"], "ok", "{v}");
+    let outcomes: Vec<&str> = v["requests"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["outcome"].as_str().unwrap())
+        .collect();
+    assert_eq!(outcomes, ["ok", "ok"], "{v}");
+    assert!(!pending.exists());
     let _ = std::fs::remove_dir_all(&e.root);
 }
 
@@ -1438,6 +1475,101 @@ fn holding<'a>(v: &'a Value, id: &str) -> &'a Value {
         .unwrap()
 }
 
+/// Alex's records the invented parent's (tests/fixtures/events), Robin a
+/// child of Alex's with none: the people, as household.json has them.
+fn with_event_fixtures(e: &Env) -> (Value, Value) {
+    let h = e.json_at("household.json");
+    let person = |name: &str| {
+        h["people"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["name"] == name)
+            .unwrap()
+            .clone()
+    };
+    let (alex, robin) = (person("Alex Testperson"), person("Robin Testperson"));
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/events");
+    for (from, to) in [
+        ("parent.index.json", "index.json"),
+        ("parent.text.json", "text.json"),
+    ] {
+        let mut v: Value =
+            serde_json::from_str(&std::fs::read_to_string(fixtures.join(from)).unwrap()).unwrap();
+        v["person"] = alex["id"].clone();
+        std::fs::write(
+            e.records().join(alex["folder"].as_str().unwrap()).join(to),
+            serde_json::to_vec(&v).unwrap(),
+        )
+        .unwrap();
+    }
+    (alex, robin)
+}
+
+#[test]
+fn a_decision_is_kept_replaced_or_undone_and_a_broken_file_never_stops_the_views() {
+    let e = Env::new("decisions");
+    setup(&e);
+    let (alex, _) = with_event_fixtures(&e);
+    let aid = alex["id"].as_str().unwrap();
+    e.ok(&["views", "write"]);
+    let file = e
+        .records()
+        .join(alex["folder"].as_str().unwrap())
+        .join("overrides.json");
+    let (doc, lab) = ("r_checkupdocaaaaaaaaaa", "r_checkuplabaaaaaaaaaa");
+
+    // Mistakes change nothing.
+    for (args, code) in [
+        (vec!["events", "apart", doc, doc], 2),
+        (vec!["events", "apart", doc, "r_nosucharecordaaaaaaa"], 4),
+        (vec!["events", "together", "d_nosuchadocumentaaaaa", lab], 4),
+        (vec!["events", "undo", "o_aaaaaaaaaaaaaaaaaaaa"], 4),
+        (vec!["events", "undo", "not-a-decision"], 2),
+        (vec!["events", "show", "e_nosuchaneventaaaaaaa"], 4),
+    ] {
+        let (got, text) = e.code(&args);
+        assert_eq!(got, Some(code), "{args:?}: {text}");
+    }
+    assert!(!file.exists(), "no decision was written");
+
+    // The same decision again is unchanged, and the file with it; the other
+    // kind for the same two replaces it.
+    assert_eq!(e.ok(&["events", "apart", doc, lab])["status"], "recorded");
+    let once = std::fs::read(&file).unwrap();
+    assert_eq!(e.ok(&["events", "apart", lab, doc])["status"], "unchanged");
+    assert_eq!(std::fs::read(&file).unwrap(), once);
+    let t = e.ok(&["events", "together", doc, lab]);
+    assert_eq!(t["status"], "recorded");
+    let d = e.ok(&["events", "decisions"]);
+    let items = d["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1, "{d}");
+    assert_eq!(
+        (&items[0]["kind"], &items[0]["id"]),
+        (&json!("together"), &t["id"])
+    );
+    e.ok(&["events", "undo", t["id"].as_str().unwrap()]);
+    assert!(e.ok(&["events", "decisions"])["items"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+
+    // A decisions file that does not read leaves the events without it and
+    // says so; every other view is still written, and no decision is
+    // written over it.
+    std::fs::write(&file, b"{not json").unwrap();
+    e.ok(&["views", "write"]);
+    let v = events_view(&e, aid);
+    assert_eq!(v["overrides_unreadable"], true, "{v}");
+    assert!(!v["events"].as_array().unwrap().is_empty());
+    let listed = e.ok(&["events", "list", "--person", "Alex"]);
+    assert!(!listed["items"].as_array().unwrap().is_empty());
+    let (code, text) = e.code(&["events", "apart", doc, lab]);
+    assert_ne!(code, Some(0), "{text}");
+    assert_eq!(std::fs::read(&file).unwrap(), b"{not json");
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
 #[test]
 fn an_event_request_records_the_households_decision_and_the_views_follow() {
     let e = Env::new("events");
@@ -1452,33 +1584,8 @@ fn an_event_request_records_the_households_decision_and_the_views_follow() {
         "--provider-profile",
         "adult1",
     ]);
-    // Alex's records are the invented parent's (tests/fixtures/events).
-    let h = e.json_at("household.json");
-    let person = |name: &str| {
-        h["people"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|p| p["name"] == name)
-            .unwrap()
-            .clone()
-    };
-    let (alex, robin) = (person("Alex Testperson"), person("Robin Testperson"));
+    let (alex, robin) = with_event_fixtures(&e);
     let aid = alex["id"].as_str().unwrap();
-    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/events");
-    for (from, to) in [
-        ("parent.index.json", "index.json"),
-        ("parent.text.json", "text.json"),
-    ] {
-        let mut v: Value =
-            serde_json::from_str(&std::fs::read_to_string(fixtures.join(from)).unwrap()).unwrap();
-        v["person"] = json!(aid);
-        std::fs::write(
-            e.records().join(alex["folder"].as_str().unwrap()).join(to),
-            serde_json::to_vec(&v).unwrap(),
-        )
-        .unwrap();
-    }
     e.ok(&["views", "write"]);
 
     // Every person has an events view; Alex's names Robin's index, a
@@ -1487,16 +1594,14 @@ fn an_event_request_records_the_households_decision_and_the_views_follow() {
     let entry = &views["people"][aid];
     assert_eq!(entry["overrides"], Value::Null, "{entry}");
     let rid = robin["id"].as_str().unwrap();
+    let robin_dir = e.records().join(robin["folder"].as_str().unwrap());
     assert_eq!(
-        entry["linked"][rid].as_str(),
-        Some(
-            md5_of(
-                &e.records()
-                    .join(robin["folder"].as_str().unwrap())
-                    .join("index.json")
-            )
-            .as_str()
-        )
+        entry["linked"][rid],
+        json!({
+            "index": md5_of(&robin_dir.join("index.json")),
+            "text": md5_of(&robin_dir.join("text.json")),
+        }),
+        "{entry}"
     );
     let before = events_view(&e, aid);
     assert_eq!(before["schema"], "medrec-events/v1");
@@ -1523,7 +1628,7 @@ fn an_event_request_records_the_households_decision_and_the_views_follow() {
     event_request(
         &e,
         "x_eventbbbbbbbbbbbbbbb",
-        json!({"person": aid, "together": [doc, "r_notalexsaaaaaaaaaaa"]}),
+        json!({"person": aid, "together": [doc, "r_notalexsaaaaaaaaaaaa"]}),
     );
     e.ok(&["refresh", "--scheduled"]);
     let done = e.json_at("_requests/done/20261124T120000Z_x_eventaaaaaaaaaaaaaaa.json");
@@ -1531,6 +1636,13 @@ fn an_event_request_records_the_households_decision_and_the_views_follow() {
     assert_eq!(done["event"], json!({"person": aid, "apart": [doc, lab]}));
     let refused = e.json_at("_requests/done/20261124T120000Z_x_eventbbbbbbbbbbbbbbb.json");
     assert_eq!(refused["handled"]["outcome"], "invalid", "{refused}");
+    assert!(
+        refused["handled"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("not one of the person's"),
+        "{refused}"
+    );
     let o = e.json_at(&format!(
         "{}/overrides.json",
         alex["folder"].as_str().unwrap()
@@ -1589,7 +1701,7 @@ fn an_event_request_records_the_households_decision_and_the_views_follow() {
         "events",
         "apart",
         "r_twoaaaaaaaaaaaaaaaaa",
-        "r_nosucharecordaaaaaa",
+        "r_nosucharecordaaaaaaa",
     ]);
     assert_eq!(code, Some(4));
     let _ = std::fs::remove_dir_all(&e.root);
