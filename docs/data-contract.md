@@ -399,8 +399,8 @@ fhir_base}`; an import's `kind` is `fhir` for a FHIR API read and the
 stream's `method` otherwise), `method` (`fhir-api`, `portal`, `scan`, `file`, `media`,
 `manual`), `source_resource` (`{type, id, version_id, last_updated}`),
 `fetched_at`, `filed_at`, `raw_path` (the verbatim file), `classified_by`
-(`medrec`, `organize-scans`, `hand`), `derived_from`, `filed_by` (`medrec
-<version>`).
+(`medrec`, `organize-scans`, `hand`), `derived_from` (`{document_id, rule_id}`, on a fact a rule read out of a
+document), `filed_by` (`medrec <version>`).
 
 ## text.json (`medrec-text/v1`)
 
@@ -1348,8 +1348,8 @@ when they have no bills. It is made from the person's documents, their
 
 ### Private (`private.json`, `medrec-private/v1`, 0.9.1 and later)
 
-The person's records, documents and events about mental health,
-reproductive and fertility care, sexual health or substance use, and the
+The person's records, documents, events and imaging studies about mental
+health, reproductive and fertility care, sexual health or substance use, and the
 medicines tied to them. **It is discretion, not access control.** A reader
 keeps them off shared screens (the household's Home, its Everyone calendar,
 a doctor sheet for someone else) and out of answers about the whole
@@ -1362,7 +1362,9 @@ nothing is private.
 {"schema": "medrec-private/v1", "person": "p_…",
  "records": {"r_…": {"area": "mental_health", "from": "code"}},
  "documents": {"d_…": {"area": "mental_health", "from": "provider"}},
- "events": {"e_…": {"area": "mental_health", "from": "members"}}}
+ "events": {"e_…": {"area": "mental_health", "from": "members"}},
+ "studies": {"m_…": {"area": "mental_health", "from": "report"}},
+ "unreported_studies": ["m_…"]}
 ```
 
 - **`area`**: `mental_health`, `reproductive`, `sexual_health`,
@@ -1380,6 +1382,8 @@ nothing is private.
   | `test` | is a result or report of a test of an area: sexually transmitted infections, pregnancy and fertility, drug screens |
   | `members` | is an event with a private claim or portal visit, or whose own members are all private |
   | `event` | is a member of a private event |
+  | `record` | is a document that a private record links (`documents` in `records`), whatever else links it (0.9.5 and later) |
+  | `report` | is an imaging study whose `report`, a document or record, is private (0.9.5 and later) |
   | `household` | was marked private by the household; its `area` is the one the rules give it, else `household` |
 
 - An event's own members are those without `person`. A paper an event shows
@@ -1392,6 +1396,15 @@ nothing is private.
   mark on an event id the person no longer has that shares a member with
   it (`marks.json`, above). A mark naming a record or document the person
   no longer has, or an event none of whose members remain, is skipped.
+- **`studies`** (0.9.5 and later) has the studies whose report makes them
+  private. **`unreported_studies`** has the ids of those with no `report`, or
+  one the person does not have. No report judges them, so a reader leaves
+  them out of answers about the whole household as it does private items,
+  counts them in the same `private-left-out` count, and shows them in an
+  answer about their person, with no `private` mark. Naming one includes it
+  as it does any item. Absent when there are none. Views from 0.9.4 and
+  earlier have neither map: a reader judges a study from its `report`, or
+  treats it as unreported.
 - **`marks_unreadable`**: `true` when the person's `marks.json` does not
   read, so no household mark applies. Absent otherwise. Any of the
   person's items may then be one the household marked private, so a

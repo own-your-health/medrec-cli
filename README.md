@@ -523,13 +523,15 @@ person's bills are also a view, `views/<person id>/bills.json`
 
 ### Private items
 
-Records, documents and events about mental health, reproductive and
-fertility care, sexual health or substance use, and the medicines tied to
-them, are private: the app keeps them off shared screens (Home, the
+Records, documents, events and imaging studies about mental health,
+reproductive and fertility care, sexual health or substance use, and the
+medicines tied to them, are private: the app keeps them off shared screens (Home, the
 Everyone calendar, a doctor sheet for someone else) and shows them on that
 person's own pages, and Claude leaves them out of answers about the whole
 household. medrec finds them by their codes, medicines, tests and the
-practice that made them. The household has the last word.
+practice that made them, a document by any private record that links it,
+and a study by its report. A study with no report is left out of answers
+about the whole household too. The household has the last word.
 
 ```sh
 medrec private list --person Robin          # each private item, its area and why

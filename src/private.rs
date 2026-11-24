@@ -1,5 +1,5 @@
 //! Private items (`views/<pid>/private.json`, `medrec-private/v1`): a
-//! person's records, documents and events about mental health,
+//! person's records, documents, events and imaging studies about mental health,
 //! reproductive and fertility care, sexual health or substance use, and
 //! the medicines tied to them. They come from codes (ICD-10), the names of
 //! the places and clinicians, the portal they came from, the medicines and
@@ -302,8 +302,9 @@ pub fn build(p: &Person, idx: &PersonIndex, events: &Value, marks: &[Mark]) -> V
         }
     }
 
-    // The household's marks, records and documents first: an event follows
-    // what its members are.
+    // The household's marks on records, then the documents a private record
+    // links, then the marks on documents: an event follows what its members
+    // are.
     let mark_of: BTreeMap<&str, bool> =
         marks.iter().map(|m| (m.item.as_str(), m.private)).collect();
     let household = Why {
@@ -326,87 +327,140 @@ pub fn build(p: &Person, idx: &PersonIndex, events: &Value, marks: &[Mark]) -> V
         .flatten()
         .filter_map(|e| e["id"].as_str())
         .collect();
+    // A document the person has that any private record links is private,
+    // unless the household marked it not.
+    let documents: BTreeSet<&str> = idx.documents.iter().map(|d| d.id.as_str()).collect();
+    let link = |items: &mut BTreeMap<String, Why>| {
+        let linked: Vec<(String, Why)> = idx
+            .records
+            .iter()
+            .filter_map(|r| items.get(&r.id).map(|w| (r, *w)))
+            .flat_map(|(r, w)| r.documents.iter().map(move |d| (d.clone(), w)))
+            .filter(|(d, _)| documents.contains(d.as_str()))
+            .filter(|(d, _)| mark_of.get(d.as_str()) != Some(&false))
+            .collect();
+        for (d, w) in linked {
+            items.entry(d).or_insert(Why {
+                area: w.area,
+                from: "record",
+            });
+        }
+    };
     // A mark naming an item the person no longer has is skipped.
-    let held: BTreeSet<&str> = idx
-        .records
-        .iter()
-        .map(|r| r.id.as_str())
-        .chain(idx.documents.iter().map(|d| d.id.as_str()))
-        .collect();
-    for (id, mark) in mark_of.iter().filter(|(id, _)| held.contains(**id)) {
-        apply(&mut items, id, Some(*mark));
+    for r in &idx.records {
+        apply(&mut items, &r.id, mark_of.get(r.id.as_str()).copied());
+    }
+    link(&mut items);
+    for d in &idx.documents {
+        apply(&mut items, &d.id, mark_of.get(d.id.as_str()).copied());
     }
 
     // An event is private when a claim or portal visit in it is, or every
-    // record and paper in it is; then so is all of it.
-    let mut by_event: Vec<(String, Vec<String>)> = Vec::new();
-    for e in events["events"].as_array().into_iter().flatten() {
-        let Some(eid) = e["id"].as_str() else {
-            continue;
-        };
-        let ids = own_members(e);
-        let lead = e["members"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter(|m| m.get("person").is_none())
-            .filter(|m| m["kind"] == "claim" || m["role"] == "portal")
-            .filter_map(|m| m["record"].as_str().or(m["document"].as_str()))
-            .find_map(|id| items.get(id).copied());
-        let all = (!ids.is_empty() && ids.iter().all(|id| items.contains_key(id)))
-            .then(|| items[&ids[0]]);
-        if let Some(w) = lead.or(all) {
-            items.insert(
-                eid.to_string(),
-                Why {
-                    area: w.area,
-                    from: "members",
-                },
-            );
-        }
-        // The last mark that applies: its own, else one that followed its
-        // members here.
-        let mark = marks
-            .iter()
-            .rev()
-            .find(|m| m.item == eid)
-            .or_else(|| {
-                marks
-                    .iter()
-                    .rev()
-                    .find(|m| marks_event(m, eid, &ids, &event_ids))
-            })
-            .map(|m| m.private);
-        apply(&mut items, eid, mark);
-        by_event.push((eid.to_string(), ids));
-    }
-    for (eid, ids) in &by_event {
-        let Some(w) = items.get(eid).copied() else {
-            continue;
-        };
-        for id in ids {
-            if !items.contains_key(id) && mark_of.get(id.as_str()) != Some(&false) {
+    // record and paper in it is; then so is all of it, and what it makes
+    // private can link more. Until nothing changes.
+    loop {
+        let before = items.len();
+        let mut by_event: Vec<(String, Vec<String>)> = Vec::new();
+        for e in events["events"].as_array().into_iter().flatten() {
+            let Some(eid) = e["id"].as_str() else {
+                continue;
+            };
+            let ids = own_members(e);
+            let lead = e["members"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|m| m.get("person").is_none())
+                .filter(|m| m["kind"] == "claim" || m["role"] == "portal")
+                .filter_map(|m| m["record"].as_str().or(m["document"].as_str()))
+                .find_map(|id| items.get(id).copied());
+            let all = (!ids.is_empty() && ids.iter().all(|id| items.contains_key(id)))
+                .then(|| items[&ids[0]]);
+            if let Some(w) = lead.or(all) {
                 items.insert(
-                    id.clone(),
+                    eid.to_string(),
                     Why {
                         area: w.area,
-                        from: "event",
+                        from: "members",
                     },
                 );
+            }
+            // The last mark that applies: its own, else one that followed
+            // its members here.
+            let mark = marks
+                .iter()
+                .rev()
+                .find(|m| m.item == eid)
+                .or_else(|| {
+                    marks
+                        .iter()
+                        .rev()
+                        .find(|m| marks_event(m, eid, &ids, &event_ids))
+                })
+                .map(|m| m.private);
+            apply(&mut items, eid, mark);
+            by_event.push((eid.to_string(), ids));
+        }
+        for (eid, ids) in &by_event {
+            let Some(w) = items.get(eid).copied() else {
+                continue;
+            };
+            for id in ids {
+                if !items.contains_key(id) && mark_of.get(id.as_str()) != Some(&false) {
+                    items.insert(
+                        id.clone(),
+                        Why {
+                            area: w.area,
+                            from: "event",
+                        },
+                    );
+                }
+            }
+        }
+        link(&mut items);
+        if items.len() == before {
+            break;
+        }
+    }
+
+    // A study is private when its report is. One with no report, or a
+    // report the person does not have, cannot be judged.
+    let mut unreported = Vec::new();
+    for s in &idx.studies {
+        let report = s
+            .report
+            .as_deref()
+            .filter(|r| documents.contains(r) || idx.records.iter().any(|x| x.id == *r));
+        match report {
+            None => unreported.push(s.id.clone()),
+            Some(r) => {
+                if let Some(w) = items.get(r).copied() {
+                    items.insert(
+                        s.id.clone(),
+                        Why {
+                            area: w.area,
+                            from: "report",
+                        },
+                    );
+                }
             }
         }
     }
 
     let mut out = json!({"schema": SCHEMA, "person": p.id,
-        "records": {}, "documents": {}, "events": {}});
+        "records": {}, "documents": {}, "events": {}, "studies": {}});
     for (id, w) in items {
         let kind = match id.get(..2) {
             Some("r_") => "records",
             Some("d_") => "documents",
             Some("e_") => "events",
+            Some("m_") => "studies",
             _ => continue,
         };
         out[kind][id] = w.json();
+    }
+    if !unreported.is_empty() {
+        out["unreported_studies"] = unreported.into();
     }
     out
 }
@@ -449,20 +503,31 @@ pub fn with_events(
 #[derive(Debug, Clone, Default)]
 pub struct Private {
     pub items: BTreeMap<String, String>,
+    /// Studies no report judges: held back from household-wide answers.
+    pub unreported_studies: Vec<String>,
 }
 
 impl Private {
     /// From a `private.json`.
     pub fn of(v: &Value) -> Private {
         let mut items = BTreeMap::new();
-        for kind in ["records", "documents", "events"] {
+        for kind in ["records", "documents", "events", "studies"] {
             for (id, w) in v[kind].as_object().into_iter().flatten() {
                 if let Some(a) = w["area"].as_str() {
                     items.insert(id.clone(), a.to_string());
                 }
             }
         }
-        Private { items }
+        let unreported_studies = v["unreported_studies"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|x| x.as_str().map(str::to_string))
+            .collect();
+        Private {
+            items,
+            unreported_studies,
+        }
     }
 
     /// The area of a private item.
@@ -800,6 +865,157 @@ mod tests {
         json!({"id": id, "kind": kind, "key": id, "date": "2026-10-28", "display": display,
             "fields": fields, "provenance": [{"source": {"kind": "fhir", "cli": "mychart"},
             "method": "fhir-api", "filed_at": "2026-11-20T10:00:00Z", "filed_by": "medrec"}]})
+    }
+
+    fn document(id: &str) -> Value {
+        json!({"id": id, "path": format!("Documents/2026/{id}.pdf"), "sha256": id, "md5": id,
+            "size": 1, "media_type": "application/pdf", "doc_type": "letter", "date": "2026-10-29",
+            "filed_at": "2026-11-20T10:00:00Z", "origin": {"kind": "file", "action": "copied"},
+            "provenance": {"source": {"kind": "scan"}, "method": "file",
+            "filed_at": "2026-11-20T10:00:00Z", "filed_by": "medrec"}})
+    }
+
+    fn study(id: &str, report: Option<&str>) -> Value {
+        let mut v = json!({"id": id, "study_uid": id, "path": format!("Imaging/{id}/"), "date": "2026-10-30",
+            "series": [], "instances": 0, "size": 0, "filed_at": "2026-11-20T10:00:00Z", "provenance": []});
+        if let Some(r) = report {
+            v["report"] = r.into();
+        }
+        v
+    }
+
+    /// A document follows the record that links it, and a study its report.
+    #[test]
+    fn a_document_follows_the_record_that_links_it_and_a_study_its_report() {
+        let mut therapy = record(
+            "r_therapyclaimaaaaaaaa",
+            "claim",
+            "Office visit",
+            json!({"provider": "Kim Example",
+                "diagnoses": [{"sequence": 1, "code": {"system": crate::normalize::ICD10, "code": "F41.1"}}]}),
+        );
+        therapy["documents"] = json!([
+            "d_eobaaaaaaaaaaaaaaaaa",
+            "d_sharedaaaaaaaaaaaaaa",
+            "d_goneaaaaaaaaaaaaaaa"
+        ]);
+        let mut checkup = record(
+            "r_checkupclaimaaaaaaaa",
+            "claim",
+            "Office visit",
+            json!({"provider": "Example Family Practice"}),
+        );
+        checkup["documents"] = json!(["d_sharedaaaaaaaaaaaaaa", "d_plainaaaaaaaaaaaaaaa"]);
+        let v_of = |marks: &[Mark]| {
+            let idx: PersonIndex = serde_json::from_value(json!({
+                "schema": "medrec-index/v1", "person": "p_testaaaaaaaaaaaaaaaa", "rev": 1, "imports": [],
+                "documents": [document("d_eobaaaaaaaaaaaaaaaaa"), document("d_sharedaaaaaaaaaaaaaa"),
+                    document("d_plainaaaaaaaaaaaaaaa"), document("d_reportaaaaaaaaaaaaa")],
+                "studies": [
+                    study("m_eobaaaaaaaaaaaaaaaaa", Some("d_eobaaaaaaaaaaaaaaaaa")),
+                    study("m_plainaaaaaaaaaaaaaa", Some("d_plainaaaaaaaaaaaaaaa")),
+                    study("m_recordaaaaaaaaaaaaa", Some("r_therapyclaimaaaaaaaa")),
+                    study("m_noneaaaaaaaaaaaaaaa", None),
+                    study("m_lostaaaaaaaaaaaaaaa", Some("d_lostaaaaaaaaaaaaaaaa"))],
+                "records": [therapy.clone(), checkup.clone()]
+            }))
+            .unwrap();
+            build(&person(), &idx, &json!({"events": []}), marks)
+        };
+        let v = v_of(&[]);
+        // Any record that links it is enough, and an unlinked one is not.
+        let docs = areas(&v, "documents");
+        assert_eq!(
+            docs,
+            json!({"d_eobaaaaaaaaaaaaaaaaa": MENTAL_HEALTH, "d_sharedaaaaaaaaaaaaaa": MENTAL_HEALTH})
+                .as_object()
+                .unwrap()
+                .clone()
+        );
+        assert_eq!(v["documents"]["d_eobaaaaaaaaaaaaaaaaa"]["from"], "record");
+        let studies = areas(&v, "studies");
+        assert_eq!(
+            studies,
+            json!({"m_eobaaaaaaaaaaaaaaaaa": MENTAL_HEALTH, "m_recordaaaaaaaaaaaaa": MENTAL_HEALTH})
+                .as_object()
+                .unwrap()
+                .clone()
+        );
+        assert_eq!(v["studies"]["m_eobaaaaaaaaaaaaaaaaa"]["from"], "report");
+        // No report, or one the person does not have: not judged.
+        let mut none = v["unreported_studies"].as_array().unwrap().clone();
+        none.sort_by_key(|x| x.to_string());
+        assert_eq!(
+            none,
+            [
+                json!("m_lostaaaaaaaaaaaaaaa"),
+                json!("m_noneaaaaaaaaaaaaaaa")
+            ]
+        );
+
+        // The household's mark on a document wins over the record that links
+        // it, and a study then follows the document.
+        let mark = |item: &str, private: bool| Mark {
+            id: "o_markaaaaaaaaaaaaaaaa".into(),
+            item: item.into(),
+            private,
+            at: "2026-11-24T12:00:00Z".into(),
+            by: None,
+            request: None,
+            members: Vec::new(),
+        };
+        let v = v_of(&[
+            mark("d_eobaaaaaaaaaaaaaaaaa", false),
+            mark("d_plainaaaaaaaaaaaaaaa", true),
+        ]);
+        assert_eq!(
+            areas(&v, "documents"),
+            json!({"d_plainaaaaaaaaaaaaaaa": HOUSEHOLD, "d_sharedaaaaaaaaaaaaaa": MENTAL_HEALTH})
+                .as_object()
+                .unwrap()
+                .clone()
+        );
+        assert_eq!(
+            areas(&v, "studies"),
+            json!({"m_plainaaaaaaaaaaaaaa": HOUSEHOLD, "m_recordaaaaaaaaaaaaa": MENTAL_HEALTH})
+                .as_object()
+                .unwrap()
+                .clone()
+        );
+        // A record marked not private links nothing.
+        let v = v_of(&[mark("r_therapyclaimaaaaaaaa", false)]);
+        assert!(areas(&v, "documents").is_empty(), "{v}");
+        assert!(areas(&v, "studies").is_empty(), "{v}");
+    }
+
+    /// A document linked to a record an event makes private is private too.
+    #[test]
+    fn a_link_follows_what_an_event_makes_private() {
+        let therapy = record(
+            "r_therapyclaimaaaaaaaa",
+            "claim",
+            "Office visit",
+            json!({"provider": "Kim Example",
+                "diagnoses": [{"sequence": 1, "code": {"system": crate::normalize::ICD10, "code": "F41.1"}}]}),
+        );
+        let mut visit = record(
+            "r_therapyvisitaaaaaaaa",
+            "encounter",
+            "Office Visit",
+            json!({"class": "AMB"}),
+        );
+        visit["documents"] = json!(["d_summaryaaaaaaaaaaaa"]);
+        let idx: PersonIndex = serde_json::from_value(json!({
+            "schema": "medrec-index/v1", "person": "p_testaaaaaaaaaaaaaaaa", "rev": 1, "imports": [],
+            "documents": [document("d_summaryaaaaaaaaaaaa")], "studies": [],
+            "records": [therapy, visit]
+        }))
+        .unwrap();
+        let events = json!({"events": [{"id": "e_therapyaaaaaaaaaaaaa", "members": [
+            {"record": "r_therapyclaimaaaaaaaa", "kind": "claim", "role": "office"},
+            {"record": "r_therapyvisitaaaaaaaa", "kind": "encounter", "role": "portal"}]}]});
+        let v = build(&person(), &idx, &events, &[]);
+        assert_eq!(v["documents"]["d_summaryaaaaaaaaaaaa"]["from"], "record");
     }
 
     #[test]
