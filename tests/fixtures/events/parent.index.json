@@ -283,7 +283,7 @@
       "service": {
        "system": "http://www.ama-assn.org/go/cpt",
        "code": "85025",
-       "display": "Blood count"
+       "display": "Blood cell test"
       },
       "amounts": {
        "billed": {
@@ -306,7 +306,7 @@
       "revenue": {
        "system": "https://www.nubc.org/CodeSystem/RevenueCodes",
        "code": "0300",
-       "display": "Blood count"
+       "display": "Blood cell test"
       }
      }
     ]
@@ -488,7 +488,7 @@
    "kind": "claim",
    "key": "claim|example|erlab|2026-10-08",
    "date": "2026-10-08",
-   "display": "Metabolic panel \u00b7 Sample Pathology Labs",
+   "display": "Chemistry tests \u00b7 Sample Pathology Labs",
    "fields": {
     "provider": "Sample Pathology Labs",
     "insurer": "Example Health Plan",
@@ -522,7 +522,7 @@
       "service": {
        "system": "http://www.ama-assn.org/go/cpt",
        "code": "80053",
-       "display": "Metabolic panel"
+       "display": "Chemistry tests"
       },
       "amounts": {
        "billed": {
@@ -991,7 +991,7 @@
    "kind": "claim",
    "key": "claim|example|checkuplab|2026-06-10",
    "date": "2026-06-10",
-   "display": "Lipid panel \u00b7 Example Labs",
+   "display": "Cholesterol tests \u00b7 Example Labs",
    "fields": {
     "provider": "Example Labs",
     "insurer": "Example Health Plan",
@@ -1025,7 +1025,7 @@
       "service": {
        "system": "http://www.ama-assn.org/go/cpt",
        "code": "80061",
-       "display": "Lipid panel"
+       "display": "Cholesterol tests"
       },
       "amounts": {
        "billed": {
@@ -1182,7 +1182,7 @@
    "kind": "claim",
    "key": "claim|example|therapy|2026-08-01",
    "date": "2026-08-01",
-   "display": "Therapeutic exercise \u00b7 Example Therapy Center",
+   "display": "Guided stretching \u00b7 Example Therapy Center",
    "fields": {
     "provider": "Example Therapy Center",
     "insurer": "Example Health Plan",
@@ -1220,7 +1220,7 @@
       "service": {
        "system": "http://www.ama-assn.org/go/cpt",
        "code": "97110",
-       "display": "Therapeutic exercise"
+       "display": "Guided stretching"
       },
       "amounts": {
        "billed": {
@@ -1243,7 +1243,7 @@
       "revenue": {
        "system": "https://www.nubc.org/CodeSystem/RevenueCodes",
        "code": "0420",
-       "display": "Therapeutic exercise"
+       "display": "Guided stretching"
       }
      }
     ]
@@ -1713,7 +1713,7 @@
    "kind": "claim",
    "key": "claim|example|twolab|2026-07-28",
    "date": "2026-07-28",
-   "display": "Blood count \u00b7 Example Labs",
+   "display": "Blood cell test \u00b7 Example Labs",
    "fields": {
     "provider": "Example Labs",
     "insurer": "Example Health Plan",
@@ -1747,7 +1747,7 @@
       "service": {
        "system": "http://www.ama-assn.org/go/cpt",
        "code": "85025",
-       "display": "Blood count"
+       "display": "Blood cell test"
       },
       "amounts": {
        "billed": {

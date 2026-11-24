@@ -1074,7 +1074,7 @@ mod tests {
         // The title names what the counted lines paid for.
         assert_eq!(
             rec.display,
-            "Emergency visit, moderate and Blood count · Example Hospital"
+            "Emergency visit, moderate and Blood cell test · Example Hospital"
         );
         assert_eq!(f["category"], "mixed");
         // Each line keeps the processing notes it points at; the claim
@@ -1099,7 +1099,7 @@ mod tests {
         assert!(items.iter().all(|i| i.get("counted").is_none()));
         assert_eq!(
             rec.display,
-            "Emergency visit, moderate and Blood count · Example Hospital"
+            "Emergency visit, moderate and Blood cell test · Example Hospital"
         );
     }
 

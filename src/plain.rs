@@ -97,7 +97,7 @@ const VISIT_WORDS: &[&str] = &[
 ];
 
 /// Whether `text` says only what kind of visit it was, in billing words
-/// ("Ofc visit, new pt, level 3"), and so no reason a person would give.
+/// ("Return appointment, 20 minutes"), and so no reason a person would give.
 pub fn only_visit_words(text: &str) -> bool {
     let mut words = text
         .split(|c: char| !c.is_alphanumeric())
@@ -265,8 +265,8 @@ mod tests {
     #[test]
     fn a_reason_in_billing_words_says_only_the_kind_of_visit() {
         for t in [
-            "Ofc visit, new pt, level 3",
-            "OFFICE/OUTPATIENT EST PT 25 MIN",
+            "Return appointment, 20 minutes",
+            "ESTABLISHED PATIENT ENCOUNTER, LOW LEVEL",
             "Follow up",
             "E/M visit",
             "Office Visit",
@@ -288,8 +288,8 @@ mod tests {
     #[test]
     fn capitals_become_title_case_with_acronyms_kept_and_long_names_cut() {
         assert_eq!(
-            tidy("OFC VISIT NEW PT LEVEL 3", 48),
-            "Office Visit New Pt Level 3"
+            tidy("OFC APPT FOR A NEW PATIENT", 48),
+            "Office Appt for a New Patient"
         );
         assert_eq!(tidy("CT HEAD W/O CONTRAST", 48), "CT Head w/o Contrast");
         assert_eq!(tidy("MRI OF THE KNEE", 48), "MRI of the Knee");
@@ -298,11 +298,11 @@ mod tests {
         assert_eq!(tidy("Ear pain", 48), "Ear pain");
         assert_eq!(tidy("A1C", 48), "A1C");
         let long = tidy(
-            "COMPREHENSIVE METABOLIC PANEL WITH ESTIMATED GFR AND ADDITIONAL CALCULATIONS",
+            "VITAMIN AND MINERAL CHECK WITH ADDITIONAL CALCULATIONS AND A WRITTEN REPORT",
             40,
         );
         assert!(long.chars().count() <= 40, "{long}");
-        assert!(long.starts_with("Comprehensive Metabolic Panel"), "{long}");
+        assert!(long.starts_with("Vitamin and Mineral Check"), "{long}");
     }
 
     #[test]

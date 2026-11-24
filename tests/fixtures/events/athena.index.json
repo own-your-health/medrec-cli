@@ -12,16 +12,16 @@
    "code": {
     "system": "http://www.ama-assn.org/go/cpt",
     "code": "99203",
-    "display": "NEW PT OFFICE VISIT LEVEL THREE"
+    "display": "FIRST APPOINTMENT TIER THREE"
    },
-   "display": "NEW PT OFFICE VISIT LEVEL THREE",
+   "display": "FIRST APPOINTMENT TIER THREE",
    "status": "finished",
    "fields": {
     "class": "AMB",
     "period": {
      "start": "2026-09-01T14:00:00Z"
     },
-    "reason": "Ofc visit, new pt"
+    "reason": "New patient appointment"
    },
    "provenance": [
     {
@@ -46,9 +46,9 @@
    "code": {
     "system": "http://www.ama-assn.org/go/cpt",
     "code": "99213",
-    "display": "EST PT OFFICE VISIT LEVEL THREE"
+    "display": "RETURN APPOINTMENT TIER THREE"
    },
-   "display": "EST PT OFFICE VISIT LEVEL THREE",
+   "display": "RETURN APPOINTMENT TIER THREE",
    "status": "finished",
    "fields": {
     "class": "AMB",
@@ -115,16 +115,16 @@
    "code": {
     "system": "http://www.ama-assn.org/go/cpt",
     "code": "99392",
-    "display": "PREVENTIVE VISIT EST AGE ONE TO FOUR"
+    "display": "TODDLER CHECKUP RETURNING FAMILY"
    },
-   "display": "PREVENTIVE VISIT EST AGE ONE TO FOUR",
+   "display": "TODDLER CHECKUP RETURNING FAMILY",
    "status": "finished",
    "fields": {
     "class": "AMB",
     "period": {
      "start": "2026-10-01T14:00:00Z"
     },
-    "reason": "Office visit, est pt"
+    "reason": "Return appointment"
    },
    "provenance": [
     {

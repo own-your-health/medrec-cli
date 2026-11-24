@@ -82,7 +82,7 @@ recs, docs, texts = [], [], {}
 recs.append(claim("erfac", "institutional", "Example General Hospital", "2026-10-07", "2026-10-08", [
     line(1, "99285", "Emergency room visit", "visit", {"billed": 7000, "plan_paid": 0, "you_owe": 7000}, revenue="0450", counted=False),
     line(2, "99284", "Emergency room visit", "visit", {"billed": 7000, "allowed": 900, "plan_paid": 700, "you_owe": 200}, revenue="0450"),
-    line(3, "85025", "Blood count", "lab", {"billed": 2000, "allowed": 200, "plan_paid": 200, "you_owe": 0}, revenue="0300"),
+    line(3, "85025", "Blood cell test", "lab", {"billed": 2000, "allowed": 200, "plan_paid": 200, "you_owe": 0}, revenue="0300"),
 ], {"billed": 9000, "allowed": 1100, "plan_paid": 900, "copay": 200, "you_owe": 200}))
 recs.append(claim("erdoc", "professional", "J SAMPLE", "2026-10-07", "2026-10-07", [
     line(1, "99284", "Emergency room visit", "visit", {"billed": 1200, "allowed": 300, "plan_paid": 240, "you_owe": 60}),
@@ -91,7 +91,7 @@ recs.append(claim("errad", "professional", "Example Radiology Associates", "2026
     line(1, "71046", "Chest x-ray", "imaging", {"billed": 120, "allowed": 30, "plan_paid": 30, "you_owe": 0}),
 ], {"billed": 120, "allowed": 30, "plan_paid": 30, "you_owe": 0}, category="imaging"))
 recs.append(claim("erlab", "professional", "Sample Pathology Labs", "2026-10-08", "2026-10-08", [
-    line(1, "80053", "Metabolic panel", "lab", {"billed": 80, "allowed": 15, "plan_paid": 15, "you_owe": 0}),
+    line(1, "80053", "Chemistry tests", "lab", {"billed": 80, "allowed": 15, "plan_paid": 15, "you_owe": 0}),
 ], {"billed": 80, "allowed": 15, "plan_paid": 15, "you_owe": 0}, category="lab"))
 # Its statement, sent weeks later (D3s).
 docs.append(doc("erbill", "bill", "2026-11-02", "Example General Hospital", "Statement",
@@ -122,7 +122,7 @@ recs.append(claim("checkupdoc", "professional", "C SAMPLE", "2026-06-10", "2026-
     line(1, "99396", "Preventive visit", "visit", {"billed": 300, "allowed": 180, "plan_paid": 180, "you_owe": 0}),
 ], {"billed": 300, "allowed": 180, "plan_paid": 180, "you_owe": 0}, category="visit"))
 recs.append(claim("checkuplab", "professional", "Example Labs", "2026-06-10", "2026-06-10", [
-    line(1, "80061", "Lipid panel", "lab", {"billed": 90, "allowed": 12, "plan_paid": 12, "you_owe": 0}, records=[res1["id"]]),
+    line(1, "80061", "Cholesterol tests", "lab", {"billed": 90, "allowed": 12, "plan_paid": 12, "you_owe": 0}, records=[res1["id"]]),
     line(2, "82947", "Glucose test", "lab", {"billed": 40, "allowed": 5, "plan_paid": 5, "you_owe": 0}, records=[res2["id"]]),
 ], {"billed": 130, "allowed": 17, "plan_paid": 17, "you_owe": 0}, category="lab", results=[res1["id"], res2["id"]]))
 docs.append(doc("checkupavs", "visit_summary", "2026-06-10", "Example Family Practice", "After Visit Summary", src=PORTAL))
@@ -136,7 +136,7 @@ docs.append(doc("obreceiptcopy", "receipt", "2026-05-14", "Example Womens Care",
 
 # 5. A course of therapy over four weeks, and a visit inside it that stays apart.
 recs.append(claim("therapy", "institutional", "Example Therapy Center", "2026-08-01", "2026-08-29", [
-    line(1, "97110", "Therapeutic exercise", "medicine", {"billed": 1600, "allowed": 640, "plan_paid": 512, "you_owe": 128}, revenue="0420"),
+    line(1, "97110", "Guided stretching", "medicine", {"billed": 1600, "allowed": 640, "plan_paid": 512, "you_owe": 128}, revenue="0420"),
 ], {"billed": 1600, "allowed": 640, "plan_paid": 512, "coinsurance": 128, "you_owe": 128}))
 recs.append(claim("therapyeval", "professional", "R EXAMPLE", "2026-08-12", "2026-08-12", [
     line(1, "99214", "Office visit", "visit", {"billed": 200, "allowed": 95, "plan_paid": 95, "you_owe": 0}),
@@ -162,7 +162,7 @@ recs.append(claim("twob", "professional", "B EXAMPLE", "2026-07-28", "2026-07-28
     line(1, "99214", "Office visit", "visit", {"billed": 260, "allowed": 120, "plan_paid": 120, "you_owe": 0})],
     {"billed": 260, "allowed": 120, "plan_paid": 120, "you_owe": 0}, category="visit"))
 recs.append(claim("twolab", "professional", "Example Labs", "2026-07-28", "2026-07-28", [
-    line(1, "85025", "Blood count", "lab", {"billed": 50, "allowed": 8, "plan_paid": 8, "you_owe": 0})],
+    line(1, "85025", "Blood cell test", "lab", {"billed": 50, "allowed": 8, "plan_paid": 8, "you_owe": 0})],
     {"billed": 50, "allowed": 8, "plan_paid": 8, "you_owe": 0}, category="lab"))
 
 # 8. The parent's visit that a paper filed under the child belongs to (X2).
