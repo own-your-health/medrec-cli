@@ -747,9 +747,13 @@ pub fn clear_local_copies() -> Result<Cleared, CliError> {
         }
     };
     // `refresh/` stays too: it holds this machine's refresher id, and a
-    // new one would make this Mac another machine to its own folder.
+    // new one would make this Mac another machine to its own folder. So
+    // does `tables/`: published files, no copy of any record.
     for e in entries {
-        if e.file_name() == "locks" || e.file_name() == "refresh" {
+        if ["locks", "refresh", "tables"]
+            .iter()
+            .any(|d| e.file_name() == *d)
+        {
             continue;
         }
         let path = e.path();

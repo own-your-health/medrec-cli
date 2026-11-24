@@ -23,7 +23,7 @@ use medrec::folder::{Access, Folder};
 use medrec::intake::{self, Given};
 use medrec::store::{Location, BIN};
 use medrec::views::Range;
-use medrec::{imaging, import, maint, notes, people, review, store, view, views};
+use medrec::{imaging, import, maint, notes, people, review, store, tables, view, views};
 
 const REPO: &str = "own-your-health/medrec-cli";
 
@@ -64,6 +64,10 @@ enum Command {
     /// Provider CLIs medrec can import from.
     #[command(subcommand)]
     Providers(ProvidersCmd),
+    /// Published code tables kept on this machine: the plain names of
+    /// diagnosis codes.
+    #[command(subcommand)]
+    Tables(TablesCmd),
     /// Import each source set up for it: on a schedule (a LaunchAgent), on
     /// a reader's request in `_requests/`, or now.
     Refresh(RefreshArgs),
@@ -287,6 +291,21 @@ struct InitArgs {
     /// `views` folder, where medrec writes its views.
     #[arg(long)]
     allow_other_files: bool,
+}
+
+#[derive(Subcommand, Debug)]
+enum TablesCmd {
+    /// The tables medrec knows, and whether each is on this machine.
+    List,
+    /// Download whole tables from their publishers (all of them, or those
+    /// named), checked against the SHA-256 medrec records.
+    Fetch {
+        /// Tables by id (default: all).
+        ids: Vec<String>,
+        /// Keep this downloaded zip as the one table named.
+        #[arg(long, value_name = "ZIP", requires = "ids")]
+        file: Option<std::path::PathBuf>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -921,6 +940,45 @@ fn profile_name(s: &str) -> Result<ProfileName, String> {
     ProfileName::parse(s).map_err(|e| e.to_string())
 }
 
+/// The code tables: no records folder, no profile and no sign-in.
+fn tables_cmd(cli: &Cli, cmd: &TablesCmd) -> Result<(), CliError> {
+    let json = cli.common.json;
+    match cmd {
+        TablesCmd::List => {
+            output::emit(json, "table-list", items(&tables::list()), |v| {
+                table(v, &["id", "version", "date", "state", "publisher"])
+            });
+            Ok(())
+        }
+        TablesCmd::Fetch { ids, file } => {
+            let wanted: Vec<&tables::Table> = if ids.is_empty() {
+                tables::TABLES.to_vec()
+            } else {
+                ids.iter()
+                    .map(|i| tables::by_id(i))
+                    .collect::<Result<_, _>>()?
+            };
+            if file.is_some() && wanted.len() != 1 {
+                return Err(CliError::Usage(
+                    "--file is one table's zip: name that one table".into(),
+                ));
+            }
+            let dir = tables::dir().ok_or_else(|| {
+                CliError::Other("cannot resolve a cache directory (is $HOME set?)".into())
+            })?;
+            let mut rows = Vec::new();
+            for t in wanted {
+                note(cli, &format!("{} {}", t.id, t.version));
+                rows.push(tables::fetch(t, &dir, file.as_deref())?);
+            }
+            output::emit(json, "table-fetch", items(&rows), |v| {
+                table(v, &["id", "version", "status", "bytes"])
+            });
+            Ok(())
+        }
+    }
+}
+
 fn run(cli: &Cli) -> Result<(), CliError> {
     let json = cli.common.json;
     if cli.common.quiet || json {
@@ -962,6 +1020,7 @@ fn run(cli: &Cli) -> Result<(), CliError> {
             });
             Ok(())
         }
+        Command::Tables(cmd) => tables_cmd(cli, cmd),
         Command::Timeline(a) => {
             let (f, h) = read(&store, cli)?;
             let rows = views::timeline(&f, &h, a.person.as_deref(), &a.range.range(), &a.kinds)?;

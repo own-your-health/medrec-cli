@@ -124,7 +124,7 @@ named by the household and kept in this machine's config only. Every command
 that reaches a records folder needs `--profile <NAME>`, or `MEDREC_PROFILE`;
 there is no default, and a lone profile is never picked: without one the
 command is exit 2 and lists the configured profiles. `profiles`, `providers
-list`, `config path|show`, a machine setting's `config set|unset`, `cache
+list`, `tables`, `config path|show`, a machine setting's `config set|unset`, `cache
 clear`, `auth status`, `info`, `completions` and `self-update` take none.
 
 `refresh sign-in <source id>` is the one command that may run without
@@ -582,6 +582,38 @@ medrec --profile <NAME> views write --all    # make every person's again
 and `files_removed`.
 A failure to write them leaves them stale and says so on stderr. The command
 that wrote the records still succeeds, and the next write tries again.
+
+### Code tables
+
+A condition's code has an official title, and a portal's own words for it can
+be an abbreviation. `medrec tables` keeps the published titles on this
+machine, so that readers can show "Essential (primary) hypertension" first and
+the source's words beside it. The records keep the source's words, and
+search and filters go by them.
+
+```sh
+medrec tables list                      # the tables, and whether each is here
+medrec tables fetch                     # download them
+medrec tables fetch icd10cm --file ZIP  # or keep a zip downloaded by hand
+```
+
+| Table | Publisher | Version | File |
+|---|---|---|---|
+| `icd10cm`, ICD-10-CM code titles | Centers for Medicare & Medicaid Services | FY2027, dated 2026-06-01 | [2027 Code Descriptions in Tabular Order](https://www.cms.gov/files/zip/2027-code-descriptions-tabular-order.zip), 2.2 MB, 98,403 rows |
+
+- **medrec includes no table.** It downloads the publisher's whole file, and
+  keeps it only if its size, SHA-256 and row count are those recorded in
+  `src/tables.rs`. No code is ever looked up over the network, so no request
+  says which codes the records hold.
+- **No table, no names.** Without the file, or with one that is not the
+  recorded one, the source's own words stand. A code the table lacks (another
+  year's, withdrawn or invalid) has no name.
+- The file is in `~/.cache/medrec/tables`. After fetching it, run `medrec
+  views write` on each profile, or let the next write do it.
+- The names a person's records use are in `views/` as `code-names.json`
+  (docs/data-contract.md). Like any view, they are on the Drive folder.
+
+medrec is not affiliated with or endorsed by the publisher.
 
 ### Settings
 

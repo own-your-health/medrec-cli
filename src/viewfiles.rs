@@ -103,6 +103,11 @@ pub struct PersonViews {
     pub marks: Option<String>,
     #[serde(default)]
     pub linked: BTreeMap<String, LinkedFiles>,
+    /// The code table `code-names.json` was made with, absent when this
+    /// machine had none (0.9.4 and later). A reader need not check it: the
+    /// next pass on a machine with another table makes the views again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code_table: Option<String>,
     pub row: Row,
     pub records: BTreeMap<String, Run>,
     pub timeline: Run,
@@ -234,6 +239,9 @@ pub fn sync(f: &Folder, all: bool) -> Result<Synced, CliError> {
         people,
     };
 
+    let titles = crate::code_names::titles();
+    let code_table = titles.as_ref().map(|_| crate::tables::Titles::identity());
+
     // Whose views stand: their files have the MD5s the views were made from.
     let mut kept: BTreeMap<String, PersonViews> = BTreeMap::new();
     let linked_md5s = |p: &Person| -> Result<BTreeMap<String, LinkedFiles>, CliError> {
@@ -256,6 +264,7 @@ pub fn sync(f: &Folder, all: bool) -> Result<Synced, CliError> {
                 && store.md5(&crate::events::overrides_rel(p))? == was.overrides
                 && store.md5(&crate::marks::rel(p))? == was.marks
                 && linked_md5s(p)? == was.linked
+                && was.code_table == code_table
                 && EVERY_PERSON.iter().all(|f| was.files.contains_key(*f))
             {
                 kept.insert(p.id.clone(), was.clone());
@@ -386,10 +395,15 @@ pub fn sync(f: &Folder, all: bool) -> Result<Synced, CliError> {
             bills["marks_unreadable"] = Value::Bool(true);
             private["marks_unreadable"] = Value::Bool(true);
         }
+        let code_names = titles
+            .as_ref()
+            .and_then(|t| crate::code_names::build(p, &me.idx, &private, private_marks, t));
         let from = EventsFrom {
             bills,
             private,
             events,
+            code_names,
+            code_table: code_table.clone(),
             overrides: otext.as_deref().map(|t| md5_hex(t.as_bytes())),
             marks: mtext.as_deref().map(|t| md5_hex(t.as_bytes())),
             linked: linked
@@ -502,6 +516,57 @@ pub fn sync(f: &Folder, all: bool) -> Result<Synced, CliError> {
         }
     }
     Ok(out)
+}
+
+/// One of a person's views, when the views are those of the folder's files
+/// as they are now; none when it is missing, stale, or another pass's.
+pub fn current_view(
+    f: &Folder,
+    h: &Household,
+    p: &Person,
+    name: &str,
+) -> Result<Option<Vec<u8>>, CliError> {
+    let md5 = |rel: &str| -> Result<Option<String>, CliError> {
+        Ok(f.store.read_text(rel)?.map(|t| md5_hex(t.as_bytes())))
+    };
+    let Some(index) = f
+        .store
+        .read_text(INDEX)?
+        .and_then(|t| serde_json::from_str::<ViewsIndex>(&t).ok())
+    else {
+        return Ok(None);
+    };
+    if index.schema != SCHEMA || md5(folder::HOUSEHOLD)?.as_deref() != Some(&*index.household) {
+        return Ok(None);
+    }
+    let Some(v) = index.people.get(&p.id) else {
+        return Ok(None);
+    };
+    let Some(want) = v.files.get(name) else {
+        return Ok(None);
+    };
+    if md5(&folder::index_rel(p))? != v.index
+        || md5(&folder::text_rel(p))? != v.text
+        || md5(&crate::events::overrides_rel(p))? != v.overrides
+        || md5(&crate::marks::rel(p))? != v.marks
+    {
+        return Ok(None);
+    }
+    let linked = crate::events::linked_people(h, p);
+    if linked.len() != v.linked.len() {
+        return Ok(None);
+    }
+    for q in linked {
+        let now = LinkedFiles {
+            index: md5(&folder::index_rel(q))?,
+            text: md5(&folder::text_rel(q))?,
+        };
+        if v.linked.get(&q.id) != Some(&now) {
+            return Ok(None);
+        }
+    }
+    let text = f.store.read_text(&stored_rel(&p.id, name, want))?;
+    Ok(text.map(String::into_bytes).filter(|b| md5_hex(b) == *want))
 }
 
 /// Upload every view, stopping at the first error; the caller writes
@@ -724,6 +789,10 @@ pub(crate) struct EventsFrom {
     pub events: Value,
     pub bills: Value,
     pub private: Value,
+    /// `code-names.json`, when any code of theirs has a name, and the table
+    /// on this machine it was made with.
+    pub code_names: Option<Value>,
+    pub code_table: Option<String>,
     pub overrides: Option<String>,
     pub marks: Option<String>,
     pub linked: BTreeMap<String, LinkedFiles>,
@@ -749,6 +818,9 @@ pub(crate) fn person(
     put("events.json", json(&from.events));
     put("bills.json", json(&from.bills));
     put("private.json", json(&from.private));
+    if let Some(v) = &from.code_names {
+        put(crate::code_names::FILE, json(v));
+    }
 
     let s = summary::of_index(
         h,
@@ -1041,6 +1113,7 @@ pub(crate) fn person(
         overrides: from.overrides,
         marks: from.marks,
         linked: from.linked,
+        code_table: from.code_table,
         row: Row {
             documents: row.documents,
             records: row.records,
@@ -1233,6 +1306,8 @@ mod tests {
                 overrides: None,
                 marks: None,
                 linked: BTreeMap::new(),
+                code_names: None,
+                code_table: None,
             },
             &mut out,
         )

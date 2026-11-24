@@ -834,6 +834,162 @@ fn private_items_stay_out_of_household_wide_answers_unless_asked_about() {
     assert_eq!(warned, 1, "{v}");
 }
 
+/// Puts `code-names.json` in a person's views, as a medrec with the tables
+/// writes it.
+fn put_code_names(e: &Env, pid: &str, v: &Value) {
+    let bytes = serde_json::to_vec(v).unwrap();
+    let md5 = medrec::hash::md5_hex(&bytes);
+    let stored = medrec::viewfiles::stored_name("code-names.json", &md5);
+    std::fs::write(e.records().join("views").join(pid).join(stored), &bytes).unwrap();
+    let path = e.records().join("views/views.json");
+    let mut index: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    index["people"][pid]["files"]["code-names.json"] = json!(md5);
+    std::fs::write(path, serde_json::to_vec(&index).unwrap()).unwrap();
+}
+
+#[test]
+fn a_condition_has_its_plain_name_from_the_folders_views() {
+    let e = Env::new("codenames");
+    household(&e);
+    let h: Value =
+        serde_json::from_slice(&std::fs::read(e.records().join("household.json")).unwrap())
+            .unwrap();
+    let alex = h["people"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["name"] == "Alex Testperson")
+        .unwrap()
+        .clone();
+    let (pid, folder) = (
+        alex["id"].as_str().unwrap().to_string(),
+        alex["folder"].as_str().unwrap().to_string(),
+    );
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/private");
+    for (from, to) in [
+        ("adult.index.json", "index.json"),
+        ("adult.text.json", "text.json"),
+    ] {
+        let mut v: Value =
+            serde_json::from_str(&std::fs::read_to_string(fixtures.join(from)).unwrap()).unwrap();
+        v["person"] = alex["id"].clone();
+        std::fs::write(
+            e.records().join(&folder).join(to),
+            serde_json::to_vec(&v).unwrap(),
+        )
+        .unwrap();
+    }
+    e.ok(&["views", "write"]);
+    put_code_names(
+        &e,
+        &pid,
+        &json!({"schema": "medrec-code-names/v1", "person": pid,
+            "table": {"id": "icd10cm", "version": "FY2027", "date": "2026-06-01"},
+            "codes": {"icd10cm|I10": {"name": "Sample pressure"}},
+            "private_codes": {"icd10cm|F32.0": {"name": "Sample low mood"}}}),
+    );
+    let (low, pressure) = ("r_depressionaaaaaaaaaa", "r_hypertensionaaaaaaaa");
+    let t = e.tools();
+    let ask = |tool: &str, args: Value| {
+        let r = call(&t, tool, args);
+        assert!(!r.is_error(), "{tool}: {}", r.text());
+        assert_fits(&t, tool, &r).clone()
+    };
+    let name_of = |v: &Value, id: &str| -> Option<String> {
+        v["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|i| i["id"] == id)
+            .unwrap_or_else(|| panic!("no {id}: {v}"))["plain_name"]
+            .as_str()
+            .map(str::to_string)
+    };
+
+    // About one person: both, with the source's own words beside them.
+    let v = ask(RECORDS, json!({"kind": "conditions", "person": "Alex"}));
+    assert_eq!(name_of(&v, pressure).as_deref(), Some("Sample pressure"));
+    assert_eq!(name_of(&v, low).as_deref(), Some("Sample low mood"));
+    let row = v["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["id"] == pressure)
+        .unwrap();
+    assert_eq!(row["title"], "Essential hypertension");
+    let v = ask(SUMMARY, json!({"person": "Alex"}));
+    let lines = v["summary"]["sections"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["section"] == "conditions")
+        .unwrap()["items"]
+        .clone();
+    assert!(
+        lines
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|l| l["id"] == pressure && l["plain_name"] == "Sample pressure"),
+        "{lines}"
+    );
+    assert!(!v.to_string().contains("name_key"), "{v}");
+
+    // About the household: only the codes an open item uses, and a private
+    // item the question names keeps the source's words.
+    let v = ask(RECORDS, json!({"kind": "conditions"}));
+    assert_eq!(name_of(&v, pressure).as_deref(), Some("Sample pressure"));
+    let v = ask(
+        RECORDS,
+        json!({"kind": "conditions", "name": "major depressive disorder"}),
+    );
+    assert_eq!(name_of(&v, low), None);
+
+    // A name is not a word a question can find: no row, and no private
+    // item opened.
+    for q in ["Sample low mood", "Sample pressure"] {
+        let v = ask(RECORDS, json!({"kind": "conditions", "name": q}));
+        assert!(v["items"].as_array().unwrap().is_empty(), "{v}");
+        let v = ask(SEARCH, json!({"query": q}));
+        assert!(v["items"].as_array().unwrap().is_empty(), "{v}");
+    }
+
+    // Views older than the folder's files name nothing.
+    let path = e.records().join(&folder).join("marks.json");
+    std::fs::write(
+        &path,
+        serde_json::to_vec(&json!({"schema": "medrec-marks/v1", "person": pid})).unwrap(),
+    )
+    .unwrap();
+    let v = ask(RECORDS, json!({"kind": "conditions", "person": "Alex"}));
+    assert_eq!(name_of(&v, pressure), None);
+
+    // A pass on a machine with no table takes the names out.
+    e.ok(&["views", "write"]);
+    let index: Value =
+        serde_json::from_slice(&std::fs::read(e.records().join("views/views.json")).unwrap())
+            .unwrap();
+    let files = index["people"][&pid]["files"].as_object().unwrap();
+    assert!(!files.contains_key("code-names.json"), "{files:?}");
+    let left = std::fs::read_dir(e.records().join("views").join(&pid))
+        .unwrap()
+        .flatten()
+        .filter(|f| f.file_name().to_string_lossy().starts_with("code-names."))
+        .count();
+    assert_eq!(left, 0);
+
+    // As does a pass that finds other tables than the views were made with.
+    let mut index = index;
+    index["people"][&pid]["code_table"] = json!("icd10cm FY2000");
+    std::fs::write(
+        e.records().join("views/views.json"),
+        serde_json::to_vec(&index).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(e.ok(&["views", "write"])["people_rebuilt"], 1);
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
 fn rpc(stdin: &mut impl Write, stdout: &mut impl BufRead, msg: Value) -> Option<Value> {
     writeln!(stdin, "{msg}").unwrap();
     stdin.flush().unwrap();

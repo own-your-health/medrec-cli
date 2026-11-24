@@ -1359,6 +1359,7 @@ dependencies = [
  "base64 0.22.1",
  "clap",
  "clap_complete",
+ "flate2",
  "libc",
  "md-5 0.10.6",
  "pk-cli-auth",

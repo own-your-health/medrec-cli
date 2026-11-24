@@ -85,6 +85,9 @@ fn every_command_renders_its_help() {
         &["review", "drop"],
         &["import"],
         &["providers", "list"],
+        &["tables"],
+        &["tables", "list"],
+        &["tables", "fetch"],
         &["refresh"],
         &["refresh", "add"],
         &["refresh", "remove"],
@@ -525,4 +528,65 @@ fn drive_profiles_are_medrecs_own_and_none_is_a_default() {
         String::from_utf8_lossy(&out.stdout)
     );
     assert!(String::from_utf8_lossy(&out.stderr).contains("home-drive"));
+}
+
+#[test]
+fn the_code_tables_need_no_profile_and_start_absent() {
+    let out = medrec()
+        .args(["--json", "tables", "list"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let v = json_of(&out);
+    let rows = v["items"].as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["id"], "icd10cm");
+    assert_eq!(rows[0]["state"], "absent");
+    assert_eq!(rows[0]["sha256"].as_str().unwrap().len(), 64);
+    for (args, why) in [
+        (&["tables", "fetch", "nosuch"][..], "no table `nosuch`"),
+        (
+            &["tables", "fetch", "--file", "/nonexistent.zip"][..],
+            "required",
+        ),
+        (
+            &["tables", "fetch", "icd10cm", "--file", "/nonexistent.zip"][..],
+            "nonexistent.zip",
+        ),
+    ] {
+        let out = medrec().args(args).output().unwrap();
+        assert_eq!(out.status.code(), Some(2), "{args:?}");
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains(why),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+}
+
+#[test]
+fn cache_clear_keeps_the_code_tables() {
+    let dir = std::env::temp_dir().join(format!("medrec-surface-tables-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let base = dir.join("cache/medrec");
+    std::fs::create_dir_all(base.join("tables")).unwrap();
+    std::fs::create_dir_all(base.join("copies")).unwrap();
+    std::fs::write(base.join("tables/icd10cm-FY2027.zip"), b"x").unwrap();
+    std::fs::write(base.join("copies/a.pdf"), b"x").unwrap();
+    let run = |args: &[&str]| {
+        medrec()
+            .env("XDG_CACHE_HOME", dir.join("cache"))
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    let out = run(&["--json", "cache", "clear"]);
+    assert!(out.status.success());
+    assert_eq!(json_of(&out)["files"], 1);
+    assert!(base.join("tables/icd10cm-FY2027.zip").exists());
+    assert!(!base.join("copies").exists());
+    // A file that is not the recorded one is there and never read.
+    let v = json_of(&run(&["--json", "tables", "list"]));
+    assert_eq!(v["items"][0]["state"], "changed");
+    let _ = std::fs::remove_dir_all(&dir);
 }

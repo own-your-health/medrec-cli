@@ -883,6 +883,48 @@ integers are little-endian unsigned 32-bit. Strings compare as UTF-8 bytes.
 "Newest first" sorts by the date string, descending, with undated items
 last.
 
+### Code names (`code-names.json`, `medrec-code-names/v1`, 0.9.4 and later)
+
+The ICD-10-CM titles of the codes the person's conditions and claim
+diagnoses use, from the published table on the machine that wrote the views
+(README, "Code tables"). **It only labels items a reader already shows.**
+By itself it lists a person's conditions, private ones included, so a
+reader never lists, searches or serves it on its own. A person with no
+named code has no `code-names.json`, and neither does one whose views a
+machine without the table wrote.
+
+```json
+{"schema": "medrec-code-names/v1", "person": "p_…",
+ "table": {"id": "icd10cm", "version": "FY2027", "date": "2026-06-01"},
+ "codes": {"icd10cm|J30.9": {"name": "…"}},
+ "private_codes": {"icd10cm|F32.1": {"name": "…"}}}
+```
+
+- **The key** is `icd10cm|` and the code in upper case, with a dot after its
+  third character when it has more: `J309`, `j30.9` and `J30.9` are all
+  `icd10cm|J30.9`. Only the system `http://hl7.org/fhir/sid/icd-10-cm` maps
+  to it. WHO's ICD-10, ICD-10-PCS and ICD-9 do not. A code the table lacks (another year's, withdrawn or
+  invalid) has no entry. A heading code has one.
+- **`codes`** has the codes at least one item that is not private uses.
+  **`private_codes`** has those only private items use, private as
+  `private.json` says, the household's marks included. A claim is private
+  by its principal diagnosis: another of its diagnoses in a private area
+  counts as private too, unless the household marked the claim not
+  private. When the person's `marks.json` does not read, every code is in
+  `private_codes`.
+- **A reader looks up a name only for an item it is showing.** In an answer
+  or a page about one person it reads `codes`, then `private_codes`. In one
+  about the whole household it reads `codes` only, and gives no name to an
+  item that is private. `medrec mcp` does this with `plain_name` on
+  `kind: "conditions"` rows and on the summary's condition lines (Readers,
+  below).
+- **A name never replaces the source's words.** It is shown first, with the
+  source's beside it, and filters, search, sorting, cursors and the check of
+  whether a question names a private item use the source's words alone.
+- **Stale** as `private.json` is. Missing or stale, the source's words stand,
+  with no warning. A reader need not check which table made it
+  (`code_table` in `views.json`, below).
+
 ### When they are written
 
 - **After every write.** A command that writes `household.json`, an
@@ -893,7 +935,8 @@ last.
 - **Only what changed.** A person keeps their views when their `index.json`,
   `text.json`, `overrides.json` and `marks.json` and their linked people's
   `index.json` and `text.json` have the MD5s `views.json` recorded, under the same `household.json` and
-  medrec version. Otherwise their views are made
+  medrec version, and the code table on this machine is the one they were
+  made with (`code_table`). Otherwise their views are made
   again, and only views the folder does not already hold under their
   stored names are uploaded. An unchanged view keeps its name and is not
   written again. A person whose views lack one every person has
@@ -930,9 +973,9 @@ A reader decides freshness by MD5, as Drive reports it (`md5Checksum`):
 
   | Differs from `views.json` | Stale |
   |---|---|
-  | `overrides.json`'s MD5 from `overrides` | `events.json`, `bills.json`, `private.json` |
-  | a linked person's `index.json` or `text.json` MD5 from `linked` | `events.json`, `bills.json`, `private.json` |
-  | `marks.json`'s MD5 from `marks` (0.9.1 and later) | `bills.json`, `private.json` |
+  | `overrides.json`'s MD5 from `overrides` | `events.json`, `bills.json`, `private.json`, `code-names.json` |
+  | a linked person's `index.json` or `text.json` MD5 from `linked` | `events.json`, `bills.json`, `private.json`, `code-names.json` |
+  | `marks.json`'s MD5 from `marks` (0.9.1 and later) | `bills.json`, `private.json`, `code-names.json` |
 
   No other view reads those files: `summary.json` and `documents.json`
   say nothing of payments or privacy, and a reader applies `bills.json`
@@ -961,6 +1004,7 @@ A reader decides freshness by MD5, as Drive reports it (`md5Checksum`):
 | `people.<id>.overrides` | The MD5 of the person's `overrides.json` as read; `null` when there is none (0.9.0 and later). |
 | `people.<id>.marks` | The MD5 of the person's `marks.json` as read; `null` when there is none (0.9.1 and later). |
 | `people.<id>.linked` | For each person linked to this one (Events, below), the MD5s of their `index.json` and `text.json` as read, as `{"index", "text"}`, each `null` when the file is absent; `{}` when no one is linked (0.9.0 and later). |
+| `people.<id>.code_table` | The code table the person's names were made with (`icd10cm FY2027`); absent when the machine had none (0.9.4 and later). A pass on a machine with another table, or none, makes the person's views again. |
 | `row` | `documents`, `records`, `studies`, and `newest` and `last_import` when there are any: the person's line in `medrec_summary`'s people list, without `notes`. |
 | `records` | For each record kind, `{"shards": [[newest day, oldest day, count], …], "undated": count}`: its dated shards by number, and how many records its undated file holds. |
 | `timeline` | The timeline's shards, the same way. |
@@ -1046,7 +1090,8 @@ It is made without the household's payments: a reader leaves out the
 bills `bills.json` has `settled` as it answers (0.9.1 and later). Each
 medicine, condition, allergy and visit carries its record's `id`, a
 vaccine its last dose's and a latest result its own (0.9.1 and later), so
-a reader finds them in `private.json`.
+a reader finds them in `private.json`. A condition whose code can have a
+name carries `name_key`, its key in `code-names.json` (0.9.4 and later).
 
 ### documents.json and text-<n>.bin
 
@@ -1411,6 +1456,12 @@ readers ship with medrec:
     items held back from answers about the whole household, with a
     `private-marks-unreadable` warning naming them. The commands are the
     household's own terminal and leave nothing out.
+  - `kind: "conditions"` rows and the summary's condition lines carry
+    `plain_name`, the code's name in the person's current
+    `code-names.json` (0.9.4 and later). `title` and `name` stay the
+    source's. `medrec mcp` reads it from the views, unlike the rest of its
+    answer, so a reader of the views gives the same names. In an answer
+    about the whole household it names no private item.
   - a reader that answers from the views without a current `private.json`
     for a person cannot tell which of their items are private: theirs is
     stale or absent (views from 0.9.0 or earlier), or the reader falls
