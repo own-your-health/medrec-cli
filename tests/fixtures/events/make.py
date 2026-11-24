@@ -97,11 +97,11 @@ recs.append(claim("erlab", "professional", "Sample Pathology Labs", "2026-10-08"
 docs.append(doc("erbill", "bill", "2026-11-02", "Example General Hospital", "Statement",
                 statement={"statement_date": "2026-11-02", "amount_due": usd(200)}))
 
-# 2. A birth stay, with the hospitalists' and the anesthesiologists' claims.
+# 2. A birth stay, with a physicians' group's and the anesthesiologists' claims.
 recs.append(claim("birthfac", "institutional", "Example General Hospital", "2026-03-05", "2026-03-08", [
     line(1, "59400", "Room and board", "facility", {"billed": 20000, "allowed": 9000, "plan_paid": 8000, "you_owe": 1000}, revenue="0120"),
 ], {"billed": 20000, "allowed": 9000, "plan_paid": 8000, "deductible": 1000, "you_owe": 1000}))
-recs.append(claim("birthob", "professional", "Sample OB Hospitalists Group", "2026-03-08", "2026-03-08", [
+recs.append(claim("birthrheum", "professional", "Sample Rheumatology Group", "2026-03-08", "2026-03-08", [
     line(1, "99238", "Day of discharge", "visit", {"billed": 400, "allowed": 150, "plan_paid": 150, "you_owe": 0}),
 ], {"billed": 400, "allowed": 150, "plan_paid": 150, "you_owe": 0}, category="visit"))
 recs.append(claim("birthanes", "professional", "Example Anesthesia Partners", "2026-03-06", "2026-03-06", [
@@ -166,14 +166,14 @@ recs.append(claim("twolab", "professional", "Example Labs", "2026-07-28", "2026-
     {"billed": 50, "allowed": 8, "plan_paid": 8, "you_owe": 0}, category="lab"))
 
 # 8. The parent's visit that a paper filed under the child belongs to (X2).
-recs.append(claim("urology", "professional", "K EXAMPLE", "2026-03-02", "2026-03-02", [
+recs.append(claim("podiatry", "professional", "K EXAMPLE", "2026-03-02", "2026-03-02", [
     line(1, "99203", "Office visit", "visit", {"billed": 300, "allowed": 140, "plan_paid": 100, "you_owe": 40})],
     {"billed": 300, "allowed": 140, "plan_paid": 100, "copay": 40, "you_owe": 40}, category="visit"))
 
 # 9. A bill from a practice no claim names, on the only visit that day, for
 # the visit's share: sure (D3), and the clinician is learned to belong to it (N5).
-docs.append(doc("urologybill", "bill", "2026-03-02", "Example Urology Associates", "Statement",
-                statement={"statement_date": "2026-03-02", "amount_due": usd(40)}))
+docs.append(doc("podiatrybill", "bill", "2026-03-02", "Example Podiatry Associates", "Statement",
+                statement={"statement_date": "2026-03-02", "amount_due": usd(40), "due_date": "2026-03-30"}))
 
 parent = {"schema": "medrec-index/v1", "person": PARENT, "rev": 1, "documents": docs, "records": recs, "studies": [], "imports": []}
 texts[rid("d", "erbill")] = "Example General Hospital\nStatement\nAmount due 200.00"
@@ -185,9 +185,9 @@ for tag, code, display, d in [("nbone", "99460", "Newborn care", "2026-03-06"), 
     crecs.append(claim(tag, "professional", "Sample Neonatal Physicians", d, d, [
         line(1, code, display, "visit", {"billed": 300, "allowed": 120, "plan_paid": 120, "you_owe": 0})],
         {"billed": 300, "allowed": 120, "plan_paid": 120, "you_owe": 0}, category="visit"))
-cdocs = [doc("urologyrx", "prescription", "2026-03-02", "Example Pediatric Urology", "Prescription")]
+cdocs = [doc("podiatryrx", "prescription", "2026-03-02", "Example Podiatry for Kids", "Prescription")]
 child = {"schema": "medrec-index/v1", "person": CHILD, "rev": 1, "documents": cdocs, "records": crecs, "studies": [], "imports": []}
-ctexts = {rid("d", "urologyrx"): "Example Pediatric Urology\nKim Example, M.D.\nRx"}
+ctexts = {rid("d", "podiatryrx"): "Example Podiatry for Kids\nKim Example, M.D.\nRx"}
 
 household = {"schema": "medrec-household/v1", "format": FORMAT, "folder_id": "f_exampleaaaaaaaaaaaaa", "rev": 1, "people": [
     {"id": PARENT, "name": "Alex Example", "folder": "Alex Example", "birth_date": "1990-01-01", "adult": True, "created_at": "2026-01-01T00:00:00Z"},

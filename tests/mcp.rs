@@ -449,7 +449,7 @@ fn events_answer_what_happened_with_each_members_title_and_date() {
 
     // A bill past its due date says so until it is paid, then what is left
     // once something is paid, and that it is paid.
-    let bill = "d_urologybillaaaaaaaaa";
+    let bill = "d_podiatrybillaaaaaaaa";
     let detail = || -> String {
         let r = call(&t, RECORDS, json!({"kind": "bills", "person": "Alex"}));
         let v = assert_fits(&t, RECORDS, &r).clone();

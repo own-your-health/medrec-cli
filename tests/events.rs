@@ -169,13 +169,13 @@ fn every_claim_is_in_one_event_and_each_shape_is_one_event() {
     );
     assert_eq!(er["status"], "complete");
 
-    // A birth stay takes the hospitalists' and the anesthesiologists'
+    // A birth stay takes a physicians' group's and the anesthesiologists'
     // claims, and links to the newborn's care.
     let stay = holding(&v, "r_birthfacaaaaaaaaaaaa");
     assert_eq!(stay["kind"], "inpatient");
     assert!(
         ids(stay).contains(&"r_birthanesaaaaaaaaaaa")
-            && ids(stay).contains(&"r_birthobaaaaaaaaaaaaa")
+            && ids(stay).contains(&"r_birthrheumaaaaaaaaaa")
     );
     let c = events_of(&w, 1, None);
     let newborn = holding(&c, "r_nboneaaaaaaaaaaaaaaa");
@@ -271,21 +271,21 @@ fn every_claim_is_in_one_event_and_each_shape_is_one_event() {
 
     // A bill from a practice no claim names, for the only visit that day
     // and its share: sure, and the clinician is learned to belong to it.
-    let uro = holding(&v, "r_urologyaaaaaaaaaaaaa");
+    let pod = holding(&v, "r_podiatryaaaaaaaaaaaa");
     assert_eq!(
         (
-            member(uro, "d_urologybillaaaaaaaaa")["rule"].as_str(),
-            member(uro, "d_urologybillaaaaaaaaa")["confidence"].as_str()
+            member(pod, "d_podiatrybillaaaaaaaa")["rule"].as_str(),
+            member(pod, "d_podiatrybillaaaaaaaa")["confidence"].as_str()
         ),
         (Some("D3"), Some("sure"))
     );
     assert_eq!(
-        (uro["place"].as_str(), uro["place_from"].as_str()),
-        (Some("Example Urology Associates"), Some("alias"))
+        (pod["place"].as_str(), pod["place_from"].as_str()),
+        (Some("Example Podiatry Associates"), Some("alias"))
     );
     assert_eq!(v["aliases"][0]["clinician"], "K EXAMPLE");
     // A paper filed under the child before the birth is this visit's.
-    let rx = member(uro, "d_urologyrxaaaaaaaaaaa");
+    let rx = member(pod, "d_podiatryrxaaaaaaaaaa");
     assert_eq!(
         (rx["rule"].as_str(), rx["person"].as_str()),
         (Some("X2"), Some("p_childaaaaaaaaaaaaaaa"))
@@ -307,7 +307,7 @@ fn every_claim_is_in_one_event_and_each_shape_is_one_event() {
         .as_array()
         .unwrap()
         .iter()
-        .all(|e| !ids(e).contains(&"d_urologyrxaaaaaaaaaaa")));
+        .all(|e| !ids(e).contains(&"d_podiatryrxaaaaaaaaaa")));
 }
 
 #[test]
@@ -567,7 +567,7 @@ fn visits_get_plain_names_and_a_connections_name_is_never_a_place() {
         (json!("Follow-up visit"), json!("claims"))
     );
     assert_eq!(
-        what(&parent, "r_urologyaaaaaaaaaaaaa"),
+        what(&parent, "r_podiatryaaaaaaaaaaaa"),
         (json!("New-patient visit"), json!("claims"))
     );
     assert_eq!(

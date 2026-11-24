@@ -1530,7 +1530,7 @@ fn a_bill_marked_paid_from_the_app_or_a_terminal_is_settled_in_the_bills_view() 
     let (alex, _) = with_event_fixtures(&e);
     let aid = alex["id"].as_str().unwrap();
     e.ok(&["views", "write"]);
-    let bill = "d_urologybillaaaaaaaaa";
+    let bill = "d_podiatrybillaaaaaaaa";
     let b = bill_row(&bills_view(&e, aid), bill);
     assert_eq!(
         (&b["amount_due"], &b["settled"]),
