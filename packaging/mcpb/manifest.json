@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "medrec",
   "display_name": "Medical records (medrec)",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "description": "Read-only access to your household's medical records folder, kept by the open-source medrec CLI.",
   "long_description": "Ask Claude about the medical records medrec keeps for your household: who takes what, conditions and allergies, immunizations, a lab test over time with each lab's reference range, visits, claims and bills, what happened and what it cost, and the text of any filed document. Four read-only tools, medrec_summary, medrec_search, medrec_records and medrec_document; nothing can change the folder. The tools read the records folder of one medrec profile on this computer, so first install the medrec CLI and set up a profile (`medrec profiles add`, `medrec init`), then enter that profile's name here. A records folder on Google Drive is read through medrec's own Drive sign-in (`medrec drive login`). The first call after installing or updating the extension may ask macOS to let this copy of medrec use its Keychain item. What the tools return goes to Claude.",
   "author": {

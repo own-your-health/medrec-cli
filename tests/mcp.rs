@@ -614,6 +614,31 @@ fn private_items_stay_out_of_household_wide_answers_unless_asked_about() {
     let v = ask(SEARCH, json!({"query": "recheck"}));
     assert!(left_out(&v).is_none(), "nothing private matched: {v}");
 
+    // A page counts what was left out between it and the page before; the
+    // pages add up to the answer's whole count.
+    let whole = ask(RECORDS, json!({"kind": "timeline"}));
+    let count = |v: &Value| -> usize {
+        left_out(v).map_or(0, |w| w.split(' ').next().unwrap().parse().unwrap())
+    };
+    let total = count(&whole);
+    assert!(total >= 2, "{whole}");
+    let (mut sum, mut pages, mut cursor) = (0, 0, None::<String>);
+    loop {
+        let mut args = json!({"kind": "timeline", "limit": 2});
+        if let Some(c) = &cursor {
+            args["cursor"] = json!(c);
+        }
+        let v = ask(RECORDS, args);
+        sum += count(&v);
+        pages += 1;
+        match v["next_cursor"].as_str() {
+            Some(c) => cursor = Some(c.to_string()),
+            None => break,
+        }
+    }
+    assert!(pages > 1);
+    assert_eq!(sum, total, "{pages} pages");
+
     // About the person, or naming the item: in, and marked.
     let v = ask(RECORDS, json!({"kind": "conditions", "person": "Alex"}));
     assert_eq!(item(&v, depression)["private"], "mental_health");

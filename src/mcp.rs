@@ -570,32 +570,31 @@ impl PrivateItems {
 
     /// Marks an answer's private items with their area when the call is
     /// about one person or names the item (`open`); otherwise leaves them
-    /// out. How many it left out.
-    fn keep(&self, items: &mut Vec<Item>, open: impl Fn(&Item) -> bool) -> usize {
-        let before = items.len();
-        items.retain_mut(|i| {
+    /// out. What is kept, and where those left out sat.
+    fn keep(&self, items: Vec<Item>, open: impl Fn(&Item) -> bool) -> (Vec<Item>, views::LeftOut) {
+        views::LeftOut::split(items, |i| {
             if !self.held_back(&i.id) {
-                return true;
-            }
-            if !open(i) {
                 return false;
             }
+            if !open(i) {
+                return true;
+            }
             i.private = self.area(&i.id);
-            true
-        });
-        before - items.len()
+            false
+        })
     }
 
-    /// Says on a page how many items it left out, and whose marks did not
-    /// read.
-    fn warn<T>(&self, page: &mut Page<T>, left_out: usize) {
-        if left_out > 0 {
+    /// Says on a page, starting at `offset`, how many items it left out,
+    /// and whose marks did not read.
+    fn warn<T>(&self, page: &mut Page<T>, offset: usize, left_out: &views::LeftOut) {
+        let n = left_out.on_page(offset, page.info.returned, page.info.next_cursor.is_none());
+        if n > 0 {
             page.warn(
                 "private-left-out",
                 format!(
-                    "{left_out} private item{} left out of this household-wide answer: ask about one person, or name the item, to include {}",
-                    if left_out == 1 { "" } else { "s" },
-                    if left_out == 1 { "it" } else { "them" },
+                    "{n} private item{} left out of this page of a household-wide answer: ask about one person, or name the item, to include {}",
+                    if n == 1 { "" } else { "s" },
+                    if n == 1 { "it" } else { "them" },
                 ),
             );
         }
@@ -753,7 +752,7 @@ impl MedrecTools {
             })
             .collect();
         let mut out = page.page(items, "person, since/until, or more words")?;
-        private.warn(&mut out, left_out);
+        private.warn(&mut out, page.offset(), &left_out);
         ToolOutput::new(&out)
     }
 
@@ -952,11 +951,11 @@ impl MedrecTools {
         }
         items.sort_by(|a, b| b.date.cmp(&a.date).then(a.title.cmp(&b.title)));
         let private = PrivateItems::of(&f, &h, &selected)?;
-        let left_out = private.keep(&mut items, |i| {
+        let (items, left_out) = private.keep(items, |i| {
             person.is_some() || name.is_some_and(|n| crate::private::names(&i.title, n))
         });
         let mut out = page.page(items, "person, since/until, active or name")?;
-        private.warn(&mut out, left_out);
+        private.warn(&mut out, page.offset(), &left_out);
         ToolOutput::new(&out)
     }
 
@@ -984,7 +983,7 @@ impl MedrecTools {
         let (f, h) = self.open()?;
         let selected = people::selected(&h, person).map_err(person_error)?;
         let fold = name.map(classify::fold);
-        let mut items: Vec<Item> = crate::events::list(&f, &h, person, r)?
+        let items: Vec<Item> = crate::events::list(&f, &h, person, r)?
             .iter()
             .filter(|e| id.is_none_or(|id| e["id"] == id))
             .filter(|e| {
@@ -1011,7 +1010,7 @@ impl MedrecTools {
             );
         }
         let private = PrivateItems::of(&f, &h, &selected)?;
-        let left_out = private.keep(&mut items, |i| {
+        let (items, left_out) = private.keep(items, |i| {
             person.is_some()
                 || id.is_some()
                 || name.is_some_and(|n| {
@@ -1026,7 +1025,7 @@ impl MedrecTools {
                 })
         });
         let mut out = page.page(items, "person, since/until or name")?;
-        private.warn(&mut out, left_out);
+        private.warn(&mut out, page.offset(), &left_out);
         ToolOutput::new(&out)
     }
 

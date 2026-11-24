@@ -547,8 +547,64 @@ pub fn search(
     Ok(search_leaving_out(folder, h, person, query, range, limit, &|_| false)?.0)
 }
 
+/// Where the items a list left out sat in it, so that each page can say
+/// how many of them it skipped.
+#[derive(Debug, Clone, Default)]
+pub struct LeftOut {
+    /// The whole list's length, before anything was left out.
+    pub len: usize,
+    /// The place in the whole list of each item kept, in order.
+    pub kept_at: Vec<usize>,
+    /// The places of the items left out.
+    pub held_at: Vec<usize>,
+}
+
+impl LeftOut {
+    /// Sorts `items` out by `held`, keeping their order: what is kept, and
+    /// where each was.
+    pub fn split<T>(items: Vec<T>, mut held: impl FnMut(&mut T) -> bool) -> (Vec<T>, LeftOut) {
+        let mut out = LeftOut {
+            len: items.len(),
+            ..Default::default()
+        };
+        let mut kept = Vec::new();
+        for (i, mut x) in items.into_iter().enumerate() {
+            if held(&mut x) {
+                out.held_at.push(i);
+            } else {
+                out.kept_at.push(i);
+                kept.push(x);
+            }
+        }
+        (kept, out)
+    }
+
+    /// How many items left out sort within a page of the kept items that
+    /// starts at `offset` and holds `returned`: after the previous page's
+    /// last item, up to this page's last, or to the end on the `last` page.
+    /// The pages' counts add up to all of them.
+    pub fn on_page(&self, offset: usize, returned: usize, last: bool) -> usize {
+        let from = offset
+            .checked_sub(1)
+            .and_then(|i| self.kept_at.get(i))
+            .map_or(0, |i| i + 1);
+        let to = if last {
+            self.len
+        } else {
+            (offset + returned)
+                .checked_sub(1)
+                .and_then(|i| self.kept_at.get(i))
+                .map_or(self.len, |i| i + 1)
+        };
+        self.held_at
+            .iter()
+            .filter(|&&i| i >= from && i < to)
+            .count()
+    }
+}
+
 /// As `search`, leaving out the hits `leave_out` names, before the limit:
-/// the hits and how many were left out.
+/// the hits, and where those left out sat among them.
 pub fn search_leaving_out(
     folder: &Folder,
     h: &Household,
@@ -557,7 +613,7 @@ pub fn search_leaving_out(
     range: &Range,
     limit: usize,
     leave_out: &dyn Fn(&Hit) -> bool,
-) -> Result<(Vec<Hit>, usize), CliError> {
+) -> Result<(Vec<Hit>, LeftOut), CliError> {
     range.validate()?;
     let terms: Vec<String> = classify::fold(query)
         .split(|c: char| !c.is_alphanumeric())
@@ -593,10 +649,8 @@ pub fn search_leaving_out(
             }
         }
     }
-    let before = hits.len();
-    hits.retain(|x| !leave_out(x));
-    let left_out = before - hits.len();
     hits.sort_by(|a, b| b.score.cmp(&a.score).then(b.date.cmp(&a.date)));
+    let (mut hits, left_out) = LeftOut::split(hits, |x| leave_out(x));
     hits.truncate(limit.max(1));
     Ok((hits, left_out))
 }
@@ -866,6 +920,20 @@ pub fn notes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn each_page_counts_what_was_left_out_between_it_and_the_last() {
+        // Six items, the second and the last two left out; pages of two.
+        let (kept, out) = LeftOut::split((0..6).collect::<Vec<_>>(), |i| [1, 4, 5].contains(i));
+        assert_eq!(kept, vec![0, 2, 3]);
+        assert_eq!(out.on_page(0, 2, false), 1);
+        assert_eq!(out.on_page(2, 1, true), 2);
+        // One page holding all: all of them.
+        assert_eq!(out.on_page(0, 3, true), 3);
+        // Nothing kept: the one page counts everything.
+        let (_, none) = LeftOut::split(vec![1, 2], |_| true);
+        assert_eq!(none.on_page(0, 0, true), 2);
+    }
 
     #[test]
     fn a_date_is_cut_by_characters_and_an_unknown_kind_is_refused() {
