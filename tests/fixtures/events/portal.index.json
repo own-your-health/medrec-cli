@@ -1,0 +1,218 @@
+{
+ "schema": "medrec-index/v1",
+ "person": "p_portalaaaaaaaaaaaaaa",
+ "rev": 1,
+ "documents": [],
+ "records": [
+  {
+   "id": "r_birthstayaaaaaaaaaaa",
+   "kind": "encounter",
+   "key": "encounter|birthstay|2026-11-08",
+   "date": "2026-11-08T06:10:00Z",
+   "display": "Hospital Encounter",
+   "fields": {
+    "class": "inpatient",
+    "location": "Example Hospital Maternity",
+    "service_provider": "Example Hospital",
+    "period": {
+     "start": "2026-11-08T06:10:00Z",
+     "end": "2026-11-10T15:00:00Z"
+    }
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "mychart",
+      "organization_id": "example-hospital",
+      "fhir_base": "https://portal.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ]
+  },
+  {
+   "id": "r_bilirubinaaaaaaaaaaa",
+   "kind": "result",
+   "key": "result|bilirubin|2026-11-09",
+   "date": "2026-11-09T13:20:00Z",
+   "display": "Bilirubin, total",
+   "fields": {
+    "value": {
+     "value": 6.1,
+     "unit": "mg/dL"
+    }
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "mychart",
+      "organization_id": "example-hospital",
+      "fhir_base": "https://portal.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ]
+  },
+  {
+   "id": "r_dtapaaaaaaaaaaaaaaaa",
+   "kind": "immunization",
+   "key": "immunization|dtap|2022-01-10",
+   "date": "2022-01-10",
+   "display": "DTaP",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "mychart",
+      "organization_id": "example-family",
+      "fhir_base": "https://portal.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ]
+  },
+  {
+   "id": "r_hibaaaaaaaaaaaaaaaaa",
+   "kind": "immunization",
+   "key": "immunization|hib|2022-01-10",
+   "date": "2022-01-10",
+   "display": "Hib",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "mychart",
+      "organization_id": "example-family",
+      "fhir_base": "https://portal.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ]
+  },
+  {
+   "id": "r_polioaaaaaaaaaaaaaaa",
+   "kind": "immunization",
+   "key": "immunization|polio|2022-01-10",
+   "date": "2022-01-10",
+   "display": "Polio (IPV)",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "mychart",
+      "organization_id": "example-family",
+      "fhir_base": "https://portal.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ]
+  },
+  {
+   "id": "r_pcvaaaaaaaaaaaaaaaaa",
+   "kind": "immunization",
+   "key": "immunization|pcv|2022-01-10",
+   "date": "2022-01-10",
+   "display": "Pneumococcal (PCV)",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "mychart",
+      "organization_id": "example-family",
+      "fhir_base": "https://portal.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ]
+  },
+  {
+   "id": "r_flushotaaaaaaaaaaaaa",
+   "kind": "immunization",
+   "key": "immunization|flushot|2022-01-10",
+   "date": "2022-01-10",
+   "display": "Influenza",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "mychart",
+      "organization_id": "example-pharmacy",
+      "fhir_base": "https://portal.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ]
+  },
+  {
+   "id": "r_amoxfillaaaaaaaaaaaa",
+   "kind": "medication",
+   "key": "medication|amoxfill|2026-10-28",
+   "date": "2026-10-28",
+   "display": "Amoxicillin 250 mg/5 mL oral suspension",
+   "fields": {
+    "source": "dispense",
+    "pharmacy": "Example Pharmacy"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "mychart",
+      "organization_id": "example-pharmacy",
+      "fhir_base": "https://portal.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ]
+  },
+  {
+   "id": "r_ibufillaaaaaaaaaaaaa",
+   "kind": "medication",
+   "key": "medication|ibufill|2026-10-29",
+   "date": "2026-10-29",
+   "display": "Ibuprofen 100 mg/5 mL oral suspension",
+   "fields": {
+    "source": "dispense",
+    "pharmacy": "Example Pharmacy"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "mychart",
+      "organization_id": "example-pharmacy",
+      "fhir_base": "https://portal.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ]
+  }
+ ],
+ "studies": [],
+ "imports": []
+}

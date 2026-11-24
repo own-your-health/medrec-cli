@@ -85,8 +85,7 @@ pub struct PersonViews {
     #[serde(default)]
     pub overrides: Option<String>,
     /// The MD5 of the person's `marks.json`, null when there is none
-    /// (0.9.1 and later); it too makes only `events.json` and `bills.json`
-    /// stale.
+    /// (0.9.1 and later); it too makes only `bills.json` stale.
     #[serde(default)]
     pub marks: Option<String>,
     #[serde(default)]
@@ -342,6 +341,7 @@ pub fn sync(f: &Folder, all: bool) -> Result<Synced, CliError> {
                     texts: Some(&loaded[&q.id].texts),
                 })
                 .collect(),
+            utc_offset: pk_cli_core::dates::local_utc_offset,
         });
         if matches!(overrides, Some(Err(()))) {
             events["overrides_unreadable"] = Value::Bool(true);

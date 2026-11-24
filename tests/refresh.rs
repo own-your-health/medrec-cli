@@ -47,6 +47,7 @@ impl Env {
     fn run_env(&self, args: &[&str], env: &[(&str, &str)]) -> Output {
         let mut c = Command::cargo_bin("medrec").unwrap();
         c.env("XDG_CONFIG_HOME", self.root.join("config"))
+            .env("TZ", "America/New_York")
             .env("XDG_CACHE_HOME", self.root.join("cache"))
             .env("HOME", &self.root)
             .env("PATH", &self.path)

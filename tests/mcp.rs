@@ -33,6 +33,7 @@ impl Env {
     fn command(&self) -> Command {
         let mut c = Command::cargo_bin("medrec").unwrap();
         c.env("XDG_CONFIG_HOME", self.root.join("config"))
+            .env("TZ", "America/New_York")
             .env("XDG_CACHE_HOME", self.root.join("cache"))
             .env("HOME", &self.root)
             .env("PATH", &self.path)
@@ -566,6 +567,7 @@ fn the_binary_serves_over_stdio_and_writes_nothing() {
     let bin = assert_cmd::cargo::cargo_bin("medrec");
     let mut child = std::process::Command::new(bin)
         .env("XDG_CONFIG_HOME", e.root.join("config"))
+        .env("TZ", "America/New_York")
         .env("XDG_CACHE_HOME", e.root.join("cache"))
         .env("HOME", &e.root)
         .env("PATH", &e.path)
@@ -645,6 +647,7 @@ fn call_summary(e: &Env, env: &[(&str, &str)], calls: usize) -> Vec<(Value, std:
     let bin = assert_cmd::cargo::cargo_bin("medrec");
     let mut cmd = std::process::Command::new(bin);
     cmd.env("XDG_CONFIG_HOME", e.root.join("config"))
+        .env("TZ", "America/New_York")
         .env("XDG_CACHE_HOME", e.root.join("cache"))
         .env("HOME", &e.root)
         .env("PATH", &e.path)

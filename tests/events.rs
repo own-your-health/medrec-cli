@@ -2,8 +2,13 @@
 //! written by its make.py): one event per real-world visit, stay or fill.
 
 use medrec::events::{self, Decision, Input, Linked, Overrides};
-use medrec::model::{Household, PersonIndex, PersonText};
-use serde_json::Value;
+use medrec::model::{Household, Person, PersonIndex, PersonText};
+use serde_json::{json, Value};
+
+/// US Eastern in November: the zone the fixtures' days are read in.
+fn eastern(_: i64) -> Option<i64> {
+    Some(-5 * 3600)
+}
 
 fn load<T: serde::de::DeserializeOwned>(name: &str) -> T {
     let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -49,6 +54,7 @@ fn events_of(w: &World, who: usize, overrides: Option<&Overrides>) -> Value {
             index: oidx,
             texts: Some(otext),
         }],
+        utc_offset: eastern,
     })
 }
 
@@ -378,4 +384,106 @@ fn the_households_decisions_outrank_the_rules() {
         .unwrap()
         .iter()
         .all(|e| !ids(e).contains(&"d_obreceiptaaaaaaaaaaa")));
+}
+
+#[test]
+fn a_portal_stay_spans_its_days_and_a_days_doses_and_fills_say_what_they_were() {
+    let idx: PersonIndex = load("portal.index.json");
+    let person: Person = serde_json::from_value(json!({
+        "id": idx.person, "name": "Jamie Example", "folder": "Jamie Example",
+        "created_at": "2026-11-10T00:00:00Z"}))
+    .unwrap();
+    let texts = PersonText::new(&person.id);
+    let build = |utc_offset: fn(i64) -> Option<i64>| {
+        events::build(&Input {
+            person: &person,
+            index: &idx,
+            texts: &texts,
+            overrides: None,
+            linked: Vec::new(),
+            utc_offset,
+        })
+    };
+    let v = build(eastern);
+
+    // A stay seen only in the portal, from 01:10 on its first day (06:10
+    // UTC), is a stay through its last, and a result inside it joins it.
+    let stay = holding(&v, "r_birthstayaaaaaaaaaaa");
+    assert_eq!(
+        (&stay["kind"], &stay["title"], &stay["start"], &stay["end"]),
+        (
+            &json!("inpatient"),
+            &json!("Hospital stay"),
+            &json!("2026-11-08"),
+            &json!("2026-11-10")
+        ),
+        "{stay}"
+    );
+    assert_eq!(
+        (
+            &member(stay, "r_bilirubinaaaaaaaaaaa")["role"],
+            &member(stay, "r_bilirubinaaaaaaaaaaa")["rule"]
+        ),
+        (&json!("satellite"), &json!("E4"))
+    );
+
+    // In a zone where 06:10 UTC is the evening before, it starts then.
+    fn hawaii(_: i64) -> Option<i64> {
+        Some(-10 * 3600)
+    }
+    let far = build(hawaii);
+    assert_eq!(
+        holding(&far, "r_birthstayaaaaaaaaaaa")["start"],
+        "2026-11-07"
+    );
+    // An offset outside the T2 range keeps the first of its days.
+    fn none(_: i64) -> Option<i64> {
+        None
+    }
+    assert_eq!(
+        holding(&build(none), "r_birthstayaaaaaaaaaaa")["start"],
+        "2026-11-07"
+    );
+
+    // One practice's doses on a day are one visit; another's are not.
+    let shots = holding(&v, "r_dtapaaaaaaaaaaaaaaaa");
+    assert_eq!(
+        ids(shots),
+        [
+            "r_dtapaaaaaaaaaaaaaaaa",
+            "r_hibaaaaaaaaaaaaaaaaa",
+            "r_polioaaaaaaaaaaaaaaa",
+            "r_pcvaaaaaaaaaaaaaaaaa"
+        ]
+    );
+    assert_eq!(
+        (&shots["kind"], &shots["what"], &shots["what_from"]),
+        (
+            &json!("vaccine"),
+            &json!("DTaP, Hib and 2 more"),
+            &json!("portal")
+        )
+    );
+    let flu = holding(&v, "r_flushotaaaaaaaaaaaaa");
+    assert_eq!(ids(flu), ["r_flushotaaaaaaaaaaaaa"]);
+    assert_eq!(flu["what"], "Influenza");
+
+    // A fill with no claim says which drug it was.
+    for (id, what) in [
+        (
+            "r_amoxfillaaaaaaaaaaaa",
+            "Amoxicillin 250 mg/5 mL oral suspension",
+        ),
+        (
+            "r_ibufillaaaaaaaaaaaaa",
+            "Ibuprofen 100 mg/5 mL oral suspension",
+        ),
+    ] {
+        let fill = holding(&v, id);
+        assert_eq!(
+            (&fill["kind"], &fill["what"], &fill["what_from"]),
+            (&json!("fill"), &json!(what), &json!("portal")),
+            "{fill}"
+        );
+    }
 }

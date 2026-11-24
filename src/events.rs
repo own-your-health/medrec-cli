@@ -20,6 +20,7 @@
 //! and `overrides.json`, and, for the X rules, a guardian's or child's
 //! index. Nothing here is a source.
 
+use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
 
@@ -103,6 +104,10 @@ pub struct Input<'a> {
     pub texts: &'a PersonText,
     pub overrides: Option<&'a Overrides>,
     pub linked: Vec<Linked<'a>>,
+    /// The UTC offset, in seconds, at a time: the days an event is shown
+    /// on are the calendar days at it (`pk_cli_core::dates::local_utc_offset`,
+    /// the machine's zone, outside tests).
+    pub utc_offset: fn(i64) -> Option<i64>,
 }
 
 // ---------------------------------------------------------------- days
@@ -143,6 +148,44 @@ fn local_days(s: &str) -> BTreeSet<Day> {
         (secs - 10 * 3600).div_euclid(86_400),
     ]
     .into()
+}
+
+thread_local! {
+    /// `Input::utc_offset` while `build` runs.
+    static OFFSET: Cell<fn(i64) -> Option<i64>> = const { Cell::new(no_offset) };
+}
+
+fn no_offset(_: i64) -> Option<i64> {
+    None
+}
+
+/// Sets `OFFSET` for one `build`, and puts the one before back after it.
+struct Offset(fn(i64) -> Option<i64>);
+
+impl Offset {
+    fn set(f: fn(i64) -> Option<i64>) -> Self {
+        Offset(OFFSET.with(|o| o.replace(f)))
+    }
+}
+
+impl Drop for Offset {
+    fn drop(&mut self) {
+        OFFSET.with(|o| o.set(self.0));
+    }
+}
+
+/// The day a time is shown on: of its local days (T2), the one it falls
+/// on at the offset `build` was given, else the first.
+fn shown_day(s: &str) -> Option<Day> {
+    let days = local_days(s);
+    if days.len() > 1 {
+        let at = crate::refresh::time::parse(s)
+            .and_then(|secs| Some((secs + OFFSET.with(Cell::get)(secs)?).div_euclid(86_400)));
+        if let Some(d) = at.filter(|d| days.contains(d)) {
+            return Some(d);
+        }
+    }
+    days.first().copied()
 }
 
 // ---------------------------------------------------------------- amounts
@@ -1214,14 +1257,51 @@ fn source_key(p: &[crate::model::Provenance]) -> Option<String> {
 
 const SKIPPED_STATUS: &[&str] = &["planned", "cancelled", "entered-in-error"];
 
-fn record_days(r: &Record) -> BTreeSet<Day> {
-    let start = r
-        .fields
+fn record_start(r: &Record) -> Option<&str> {
+    r.fields
         .get("period")
         .and_then(|p| p.get("start"))
         .and_then(Value::as_str)
-        .or(r.date.as_deref());
-    start.map(local_days).unwrap_or_default()
+        .or(r.date.as_deref())
+}
+
+/// The local days a record can have started on (T2).
+fn record_days(r: &Record) -> BTreeSet<Day> {
+    record_start(r).map(local_days).unwrap_or_default()
+}
+
+/// The day a record is shown as starting on.
+fn record_day(r: &Record) -> Option<Day> {
+    record_start(r).and_then(shown_day)
+}
+
+/// The longest period, in days, read as one stay rather than an error.
+const LONGEST_PERIOD: Day = 90;
+
+/// The days a record is shown as starting and ending on: its period's end,
+/// when it has one, on or after the start and at most `LONGEST_PERIOD`
+/// days later; else its start.
+fn record_dates(r: &Record) -> Option<(Day, Day)> {
+    let start = record_day(r)?;
+    let end = r
+        .fields
+        .get("period")
+        .and_then(|p| p.get("end"))
+        .and_then(Value::as_str)
+        .and_then(shown_day)
+        .filter(|e| *e >= start && *e - start <= LONGEST_PERIOD)
+        .unwrap_or(start);
+    Some((start, end))
+}
+
+/// Every day a record can fall on: its local start days and each day
+/// through its period's end.
+fn record_span(r: &Record) -> BTreeSet<Day> {
+    let mut days = record_days(r);
+    if let Some((s, e)) = record_dates(r) {
+        days.extend(s..=e);
+    }
+    days
 }
 
 fn record_member(
@@ -1231,7 +1311,7 @@ fn record_member(
     conf: Conf,
     spans: bool,
 ) -> Member {
-    let days = record_days(r);
+    let dates = record_dates(r);
     Member {
         id: r.id.clone(),
         document: false,
@@ -1241,7 +1321,7 @@ fn record_member(
         conf,
         person: None,
         days: if spans {
-            Some((*days.first().unwrap_or(&0), *days.first().unwrap_or(&0)))
+            Some(dates.unwrap_or((0, 0)))
         } else {
             None
         },
@@ -1295,13 +1375,7 @@ fn portal_into_events(evs: &mut Vec<Ev>, records: &[Record], first_claim: Option
     }
     let mut pvs: Vec<Pv> = Vec::new();
     let mut visits: Vec<&Record> = encounters.iter().copied().filter(|r| is_visit(r)).collect();
-    visits.sort_by(|a, b| {
-        (record_days(a).first().copied(), &a.date, &a.id).cmp(&(
-            record_days(b).first().copied(),
-            &b.date,
-            &b.id,
-        ))
-    });
+    visits.sort_by(|a, b| (record_day(a), &a.date, &a.id).cmp(&(record_day(b), &b.date, &b.id)));
     for e in visits {
         let days = record_days(e);
         if days.is_empty() {
@@ -1416,7 +1490,7 @@ fn portal_into_events(evs: &mut Vec<Ev>, records: &[Record], first_claim: Option
 
     // E1: a contact joins a visit of its organization within 3 days.
     for e in encounters.iter().filter(|r| !is_visit(r)) {
-        let Some(&d) = record_days(e).first() else {
+        let Some(d) = record_day(e) else {
             continue;
         };
         let key = source_key(&e.provenance);
@@ -1486,7 +1560,7 @@ fn portal_into_events(evs: &mut Vec<Ev>, records: &[Record], first_claim: Option
                     m.role == "portal"
                         && idx.get(m.id.as_str()).is_some_and(|enc| {
                             source_key(&enc.provenance) == key
-                                && record_days(enc).iter().any(|ed| {
+                                && record_span(enc).iter().any(|ed| {
                                     days.contains(ed)
                                         || (matches!(r.kind.as_str(), "result" | "report")
                                             && days.contains(&(ed - 1)))
@@ -1580,7 +1654,7 @@ fn portal_into_events(evs: &mut Vec<Ev>, records: &[Record], first_claim: Option
         if placed.contains(&r.id) {
             continue;
         }
-        let Some(&d) = record_days(r).first() else {
+        let Some(d) = record_day(r) else {
             continue;
         };
         let fam = vaccine_family(&r.display);
@@ -1602,14 +1676,34 @@ fn portal_into_events(evs: &mut Vec<Ev>, records: &[Record], first_claim: Option
                     })
                 })
         });
+        // With no claim, a day's doses from one source are one visit.
+        let key = source_key(&r.provenance);
+        let same_visit = || {
+            evs.iter().position(|ev| {
+                ev.kind == "vaccine"
+                    && ev.claims().next().is_none()
+                    && ev.span() == Some((d, d))
+                    && ev.members.iter().all(|m| {
+                        m.role == "vaccine"
+                            && idx
+                                .get(m.id.as_str())
+                                .is_some_and(|o| source_key(&o.provenance) == key)
+                    })
+            })
+        };
         match target {
             Some(i) => evs[i]
                 .members
                 .push(record_member(r, "satellite", "E5", Conf::Sure, false)),
-            None => evs.push(Ev::new(
-                "vaccine",
-                record_member(r, "vaccine", "E5", Conf::Sure, true),
-            )),
+            None => match same_visit() {
+                Some(i) => evs[i]
+                    .members
+                    .push(record_member(r, "vaccine", "E5", Conf::Sure, true)),
+                None => evs.push(Ev::new(
+                    "vaccine",
+                    record_member(r, "vaccine", "E5", Conf::Sure, true),
+                )),
+            },
         }
     }
 
@@ -1620,7 +1714,7 @@ fn portal_into_events(evs: &mut Vec<Ev>, records: &[Record], first_claim: Option
         .filter(|r| r.kind == "medication" && str_field(r, "source") == Some("dispense"))
         .filter(live)
     {
-        let Some(&d) = record_days(r).first() else {
+        let Some(d) = record_day(r) else {
             continue;
         };
         let pharmacy = str_field(r, "pharmacy").unwrap_or("");
@@ -2135,7 +2229,7 @@ fn apply(evs: &mut Vec<Ev>, idx: &PersonIndex, decisions: &[Decision]) -> usize 
                     if m.days.is_none() {
                         m.days = recs
                             .get(out.as_str())
-                            .and_then(|r| record_days(r).first().map(|d| (*d, *d)));
+                            .and_then(|r| record_day(r).map(|d| (d, d)));
                     }
                     evs.push(Ev::new(kind, m));
                 }
@@ -2298,9 +2392,21 @@ fn render(
         .claims()
         .find(|m| m.role == "facility")
         .and_then(|m| recs.get(m.id.as_str()).copied());
+    // A visit seen only in the portal is a stay or an ER visit when its
+    // encounter's class says so.
+    let class_is = |classes: &[&str]| {
+        encs.iter().any(|e| {
+            str_field(e, "class").is_some_and(|c| classes.contains(&c.to_lowercase().as_str()))
+        })
+    };
+    let kind = match ev.kind {
+        "portal" if class_is(&["inpatient", "imp", "inpatient encounter", "acute"]) => "inpatient",
+        "portal" if class_is(&["emergency", "emer"]) => "er",
+        k => k,
+    };
     let mut o = Map::new();
     o.insert("id".into(), json!(id));
-    o.insert("kind".into(), json!(ev.kind));
+    o.insert("kind".into(), json!(kind));
     o.insert("start".into(), json!(iso(start)));
     o.insert("end".into(), json!(iso(end)));
     let times: Vec<&str> = encs
@@ -2318,7 +2424,7 @@ fn render(
     }
     let title = TITLE
         .iter()
-        .find(|(k, _)| *k == ev.kind)
+        .find(|(k, _)| *k == kind)
         .map(|(_, t)| *t)
         .unwrap_or("Event");
     o.insert("title".into(), json!(title));
@@ -2334,24 +2440,48 @@ fn render(
         o.insert("what".into(), json!(r));
         o.insert("what_from".into(), json!("portal"));
     } else if encs.is_empty() {
-        let from_claims = if matches!(ev.kind, "fill" | "vaccine") {
-            let names: Vec<&str> = claims
-                .iter()
-                .filter_map(|c| c.display.split(" · ").next())
-                .filter(|s| !s.is_empty())
-                .collect();
-            match names.as_slice() {
+        let listed = |names: Vec<&str>| -> Option<String> {
+            let mut seen: Vec<&str> = Vec::new();
+            for n in names.into_iter().filter(|s| !s.is_empty()) {
+                if !seen.contains(&n) {
+                    seen.push(n);
+                }
+            }
+            match seen.as_slice() {
                 [] => None,
                 [a] => Some(a.to_string()),
                 [a, b] => Some(format!("{a} and {b}")),
                 [a, b, rest @ ..] => Some(format!("{a}, {b} and {} more", rest.len())),
             }
-        } else {
-            from_claims
         };
-        if let Some(w) = from_claims {
+        let (what, from) = if matches!(ev.kind, "fill" | "vaccine") {
+            // The claims' names, else the fills' or doses' own.
+            match listed(
+                claims
+                    .iter()
+                    .filter_map(|c| c.display.split(" · ").next())
+                    .collect(),
+            ) {
+                Some(w) => (Some(w), "claims"),
+                None => (
+                    listed(
+                        ev.members
+                            .iter()
+                            .filter(|m| matches!(m.role, "fill" | "vaccine") && m.kind != "claim")
+                            .filter_map(|m| recs.get(m.id.as_str()))
+                            .map(|r| r.display.as_str())
+                            .collect(),
+                    )
+                    .map(|w| crate::summary::clip(&w, MEMBER_TITLE)),
+                    "portal",
+                ),
+            }
+        } else {
+            (from_claims, "claims")
+        };
+        if let Some(w) = what {
             o.insert("what".into(), json!(w));
-            o.insert("what_from".into(), json!("claims"));
+            o.insert("what_from".into(), json!(from));
         }
     }
     let portal_place = encs
@@ -2514,6 +2644,7 @@ fn render(
 
 /// A person's events document.
 pub fn build(inp: &Input) -> Value {
+    let _offset = Offset::set(inp.utc_offset);
     let pid = &inp.person.id;
     let mut b = base(inp.index, Some(inp.texts));
     let recs: BTreeMap<&str, &Record> = inp
@@ -2718,6 +2849,7 @@ pub fn of_person(
                 texts: Some(t),
             })
             .collect(),
+        utc_offset: pk_cli_core::dates::local_utc_offset,
     });
     if overrides.is_err() {
         v["overrides_unreadable"] = Value::Bool(true);
