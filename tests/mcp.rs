@@ -955,38 +955,76 @@ fn a_condition_has_its_plain_name_from_the_folders_views() {
     }
 
     // Views older than the folder's files name nothing.
-    let path = e.records().join(&folder).join("marks.json");
-    std::fs::write(
-        &path,
-        serde_json::to_vec(&json!({"schema": "medrec-marks/v1", "person": pid})).unwrap(),
-    )
-    .unwrap();
+    let marks = e.records().join(&folder).join("marks.json");
+    let mark = |item: &str| {
+        std::fs::write(
+            &marks,
+            serde_json::to_vec(
+                &json!({"schema": "medrec-marks/v1", "person": pid, "private": [
+                {"id": "m_aaaaaaaaaaaaaaaaaaaa", "item": item, "private": true,
+                 "at": "2026-11-24T00:00:00Z"}]}),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    };
+    mark(pressure);
     let v = ask(RECORDS, json!({"kind": "conditions", "person": "Alex"}));
     assert_eq!(name_of(&v, pressure), None);
 
-    // A pass on a machine with no table takes the names out.
+    // A pass on a machine with no table keeps the names, split by what is
+    // private now, and adds none.
+    let view = || -> Option<Value> {
+        let index: Value =
+            serde_json::from_slice(&std::fs::read(e.records().join("views/views.json")).unwrap())
+                .unwrap();
+        let md5 = index["people"][&pid]["files"]["code-names.json"].as_str()?;
+        let stored = medrec::viewfiles::stored_name("code-names.json", md5);
+        let bytes = std::fs::read(e.records().join("views").join(&pid).join(stored)).unwrap();
+        Some(serde_json::from_slice(&bytes).unwrap())
+    };
     e.ok(&["views", "write"]);
-    let index: Value =
-        serde_json::from_slice(&std::fs::read(e.records().join("views/views.json")).unwrap())
-            .unwrap();
-    let files = index["people"][&pid]["files"].as_object().unwrap();
-    assert!(!files.contains_key("code-names.json"), "{files:?}");
-    let left = std::fs::read_dir(e.records().join("views").join(&pid))
-        .unwrap()
-        .flatten()
-        .filter(|f| f.file_name().to_string_lossy().starts_with("code-names."))
-        .count();
-    assert_eq!(left, 0);
+    let v = view().expect("the names are kept");
+    assert_eq!(v["table"]["version"], "FY2027");
+    assert_eq!(v["codes"], json!({}));
+    assert_eq!(
+        v["private_codes"],
+        json!({"icd10cm|F32.0": {"name": "Sample low mood"},
+               "icd10cm|I10": {"name": "Sample pressure"}})
+    );
+    let v = ask(RECORDS, json!({"kind": "conditions", "person": "Alex"}));
+    assert_eq!(name_of(&v, pressure).as_deref(), Some("Sample pressure"));
+    let v = ask(
+        RECORDS,
+        json!({"kind": "conditions", "name": "essential hypertension"}),
+    );
+    assert_eq!(name_of(&v, pressure), None);
 
-    // As does a pass that finds other tables than the views were made with.
-    let mut index = index;
-    index["people"][&pid]["code_table"] = json!("icd10cm FY2000");
-    std::fs::write(
-        e.records().join("views/views.json"),
-        serde_json::to_vec(&index).unwrap(),
-    )
-    .unwrap();
-    assert_eq!(e.ok(&["views", "write"])["people_rebuilt"], 1);
+    // Nobody's views are made again for the table this machine lacks.
+    let path = e.records().join("views/views.json");
+    let mut index: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    index["people"][&pid]["code_table"] = json!("icd10cm FY2027");
+    std::fs::write(&path, serde_json::to_vec(&index).unwrap()).unwrap();
+    assert_eq!(e.ok(&["views", "write"])["people_rebuilt"], 0);
+    let after: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(
+        after["people"][&pid]["code_table"], "icd10cm FY2027",
+        "the table the names came from is kept"
+    );
+    e.ok(&["views", "write", "--all"]);
+    let after: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(after["people"][&pid]["code_table"], "icd10cm FY2027");
+    assert!(view().is_some());
+
+    // A last view whose bytes are not the ones recorded is not carried.
+    let files = std::fs::read_dir(e.records().join("views").join(&pid)).unwrap();
+    for f in files.flatten() {
+        if f.file_name().to_string_lossy().starts_with("code-names.") {
+            std::fs::write(f.path(), b"{}").unwrap();
+        }
+    }
+    e.ok(&["views", "write", "--all"]);
+    assert!(view().is_none());
     let _ = std::fs::remove_dir_all(&e.root);
 }
 

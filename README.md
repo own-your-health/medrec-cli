@@ -8,8 +8,9 @@ conditions, allergies, immunizations and notes, at the terminal or, through
 `medrec mcp`, in Claude.
 
 `medrec` holds no provider credentials and makes no network calls of its
-own, except to Google Drive, through its own sign-in, and to GitHub for
-`self-update`. Provider CLIs fetch records; `medrec` files them.
+own, except to Google Drive, through its own sign-in, to GitHub for
+`self-update`, and to a code table's publisher for `tables fetch`. Provider
+CLIs fetch records; `medrec` files them.
 
 Part of the `piekstra-cli/1` family. It is built on
 [cli-common](https://github.com/piekstra/cli-common) and
@@ -605,9 +606,10 @@ medrec tables fetch icd10cm --file ZIP  # or keep a zip downloaded by hand
   keeps it only if its size, SHA-256 and row count are those recorded in
   `src/tables.rs`. No code is ever looked up over the network, so no request
   says which codes the records hold.
-- **No table, no names.** Without the file, or with one that is not the
-  recorded one, the source's own words stand. A code the table lacks (another
-  year's, withdrawn or invalid) has no name.
+- **No table, no new names.** Without the file, or with one that is not the
+  recorded one, a pass keeps the names another machine wrote for codes still
+  in use, and adds none. A code with no name shows the source's own words. A
+  code the table lacks (another year's, withdrawn or invalid) has no name.
 - The file is in `~/.cache/medrec/tables`. After fetching it, run `medrec
   views write` on each profile, or let the next write do it.
 - The names a person's records use are in `views/` as `code-names.json`

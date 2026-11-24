@@ -103,9 +103,10 @@ pub struct PersonViews {
     pub marks: Option<String>,
     #[serde(default)]
     pub linked: BTreeMap<String, LinkedFiles>,
-    /// The code table `code-names.json` was made with, absent when this
-    /// machine had none (0.9.4 and later). A reader need not check it: the
-    /// next pass on a machine with another table makes the views again.
+    /// The code table `code-names.json` was made with, absent when no pass
+    /// had one (0.9.4 and later). A reader need not check it: the next pass
+    /// on a machine with another table makes the views again, and one on a
+    /// machine with none keeps the names.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code_table: Option<String>,
     pub row: Row,
@@ -264,7 +265,7 @@ pub fn sync(f: &Folder, all: bool) -> Result<Synced, CliError> {
                 && store.md5(&crate::events::overrides_rel(p))? == was.overrides
                 && store.md5(&crate::marks::rel(p))? == was.marks
                 && linked_md5s(p)? == was.linked
-                && was.code_table == code_table
+                && (code_table.is_none() || was.code_table == code_table)
                 && EVERY_PERSON.iter().all(|f| was.files.contains_key(*f))
             {
                 kept.insert(p.id.clone(), was.clone());
@@ -395,15 +396,30 @@ pub fn sync(f: &Folder, all: bool) -> Result<Synced, CliError> {
             bills["marks_unreadable"] = Value::Bool(true);
             private["marks_unreadable"] = Value::Bool(true);
         }
-        let code_names = titles
+        // A machine without the table keeps the names another wrote.
+        let last = old
             .as_ref()
-            .and_then(|t| crate::code_names::build(p, &me.idx, &private, private_marks, t));
+            .filter(|o| o.schema == SCHEMA)
+            .and_then(|o| o.people.get(&p.id));
+        let before = match (&titles, last) {
+            (None, Some(v)) => last_code_names(store, p, v)?,
+            _ => None,
+        };
+        let source = match (&titles, &before) {
+            (Some(t), _) => Some(crate::code_names::Source::Table(t)),
+            (None, Some(v)) => Some(crate::code_names::Source::Previous(v)),
+            (None, None) => None,
+        };
+        let code_names =
+            source.and_then(|s| crate::code_names::build(p, &me.idx, &private, private_marks, &s));
         let from = EventsFrom {
             bills,
             private,
             events,
             code_names,
-            code_table: code_table.clone(),
+            code_table: code_table
+                .clone()
+                .or_else(|| last.and_then(|v| v.code_table.clone())),
             overrides: otext.as_deref().map(|t| md5_hex(t.as_bytes())),
             marks: mtext.as_deref().map(|t| md5_hex(t.as_bytes())),
             linked: linked
@@ -567,6 +583,22 @@ pub fn current_view(
     }
     let text = f.store.read_text(&stored_rel(&p.id, name, want))?;
     Ok(text.map(String::into_bytes).filter(|b| md5_hex(b) == *want))
+}
+
+/// The person's `code-names.json` as the last pass wrote it.
+fn last_code_names(
+    store: &crate::store::Store,
+    p: &Person,
+    v: &PersonViews,
+) -> Result<Option<Value>, CliError> {
+    let name = crate::code_names::FILE;
+    let Some(want) = v.files.get(name) else {
+        return Ok(None);
+    };
+    Ok(store
+        .read_text(&stored_rel(&p.id, name, want))?
+        .filter(|t| md5_hex(t.as_bytes()) == *want)
+        .and_then(|t| crate::code_names::previous(&t, &p.id)))
 }
 
 /// Upload every view, stopping at the first error; the caller writes

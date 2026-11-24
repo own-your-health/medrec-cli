@@ -8,11 +8,11 @@
 //! recorded one, a code has no name and the source's own text stands.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use pk_cli_core::CliError;
+use pk_cli_core::{private_file, CliError};
 use serde::Serialize;
 
 use crate::hash::sha256_hex;
@@ -61,7 +61,8 @@ pub enum State {
     Ready,
     /// Not downloaded.
     Absent,
-    /// A file is there, and its hash is not the recorded one: it is not read.
+    /// A file is there, and it is not the recorded one or does not read: it
+    /// is not used.
     Changed,
 }
 
@@ -109,14 +110,13 @@ impl Table {
     fn verified(&self, dir: &Path) -> (State, Option<Vec<u8>>) {
         let path = self.path(dir);
         match std::fs::metadata(&path) {
-            Err(_) => return (State::Absent, None),
-            Ok(m) if m.len() != self.bytes => return (State::Changed, None),
-            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (State::Absent, None),
+            Ok(m) if m.len() == self.bytes => {}
+            _ => return (State::Changed, None),
         }
         match std::fs::read(&path) {
             Ok(b) if sha256_hex(&b) == self.sha256 => (State::Ready, Some(b)),
-            Ok(_) => (State::Changed, None),
-            Err(_) => (State::Absent, None),
+            _ => (State::Changed, None),
         }
     }
 
@@ -164,30 +164,17 @@ pub fn fetch(t: &Table, dir: &Path, from: Option<&Path>) -> Result<Fetched, CliE
         }
         None => (download(t)?, "downloaded"),
     };
-    let rows = member(&bytes, t.member, t.member_bytes).map(|b| icd_rows(&b).count());
-    if rows != Some(t.rows) {
+    let file = member(&bytes, t.member, t.member_bytes)
+        .ok_or_else(|| CliError::Other(format!("{} {} cannot be unpacked", t.id, t.version)))?;
+    if icd_rows(&file).count() != t.rows {
         return Err(CliError::Other(format!(
             "{} {} does not have the rows medrec expects",
             t.id, t.version
         )));
     }
-    let fail = |e: std::io::Error| CliError::Other(format!("keeping {}: {e}", t.id));
-    let mut b = std::fs::DirBuilder::new();
-    b.recursive(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::DirBuilderExt;
-        b.mode(0o700);
-    }
-    b.create(dir).map_err(fail)?;
-    let tmp = dir.join(format!(".{}-{}.part", t.id, std::process::id()));
-    let mut f = std::fs::File::create(&tmp).map_err(fail)?;
-    let wrote = f.write_all(&bytes).and_then(|_| f.sync_all());
-    drop(f);
-    if let Err(e) = wrote.and_then(|_| std::fs::rename(&tmp, t.path(dir))) {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(fail(e));
-    }
+    private_file::create_dir_all(dir)
+        .and_then(|()| private_file::write(&t.path(dir), &bytes, private_file::Replace::Always))
+        .map_err(|e| CliError::Other(format!("keeping {}: {e}", t.id)))?;
     Ok(Fetched {
         id: t.id,
         version: t.version,
@@ -342,6 +329,8 @@ impl Titles {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Write;
+
     use super::*;
 
     /// Invented rows in the publishers' layouts.

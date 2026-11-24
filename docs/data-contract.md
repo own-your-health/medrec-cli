@@ -890,8 +890,9 @@ diagnoses use, from the published table on the machine that wrote the views
 (README, "Code tables"). **It only labels items a reader already shows.**
 By itself it lists a person's conditions, private ones included, so a
 reader never lists, searches or serves it on its own. A person with no
-named code has no `code-names.json`, and neither does one whose views a
-machine without the table wrote.
+named code has no `code-names.json`. A pass on a machine without the table
+keeps the names the last pass wrote for codes still in use, splits them by
+what is private now, and adds none.
 
 ```json
 {"schema": "medrec-code-names/v1", "person": "p_…",
@@ -935,8 +936,8 @@ machine without the table wrote.
 - **Only what changed.** A person keeps their views when their `index.json`,
   `text.json`, `overrides.json` and `marks.json` and their linked people's
   `index.json` and `text.json` have the MD5s `views.json` recorded, under the same `household.json` and
-  medrec version, and the code table on this machine is the one they were
-  made with (`code_table`). Otherwise their views are made
+  medrec version, and the code table on this machine, when there is one, is
+  the one they were made with (`code_table`). Otherwise their views are made
   again, and only views the folder does not already hold under their
   stored names are uploaded. An unchanged view keeps its name and is not
   written again. A person whose views lack one every person has
@@ -1004,7 +1005,7 @@ A reader decides freshness by MD5, as Drive reports it (`md5Checksum`):
 | `people.<id>.overrides` | The MD5 of the person's `overrides.json` as read; `null` when there is none (0.9.0 and later). |
 | `people.<id>.marks` | The MD5 of the person's `marks.json` as read; `null` when there is none (0.9.1 and later). |
 | `people.<id>.linked` | For each person linked to this one (Events, below), the MD5s of their `index.json` and `text.json` as read, as `{"index", "text"}`, each `null` when the file is absent; `{}` when no one is linked (0.9.0 and later). |
-| `people.<id>.code_table` | The code table the person's names were made with (`icd10cm FY2027`); absent when the machine had none (0.9.4 and later). A pass on a machine with another table, or none, makes the person's views again. |
+| `people.<id>.code_table` | The code table the person's names were made with (`icd10cm FY2027`); absent when no pass had one (0.9.4 and later). A pass on a machine with another table makes the person's views again; one on a machine with none leaves them. |
 | `row` | `documents`, `records`, `studies`, and `newest` and `last_import` when there are any: the person's line in `medrec_summary`'s people list, without `notes`. |
 | `records` | For each record kind, `{"shards": [[newest day, oldest day, count], …], "undated": count}`: its dated shards by number, and how many records its undated file holds. |
 | `timeline` | The timeline's shards, the same way. |

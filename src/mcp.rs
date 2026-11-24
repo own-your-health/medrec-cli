@@ -470,10 +470,9 @@ impl Toolset for MedrecTools {
         vec![
             ToolDef::read(
                 SUMMARY,
-                "Household and person summary",
-                "The household's people; with person, their summary. Use it first. \
-                 Medications, conditions, allergies, immunizations, latest results, visits \
-                 and bills due.",
+                "Household summary",
+                "The household's people; with person, their summary. Use it first. Medicines, \
+                 conditions, allergies, vaccines, results, visits, bills due.",
             )
             .input::<SummaryArgs>()
             .output::<SummaryOut>(),
@@ -481,7 +480,8 @@ impl Toolset for MedrecTools {
                 SEARCH,
                 "Search records",
                 "Documents, records, studies and notes with every word of query, best first. \
-                 For a named doctor, test, medicine or clinic. labs finds every lab result.",
+                 For a named doctor, test, medicine or clinic. labs or blood tests finds \
+                 every lab result.",
             )
             .input::<SearchArgs>()
             .output::<Page<SearchItem>>(),
@@ -490,7 +490,7 @@ impl Toolset for MedrecTools {
                 "List records by kind",
                 "One kind of record, newest first. events: what happened, one per visit, stay \
                  or fill, with you_owe; id gives one in full. results with name: one test over \
-                 time.",
+                 time, with range and flag.",
             )
             .input::<RecordsArgs>()
             .output::<Page<Item>>(),

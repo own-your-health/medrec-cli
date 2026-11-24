@@ -70,6 +70,46 @@ pub fn keys(r: &Record) -> Vec<String> {
     }
 }
 
+/// Where a pass's names come from.
+pub enum Source<'a> {
+    /// The table on this machine.
+    Table(&'a Titles),
+    /// The person's `code-names.json` as it was: a machine without the
+    /// table keeps the names another wrote.
+    Previous(&'a Value),
+}
+
+impl Source<'_> {
+    fn table(&self) -> Value {
+        match self {
+            Source::Table(_) => {
+                json!({"id": ICD10CM.id, "version": ICD10CM.version, "date": ICD10CM.date})
+            }
+            Source::Previous(v) => v["table"].clone(),
+        }
+    }
+
+    /// The names of `keys`, by key.
+    fn names(&self, keys: &BTreeSet<&String>) -> BTreeMap<String, String> {
+        match self {
+            Source::Table(titles) => {
+                let bare = |k: &str| tables::bare(k.split_once('|').map_or("", |(_, c)| c));
+                let found = titles.of(&keys.iter().map(|k| bare(k)).collect());
+                keys.iter()
+                    .filter_map(|k| Some((k.to_string(), found.get(&bare(k))?.clone())))
+                    .collect()
+            }
+            Source::Previous(v) => ["codes", "private_codes"]
+                .iter()
+                .filter_map(|m| v[*m].as_object())
+                .flatten()
+                .filter(|(k, _)| keys.contains(k))
+                .filter_map(|(k, x)| Some((k.clone(), x["name"].as_str()?.to_string())))
+                .collect(),
+        }
+    }
+}
+
 /// The person's `code-names.json`, or none when no code of theirs has a
 /// name. `private` is their `private.json`: a code only private items use
 /// goes in `private_codes`, and every code does when their `marks.json`
@@ -79,7 +119,7 @@ pub fn build(
     idx: &PersonIndex,
     private: &Value,
     marks: &[Mark],
-    titles: &Titles,
+    source: &Source,
 ) -> Option<Value> {
     let hidden = private.get("marks_unreadable").is_some();
     let items = &private["records"];
@@ -106,10 +146,9 @@ pub fn build(
             }
         }
     }
-    let bare = |k: &String| tables::bare(k.split_once('|').map_or("", |(_, c)| c));
-    let names = titles.of(&open.iter().chain(&closed).map(bare).collect());
+    let names = source.names(&open.iter().chain(&closed).collect());
     let named = |keys: &mut dyn Iterator<Item = &String>| -> Map<String, Value> {
-        keys.filter_map(|k| Some((k.clone(), json!({"name": names.get(&bare(k))?}))))
+        keys.filter_map(|k| Some((k.clone(), json!({"name": names.get(k)?}))))
             .collect()
     };
     let codes = named(&mut open.iter());
@@ -120,10 +159,17 @@ pub fn build(
     Some(json!({
         "schema": SCHEMA,
         "person": p.id,
-        "table": {"id": ICD10CM.id, "version": ICD10CM.version, "date": ICD10CM.date},
+        "table": source.table(),
         "codes": codes,
         "private_codes": private_codes,
     }))
+}
+
+/// A `code-names.json` of this person's, as a pass reads the last one.
+pub fn previous(text: &str, person: &str) -> Option<Value> {
+    serde_json::from_str(text)
+        .ok()
+        .filter(|v: &Value| v["schema"] == SCHEMA && v["person"] == person)
 }
 
 /// A person's names, for an answer to look up by record.
@@ -222,7 +268,7 @@ mod tests {
             ("F321", "Sample low mood"),
             ("R51", "Sample aches"),
         ]);
-        build(&p, &idx, &private, marks, &titles)
+        build(&p, &idx, &private, marks, &Source::Table(&titles))
     }
 
     fn keys_of(v: &Value, map: &str) -> Vec<String> {
