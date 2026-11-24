@@ -587,7 +587,8 @@ fn numbered(stem: &str, n: i64) -> String {
 }
 
 /// A record as the tools need it: its `index.json` fields but `key` and
-/// `documents`, with only its first source's `fhir_base` and `cli`.
+/// `documents`, with only its first source's `fhir_base`, `cli` and
+/// `organization_id` (`null` when it has none).
 fn slim(r: &Record) -> Value {
     let mut m = Map::new();
     m.insert("id".into(), r.id.clone().into());
@@ -621,6 +622,15 @@ fn slim(r: &Record) -> Value {
                 keep.insert(k.into(), v.clone());
             }
         }
+        // The sign-in a label comes from; null says the record has none, which
+        // a record written before 0.9.4 does not.
+        keep.insert(
+            "organization_id".into(),
+            src.get("organization_id")
+                .filter(|v| v.is_string())
+                .cloned()
+                .unwrap_or(Value::Null),
+        );
         m.insert(
             "provenance".into(),
             Value::Array(vec![serde_json::json!({ "source": keep })]),
@@ -1244,6 +1254,37 @@ mod tests {
                 result(i, &day)
             })
             .collect()
+    }
+
+    #[test]
+    fn a_slim_record_keeps_the_source_keys_a_label_is_found_by() {
+        let source = |org: Value| {
+            let mut r = result(0, "2026-12-28");
+            r.provenance = vec![serde_json::from_value(serde_json::json!({
+                "source": {"kind": "fhir", "cli": "athena", "organization_id": org,
+                           "fhir_base": "https://athena.example.test/fhir/r4",
+                           "cli_version": "0.6.2"},
+                "method": "fhir-api", "filed_at": "2026-11-20T10:00:00Z", "filed_by": "medrec 0.9.4"
+            }))
+            .unwrap()];
+            serde_json::to_string(&slim(&r)).unwrap()
+        };
+        // fhir_base, cli and organization_id, in that order, nothing else.
+        let slimmed = source("900001".into());
+        assert!(
+            slimmed.ends_with(
+                r#""provenance":[{"source":{"fhir_base":"https://athena.example.test/fhir/r4","cli":"athena","organization_id":"900001"}}]}"#
+            ),
+            "{slimmed}"
+        );
+        // A source with none says so with null.
+        let none = source(Value::Null);
+        assert!(
+            none.ends_with(
+                r#""fhir_base":"https://athena.example.test/fhir/r4","cli":"athena","organization_id":null}}]}"#
+            ),
+            "{none}"
+        );
     }
 
     #[test]
