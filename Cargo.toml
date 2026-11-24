@@ -5,7 +5,7 @@ version = "0.9.1"
 edition = "2021"
 # pk-cli-drive needs 1.89 (`File::lock`).
 rust-version = "1.89"
-license = "MIT OR Apache-2.0"
+license = "AGPL-3.0-only"
 repository = "https://github.com/own-your-health/medrec-cli"
 authors = ["piekstra"]
 publish = false
