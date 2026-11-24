@@ -44,6 +44,12 @@ pub struct Overrides {
     pub person: String,
     #[serde(default)]
     pub events: Vec<Decision>,
+    /// Bills the household marked paid (0.9.1 and later).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub payments: Vec<crate::bills::Payment>,
+    /// What a later medrec writes here, kept as it is.
+    #[serde(flatten)]
+    pub other: Map<String, Value>,
 }
 
 impl Overrides {
@@ -52,6 +58,8 @@ impl Overrides {
             schema: OVERRIDES_SCHEMA.into(),
             person: person.into(),
             events: Vec::new(),
+            payments: Vec::new(),
+            other: Map::new(),
         }
     }
 }
@@ -106,7 +114,7 @@ pub struct Input<'a> {
 type Day = i64;
 
 /// The day number of a date or a date-time's date part.
-fn day(s: &str) -> Option<Day> {
+pub(crate) fn day(s: &str) -> Option<Day> {
     let d = s.get(..10)?;
     crate::refresh::time::parse(&format!("{d}T00:00:00Z")).map(|t| t.div_euclid(86_400))
 }

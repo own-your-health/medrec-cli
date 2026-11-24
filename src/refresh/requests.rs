@@ -18,6 +18,24 @@ pub enum Scope {
         kind: String,
         members: [String; 2],
     },
+    /// Not an import: the household marking a bill paid.
+    Paid {
+        person: String,
+        document: String,
+        /// `YYYY-MM-DD`.
+        on: String,
+        /// A decimal with two places.
+        amount: String,
+        currency: String,
+    },
+}
+
+impl Scope {
+    /// Whether it is the household's decision, written to a person's
+    /// `overrides.json`, rather than an import.
+    pub fn is_decision(&self) -> bool {
+        matches!(self, Scope::Event { .. } | Scope::Paid { .. })
+    }
 }
 
 /// A request medrec will serve.
@@ -160,8 +178,59 @@ pub fn parse(name: &str, body: &[u8], known: &dyn Known) -> Parsed {
         return bad("its requested_at is not an RFC 3339 time".into());
     };
     let is_member = |s: &str| crate::ids::is_valid("r", s) || crate::ids::is_valid("d", s);
-    let event = match (v.get("event"), v.get("scope")) {
-        (Some(_), Some(_)) => return bad("it has both a scope and an event".into()),
+    let given = ["scope", "event", "paid"]
+        .into_iter()
+        .filter(|k| v.get(*k).is_some())
+        .count();
+    if given > 1 {
+        return bad("it has more than one of a scope, an event and a paid".into());
+    }
+    let paid = match v.get("paid") {
+        Some(Value::Object(e)) => {
+            let person = e.get("person").and_then(Value::as_str).unwrap_or("");
+            if !(crate::ids::is_valid("p", person) && known.person(person)) {
+                return bad("its paid names no person in household.json".into());
+            }
+            let document = e.get("document").and_then(Value::as_str).unwrap_or("");
+            let on = e.get("on").and_then(Value::as_str).unwrap_or("");
+            let (amount, currency) = match e.get("amount") {
+                Some(Value::String(a)) => (a.as_str(), "USD"),
+                Some(Value::Object(a)) => (
+                    a.get("amount").and_then(Value::as_str).unwrap_or(""),
+                    a.get("currency").and_then(Value::as_str).unwrap_or(""),
+                ),
+                _ => ("", ""),
+            };
+            let two_places = amount.split_once('.').is_none_or(|(_, c)| c.len() <= 2);
+            let units = crate::claims::units(amount).filter(|u| *u > 0 && two_places);
+            let currency_ok =
+                currency.len() == 3 && currency.bytes().all(|b| b.is_ascii_uppercase());
+            match units {
+                Some(u)
+                    if crate::ids::is_valid("d", document)
+                        && crate::events::day(on).is_some()
+                        && on.len() == 10
+                        && currency_ok =>
+                {
+                    Some(Scope::Paid {
+                        person: person.into(),
+                        document: document.into(),
+                        on: on.into(),
+                        amount: crate::claims::decimal(u),
+                        currency: currency.into(),
+                    })
+                }
+                _ => return bad(
+                    "its paid is not a document id, a day (YYYY-MM-DD) and an amount above zero"
+                        .into(),
+                ),
+            }
+        }
+        Some(_) => return bad("its paid is not an object".into()),
+        None => None,
+    };
+    let event = match (v.get("event"), paid) {
+        (_, Some(paid)) => Some(paid),
         (Some(Value::Object(e)), None) => {
             let person = e.get("person").and_then(Value::as_str).unwrap_or("");
             if !(crate::ids::is_valid("p", person) && known.person(person)) {
@@ -189,7 +258,7 @@ pub fn parse(name: &str, body: &[u8], known: &dyn Known) -> Parsed {
             }
         }
         (Some(_), None) => return bad("its event is not an object".into()),
-        (None, _) => None,
+        (None, None) => None,
     };
     let scope = match (event, v.get("scope")) {
         (Some(event), _) => event,
@@ -228,15 +297,28 @@ pub fn parse(name: &str, body: &[u8], known: &dyn Known) -> Parsed {
             kind,
             members,
         } => json!({ "person": person, kind.as_str(): members }),
+        Scope::Paid {
+            person,
+            document,
+            on,
+            amount,
+            currency,
+        } => {
+            let mut p = json!({"person": person, "document": document, "on": on, "amount": amount});
+            if currency != "USD" {
+                p["amount"] = json!({"amount": amount, "currency": currency});
+            }
+            p
+        }
     };
     let mut kept = Map::new();
     kept.insert("schema".into(), REQUEST_SCHEMA.into());
     kept.insert("id".into(), name_id.clone().into());
     kept.insert("requested_at".into(), requested_at.into());
-    let key = if matches!(scope, Scope::Event { .. }) {
-        "event"
-    } else {
-        "scope"
+    let key = match scope {
+        Scope::Event { .. } => "event",
+        Scope::Paid { .. } => "paid",
+        _ => "scope",
     };
     kept.insert(key.into(), scope_json);
     kept.insert(
@@ -370,6 +452,83 @@ mod tests {
     }
 
     #[test]
+    fn a_paid_request_names_a_person_a_bill_a_day_and_an_amount() {
+        let body = |extra: Value| {
+            let mut v = json!({
+                "schema": REQUEST_SCHEMA,
+                "id": "x_aaaaaaaaaaaaaaaaaaaa",
+                "requested_at": "2026-11-22T20:03:12Z",
+            });
+            for (k, x) in extra.as_object().unwrap() {
+                v[k] = x.clone();
+            }
+            serde_json::to_vec(&v).unwrap()
+        };
+        let pid = "p_aaaaaaaaaaaaaaaaaaaa";
+        let d = "d_bbbbbbbbbbbbbbbbbbbb";
+        for amount in [
+            json!("120.5"),
+            json!({"amount": "120.50", "currency": "USD"}),
+        ] {
+            let paid = json!({"paid": {"person": pid, "document": d, "on": "2026-11-20", "amount": amount}});
+            match parse(NAME, &body(paid), &K) {
+                Parsed::Valid(v) => {
+                    assert_eq!(
+                        v.scope,
+                        Scope::Paid {
+                            person: pid.into(),
+                            document: d.into(),
+                            on: "2026-11-20".into(),
+                            amount: "120.50".into(),
+                            currency: "USD".into(),
+                        }
+                    );
+                    assert!(v.scope.is_decision());
+                }
+                Parsed::Invalid(i) => panic!("{}", i.why),
+            }
+        }
+        for (paid, want) in [
+            (
+                json!({"paid": {"person": pid, "document": d, "on": "2026-11-20", "amount": "0.00"}}),
+                "above zero",
+            ),
+            (
+                json!({"paid": {"person": pid, "document": d, "on": "2026-11-20", "amount": "-5.00"}}),
+                "above zero",
+            ),
+            (
+                json!({"paid": {"person": pid, "document": d, "on": "2026-11-20", "amount": "5.001"}}),
+                "above zero",
+            ),
+            (
+                json!({"paid": {"person": pid, "document": d, "on": "20 Nov", "amount": "5.00"}}),
+                "a day",
+            ),
+            (
+                json!({"paid": {"person": pid, "document": "r_bbbbbbbbbbbbbbbbbbbb", "on": "2026-11-20", "amount": "5.00"}}),
+                "a document id",
+            ),
+            (
+                json!({"paid": {"person": pid, "document": d, "on": "2026-11-20", "amount": {"amount": "5.00", "currency": "usd"}}}),
+                "above zero",
+            ),
+            (
+                json!({"paid": {"person": "p_nosuchpersonaaaaaaa", "document": d, "on": "2026-11-20", "amount": "5.00"}}),
+                "no person",
+            ),
+            (json!({"paid": "yes"}), "not an object"),
+            (
+                json!({"paid": {"person": pid, "document": d, "on": "2026-11-20", "amount": "5.00"}, "event": {"person": pid, "apart": [d, d]}}),
+                "more than one",
+            ),
+        ] {
+            let why = why(parse(NAME, &body(paid.clone()), &K));
+            assert!(why.contains(want), "{paid}: {why}");
+        }
+    }
+
+    #[test]
     fn an_event_request_names_a_person_and_two_of_their_records_or_documents() {
         let body = |extra: Value| {
             let mut v = json!({
@@ -431,7 +590,7 @@ mod tests {
             (json!({"event": [a, b]}), "not an object"),
             (
                 json!({"event": {"person": pid, "apart": [a, b]}, "scope": {"all": true}}),
-                "both",
+                "more than one",
             ),
         ] {
             let why = why(parse(NAME, &body(event.clone()), &K));

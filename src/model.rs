@@ -336,7 +336,8 @@ pub struct Document {
     pub provenance: Provenance,
 }
 
-/// What a bill's statement says: each field only where the text labels it.
+/// What a bill's or a receipt's paper says: each field only where the text
+/// labels it.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Statement {
     /// `YYYY-MM-DD`.
@@ -351,6 +352,16 @@ pub struct Statement {
     /// mask (`****0123`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account: Option<String>,
+    /// A receipt's: what was paid (0.9.1 and later).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub amount_paid: Option<Amount>,
+    /// A receipt's: the day it was paid, `YYYY-MM-DD` (0.9.1 and later).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paid_on: Option<String>,
+    /// The number the paper gives to call with questions, as
+    /// `NNN-NNN-NNNN` (0.9.1 and later).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phone: Option<String>,
 }
 
 /// An amount as printed: a plain decimal with two places (`1234.56`,

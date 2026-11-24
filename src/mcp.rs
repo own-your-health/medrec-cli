@@ -758,6 +758,26 @@ impl MedrecTools {
             (_, None) => {
                 let bills = a.kind == Kind::Bills;
                 for p in &selected {
+                    // What is paid and left on each bill (`bills.json`).
+                    let standing: std::collections::BTreeMap<String, (bool, Option<String>)> =
+                        if bills {
+                            crate::bills::of_person(&f, &h, p)?["bills"]
+                                .as_array()
+                                .into_iter()
+                                .flatten()
+                                .filter_map(|b| {
+                                    Some((
+                                        b["document"].as_str()?.to_string(),
+                                        (
+                                            b["settled"] == true,
+                                            b["left"].as_str().map(str::to_string),
+                                        ),
+                                    ))
+                                })
+                                .collect()
+                        } else {
+                            std::collections::BTreeMap::new()
+                        };
                     for d in f.index(p)?.documents {
                         let is_bill = d.doc_type.as_deref() == Some("bill");
                         if (bills && (!is_bill || d.same_statement_as.is_some()))
@@ -776,17 +796,29 @@ impl MedrecTools {
                         }
                         let s = d.statement.as_ref();
                         let due = s.and_then(|s| s.due_date.clone());
-                        let past_due = due.as_deref().is_some_and(|d| d < today.as_str());
+                        let (settled, left) = standing.get(&d.id).cloned().unwrap_or((false, None));
+                        let past_due =
+                            !settled && due.as_deref().is_some_and(|d| d < today.as_str());
+                        let mut detail = label(d.doc_type.as_deref()).to_string();
+                        if past_due {
+                            detail.push_str(", past due");
+                        }
+                        if settled {
+                            detail.push_str(", paid");
+                        } else if let Some(left) = left {
+                            let paid_some = s
+                                .and_then(|s| s.amount_due.as_ref())
+                                .is_some_and(|a| a.amount != left);
+                            if paid_some {
+                                detail.push_str(&format!(", {left} left"));
+                            }
+                        }
                         items.push(Item {
                             kind: "document".into(),
                             person: p.name.clone(),
                             date: d.date.clone(),
                             title: clip(&title, CLIP),
-                            detail: Some(if past_due {
-                                format!("{}, past due", label(d.doc_type.as_deref()))
-                            } else {
-                                label(d.doc_type.as_deref()).to_string()
-                            }),
+                            detail: Some(detail),
                             source: d.organization.clone(),
                             id: d.id.clone(),
                             amount_due: s.and_then(|s| s.amount_due.as_ref()).map(money),

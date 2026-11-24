@@ -1,8 +1,9 @@
 //! What a bill's statement says, read from its text: the statement date, the
-//! amount due, the due date and the account number. Intake reads a
-//! statement the user files, and an import one a billing CLI exports, the
-//! same way, so two copies of one statement (a scan and the portal's PDF)
-//! are known to be one ([`same_statement`]).
+//! amount due, the due date, the account number and the number to call; and
+//! a receipt's, which adds what was paid and when. Intake reads a statement
+//! the user files, and an import one a billing CLI exports, the same way, so
+//! two copies of one statement (a scan and the portal's PDF) are known to be
+//! one ([`same_statement`]).
 //!
 //! A field is read only where the text labels it, from the rest of the
 //! label's line or, when the label heads a column (`pdftotext -layout`), from
@@ -21,6 +22,9 @@ enum Field {
     AmountDue,
     DueDate,
     Account,
+    AmountPaid,
+    PaidOn,
+    Phone,
 }
 
 /// Every label, lower-case. Where two match at one place, the longer wins,
@@ -54,7 +58,28 @@ const LABELS: &[(&str, Field)] = &[
     ("acct number", Field::Account),
     ("acct no", Field::Account),
     ("acct #", Field::Account),
+    ("amount paid", Field::AmountPaid),
+    ("payment amount", Field::AmountPaid),
+    ("paid amount", Field::AmountPaid),
+    ("total paid", Field::AmountPaid),
+    ("you paid", Field::AmountPaid),
+    ("payment date", Field::PaidOn),
+    ("date of payment", Field::PaidOn),
+    ("date paid", Field::PaidOn),
+    ("paid on", Field::PaidOn),
+    ("questions", Field::Phone),
+    ("call us at", Field::Phone),
+    ("call", Field::Phone),
+    ("customer service", Field::Phone),
+    ("phone number", Field::Phone),
+    ("phone", Field::Phone),
+    ("telephone", Field::Phone),
+    ("tel", Field::Phone),
 ];
+
+/// The word just before a phone label that makes it someone's own number,
+/// not the one to call (`Patient phone`, `Home phone`).
+const NOT_THE_OFFICE: &[&str] = &["patient", "guarantor", "home", "cell", "mobile", "your"];
 
 /// A label on a line: its field and its columns, in characters.
 struct Label {
@@ -78,9 +103,26 @@ pub fn read(text: &str) -> Option<Statement> {
                 Field::AmountDue => st.amount_due.is_none(),
                 Field::DueDate => st.due_date.is_none(),
                 Field::Account => st.account.is_none(),
+                Field::AmountPaid => st.amount_paid.is_none(),
+                Field::PaidOn => st.paid_on.is_none(),
+                Field::Phone => st.phone.is_none(),
             };
             if !slot {
                 continue;
+            }
+            if label.field == Field::Phone {
+                let word: String = line[..label.start]
+                    .iter()
+                    .rev()
+                    .skip_while(|c| c.is_whitespace())
+                    .take_while(|c| c.is_alphabetic())
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .collect();
+                if NOT_THE_OFFICE.contains(&word.as_str()) {
+                    continue;
+                }
             }
             // The rest of the line up to the next label, else the value
             // under the label on the next line that has text.
@@ -104,6 +146,9 @@ pub fn read(text: &str) -> Option<Statement> {
                 (Field::DueDate, Some(Value::Date(d))) => st.due_date = Some(d),
                 (Field::AmountDue, Some(Value::Amount(a))) => st.amount_due = Some(a),
                 (Field::Account, Some(Value::Account(a))) => st.account = Some(a),
+                (Field::AmountPaid, Some(Value::Amount(a))) => st.amount_paid = Some(a),
+                (Field::PaidOn, Some(Value::Date(d))) => st.paid_on = Some(d),
+                (Field::Phone, Some(Value::Phone(n))) => st.phone = Some(n),
                 _ => {}
             }
         }
@@ -205,6 +250,7 @@ enum Value {
     Date(String),
     Amount(Amount),
     Account(String),
+    Phone(String),
 }
 
 fn parse(field: Field, s: &str) -> Option<Value> {
@@ -212,13 +258,28 @@ fn parse(field: Field, s: &str) -> Option<Value> {
         return None;
     }
     match field {
-        Field::StatementDate | Field::DueDate => all_dates(s)
+        Field::StatementDate | Field::DueDate | Field::PaidOn => all_dates(s)
             .into_iter()
             .find(|(_, _, at)| *at <= 2)
             .map(|(iso, _, _)| Value::Date(iso)),
-        Field::AmountDue => amount(s).map(Value::Amount),
+        Field::AmountDue | Field::AmountPaid => amount(s).map(Value::Amount),
         Field::Account => account(s).map(Value::Account),
+        Field::Phone => phone(s).map(Value::Phone),
     }
+}
+
+/// A US phone number anywhere in `s` (`(555) 010-0123`, `1-555-010-0100`,
+/// `555.010.0123`), as `NNN-NNN-NNNN`; never part of a longer run of digits.
+fn phone(s: &str) -> Option<String> {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| {
+        Regex::new(
+            r"(?:^|[^\d])(?:\+?1[\s.\-]?)?\(?(\d{3})\)?[\s.\-]?(\d{3})[\s.\-](\d{4})(?:$|[^\d])",
+        )
+        .unwrap()
+    });
+    let c = re.captures(s)?;
+    Some(format!("{}-{}-{}", &c[1], &c[2], &c[3]))
 }
 
 /// `$1,234.56`, `-$12.00`, `($12.00)`: a credit is negative.
@@ -285,7 +346,7 @@ pub fn same_statement(a: &Statement, b: &Statement) -> bool {
 
 /// The same account number, or a masked one (`****0123`, `XXXX0123`) whose
 /// last four or more digits shown end the other.
-fn same_account(a: &str, b: &str) -> bool {
+pub(crate) fn same_account(a: &str, b: &str) -> bool {
     let plain = |s: &str| -> String {
         s.chars()
             .filter(|c| c.is_ascii_alphanumeric() || *c == '*')
@@ -309,39 +370,82 @@ fn same_account(a: &str, b: &str) -> bool {
     }
 }
 
-/// Give a bill its statement, read from `text`, and point it at the bill
-/// filed before that is the same statement, if one is. The bills filed
-/// before it get theirs first where they have none ([`backfill`]).
+/// What a document of `doc_type` keeps of its text's statement: a bill's
+/// and a receipt's, and only a receipt says what was paid (a bill's
+/// `Payment date` is an earlier payment's, not this paper's).
+fn statement_for(doc_type: Option<&str>, text: &str) -> Option<Statement> {
+    let mut st = read(text)?;
+    match doc_type {
+        Some("receipt") => {}
+        Some("bill") => {
+            st.amount_paid = None;
+            st.paid_on = None;
+        }
+        _ => return None,
+    }
+    (st != Statement::default()).then_some(st)
+}
+
+/// Give a bill or a receipt its statement, read from `text`, and point a
+/// bill at the bill filed before that is the same statement, if one is.
+/// The papers filed before it get theirs first ([`backfill`]).
 pub fn annotate(doc: &mut Document, text: &str, index: &mut PersonIndex, texts: &PersonText) {
-    if doc.doc_type.as_deref() != Some("bill") {
+    if !matches!(doc.doc_type.as_deref(), Some("bill" | "receipt")) {
         return;
     }
     backfill(index, texts);
-    let Some(st) = read(text) else { return };
-    doc.same_statement_as = first_same(&index.documents, &doc.id, &st);
+    let Some(st) = statement_for(doc.doc_type.as_deref(), text) else {
+        return;
+    };
+    if doc.doc_type.as_deref() == Some("bill") {
+        doc.same_statement_as = first_same(&index.documents, &doc.id, &st);
+    }
     doc.statement = Some(st);
 }
 
-/// A bill with no statement, filed before 0.2.9 or saved since by an
-/// older medrec (which drops the fields it does not know), gets it again
-/// from its stored text, and its link to the bill filed before it that is
-/// the same statement, in filing order.
-pub fn backfill(index: &mut PersonIndex, texts: &PersonText) {
+/// Bills and receipts read again from their stored text, in filing order:
+/// one with no statement (filed before 0.2.9, or saved since by an older
+/// medrec, which drops the fields it does not know) gets it, and a bill its
+/// link to the bill filed before it that is the same statement; one with a
+/// statement gains the fields it lacks, those a later medrec reads. A value
+/// already there is kept. Returns how many changed.
+pub fn backfill(index: &mut PersonIndex, texts: &PersonText) -> usize {
+    let mut changed = 0;
     for i in 0..index.documents.len() {
         let d = &index.documents[i];
-        if d.doc_type.as_deref() != Some("bill") || d.statement.is_some() {
-            continue;
-        }
-        let Some(st) = texts.texts.get(&d.id).and_then(|t| read(t)) else {
+        let Some(st) = texts
+            .texts
+            .get(&d.id)
+            .and_then(|t| statement_for(d.doc_type.as_deref(), t))
+        else {
             continue;
         };
-        let same = first_same(&index.documents[..i], &d.id, &st);
+        let merged = match &d.statement {
+            None => st,
+            Some(old) => Statement {
+                statement_date: old.statement_date.clone().or(st.statement_date),
+                amount_due: old.amount_due.clone().or(st.amount_due),
+                due_date: old.due_date.clone().or(st.due_date),
+                account: old.account.clone().or(st.account),
+                amount_paid: old.amount_paid.clone().or(st.amount_paid),
+                paid_on: old.paid_on.clone().or(st.paid_on),
+                phone: old.phone.clone().or(st.phone),
+            },
+        };
+        let same = (d.doc_type.as_deref() == Some("bill") && d.same_statement_as.is_none())
+            .then(|| first_same(&index.documents[..i], &d.id, &merged))
+            .flatten();
         let d = &mut index.documents[i];
-        if d.same_statement_as.is_none() {
+        if d.statement.as_ref() == Some(&merged) && same.is_none() {
+            continue;
+        }
+        if same.is_some() {
             d.same_statement_as = same;
         }
-        d.statement = Some(st);
+        d.statement = Some(merged);
+        changed += 1;
     }
+    changed
 }
 
 /// The first bill in `docs`, other than `id`, that is the same statement as
@@ -438,6 +542,84 @@ mod tests {
         let st = read(RECEIPT).unwrap();
         assert_eq!(st.amount_due, None);
         assert_eq!(st.account.as_deref(), Some("EX-000123"));
+    }
+
+    #[test]
+    fn a_receipt_says_what_was_paid_when_and_whom_to_call() {
+        let st = statement_for(Some("receipt"), RECEIPT).unwrap();
+        assert_eq!(st.amount_paid, usd("120.00"));
+        assert_eq!(st.paid_on.as_deref(), Some("2026-11-20"));
+        assert_eq!(st.phone.as_deref(), Some("555-010-0145"));
+    }
+
+    #[test]
+    fn a_bill_gives_the_number_to_call_and_no_payment() {
+        let st = statement_for(Some("bill"), INLINE).unwrap();
+        assert_eq!(
+            st.phone.as_deref(),
+            Some("555-010-0123"),
+            "not the patient's own"
+        );
+        assert_eq!(
+            statement_for(Some("bill"), COLUMNS).unwrap().phone,
+            None,
+            "a phone label with no number"
+        );
+        // A bill's payment lines are an earlier payment's.
+        let st = statement_for(
+            Some("bill"),
+            "Statement date: 11/02/2026\nPayment date: 10/01/2026\nAmount paid: $20.00\nBalance due: $50.00\n",
+        )
+        .unwrap();
+        assert_eq!((st.amount_paid, st.paid_on), (None, None));
+        assert_eq!(st.amount_due, usd("50.00"));
+        assert_eq!(statement_for(Some("letter"), INLINE), None);
+    }
+
+    #[test]
+    fn a_phone_is_ten_digits_in_any_of_the_usual_ways() {
+        for text in [
+            "(555) 010-0123",
+            "1-555-010-0123",
+            "555.010.0123",
+            "+1 555 010 0123",
+            "us at 555-010-0123 today",
+        ] {
+            assert_eq!(phone(text).as_deref(), Some("555-010-0123"), "{text}");
+        }
+        for text in ["EX-000123", "12555-010-01234", "11/20/2026", "5550100123"] {
+            assert_eq!(phone(text), None, "{text}");
+        }
+    }
+
+    #[test]
+    fn a_paper_read_before_gains_the_fields_it_lacks_and_keeps_its_own() {
+        let mut index = PersonIndex::new("p_test");
+        let mut texts = no_texts();
+        let mut old = bill("d_old");
+        old.statement = Some(Statement {
+            statement_date: Some("2026-11-02".into()),
+            amount_due: usd("1000.00"),
+            ..Statement::default()
+        });
+        index.documents.push(old);
+        texts.texts.insert("d_old".into(), INLINE.into());
+        let mut receipt = bill("d_receipt");
+        receipt.doc_type = Some("receipt".into());
+        index.documents.push(receipt);
+        texts.texts.insert("d_receipt".into(), RECEIPT.into());
+        assert_eq!(backfill(&mut index, &texts), 2);
+        let st = index.documents[0].statement.as_ref().unwrap();
+        assert_eq!(st.amount_due, usd("1000.00"), "its own value stays");
+        assert_eq!(st.phone.as_deref(), Some("555-010-0123"));
+        assert_eq!(st.amount_paid, None);
+        let r = index.documents[1].statement.as_ref().unwrap();
+        assert_eq!(
+            (r.amount_paid.clone(), r.paid_on.as_deref()),
+            (usd("120.00"), Some("2026-11-20"))
+        );
+        assert_eq!(index.documents[1].same_statement_as, None);
+        assert_eq!(backfill(&mut index, &texts), 0, "nothing left to read");
     }
 
     #[test]

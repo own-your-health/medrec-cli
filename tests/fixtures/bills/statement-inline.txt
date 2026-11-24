@@ -3,6 +3,8 @@ STATEMENT
 Statement date: Nov 2, 2026
 Guarantor Account #: ****0123
 Patient: Robin Example
+Patient phone: (555) 010-0177
 Balance due: $1,234.56
 Please pay by 12/01/2026
+Questions about your bill? Call 1-555-010-0123
 Thank you for choosing Example Pediatrics.

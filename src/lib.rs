@@ -4,6 +4,7 @@
 
 pub mod batch;
 pub mod bill;
+pub mod bills;
 pub mod claims;
 pub mod config;
 pub mod dicom;

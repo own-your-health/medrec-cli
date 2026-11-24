@@ -81,7 +81,7 @@ pub struct PersonViews {
     /// The MD5 of the person's `overrides.json`, null when there is none;
     /// and those of the index and text of each guardian or child whose
     /// records their events read, by person id. Both make only
-    /// `events.json` stale.
+    /// `events.json` and `bills.json` stale.
     #[serde(default)]
     pub overrides: Option<String>,
     #[serde(default)]
@@ -340,7 +340,14 @@ pub fn sync(f: &Folder, all: bool) -> Result<Synced, CliError> {
         if matches!(overrides, Some(Err(()))) {
             events["overrides_unreadable"] = Value::Bool(true);
         }
+        let payments = overrides
+            .as_ref()
+            .and_then(|o| o.as_ref().ok())
+            .map(|o| o.payments.as_slice())
+            .unwrap_or_default();
+        let bills = crate::bills::build(p, &me.idx, &events, payments);
         let from = EventsFrom {
+            bills,
             events,
             overrides: otext.as_deref().map(|t| md5_hex(t.as_bytes())),
             linked: linked
@@ -659,9 +666,11 @@ pub struct LinkedFiles {
     pub text: Option<String>,
 }
 
-/// What a person's `events.json` is made from beyond their own files.
+/// What a person's `events.json` is made from beyond their own files, and
+/// the `bills.json` made from it.
 pub(crate) struct EventsFrom {
     pub events: Value,
+    pub bills: Value,
     pub overrides: Option<String>,
     pub linked: BTreeMap<String, LinkedFiles>,
 }
@@ -684,6 +693,7 @@ pub(crate) fn person(
         out.insert(format!("{dir}/{name}"), bytes);
     };
     put("events.json", json(&from.events));
+    put("bills.json", json(&from.bills));
 
     let s = summary::of_index(
         h,
@@ -694,6 +704,7 @@ pub(crate) fn person(
         summary::Limits {
             per_list: crate::mcp::SUMMARY_LINES,
         },
+        &crate::bills::settled(&from.bills),
     );
     put(
         "summary.json",
@@ -1161,6 +1172,7 @@ mod tests {
             None,
             EventsFrom {
                 events: serde_json::json!({"schema": crate::events::SCHEMA, "events": []}),
+                bills: serde_json::json!({"schema": crate::bills::SCHEMA, "bills": []}),
                 overrides: None,
                 linked: BTreeMap::new(),
             },
