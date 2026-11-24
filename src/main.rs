@@ -1524,7 +1524,12 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
                             )
                         })
                 };
-                for kind in ["events", "records", "documents", "studies"] {
+                for (kind, singular) in [
+                    ("events", "event"),
+                    ("records", "record"),
+                    ("documents", "document"),
+                    ("studies", "study"),
+                ] {
                     for (id, why) in v[kind].as_object().into_iter().flatten() {
                         let (date, title) = match kind {
                             "records" => idx
@@ -1553,7 +1558,7 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
                         }
                         .unwrap_or_default();
                         items.push(serde_json::json!({
-                            "id": id, "kind": kind.strip_suffix("ies").map_or(kind.trim_end_matches('s').to_string(), |k| format!("{k}y")), "area": why["area"],
+                            "id": id, "kind": singular, "area": why["area"],
                             "from": why["from"], "date": date, "title": title,
                             "person": p.id, "person_name": p.name,
                         }));
