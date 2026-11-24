@@ -2597,6 +2597,7 @@ fn a_list_files_each_line_with_its_own_values_and_the_views_once() {
             serde_json::json!({"file": f("lab_robin.pdf"), "person": "Robin", "type": "lab_report", "date": "2026-03-04"}),
         ),
         line(serde_json::json!({"file": f("ambiguous.pdf")})),
+        line(serde_json::json!({"file": f("not-there.pdf")})),
     ];
     // A bad line anywhere stops the list before anything is filed.
     std::fs::write(
@@ -2627,14 +2628,37 @@ fn a_list_files_each_line_with_its_own_values_and_the_views_once() {
     );
 
     std::fs::write(&list, lines.concat()).unwrap();
-    let r = e.ok(&["intake", "--from", list.to_str().unwrap()]);
+    // The missing file fails as the command would, and the rest are filed.
+    let out = e.run(&["--json", "intake", "--from", list.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    let r: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(
         (
             r["counts"]["filed"].as_u64(),
-            r["counts"]["review"].as_u64()
+            r["counts"]["review"].as_u64(),
+            r["counts"]["failed"].as_u64()
         ),
-        (Some(2), Some(1)),
+        (Some(2), Some(1), Some(1)),
         "{r}"
+    );
+    let failed = &r["items"][3];
+    assert_eq!(
+        (&failed["line"], &failed["status"], &failed["error_code"]),
+        (
+            &Value::from(4),
+            &Value::from("failed"),
+            &Value::from("not_found")
+        ),
+        "{failed}"
+    );
+    assert_eq!(
+        r["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|i| i["line"].as_u64().unwrap())
+            .collect::<Vec<_>>(),
+        [1, 2, 3, 4]
     );
     let by = |src: &str| {
         r["items"]
@@ -2669,6 +2693,7 @@ fn a_list_files_each_line_with_its_own_values_and_the_views_once() {
     assert_eq!(v["schema"], "review-filed-list/v1");
     assert_eq!(v["counts"], serde_json::json!({"failed": 1, "filed": 1}));
     assert_eq!(v["items"][0]["line"], 1);
+    assert_eq!(v["items"][0]["error_code"], "not_found", "{v}");
     assert_eq!(v["items"][1]["status"], "filed");
     assert!(e
         .records()
@@ -2684,6 +2709,12 @@ fn a_list_files_each_line_with_its_own_values_and_the_views_once() {
     let claims = e.records().join("Alex Testperson/Claims/2026");
     std::fs::create_dir_all(&claims).unwrap();
     std::fs::set_permissions(&claims, std::fs::Permissions::from_mode(0o555)).unwrap();
+    if std::fs::write(claims.join("probe"), b"").is_ok() {
+        // Permission bits do not bind this user (root): nothing would fail.
+        eprintln!("skipped the refused-upload case: the folder accepted a write");
+        let _ = std::fs::remove_dir_all(&e.root);
+        return;
+    }
     let out = e.run(&[
         "--json",
         "intake",

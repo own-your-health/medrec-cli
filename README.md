@@ -300,7 +300,8 @@ reads standard input. Every line is checked before anything is filed, so a
 bad type or date stops the list with nothing changed. The lines are filed in
 order under one lock, a line that fails is reported while the rest are still
 filed (exit 1), and the views are written once, at the end, rather than
-after each filing.
+after each filing. Each item in the output names its list `line`, and a line that failed
+carries `error` and `error_code` (`not_found`, `usage`, ...).
 
 Every command takes `--json` (one document on stdout) and `--help`. Every
 list (`timeline`, the record views, `documents list`, `note list`,

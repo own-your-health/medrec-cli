@@ -110,6 +110,9 @@ struct Item {
 
 #[derive(Debug, Serialize)]
 pub struct Outcome {
+    /// The list line it came from (`intake --from`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<usize>,
     pub source: String,
     pub origin: String,
     pub status: String,
@@ -147,12 +150,16 @@ pub struct Outcome {
     pub source_removed: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// The error's code (`not_found`, `usage`, ...) when a list line failed
+    /// as a command would (`intake --from`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
 }
 
 impl Outcome {
-    /// A named file that failed before it was read: a batch line whose
-    /// values the folder refused (`intake --from`).
-    pub fn failed(source: &str, error: &str) -> Self {
+    /// A list line that failed as a command would, before its file was
+    /// filed (`intake --from`).
+    pub fn failed(source: &str, error: &pk_cli_core::CliError) -> Self {
         let mut o = Outcome::new(
             &Item {
                 from: From::Local(PathBuf::from(source)),
@@ -164,12 +171,14 @@ impl Outcome {
             },
             "failed",
         );
-        o.error = Some(error.to_string());
+        o.error = Some(error.message().to_string());
+        o.error_code = Some(error.code().to_string());
         o
     }
 
     fn new(item: &Item, status: &str) -> Self {
         Outcome {
+            line: None,
             source: item.name.clone(),
             origin: item.origin.into(),
             status: status.into(),
@@ -190,6 +199,7 @@ impl Outcome {
             text: None,
             source_removed: false,
             error: None,
+            error_code: None,
         }
     }
 }

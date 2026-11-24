@@ -1325,13 +1325,14 @@ fn intake_list(cli: &Cli, a: &IntakeArgs, from: &str, store: &ConfigStore) -> Re
             Err(e) => (
                 vec![intake::Outcome::failed(
                     &line.file.display().to_string(),
-                    &format!("list line {n}: {}", e.message()),
+                    &e,
                 )],
                 false,
             ),
         };
         all_ok &= ok;
-        for o in items {
+        for mut o in items {
+            o.line = Some(n);
             *report.counts.entry(o.status.clone()).or_default() += 1;
             report.items.push(o);
         }
@@ -1472,6 +1473,7 @@ fn review_list(cli: &Cli, cfg: &Config, from: &str) -> Result<(), CliError> {
                 "review": line.id,
                 "status": "failed",
                 "error": e.message(),
+                "error_code": e.code(),
             }),
         };
         let status = row["status"].as_str().unwrap_or("failed").to_string();
