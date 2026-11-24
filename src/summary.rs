@@ -196,10 +196,12 @@ pub fn person(
 ) -> Result<Summary, CliError> {
     let idx = folder.index(p)?;
     let notes = folder.notes(p)?.len();
-    Ok(of_index(h, p, &idx, notes, today, limits))
+    let settled = crate::bills::settled(&crate::bills::of_person(folder, h, p)?);
+    Ok(of_index(h, p, &idx, notes, today, limits, &settled))
 }
 
-/// [`person`] from the person's index already read, with `notes` notes.
+/// [`person`] from the person's index already read, with `notes` notes and
+/// the bills `bills.json` says are settled.
 pub(crate) fn of_index(
     h: &Household,
     p: &Person,
@@ -207,6 +209,7 @@ pub(crate) fn of_index(
     notes: usize,
     today: &str,
     limits: Limits,
+    settled: &std::collections::BTreeSet<String>,
 ) -> Summary {
     let n = limits.per_list;
     let mut records: Vec<&Record> = idx.records.iter().collect();
@@ -260,7 +263,7 @@ pub(crate) fn of_index(
                 .collect(),
             n,
         ),
-        bills: Listed::cut(bills(idx, today), n),
+        bills: Listed::cut(bills(idx, today, settled), n),
     }
 }
 
@@ -415,8 +418,13 @@ pub(crate) fn latest_results(h: &Household, records: &[&Record]) -> Vec<ResultRo
     by.into_iter().map(|(_, r)| r).collect()
 }
 
-/// The newest statement of each account with an amount due over zero.
-fn bills(idx: &PersonIndex, today: &str) -> Vec<Bill> {
+/// The newest statement of each account with an amount due over zero,
+/// unless it is settled.
+fn bills(
+    idx: &PersonIndex,
+    today: &str,
+    settled: &std::collections::BTreeSet<String>,
+) -> Vec<Bill> {
     let mut docs: Vec<&crate::model::Document> = idx
         .documents
         .iter()
@@ -460,7 +468,7 @@ fn bills(idx: &PersonIndex, today: &str) -> Vec<Bill> {
     }
     out.into_iter()
         .map(|(_, b)| b)
-        .filter(|b| owes(&b.amount_due))
+        .filter(|b| owes(&b.amount_due) && !settled.contains(&b.document))
         .collect()
 }
 
@@ -539,7 +547,7 @@ mod bill_tests {
             ],
         }))
         .unwrap();
-        let b = bills(&idx, "2026-11-22");
+        let b = bills(&idx, "2026-11-22", &Default::default());
         let got: Vec<(&str, &str, bool, usize)> = b
             .iter()
             .map(|b| {

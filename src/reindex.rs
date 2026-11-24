@@ -1,6 +1,8 @@
 //! `medrec reindex`: every claim shaped again from the raw resource filed
 //! for it, as this medrec's import shapes it, so claims no source serves any
-//! more take the current shape too. It reads only the folder.
+//! more take the current shape too; and every bill's and receipt's statement
+//! read again from its stored text for the fields it lacks. It reads only
+//! the folder.
 
 use std::collections::BTreeSet;
 
@@ -23,6 +25,8 @@ pub struct Reindexed {
     /// Claims with no raw file to shape them from: filed before raw files
     /// were kept, or by `record add`.
     pub without_raw: usize,
+    /// Bills and receipts whose statement gained fields from their text.
+    pub statements: usize,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -32,6 +36,7 @@ pub struct PersonReindexed {
     pub reshaped: usize,
     pub unchanged: usize,
     pub without_raw: usize,
+    pub statements: usize,
 }
 
 /// The claim's own content, links left out.
@@ -47,8 +52,10 @@ fn content(r: &Record) -> impl PartialEq + '_ {
 
 /// Shape every claim of `person` (everyone's by default) again from its
 /// first provenance's raw file. A claim the shaping would give another
-/// `key` is left as it is: re-keying is an import's to do. The index is
-/// written only when a claim changed.
+/// `key` is left as it is: re-keying is an import's to do. Bills and
+/// receipts gain the statement fields their text gives and they lack
+/// ([`crate::bill::backfill`]). The index is written only when something
+/// changed.
 pub fn claims(folder: &Folder, h: &Household, person: Option<&str>) -> Result<Reindexed, CliError> {
     let tmp = pk_cli_drive::private_temp_dir("medrec-reindex")?;
     let mut out = Reindexed::default();
@@ -97,9 +104,11 @@ pub fn claims(folder: &Folder, h: &Household, person: Option<&str>) -> Result<Re
             r.fields = new.fields;
             row.reshaped += 1;
         }
-        if row.reshaped > 0 {
+        row.statements = crate::bill::backfill(&mut idx, &folder.text(p)?);
+        if row.reshaped > 0 || row.statements > 0 {
             folder.save_index(p, &mut idx)?;
         }
+        out.statements += row.statements;
         out.claims += row.claims;
         out.reshaped += row.reshaped;
         out.unchanged += row.unchanged;

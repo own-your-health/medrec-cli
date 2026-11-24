@@ -81,9 +81,14 @@ pub struct PersonViews {
     /// The MD5 of the person's `overrides.json`, null when there is none;
     /// and those of the index and text of each guardian or child whose
     /// records their events read, by person id. Both make only
-    /// `events.json` stale.
+    /// `events.json` and `bills.json` stale.
     #[serde(default)]
     pub overrides: Option<String>,
+    /// The MD5 of the person's `marks.json`, null when there is none
+    /// (0.9.1 and later); it too makes only `events.json` and `bills.json`
+    /// stale.
+    #[serde(default)]
+    pub marks: Option<String>,
     #[serde(default)]
     pub linked: BTreeMap<String, LinkedFiles>,
     pub row: Row,
@@ -237,6 +242,7 @@ pub fn sync(f: &Folder, all: bool) -> Result<Synced, CliError> {
             if store.md5(&folder::index_rel(p))? == was.index
                 && store.md5(&folder::text_rel(p))? == was.text
                 && store.md5(&crate::events::overrides_rel(p))? == was.overrides
+                && store.md5(&crate::bills::marks_rel(p))? == was.marks
                 && linked_md5s(p)? == was.linked
             {
                 kept.insert(p.id.clone(), was.clone());
@@ -340,9 +346,29 @@ pub fn sync(f: &Folder, all: bool) -> Result<Synced, CliError> {
         if matches!(overrides, Some(Err(()))) {
             events["overrides_unreadable"] = Value::Bool(true);
         }
+        let mrel = crate::bills::marks_rel(p);
+        let mtext = store.read_text(&mrel)?;
+        // So is a marks file that does not read: the bills say so.
+        let marks: Option<Result<crate::bills::Marks, ()>> = mtext.as_deref().map(|t| {
+            parse::<crate::bills::Marks>(t, &mrel)
+                .ok()
+                .filter(|m| m.person == p.id && m.schema == crate::bills::MARKS_SCHEMA)
+                .ok_or(())
+        });
+        let payments = marks
+            .as_ref()
+            .and_then(|m| m.as_ref().ok())
+            .map(|m| m.payments.as_slice())
+            .unwrap_or_default();
+        let mut bills = crate::bills::build(p, &me.idx, &events, payments);
+        if matches!(marks, Some(Err(()))) {
+            bills["marks_unreadable"] = Value::Bool(true);
+        }
         let from = EventsFrom {
+            bills,
             events,
             overrides: otext.as_deref().map(|t| md5_hex(t.as_bytes())),
+            marks: mtext.as_deref().map(|t| md5_hex(t.as_bytes())),
             linked: linked
                 .iter()
                 .map(|q| {
@@ -659,10 +685,13 @@ pub struct LinkedFiles {
     pub text: Option<String>,
 }
 
-/// What a person's `events.json` is made from beyond their own files.
+/// What a person's `events.json` is made from beyond their own files, and
+/// the `bills.json` made from it.
 pub(crate) struct EventsFrom {
     pub events: Value,
+    pub bills: Value,
     pub overrides: Option<String>,
+    pub marks: Option<String>,
     pub linked: BTreeMap<String, LinkedFiles>,
 }
 
@@ -684,6 +713,7 @@ pub(crate) fn person(
         out.insert(format!("{dir}/{name}"), bytes);
     };
     put("events.json", json(&from.events));
+    put("bills.json", json(&from.bills));
 
     let s = summary::of_index(
         h,
@@ -694,6 +724,7 @@ pub(crate) fn person(
         summary::Limits {
             per_list: crate::mcp::SUMMARY_LINES,
         },
+        &Default::default(),
     );
     put(
         "summary.json",
@@ -973,6 +1004,7 @@ pub(crate) fn person(
         index: index_md5,
         text: text_md5,
         overrides: from.overrides,
+        marks: from.marks,
         linked: from.linked,
         row: Row {
             documents: row.documents,
@@ -1161,7 +1193,9 @@ mod tests {
             None,
             EventsFrom {
                 events: serde_json::json!({"schema": crate::events::SCHEMA, "events": []}),
+                bills: serde_json::json!({"schema": crate::bills::SCHEMA, "bills": {}}),
                 overrides: None,
+                marks: None,
                 linked: BTreeMap::new(),
             },
             &mut out,

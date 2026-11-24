@@ -283,13 +283,14 @@ medrec import --from uhc --from-profile adult1 --patient <a> --person Alex --pat
 
 medrec timeline --person Robin --since 2026-01-01
 medrec events list --person Robin               # what happened: one line per visit, stay, test or fill
+medrec bills list --person Robin                # each bill: its claim, what is paid and left
 medrec search hemoglobin
 medrec results --code 718-7
 medrec meds --active
 medrec note add Robin "Ask about the recheck" --tag question --about <record id>
 
 medrec verify                                   # every indexed file against the index
-medrec reindex                                  # claims shaped again from their raw files, after an upgrade
+medrec reindex                                  # claims shaped again from their raw files, and bills and receipts read again, after an upgrade
 medrec backup --to "/Volumes/Backup/Medical Records"
 ```
 
@@ -489,6 +490,34 @@ through `_requests/`, and the refreshing machine records it on its next
 pass. Each person's events are also a view, `views/<person id>/events.json`,
 for the app and the connector ([docs/data-contract.md](docs/data-contract.md),
 "Events").
+
+### Bills
+
+Each bill is matched to the claim it bills and the event it belongs to,
+and to the receipts that pay it. A bill the household paid with no
+receipt filed can be marked paid.
+
+```sh
+medrec bills list --person Robin                              # newest first: asked, paid, left
+medrec bills paid <bill document id> --on 2026-11-20 --amount 120.00
+medrec bills payments --person Robin                          # the payments marked
+medrec bills undo <payment id>
+```
+
+`bills list` also shows the bills and desk payments worth a call: a bill
+that asks more or less than its claim says is owed, a bill with no claim
+behind it, a copay paid at the desk that the claims say was not owed. It
+then lists the shares the claims say are owed that no bill has asked for
+yet, with pharmacy fills marked, since those are usually paid at the
+counter. `--limit` bounds the bills; the other two lists are shown whole.
+`paid` takes a `bill` document's id (`d_…`) and `undo` a payment id
+(`o_…`) that `bills payments` lists. Payments are kept in the person's
+`marks.json`, apart from the event decisions in `overrides.json`.
+Receipts give what was paid and
+when from their text, and statements the number to call; after upgrading
+to 0.9.1, `medrec reindex` reads the bills and receipts filed before. Each
+person's bills are also a view, `views/<person id>/bills.json`
+([docs/data-contract.md](docs/data-contract.md), "Bills").
 
 ### Views
 

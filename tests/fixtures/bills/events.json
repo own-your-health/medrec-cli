@@ -1,0 +1,27 @@
+{
+  "schema": "medrec-events/v1",
+  "person": "p_test",
+  "events": [
+    {"id": "e_portalaaaaaaaaaaaaaa", "kind": "portal", "start": "2026-10-10", "end": "2026-10-10", "place": "Example Dental",
+     "members": [{"record": "r_dentvisitaaaaaaaaaaa", "kind": "encounter", "role": "portal", "rule": "E3"},
+                 {"document": "d_dentbillaaaaaaaaaaaa", "kind": "bill", "role": "paper", "rule": "D2"}]},
+    {"id": "e_fillaaaaaaaaaaaaaaaa", "kind": "fill", "start": "2026-10-02", "end": "2026-10-02", "money": {"currency": "USD", "you_owe": "10.00"},
+     "members": [{"record": "r_fillaaaaaaaaaaaaaaaa", "kind": "claim", "role": "fill", "rule": "C6", "provider": "Example Pharmacy", "you_owe": "10.00"}]},
+    {"id": "e_labaaaaaaaaaaaaaaaaa", "kind": "tests", "start": "2026-09-20", "end": "2026-09-20", "money": {"currency": "USD", "you_owe": "30.00"},
+     "members": [{"record": "r_labaaaaaaaaaaaaaaaaa", "kind": "claim", "role": "service", "rule": "C5", "provider": "Example Lab", "you_owe": "30.00"},
+                 {"document": "d_labbillaaaaaaaaaaaaa", "kind": "bill", "role": "paper", "rule": "D2"}]},
+    {"id": "e_visitaaaaaaaaaaaaaaa", "kind": "office", "start": "2026-09-08", "end": "2026-09-08", "place": "Example Clinic", "money": {"currency": "USD", "you_owe": "0.00"},
+     "members": [{"record": "r_visitaaaaaaaaaaaaaaa", "kind": "claim", "role": "office", "rule": "C5", "provider": "Example Clinic", "you_owe": "0.00"}]},
+    {"id": "e_eraaaaaaaaaaaaaaaaaa", "kind": "er", "start": "2026-08-14", "end": "2026-08-14", "place": "Example Health Medical Center", "money": {"currency": "USD", "you_owe": "330.00"},
+     "members": [{"record": "r_erfacilityaaaaaaaaaa", "kind": "claim", "role": "facility", "rule": "C1", "provider": "Example Health Medical Center", "you_owe": "250.00"},
+                 {"record": "r_erdoctoraaaaaaaaaaaa", "kind": "claim", "role": "hospital", "rule": "C2", "provider": "Example ER Physicians", "you_owe": "80.00"},
+                 {"document": "d_erbillaaaaaaaaaaaaaa", "kind": "bill", "role": "paper", "rule": "D3s", "matches": "r_erfacilityaaaaaaaaaa", "copies": ["d_erbillcopyaaaaaaaaaa"]},
+                 {"document": "d_doctorbillaaaaaaaaaa", "kind": "bill", "role": "paper", "rule": "D2"}]},
+    {"id": "e_oldaaaaaaaaaaaaaaaaa", "kind": "office", "start": "2025-02-03", "end": "2025-02-03", "money": {"currency": "USD", "you_owe": "15.00"},
+     "members": [{"record": "r_oldaaaaaaaaaaaaaaaaa", "kind": "claim", "role": "office", "rule": "C5", "provider": "Example Clinic", "you_owe": "15.00"}]}
+  ],
+  "pending": [],
+  "aliases": [],
+  "undated": [],
+  "overrides": 0
+}

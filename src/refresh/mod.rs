@@ -494,22 +494,64 @@ fn counts(r: &import::Report) -> BTreeMap<String, u64> {
 /// import's wait).
 const EVENT_LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(15);
 
-/// Apply a request's event decision through the pass's one write `folder`,
-/// whose views follow once, as it closes: `ok` once it is in the person's
-/// `overrides.json`, `invalid` when a member is not that person's, `failed`
-/// when the folder could not be written.
-fn event_request(
+/// Apply a request's decision (an event's, or a bill marked paid) through
+/// the pass's one write `folder`, whose views follow once, as it closes:
+/// `ok` once it is in the person's `overrides.json`, `invalid` when what it
+/// names is not that person's (or, for `paid`, not a bill), `failed` when
+/// the folder could not be written.
+fn decision_request(
     folder: &Folder,
     h: &crate::model::Household,
     v: &requests::Valid,
 ) -> (&'static str, String) {
+    if let Scope::Paid {
+        person,
+        document,
+        on,
+        amount,
+        currency,
+    } = &v.scope
+    {
+        let Some(p) = h.person(person) else {
+            return (
+                "invalid",
+                "its paid names no person in household.json".into(),
+            );
+        };
+        let by = v.requested_by_name();
+        let amount = crate::model::Amount {
+            amount: amount.clone(),
+            currency: currency.clone(),
+        };
+        return match crate::bills::mark_paid(
+            folder,
+            p,
+            document,
+            on,
+            &amount,
+            by.as_deref(),
+            Some(&v.id),
+        ) {
+            Ok((pm, true)) => ("ok", format!("recorded the payment as {}", pm.id)),
+            Ok((pm, false)) => (
+                "ok",
+                format!("the payment was already recorded as {}", pm.id),
+            ),
+            Err(CliError::NotFound(_)) => (
+                "invalid",
+                "the document it names is not one of the person's".into(),
+            ),
+            Err(CliError::Usage(_)) => ("invalid", "the document it names is not a bill".into()),
+            Err(e) => ("failed", e.message().to_string()),
+        };
+    }
     let Scope::Event {
         person,
         kind,
         members,
     } = &v.scope
     else {
-        return ("invalid", "not an event request".into());
+        return ("invalid", "not a decision".into());
     };
     let Some(p) = h.person(person) else {
         return (
@@ -737,7 +779,7 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
                 .map(|e| e.source.clone())
                 .collect(),
             Scope::Source(s) => vec![s.clone()],
-            Scope::Event { .. } => Vec::new(),
+            Scope::Event { .. } | Scope::Paid { .. } => Vec::new(),
         };
         for id in ids {
             let w = want.entry(id).or_default();
@@ -1099,7 +1141,7 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
             if waits {
                 continue;
             }
-            if matches!(v.scope, Scope::Event { .. }) {
+            if v.scope.is_decision() {
                 let f = events_folder.get_or_insert_with(|| {
                     Folder::open_at_within(
                         &location,
@@ -1115,9 +1157,9 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
         }
         let (sources, outcome, message): (Vec<HandledSource>, String, String) = match p {
             Parsed::Invalid(i) => (Vec::new(), "invalid".into(), clip(&i.why, MESSAGE_MAX)),
-            Parsed::Valid(v) if matches!(v.scope, Scope::Event { .. }) => {
+            Parsed::Valid(v) if v.scope.is_decision() => {
                 let (outcome, message) = match events_folder.as_ref() {
-                    Some(Ok(f)) => event_request(f, &h, v),
+                    Some(Ok(f)) => decision_request(f, &h, v),
                     Some(Err(e)) => ("failed", e.message().to_string()),
                     None => ("failed", "the folder was not opened to write".into()),
                 };

@@ -168,6 +168,18 @@ saved since by an older medrec (which drops fields it does not know), gets
 its statement and link again from its stored text the next time a bill is
 filed for that person.
 
+**What a statement adds in 0.9.1.** A bill's and a receipt's `statement`
+also give `phone`, the number the paper gives to call (`Questions? Call`,
+`Phone`, `Tel`), as `NNN-NNN-NNNN`; a number labeled as the patient's,
+the guarantor's or a home, cell or mobile number is not it. A `receipt`
+carries `statement` too (0.9.1 and later), with `amount_paid` (`Amount
+paid`, `Payment amount`, `Total paid`) and `paid_on` (`Payment date`,
+`Date paid`), besides any field above its text labels. A bill never
+carries `amount_paid` or `paid_on`: a bill's payment lines are an earlier
+payment's. A bill or receipt filed before 0.9.1 gains the fields its
+stored text gives and its statement lacks, keeping those it has, the next
+time a bill or receipt is filed for that person, or at `medrec reindex`.
+
 A DocumentReference names a house type with a `type.coding` in the system
 `urn:pk-med:doc-type` (code `bill`, `receipt`, or any type above). With no
 such coding and no LOINC code, a `type.text` of `bill` or `receipt` (any
@@ -445,9 +457,45 @@ which outrank the matching rules. It is absent until the first decision.
 - `by` is who asked, as shown (a request's `requested_by`), and `request`
   the request it came from; both are `null` from a terminal. Neither is
   trusted.
-- medrec writes it (`medrec events apart|together|undo`, and event requests
-  in `_requests/`, below). Readers read it only to judge `events.json`'s
-  freshness.
+- medrec writes it (`medrec events apart|together|undo`, and event
+  requests in `_requests/`, below). Readers read it only to judge the
+  freshness of the views made from it (views, below).
+- A field a later medrec adds is kept when an earlier one, from 0.9.1 on,
+  rewrites the file. medrec 0.9.0 keeps only `schema`, `person` and
+  `events`, so nothing else the household marks is kept here
+  (`marks.json`, below).
+
+## marks.json (`medrec-marks/v1`, 0.9.1 and later)
+
+What the household marked on a person's papers that no rule decides: for
+now, the bills they marked paid (`bills.json`, below). It is a file of its
+own so that a medrec before 0.9.1, which rewrites `overrides.json` with
+only the fields it knows, never drops a mark. It is absent until the first
+mark.
+
+```json
+{"schema": "medrec-marks/v1", "person": "p_…",
+ "payments": [
+   {"id": "o_…", "document": "d_…", "on": "2026-11-20",
+    "amount": {"amount": "120.00", "currency": "USD"},
+    "at": "2026-11-24T12:00:00Z", "by": "Alex Testperson", "request": "x_…"}
+ ]}
+```
+
+- A payment is the household saying a bill (`document`, a `bill` of this
+  person's) was paid `amount` on `on`, as a receipt never filed would. A
+  bill may have several. The same bill, day and amount again changes
+  nothing.
+- `by` and `request` are as in `overrides.json`: who asked and the request
+  it came from, `null` from a terminal, neither trusted.
+- medrec writes it (`medrec bills paid|undo`, and paid requests in
+  `_requests/`, below). Readers read it only to judge the freshness of the
+  views made from it (views, below).
+- A file that does not read as this person's `medrec-marks/v1` is left
+  out: `bills.json` says `marks_unreadable`, `medrec bills list` says so,
+  and medrec writes no mark over it until it is fixed or removed.
+- A field a later medrec adds is kept when an earlier one rewrites the
+  file.
 
 ## _status/ (`medrec-status/v1`, `medrec-attempt/v1`)
 
@@ -708,9 +756,9 @@ with `event` in place of `scope`:
 ```
 
 - `event` holds `person` and exactly one of `apart` or `together`, each two
-  different record (`r_…`) or document (`d_…`) ids. A request with both
-  `scope` and `event`, or with neither, is `invalid` (rule 1), as is one
-  whose `person` is not in `household.json`.
+  different record (`r_…`) or document (`d_…`) ids. A request with more
+  than one of `scope`, `event` and `paid` (below), or with none, is
+  `invalid` (rule 1), as is one whose `person` is not in `household.json`.
 - The next pass writes the decision to the person's `overrides.json`, and
   the views follow before it releases the lock, once for all of a pass's
   decisions. It imports nothing, so no guard or interval applies. While
@@ -721,6 +769,27 @@ with `event` in place of `scope`:
   `ok` too), `invalid` when a member is not one of that person's records or
   documents, and `failed` when the folder could not be written. `sources`
   is empty.
+
+### Paid requests (0.9.1 and later)
+
+The app's "Mark paid" is a request with `paid` in place of `scope`:
+
+```json
+{"schema": "medrec-request/v1", "id": "x_…", "requested_at": "…",
+ "requested_by": {…}, "app": {…},
+ "paid": {"person": "p_…", "document": "d_…", "on": "2026-11-20", "amount": "120.00"}}
+```
+
+- `amount` is a decimal string in US dollars, above zero with at most two
+  places, or `{"amount", "currency"}` with a three-letter currency code.
+  `on` is a `YYYY-MM-DD` day. A request with more than one of `scope`,
+  `event` and `paid`, or whose `person` is not in `household.json`, is
+  `invalid` (rule 1).
+- It is applied as an event request is: by the next pass, to the person's
+  `marks.json` `payments`, pending while another writer holds the
+  folder. Its `done/` file keeps `paid`, with `amount` as two places.
+  `handled.outcome` is `invalid` when the document is not one of that
+  person's, or not a `bill`.
 
 ## views/ (`medrec-views/v2`, 0.8.0 and later)
 
@@ -733,7 +802,8 @@ CPU per request, and parsing a 2.5 MB index alone takes about 6 ms.
 Every view is derived from `household.json` and the person's `index.json`
 and `text.json`. `events.json` also reads the person's `overrides.json`, and
 the `index.json` and `text.json` of the people linked to them (Events,
-below). `notes.md` has no view. It is small, the app may change
+below); `bills.json` reads the same and the person's `marks.json`.
+`notes.md` has no view. It is small, the app may change
 it, and readers read it as it is. Nothing in `views/` is a source: deleting
 it loses nothing, and `medrec views write` makes it again.
 
@@ -754,6 +824,7 @@ views/<person id>/search-items.bin
 views/<person id>/search-hay-<n>.bin
 views/<person id>/search-labs-<n>.json
 views/<person id>/events.json            0.9.0 and later
+views/<person id>/bills.json             0.9.1 and later
 ```
 
 A person's directory is named by their id in `household.json`, not their
@@ -776,8 +847,8 @@ last.
   members, does it once, after the last filing. `medrec views write` does
   it on demand, and `--all` makes every person's again.
 - **Only what changed.** A person keeps their views when their `index.json`,
-  `text.json` and `overrides.json` and their linked people's `index.json`
-  and `text.json` have the MD5s `views.json` recorded, under the same `household.json` and
+  `text.json`, `overrides.json` and `marks.json` and their linked people's
+  `index.json` and `text.json` have the MD5s `views.json` recorded, under the same `household.json` and
   medrec version. Otherwise their views are made
   again, and only views the folder does not already hold under their
   stored names are uploaded. An unchanged view keeps its name and is not
@@ -807,18 +878,26 @@ A reader decides freshness by MD5, as Drive reports it (`md5Checksum`):
 - A person whose `index.json` or `text.json` MD5 differs from `views.json`
   has stale views.
 - A different `household.json` MD5 makes every person's views stale.
-- A person whose `overrides.json` MD5 differs from `overrides`, or one of
-  whose linked people's `index.json` or `text.json` MD5 differs from
-  `linked`, has a stale `events.json` only. A reader that does not read `events.json`
-  ignores both.
+- Each of these makes only some of the person's views stale, and a reader
+  that reads none of those views ignores it:
+
+  | Differs from `views.json` | Stale |
+  |---|---|
+  | `overrides.json`'s MD5 from `overrides` | `events.json`, `bills.json` |
+  | a linked person's `index.json` or `text.json` MD5 from `linked` | `events.json`, `bills.json` |
+  | `marks.json`'s MD5 from `marks` (0.9.1 and later) | `bills.json` |
+
+  No other view reads those files: `summary.json` and `documents.json`
+  say nothing of payments, and a reader applies `bills.json` to them as
+  it answers (Readers, below).
 - A view that is missing, or whose MD5 is not the one `files` gives,
   belongs to a pass still arriving.
 
 ### views.json
 
 ```json
-{"schema":"medrec-views/v2","medrec":"0.9.0","household":"<md5>",
- "people":{"p_…":{"index":"<md5>","text":"<md5>","overrides":null,"linked":{"p_…":{"index":"<md5>","text":"<md5>"}},
+{"schema":"medrec-views/v2","medrec":"0.9.1","household":"<md5>",
+ "people":{"p_…":{"index":"<md5>","text":"<md5>","overrides":null,"marks":null,"linked":{"p_…":{"index":"<md5>","text":"<md5>"}},
                   "row":{…},"records":{…},"timeline":{…},"search":{…},
                   "files":{"summary.json":"<md5>","records-result-0.json":"<md5>",…}}}}
 ```
@@ -829,6 +908,7 @@ A reader decides freshness by MD5, as Drive reports it (`md5Checksum`):
 | `household` | The MD5 (hex) of `household.json` as the views were made from it. |
 | `people.<id>.index`, `.text` | The MD5s of the person's `index.json` and `text.json` as read; `null` when the file is absent. |
 | `people.<id>.overrides` | The MD5 of the person's `overrides.json` as read; `null` when there is none (0.9.0 and later). |
+| `people.<id>.marks` | The MD5 of the person's `marks.json` as read; `null` when there is none (0.9.1 and later). |
 | `people.<id>.linked` | For each person linked to this one (Events, below), the MD5s of their `index.json` and `text.json` as read, as `{"index", "text"}`, each `null` when the file is absent; `{}` when no one is linked (0.9.0 and later). |
 | `row` | `documents`, `records`, `studies`, and `newest` and `last_import` when there are any: the person's line in `medrec_summary`'s people list, without `notes`. |
 | `records` | For each record kind, `{"shards": [[newest day, oldest day, count], …], "undated": count}`: its dated shards by number, and how many records its undated file holds. |
@@ -908,6 +988,8 @@ order. Notes are not in it; a reader adds them from `notes.md`.
 `immunizations`, `latest_results`, `recent_visits` and `bills`. Each list
 is `{items, more}`, at most 25 items. It is computed as of no day, so no
 bill is `past_due`; a reader works `past_due` out for the day it answers.
+It is made without the household's payments: a reader leaves out the
+bills `bills.json` has `settled` as it answers (0.9.1 and later).
 
 ### documents.json and text-<n>.bin
 
@@ -1060,6 +1142,92 @@ matching rules), then the household's decisions (`overrides.json`).
   it on that person's own pages, or when a question is about that person
   or names the item. Anyone who can read the folder can read it.
 
+### Bills (`bills.json`, `medrec-bills/v1`, 0.9.1 and later)
+
+Each of a person's bills with the claim it bills, what was paid against
+it and what is left; the bills and desk payments worth a call; and the
+shares the claims say are owed that nothing has asked for or paid yet.
+Every person has a `bills.json`, with an empty `bills` and empty lists
+when they have no bills. It is made from the person's documents, their
+`events.json` and the `payments` in their `marks.json`.
+
+```json
+{"schema": "medrec-bills/v1", "person": "p_…",
+ "bills": {
+   "d_…": {"copies": ["d_…"], "organization": "Example Health",
+    "title": "Statement from Example Health", "date": "2026-10-20", "currency": "USD",
+    "amount_due": "95.00", "due_date": "2026-11-15", "phone": "555-010-0123",
+    "event": "e_…", "rule": "D2", "claim": "r_…", "claim_you_owe": "80.00",
+    "paid": [{"from": "receipt", "document": "d_…", "on": "2026-10-30", "amount": "50.00", "currency": "USD"},
+             {"from": "household", "id": "o_…", "on": "2026-11-10", "amount": "45.00", "currency": "USD"}],
+    "paid_total": "95.00", "left": "0.00", "settled": true}
+ },
+ "copy_of": {"d_…": "d_…"},
+ "receipts": [
+   {"document": "d_…", "organization": "Example Health", "on": "2026-10-30",
+    "amount": "50.00", "currency": "USD", "bill": "d_…"}
+ ],
+ "worth_a_call": [
+   {"reason": "asks_more", "bill": "d_…", "claim": "r_…", "event": "e_…",
+    "asked": "95.00", "owed": "80.00", "currency": "USD"}
+ ],
+ "not_billed": [
+   {"event": "e_…", "start": "2026-10-02", "provider": "Example Pharmacy",
+    "claims": ["r_…"], "you_owe": "10.00", "currency": "USD", "fill": true}
+ ]}
+```
+
+- **`bills`**, by document id, newest first by `date` (the statement date,
+  else the document's), then by id: every `bill` that is not
+  `same_statement_as` another. A reader joins it to `documents.json` by
+  id. `copies` lists the later copies of the same statement, and
+  `copy_of` maps each copy to the bill it copies.
+  `amount_due`, `due_date` and `phone` are the statement's, each absent
+  when it gives none.
+- **Its event and claim.** `event` is the event holding the bill or one of
+  its copies, and `rule` the rule that put it there. `claim` is the claim
+  it bills: the one D3s matched by amount, else the event's one claim from
+  the bill's organization, else the event's only claim. `claim_you_owe` is
+  that claim's share. Each is absent when there is none.
+- **`paid`**, oldest first: receipts that pay it (`from: "receipt"`), and
+  the household's payments on it or a copy (`from: "household"`, by its
+  `o_…` id). A receipt pays the bill from its organization, or with its
+  account number where both give one, whose date is 0 to 120 days before
+  the receipt's `paid_on`: the one whose `amount_due` equals the amount
+  paid, else the only one. `paid_total` sums those in the bill's currency;
+  one in another currency is listed with `counted: false`.
+  `left` is `amount_due` less `paid_total`, never below zero, and
+  `settled` is `true` once it is zero; both need an `amount_due`, and
+  `settled` is `false` without one.
+- **`superseded_by`**: the newest later bill from the same biller (the same
+  account number where both give one, else the same organization). Its
+  balance includes this one's, so a reader asks for that one, not both.
+- **`receipts`**, newest first: every receipt with an `amount_paid`. `bill`
+  is the bill it pays. One that pays no bill, paid on a day of an event
+  whose place or a claim's provider is its organization (the only such
+  event), is a desk payment: `event` names that visit.
+- **`worth_a_call`**, the bills' order, then desk payments:
+  - `asks_more`: the bill asks more than its claim's share.
+  - `asks_less`: it asks less, above zero.
+  - `no_claim`: it asks above zero and its event has no claim, or it is in
+    no event and follows no earlier bill from the same biller. Insurance
+    may not have been billed.
+  - `desk_copay`: a desk payment above what that visit's claims from its
+    organization (else all its claims) say is owed; `bill` is the receipt.
+
+  `asked` is the bill's `amount_due` or the amount paid at the desk, and
+  `owed` the claims' share.
+- **`not_billed`**, the events' order, then by provider: each event's
+  claims with a share above zero that no bill and no desk payment has met,
+  summed per provider. A bill meets its `claim` and its event's claims from
+  its organization; a desk payment, the claims it was compared with. `fill`
+  is `true` for a pharmacy fill, usually paid at the counter, and absent
+  otherwise.
+- **`marks_unreadable`**: `true` when the person's `marks.json` does not
+  read (above), so no household payment is counted. Absent otherwise.
+- Amounts are decimal strings with two places. A reader treats a field it
+  does not know as unknown.
+
 ## Readers
 
 Anything that only reads the folder follows the files above and writes
@@ -1084,8 +1252,12 @@ readers ship with medrec:
     whose name holds the words asked for.
   - a bill is a `bill` document with a `statement`, not `same_statement_as`
     another. The newest statement per organization and account is shown
-    when its `amount_due` is over zero, and is `past_due` when its
-    `due_date` is before today. Whether a bill was paid is not recorded.
+    when its `amount_due` is over zero and `bills.json` does not have it
+    settled (0.9.1 and later), and is `past_due` when its `due_date` is
+    before today and it is not settled. `medrec_records` with `kind:
+    "bills"` adds `past due` to such a bill's `detail`, `paid` to a
+    settled bill's, and `<amount> left` to one partly paid. Each is worked
+    out as the call is answered, from `bills.json` and the day.
   - a document's text is its `text.json` entry. Pages are the form feeds
     between `pdftotext` pages, shown as `--- page N ---`.
   - `medrec_records` with `kind: "events"` lists a person's events as

@@ -89,6 +89,10 @@ enum Command {
     /// claims, encounters, results and papers it produced.
     #[command(subcommand)]
     Events(EventsCmd),
+    /// Bills: what each asks, the claim it bills, what was paid and what is
+    /// left; those worth a call; and shares no bill has asked for yet.
+    #[command(subcommand)]
+    Bills(BillsCmd),
     /// Dated notes, kept in each person's notes.md.
     #[command(subcommand)]
     Note(NoteCmd),
@@ -623,6 +627,37 @@ enum EventsCmd {
 }
 
 #[derive(Subcommand, Debug)]
+enum BillsCmd {
+    /// Bills, newest first, with what is paid and left; then those worth
+    /// a call and the shares not billed yet. `--limit` bounds the bills;
+    /// the other two lists are given whole.
+    List {
+        #[arg(long)]
+        person: Option<String>,
+        #[command(flatten)]
+        list: ListArgs,
+    },
+    /// Mark a bill paid, as on a receipt that was never filed.
+    Paid {
+        /// The bill's document id (d_…).
+        document: String,
+        /// The day it was paid (YYYY-MM-DD).
+        #[arg(long)]
+        on: String,
+        /// What was paid, in dollars (`120.00`).
+        #[arg(long)]
+        amount: String,
+    },
+    /// The payments the household marked.
+    Payments {
+        #[arg(long)]
+        person: Option<String>,
+    },
+    /// Drop a marked payment.
+    Undo { id: String },
+}
+
+#[derive(Subcommand, Debug)]
 enum DocumentsCmd {
     /// Filed documents, newest first.
     List {
@@ -942,6 +977,7 @@ fn run(cli: &Cli) -> Result<(), CliError> {
         Command::Immunizations(a) => records_cmd(cli, &store, a, &["immunization"], "immunization"),
         Command::Documents(cmd) => documents_cmd(cli, cmd, &store),
         Command::Events(cmd) => events_cmd(cli, cmd, &store),
+        Command::Bills(cmd) => bills_cmd(cli, cmd, &store),
         Command::Note(cmd) => note_cmd(cli, cmd, &store),
         Command::Images(cmd) => images_cmd(cli, cmd, &store),
         Command::Doctor => {
@@ -971,8 +1007,8 @@ fn run(cli: &Cli) -> Result<(), CliError> {
             let r = medrec::reindex::claims(&f, &h, a.person.as_deref())?;
             output::emit(json, "reindex", to_value(&r), |_| {
                 println!(
-                    "{} claims: {} shaped again, {} unchanged, {} with no raw file",
-                    r.claims, r.reshaped, r.unchanged, r.without_raw
+                    "{} claims: {} shaped again, {} unchanged, {} with no raw file; {} bills and receipts read again",
+                    r.claims, r.reshaped, r.unchanged, r.without_raw, r.statements
                 );
             });
             Ok(())
@@ -1199,6 +1235,185 @@ fn owner_of<'a>(
         "no record or document {}",
         medrec::printable(id)
     )))
+}
+
+fn bills_cmd(cli: &Cli, cmd: &BillsCmd, store: &ConfigStore) -> Result<(), CliError> {
+    let json = cli.common.json;
+    match cmd {
+        BillsCmd::List { person, list } => {
+            let (f, h) = read(store, cli)?;
+            let (mut items, mut calls, mut not_billed) = (Vec::new(), Vec::new(), Vec::new());
+            let mut unreadable: Vec<String> = Vec::new();
+            for p in medrec::people::selected(&h, person.as_deref())? {
+                let v = medrec::bills::of_person(&f, &h, p)?;
+                if v["marks_unreadable"] == true {
+                    unreadable.push(p.id.clone());
+                    note(
+                        cli,
+                        &format!(
+                            "{}'s marks.json does not read: the payments marked are left out",
+                            medrec::printable(&p.name)
+                        ),
+                    );
+                }
+                for (id, b) in v["bills"].as_object().into_iter().flatten() {
+                    let mut row = b.clone();
+                    row["document"] = id.clone().into();
+                    row["person"] = p.id.clone().into();
+                    row["person_name"] = p.name.clone().into();
+                    items.push(row);
+                }
+                for (key, into) in [
+                    ("worth_a_call", &mut calls),
+                    ("not_billed", &mut not_billed),
+                ] {
+                    for mut row in v[key].as_array().cloned().unwrap_or_default() {
+                        row["person"] = p.id.clone().into();
+                        row["person_name"] = p.name.clone().into();
+                        into.push(row);
+                    }
+                }
+            }
+            let date = |v: &serde_json::Value, k: &str| v[k].as_str().unwrap_or("").to_string();
+            items.sort_by(|a, b| {
+                date(b, "date")
+                    .cmp(&date(a, "date"))
+                    .then(date(a, "document").cmp(&date(b, "document")))
+            });
+            not_billed.sort_by_key(|v| std::cmp::Reverse(date(v, "start")));
+            let shown = list.take(&items);
+            let mut doc = serde_json::json!({ "items": shown, "worth_a_call": calls, "not_billed": not_billed });
+            if !unreadable.is_empty() {
+                doc["marks_unreadable"] = unreadable.into();
+            }
+            output::emit(json, "bill-list", doc, |v| {
+                table(
+                    &serde_json::json!({ "items": v["items"] }),
+                    &[
+                        "date",
+                        "person_name",
+                        "organization",
+                        "amount_due",
+                        "paid_total",
+                        "left",
+                        "settled",
+                        "document",
+                    ],
+                );
+                if !calls.is_empty() {
+                    println!();
+                    table(
+                        &serde_json::json!({ "items": v["worth_a_call"] }),
+                        &["reason", "person_name", "asked", "owed", "bill", "claim"],
+                    );
+                }
+                if !not_billed.is_empty() {
+                    println!();
+                    table(
+                        &serde_json::json!({ "items": v["not_billed"] }),
+                        &[
+                            "start",
+                            "person_name",
+                            "provider",
+                            "you_owe",
+                            "event",
+                            "fill",
+                        ],
+                    );
+                }
+            });
+        }
+        BillsCmd::Paid {
+            document,
+            on,
+            amount,
+        } => {
+            if !medrec::ids::is_valid("d", document) {
+                return Err(CliError::Usage(format!(
+                    "`{}` is not a document id (d_…)",
+                    medrec::printable(document)
+                )));
+            }
+            let amount = medrec::model::Amount {
+                amount: amount.trim_start_matches('$').to_string(),
+                currency: "USD".into(),
+            };
+            let cfg = load(store, cli)?;
+            let f = Folder::open(&cfg, Access::Write)?;
+            let h = f.household()?;
+            let p = owner_of(&f, &h, document)?;
+            let (pm, new) = medrec::bills::mark_paid(&f, p, document, on, &amount, None, None)?;
+            let mut v = to_value(&pm);
+            v["person"] = p.id.clone().into();
+            v["status"] = if new { "recorded" } else { "unchanged" }.into();
+            output::emit(json, "bill-payment", v, |v| {
+                println!(
+                    "{} {} paid on {} ({})",
+                    v["status"].as_str().unwrap_or(""),
+                    document,
+                    on,
+                    v["id"].as_str().unwrap_or("")
+                )
+            });
+        }
+        BillsCmd::Payments { person } => {
+            let (f, h) = read(store, cli)?;
+            let mut items = Vec::new();
+            for p in medrec::people::selected(&h, person.as_deref())? {
+                for pm in f.marks(p)?.payments {
+                    let mut v = to_value(&pm);
+                    v["person"] = p.id.clone().into();
+                    v["person_name"] = p.name.clone().into();
+                    items.push(v);
+                }
+            }
+            output::emit(
+                json,
+                "bill-payments",
+                serde_json::json!({ "items": items }),
+                |v| {
+                    // The amount as one column of the table only.
+                    let mut v = v.clone();
+                    for i in v["items"].as_array_mut().into_iter().flatten() {
+                        i["amount"] = format!(
+                            "{} {}",
+                            i["amount"]["amount"].as_str().unwrap_or(""),
+                            i["amount"]["currency"].as_str().unwrap_or("")
+                        )
+                        .into();
+                    }
+                    table(
+                        &v,
+                        &["id", "person_name", "document", "on", "amount", "at", "by"],
+                    )
+                },
+            );
+        }
+        BillsCmd::Undo { id } => {
+            if !medrec::ids::is_valid("o", id) {
+                return Err(CliError::Usage(format!(
+                    "`{}` is not a payment id (o_…)",
+                    medrec::printable(id)
+                )));
+            }
+            let cfg = load(store, cli)?;
+            let f = Folder::open(&cfg, Access::Write)?;
+            let h = f.household()?;
+            let mut found = None;
+            for p in &h.people {
+                if f.marks(p)?.payments.iter().any(|pm| pm.id == *id) {
+                    found = Some(p);
+                    break;
+                }
+            }
+            let p = found.ok_or_else(|| CliError::NotFound(format!("no payment {id}")))?;
+            let pm = medrec::bills::undo(&f, p, id)?;
+            output::emit(json, "bill-payment-undone", to_value(&pm), |_| {
+                println!("undone {}", pm.id)
+            });
+        }
+    }
+    Ok(())
 }
 
 fn events_cmd(cli: &Cli, cmd: &EventsCmd, store: &ConfigStore) -> Result<(), CliError> {

@@ -5,3 +5,4 @@ Receipt number: R-0001
 Account number: EX-000123
 Payment date: 11/20/2026
 Amount paid: $120.00
+Tel: 555.010.0145
