@@ -584,6 +584,11 @@ impl LeftOut {
     /// last item, up to this page's last, or to the end on the `last` page.
     /// The pages' counts add up to all of them.
     pub fn on_page(&self, offset: usize, returned: usize, last: bool) -> usize {
+        // A page past the kept items (a cursor from before the list
+        // shrank) follows the true last page, which counted the rest.
+        if offset > 0 && offset >= self.kept_at.len() {
+            return 0;
+        }
         let from = offset
             .checked_sub(1)
             .and_then(|i| self.kept_at.get(i))
@@ -933,6 +938,10 @@ mod tests {
         // Nothing kept: the one page counts everything.
         let (_, none) = LeftOut::split(vec![1, 2], |_| true);
         assert_eq!(none.on_page(0, 0, true), 2);
+        // A page past the end, from a stale cursor, counts nothing again.
+        assert_eq!(out.on_page(3, 0, true), 0);
+        assert_eq!(out.on_page(5, 0, true), 0);
+        assert_eq!(none.on_page(2, 0, true), 0);
     }
 
     #[test]
