@@ -3162,6 +3162,76 @@ fn what_services_say_makes_claims_and_procedures_private() {
     let _ = std::fs::remove_dir_all(&e.root);
 }
 
+/// A claim that prints no more of a clinician than a surname and an initial is
+/// private where a paper names them beside a practice or a credential of an
+/// area, in every answer and view; only the household opens it.
+#[test]
+fn a_clinician_a_paper_names_makes_claims_private_everywhere() {
+    const HELD: [&str; 2] = ["r_byorgaaaaaaaaaaaaaaa", "r_bytitleaaaaaaaaaaaaa"];
+    let e = Env::new("clinicians");
+    let dir = fixture_household(&e, "clinicians", &["index.json"]);
+    raw_folders(&e, &dir);
+    let alex = h_id(&e, "Alex Testperson");
+    let t = e.tools();
+    let names = [
+        "K PLACEHOLDER",
+        "EXAMPLETON",
+        "Kim Placeholder",
+        "Exampleton",
+    ];
+    let shared = || -> Vec<String> {
+        let each = every_answer(&t, None).into_values();
+        each.map(|v| v.to_string()).collect()
+    };
+    let (files, _) = views_of(&e, &alex);
+    let why = json!({"area": "mental_health", "from": "clinician"});
+    let events = |files: &BTreeMap<String, Value>, id: &str| -> Value {
+        let events = files["events"]["events"].as_array().unwrap().clone();
+        let mut of = events.iter();
+        let event = of.find(|x| x["members"].to_string().contains(id)).unwrap();
+        files["private"]["events"][event["id"].as_str().unwrap()].clone()
+    };
+    let own = every_answer(&t, Some("Alex"));
+    for id in HELD {
+        assert_eq!(files["private"]["records"][id], why, "{id}");
+        assert_eq!(events(&files, id)["from"], "members", "{id}");
+        let row = row_of(&own["timeline, detailed"], id);
+        assert_eq!(row["private"], "mental_health", "{id}: {row}");
+        assert!(!shared().iter().any(|v| v.contains(id)), "{id}");
+    }
+    for name in names {
+        assert!(!shared().iter().any(|v| v.contains(name)), "{name}");
+    }
+    // Another initial is another clinician's, and is the household's to see.
+    let open = "r_anotheraaaaaaaaaaaaa";
+    assert!(files["private"]["records"].get(open).is_none());
+    assert!(shared().iter().any(|v| v.contains(open)));
+
+    // A dry run counts them apart.
+    e.ok(&["views", "write"]);
+    view_before(&e, &alex, "private.json", |v| {
+        for list in ["records", "events"] {
+            let map = v[list].as_object_mut().unwrap();
+            let by = ["clinician", "members"];
+            map.retain(|_, why| by.iter().all(|from| why["from"] != *from));
+        }
+        true
+    });
+    let private = changes_of(&e, &alex)["private"].clone();
+    assert_eq!(private["added"], json!({"claim": 2, "event": 2}));
+    let by = json!({"clinician": 2, "members": 2});
+    assert_eq!(private["added_by"], by);
+
+    // Only the household opens it.
+    e.ok(&["private", "unmark", HELD[0]]);
+    let (files, _) = views_of(&e, &alex);
+    assert!(files["private"]["records"].get(HELD[0]).is_none());
+    assert!(events(&files, HELD[0]).is_null());
+    assert!(shared().iter().any(|v| v.contains(HELD[0])));
+    assert!(!shared().iter().any(|v| v.contains(HELD[1])));
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
 /// The words, number and name of a private line, diagnosis or payer note of an
 /// open item are in no answer that names no person: not in its title, its
 /// event, a search, or what an answer counts. Its amounts are, and what is left

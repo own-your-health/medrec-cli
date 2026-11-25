@@ -18,6 +18,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use crate::clinicians;
 use crate::events::Built;
 use crate::given;
 use crate::marks::{failed, Failed, Marks, LABELS, READ, READ_DECISIONS, RECORDS, WRITE};
@@ -471,6 +472,8 @@ pub fn build(
     if let Some(whole) = &built.whole {
         ties.extend(crate::bills::whole_ties(p, idx, texts, whole));
     }
+    let each: Vec<&Value> = std::iter::once(&built.events).chain(&built.whole).collect();
+    let clinicians = clinicians::Clinicians::of(idx, &each);
     let judge = |given: bool| {
         let mut items: BTreeMap<String, Why> = BTreeMap::new();
         let label = |id: &str| {
@@ -481,6 +484,8 @@ pub fn build(
             let gave = || given::as_given(r).find_map(|x| record_why(&x));
             let w = record_why(r).or_else(|| gave().filter(|_| given));
             let w = w.or_else(|| label(&r.id));
+            let named = || clinicians.area(r, given);
+            let w = w.or_else(|| Some(Why::of(named()?, "clinician")));
             items.extend(w.map(|w| (r.id.clone(), w)));
         }
         for d in &idx.documents {

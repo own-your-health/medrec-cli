@@ -38,7 +38,7 @@ const STATE_FAMILY: &str = "medrec-provider-state/";
 /// The papers a label gives as its evidence, at most.
 const MAX_PAPERS: usize = 5;
 /// The shortest surname looked for in a paper's text.
-const SURNAME: usize = 3;
+pub(crate) const SURNAME: usize = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1114,7 +1114,7 @@ fn heading(d: &Document) -> Option<&str> {
 /// Whether a paper prints one of these names: the surname after a word of
 /// the first initial, or before one when a comma follows it. Both are
 /// written as names are.
-fn prints_name(body: &str, readings: &BTreeSet<(String, char)>) -> bool {
+pub(crate) fn prints_name(body: &str, readings: &BTreeSet<(String, char)>) -> bool {
     let words: Vec<(&str, String)> = body
         .split_whitespace()
         .map(|w| (w, nppes::fold(w)))
