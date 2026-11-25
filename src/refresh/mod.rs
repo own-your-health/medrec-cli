@@ -1675,6 +1675,7 @@ fn prepare(
         from: provider.cli.clone(),
         from_profile,
         files: None,
+        reads_files: provider.records_files,
         patient,
         person: Some(src.person.clone()),
         since: None,

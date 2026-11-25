@@ -10,7 +10,7 @@ use serde_json::{Map, Value};
 
 use crate::about;
 use crate::import;
-use crate::model::{Person, PersonIndex, Provenance, Record};
+use crate::model::{ImportRun, Person, PersonIndex, Provenance, Record};
 
 /// A record that an import updated.
 #[derive(Debug, PartialEq, Serialize)]
@@ -69,23 +69,56 @@ fn changed(was: &Record, now: &Record) -> Vec<String> {
     other.cloned().collect()
 }
 
-/// The records of a source that an export of all it has does not have, by kind.
-/// `None` where that cannot be told: the folder of the source has imports of
-/// another patient, or the export says it left something out and not of which
-/// type. A record is not counted where a resource of it may be among those the
-/// export left out.
+/// An export through a sign-in of all a source has.
+pub struct Export<'a> {
+    pub source_dir: &'a str,
+    pub patient: &'a str,
+    /// Whether its provider also reads downloaded files.
+    pub reads_files: bool,
+    /// The raw files it has.
+    pub served: &'a HashSet<String>,
+    pub skipped: &'a [Skip],
+}
+
+/// The type a producer reads another with, by its reference: where one of that
+/// type was left out, so may what it refers to be.
+fn read_with(resource_type: &str) -> Option<&'static str> {
+    (resource_type == "MedicationRequest").then_some("MedicationDispense")
+}
+
+/// The records of a source that an export does not have, by kind. `None` where
+/// that cannot be told: the folder of the source has imports of another patient,
+/// or the export says it left something out and not of which type. A record is
+/// not counted where a resource of it may be among those the export left out, nor
+/// where the version filed of one was not read through a sign-in: downloaded files
+/// can have what the source gives no sign-in.
 pub fn not_served(
     person: &Person,
     index: &PersonIndex,
-    source_dir: &str,
-    patient: &str,
-    served: &HashSet<String>,
-    skipped: &[Skip],
+    export: &Export,
 ) -> Option<BTreeMap<String, usize>> {
-    let mut runs = index.imports.iter();
-    if runs.any(|i| i.source_dir == source_dir && i.patient_id != patient) {
+    let Export {
+        source_dir,
+        patient,
+        reads_files,
+        served,
+        skipped,
+    } = *export;
+    let runs = index.imports.iter();
+    let runs: Vec<&ImportRun> = runs.filter(|i| i.source_dir == source_dir).collect();
+    if runs.iter().any(|i| i.patient_id != patient) {
         return None;
     }
+    // A run filed before it was kept which it was of is a sign-in's where the
+    // provider has no other.
+    let (logins, files): (Vec<&ImportRun>, Vec<&ImportRun>) = runs
+        .into_iter()
+        .partition(|i| !i.from_files.unwrap_or(reads_files));
+    let gave = |p: &Provenance| {
+        let at = p.fetched_at.as_deref();
+        let of = |runs: &[&ImportRun]| runs.iter().any(|i| Some(i.pulled_at.as_str()) == at);
+        of(&logins) && !of(&files)
+    };
     let (mut types, mut each) = (HashSet::new(), HashSet::new());
     for s in skipped {
         let of = s.resource_type.as_deref().filter(|t| !t.is_empty());
@@ -106,7 +139,10 @@ pub fn not_served(
         let r = p.source_resource.as_ref();
         r.is_some_and(|r| {
             let t = r.resource_type.as_str();
-            types.contains(t) || each.contains(&(t, r.id.as_str()))
+            let with = read_with(t);
+            types.contains(t)
+                || each.contains(&(t, r.id.as_str()))
+                || with.is_some_and(|w| types.contains(w) || each.iter().any(|(t, _)| *t == w))
         })
     };
     let mut out = BTreeMap::new();
@@ -118,7 +154,7 @@ pub fn not_served(
         let (mut any, mut gone) = (false, true);
         for (p, path) in paths {
             any = true;
-            gone &= !served.contains(&path) && !left_out(p);
+            gone &= !served.contains(&path) && gave(p) && !left_out(p);
         }
         if any && gone && about::record(person, r).is_none() {
             *out.entry(r.kind.clone()).or_default() += 1;
@@ -130,17 +166,17 @@ pub fn not_served(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::ImportRun;
     use serde_json::json;
 
     const DIR: &str = "Robin Example/Records/fakeprov-one";
+    const AT: &str = "2024-01-02T10:00:00Z";
 
     fn record(id: &str, kind: &str, of: &[(&str, &str)]) -> Record {
         let provenance = of.iter().map(|(dir, resource)| {
             let (t, rid) = resource.split_once('/').unwrap();
             json!({"source": {"kind": "fhir", "cli": "fakeprov", "organization_id": "one"},
                 "source_resource": {"type": t, "id": rid}, "method": "fhir-api",
-                "filed_at": "2024-01-02T10:00:00Z", "filed_by": "medrec 0.9.9",
+                "fetched_at": AT, "filed_at": AT, "filed_by": "medrec 0.9.9",
                 "raw_path": format!("{dir}/{resource}.json")})
         });
         let provenance: Vec<Value> = provenance.collect();
@@ -162,7 +198,7 @@ mod tests {
     fn run(dir: &str, patient: &str) -> ImportRun {
         serde_json::from_value(json!({"id": "i_runaaaaaaaaaaaaaaaaa", "source_dir": dir,
             "stream_sha256": "", "stream_bytes": 0, "cli": "fakeprov", "cli_version": "0.0.1",
-            "organization": "one", "patient_id": patient, "pulled_at": "", "imported_at": "",
+            "organization": "one", "patient_id": patient, "pulled_at": AT, "imported_at": AT,
             "counts": {}, "records_added": 0, "records_updated": 0, "records_unchanged": 0,
             "resources_written": 0, "resources_unchanged": 0, "documents_added": 0}))
         .unwrap()
@@ -189,46 +225,90 @@ mod tests {
             ),
             record("of another", "claim", &[(other, "Claim/e")]),
             record("a version of it", "claim", &[(DIR, "Claim/f~abcdefab")]),
+            record(
+                "read with another",
+                "medication",
+                &[(DIR, "MedicationRequest/g")],
+            ),
         ];
+        idx.imports = vec![run(DIR, "pat-1"), run(other, "pat-2")];
         let served: HashSet<String> = ["Observation/a", "Claim/f"]
             .map(|r| format!("{DIR}/{r}.json"))
             .into();
-        let count = |idx: &PersonIndex, skipped: &[Skip]| {
-            let n = not_served(&person(), idx, DIR, "pat-1", &served, skipped);
-            n.map(|n| serde_json::to_value(n).unwrap())
+        let of = |idx: &PersonIndex, skipped: &[Skip], reads_files: bool| {
+            let export = Export {
+                source_dir: DIR,
+                patient: "pat-1",
+                reads_files,
+                served: &served,
+                skipped,
+            };
+            not_served(&person(), idx, &export).map(|n| serde_json::to_value(n).unwrap())
         };
-        assert_eq!(count(&idx, &[]), Some(json!({"condition": 1, "result": 1})));
+        let count = |idx: &PersonIndex, skipped: &[Skip]| of(idx, skipped, false);
+        let all = json!({"condition": 1, "medication": 1, "result": 1});
+        assert_eq!(count(&idx, &[]), Some(all.clone()));
         for (left_out, want) in [
             (
                 json!({"resource_type": "Observation", "reason": "", "code": "forbidden"}),
-                Some(json!({"condition": 1})),
+                Some(json!({"condition": 1, "medication": 1})),
             ),
             (
                 json!({"search": "Observation?category=x", "reason": "", "code": "page_cap"}),
-                Some(json!({"condition": 1})),
+                Some(json!({"condition": 1, "medication": 1})),
             ),
             (
                 json!({"resource_type": "Observation", "id": "b", "reason": "", "code": "too_large"}),
-                Some(json!({"condition": 1})),
+                Some(json!({"condition": 1, "medication": 1})),
+            ),
+            (
+                json!({"resource_type": "Observation", "id": "Observation/b", "reason": "",
+                    "code": "upstream"}),
+                Some(json!({"condition": 1, "medication": 1})),
+            ),
+            // What another type is read with.
+            (
+                json!({"resource_type": "MedicationDispense", "reason": "", "code": "upstream"}),
+                Some(json!({"condition": 1, "result": 1})),
+            ),
+            (
+                json!({"resource_type": "MedicationDispense", "id": "x", "reason": "",
+                    "code": "too_large"}),
+                Some(json!({"condition": 1, "result": 1})),
             ),
             (
                 json!({"resource_type": "Binary", "id": "b", "reason": "", "code": "no_file"}),
-                Some(json!({"condition": 1, "result": 1})),
+                Some(all.clone()),
             ),
             (json!({"reason": "", "code": "upstream"}), None),
         ] {
             assert_eq!(count(&idx, &[skip(left_out.clone())]), want, "{left_out}");
         }
-        idx.imports = vec![run(DIR, "pat-1"), run(other, "pat-2")];
-        assert!(count(&idx, &[]).is_some());
         idx.imports.push(run(DIR, "pat-2"));
         assert_eq!(count(&idx, &[]), None);
+        idx.imports.pop();
+        // A run that does not say which it was is a sign-in's where the provider
+        // has no other.
+        assert_eq!(of(&idx, &[], true), Some(json!({})));
+        idx.imports[0].from_files = Some(false);
+        assert_eq!(of(&idx, &[], true), Some(all));
+        // What files gave is not counted, nor what both gave at one time.
+        let mut files = run(DIR, "pat-1");
+        files.from_files = Some(true);
+        idx.imports.push(files);
+        assert_eq!(count(&idx, &[]), Some(json!({})));
+        idx.imports[2].pulled_at = "2024-01-03T10:00:00Z".into();
+        idx.records[1].provenance[0].fetched_at = Some("2024-01-03T10:00:00Z".into());
+        let rest = json!({"condition": 1, "medication": 1});
+        assert_eq!(count(&idx, &[]), Some(rest.clone()));
+        idx.records[1].provenance[0].fetched_at = None;
+        assert_eq!(count(&idx, &[]), Some(rest.clone()));
         // What is about somebody else has no kind.
-        idx.imports.clear();
+        idx.records[1].provenance[0].fetched_at = Some(AT.into());
         idx.records[1]
             .fields
             .insert(about::FIELD.into(), "another".into());
-        assert_eq!(count(&idx, &[]), Some(json!({"condition": 1})));
+        assert_eq!(count(&idx, &[]), Some(rest));
     }
 
     #[test]
@@ -236,7 +316,12 @@ mod tests {
         let mut was = record("one", "result", &[(DIR, "Observation/a")]);
         was.fields.insert("value".into(), json!({"value": 5}));
         was.fields.insert("note".into(), "as it was".into());
+        let word = json!([{"raw_path": format!("{DIR}/Observation/a.json"), "status": "final",
+            "version": "1", "read": "2024-01-02"}]);
+        was.words = serde_json::from_value(word).unwrap();
         let mut now = was.clone();
+        now.words[0].version = Some("2".into());
+        now.words[0].read = Some("2024-03-02".into());
         now.provenance[0].filed_at = "2024-03-02T10:00:00Z".into();
         now.given = vec![Default::default()];
         let ids: HashSet<String> = ["one".to_string(), "new".to_string()].into();
@@ -257,6 +342,8 @@ mod tests {
         now.fields.insert("unit".into(), "mg".into());
         let want = ["fields.note", "fields.unit", "fields.value", "status"];
         assert_eq!(names(&now), [of(&want)]);
+        now.words[0].status = Some("amended".into());
+        assert_eq!(names(&now), [of(&[&want[..], &["words"]].concat())]);
         // Nor is one about somebody else named.
         now.fields.insert(about::FIELD.into(), "another".into());
         assert_eq!(names(&now), []);

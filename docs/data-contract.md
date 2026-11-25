@@ -822,8 +822,9 @@ filed file's MD5 by its path in the study folder, for `verify`), `filed_at`,
 
 **ImportRun**, one `medrec import`: `id`, `source_dir`, `stream_sha256`,
 `stream_bytes`, `cli`, `cli_version`, `organization`, `patient_id`,
-`pulled_at`, `imported_at`, `counts`, `skipped`, and the counts the import
-report gives (below): `resources_written`, `resources_unchanged`,
+`pulled_at`, `from_files` (whether it was of downloaded files; 0.9.10 and later,
+absent in a run filed before), `imported_at`, `counts`, `skipped`, and the counts
+the import report gives (below): `resources_written`, `resources_unchanged`,
 `records_added`, `records_updated`, `records_unchanged`, `records_older`
 (0.2.7 and later; 0 in a run filed before), `records_not_served` (0.9.10 and
 later; absent where it cannot be told), `documents_added`,
@@ -2893,12 +2894,17 @@ characters and the invisible format characters that reorder or hide text
 | `documents_same_statement` | bills filed that are the same statement as a bill filed before (0.2.9 and later) |
 | `papers_unread` | raw files that describe papers, or are the bytes of one, and do not read (0.9.9 and later): the source's, where the stream says that something describing a paper is entered in error or carries an older version of it, and those of the person's other sources, where a paper is newly entered in error; otherwise 0 |
 
-`records_not_served` is of an export of all the source has: it is `null` with
-`--since`, where the source's folder has imports of another patient, and where a
-skip names neither a type nor a search. A record is not counted while any of
-its resources from this source is in the export, or may be among those it
-left out (its type was withheld or cut short, or it is itself among the skips),
-nor when it is about another person. So a record the source stopped giving is in
+`records_not_served` is of an export through a sign-in of all the source has: it is
+`null` with `--since`, where the export's header has `since`, with `--from-files`,
+where the source's folder has imports of another patient, and where a skip names
+neither a type nor a search. A record is not counted while any of its resources
+from this source is in the export, or may be among those it left out (its type was
+withheld or cut short, it is itself among the skips, or it is a `MedicationRequest`
+and a `MedicationDispense` is), nor when it is about another person. Nor is it
+where the version filed of one of them was not read through a sign-in: files can
+have what the source gives no sign-in. A run filed before 0.9.10 does not say which it was
+(`from_files`), and is taken for a sign-in's where the provider reads no files
+(`records-files`), else for neither. So a record the source stopped giving is in
 the count of every import from then on. `not_served` (0.9.10 and later) has the
 count of each kind, `{<kind>: n}`, and is `null` when the count is.
 
@@ -2907,8 +2913,9 @@ changed}`: `changed` has the names of what is other than it was, a member of the
 record (`status`, `code`, `display`, `date`, `words`, `errors`, `providers`,
 `documents`) or a field as `fields.<name>`, and no value. It is empty for a
 version that differs in nothing medrec reads, or only in what no reader shows
-(`given`). Several resources of one record make one entry, and a record about
-another person has none.
+(`given`). Several resources of one record make one entry. A record about another
+person has none, and neither does one that this same import first added, though
+`records_updated` counts a later resource that joins it.
 
 A field added to `import/v1` is additive: a script reads a missing one as
 absent, never as an error.

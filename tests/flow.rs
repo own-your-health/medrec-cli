@@ -3556,7 +3556,58 @@ fn an_import_counts_what_is_not_served_and_names_what_changed() {
     let since = import(&less, &["--since", "2024-01-01"]);
     assert!(since["records_not_served"].is_null(), "{since}");
     assert!(since["not_served"].is_null());
+    let mut partial = less.clone();
+    partial[0]["since"] = "2024-01-01".into();
+    let since = import(&partial, &[]);
+    assert!(since["records_not_served"].is_null(), "{since}");
+    assert!(since["not_served"].is_null());
     assert_eq!(import(&all, &[])["records_not_served"], 0);
+
+    // Nor do downloaded files, which are what is in a directory; and what only
+    // they gave is none that a sign-in stopped giving.
+    let statements = base.root.join("statements");
+    std::fs::create_dir_all(&statements).unwrap();
+    let dir = statements.to_str().unwrap();
+    let at = |stream: &[Value], minute: u32| -> Vec<Value> {
+        let mut stream = stream.to_vec();
+        stream[0]["pulled_at"] = format!("2026-03-07T09:{minute:02}:00Z").into();
+        stream
+    };
+    let files = |stream: &[Value]| -> Value {
+        let stream: String = stream.iter().map(|v| format!("{v}\n")).collect();
+        let args = ["--json", "import", "--from", "fakeprov"];
+        let args = [&args[..], &["--from-files", dir, "--patient", "pat-0001"]].concat();
+        let e = provider_env(&base, &stream);
+        let out = e.run_env(&args, &[("FAKEPROV_INFO", "files")]);
+        assert!(out.status.success(), "{:?}", said(&out));
+        serde_json::from_slice(&out.stdout).unwrap()
+    };
+    let r = files(&at(&less, 1));
+    assert!(r["records_not_served"].is_null(), "{r}");
+    assert!(r["not_served"].is_null());
+    let index: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let runs = index["imports"].as_array().unwrap();
+    assert_eq!(runs.last().unwrap()["from_files"], true);
+    assert_eq!(runs[0]["from_files"], false);
+    assert_eq!(import(&at(&less, 2), &[])["records_not_served"], 1);
+    let more = |version: u32| -> Vec<Value> {
+        let mut stream = all.clone();
+        let another = stream.iter().find(|v| is(v, "AllergyIntolerance"));
+        let mut another = another.unwrap().clone();
+        another["id"] = "another".into();
+        another["code"] = serde_json::json!({"text": "Example pollen"});
+        another["meta"]["lastUpdated"] = format!("2026-03-0{version}T00:00:00Z").into();
+        stream.insert(1, another);
+        let counts = stream.last_mut().unwrap()["counts"].as_object_mut();
+        let n = &mut counts.unwrap()["AllergyIntolerance"];
+        *n = (n.as_u64().unwrap() + 1).into();
+        stream
+    };
+    assert_eq!(files(&at(&more(1), 3))["records_added"], 1);
+    assert_eq!(import(&at(&all, 4), &[])["records_not_served"], 0);
+    import(&at(&more(2), 5), &[]);
+    let r = import(&at(&all, 6), &[]);
+    assert_eq!(r["not_served"], serde_json::json!({"allergy": 1}), "{r}");
     let _ = std::fs::remove_dir_all(&base.root);
 }
 

@@ -263,6 +263,8 @@ pub struct Request {
     pub from_profile: Option<ProfileName>,
     /// Downloaded files to read instead of a login, passed as `--files`.
     pub files: Option<PathBuf>,
+    /// The provider's [`Provider::records_files`].
+    pub reads_files: bool,
     pub patient: String,
     pub person: Option<String>,
     pub since: Option<String>,
@@ -302,7 +304,7 @@ pub struct Report {
     pub records_older: usize,
     /// Records the source gave before and not now, and how many of each kind
     /// ([`served::not_served`]). `None` where that cannot be told, as of an
-    /// export of what changed since a day.
+    /// export of what changed since a day or of downloaded files.
     pub records_not_served: Option<usize>,
     pub not_served: Option<BTreeMap<String, usize>>,
     /// The records updated, and the names of what changed in each.
@@ -902,15 +904,21 @@ fn file_streamed(
     let import_id = ids::new("i");
     let mut skipped = trailer.skipped.clone();
     skipped.extend(skipped_large);
-    let whole = req.since.is_none() && header.since.is_none();
+    let whole = req.since.is_none() && header.since.is_none() && req.files.is_none();
     let here = written
         .paths
         .values()
         .map(|p| current_of(p).unwrap_or_else(|| p.clone()));
     let here: HashSet<String> = here.collect();
     let not_served = whole.then(|| {
-        let patient = &header.patient.id;
-        served::not_served(&person, &index, &source_dir, patient, &here, &skipped)
+        let export = served::Export {
+            source_dir: &source_dir,
+            patient: &header.patient.id,
+            reads_files: req.reads_files,
+            served: &here,
+            skipped: &skipped,
+        };
+        served::not_served(&person, &index, &export)
     });
     let not_served = not_served.flatten();
     let records_not_served = not_served.as_ref().map(|n| n.values().sum());
@@ -924,6 +932,7 @@ fn file_streamed(
         organization: header.organization.id.clone(),
         patient_id: header.patient.id.clone(),
         pulled_at: header.pulled_at.clone(),
+        from_files: Some(req.files.is_some()),
         imported_at,
         counts: counts.clone(),
         skipped: skipped.clone(),
@@ -4550,6 +4559,7 @@ mod tests {
             from: "mychart".into(),
             from_profile: None,
             files: None,
+            reads_files: false,
             patient: patient.into(),
             person: person.map(str::to_string),
             since: None,

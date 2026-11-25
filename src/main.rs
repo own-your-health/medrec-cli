@@ -3083,6 +3083,7 @@ fn import_cmd(cli: &Cli, a: &ImportArgs, store: &ConfigStore) -> Result<(), CliE
             from: a.from.clone(),
             from_profile: from_profile.clone(),
             files: from_files.clone(),
+            reads_files: provider.records_files,
             patient: patient.clone(),
             person: a.person.get(i).cloned(),
             since: a.since.clone(),
@@ -3203,10 +3204,12 @@ fn print_import(r: &import::Report) {
         if let Some(n) = r.records_not_served.filter(|n| *n > 0) {
             let kinds = r.not_served.iter().flatten();
             let kinds: Vec<String> = kinds.map(|(k, n)| format!("{n} {k}")).collect();
-            println!(
-                "{n} records {organization} gave before are not in this export ({}); they were kept",
-                kinds.join(", ")
-            );
+            let kinds = kinds.join(", ");
+            if n == 1 {
+                println!("1 record {organization} gave before is not in this export ({kinds}); it was kept");
+            } else {
+                println!("{n} records {organization} gave before are not in this export ({kinds}); they were kept");
+            }
         }
         if let Some(names) = changed_names(&r.updated) {
             println!("changed in the updated records: {names}");
