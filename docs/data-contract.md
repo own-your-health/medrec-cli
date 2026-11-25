@@ -658,7 +658,7 @@ fields it knows, never drops a mark. It is absent until the first mark.
   `item` (a record, document or event id, with one name and `set` or
   `wrong`) holds it to that item. A correction of the same names and item
   replaces one of the same sort (`set` and `wrong` are one sort, `same` the
-  other), and the same again changes nothing. `medrec labels undo` drops one.
+  other), and the same again changes only `at`. `medrec labels undo` drops one.
   `providers` is absent until the first. It is in the order things were said:
   `at` is when, for a request the store's time for its file (the folder's clock,
   not the asking device's) and never after medrec first tried it, and from a

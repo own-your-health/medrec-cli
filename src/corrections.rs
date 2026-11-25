@@ -540,6 +540,12 @@ pub fn decide(
         other: Map::new(),
     };
     let later = |at: i64| request.is_some() && at > said;
+    // In the order they were said: what was said later of some of the names
+    // still is.
+    let place = |all: &[Correction]| {
+        let last = all.iter().rposition(|c| !later(c.said_at()));
+        last.map_or(0, |i| i + 1)
+    };
     if let Some(i) = m.providers.iter().rposition(|c| c.of_the_same(&new)) {
         let held = &m.providers[i];
         // Said since of some of the names: it is said again over that.
@@ -550,7 +556,15 @@ pub fn decide(
                 && !later(c.said_at())
         });
         if held.says_the_same(&new) && !since {
-            return Ok(Done::Already(Box::new(held.clone())));
+            if said <= held.said_at() {
+                return Ok(Done::Already(Box::new(held.clone())));
+            }
+            // Said again: what was asked between the two is older than it.
+            let mut c = m.providers.remove(i);
+            c.at = new.at;
+            m.providers.insert(place(&m.providers), c.clone());
+            folder.save_marks(p, &m).map_err(failed(WRITE))?;
+            return Ok(Done::Already(Box::new(c)));
         }
         if later(held.said_at()) {
             return Ok(Done::SaidLater);
@@ -562,14 +576,7 @@ pub fn decide(
     }
     m.providers_undone.retain(|u| !u.was_of_the_same(&new));
     m.providers.retain(|c| !c.of_the_same(&new));
-    // In the order they were said: what was said later of some of the names
-    // still is.
-    let after = m
-        .providers
-        .iter()
-        .rposition(|c| !later(c.said_at()))
-        .map_or(0, |i| i + 1);
-    m.providers.insert(after, new.clone());
+    m.providers.insert(place(&m.providers), new.clone());
     folder.save_marks(p, &m).map_err(failed(WRITE))?;
     Ok(Done::Recorded(Box::new(new)))
 }

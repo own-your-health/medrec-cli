@@ -2376,6 +2376,13 @@ fn what_a_provider_request_says_is_as_of_when_it_was_asked() {
             .collect()
     };
     let row = |id: &str, o: &str| (id.to_string(), o.to_string());
+    // To the next second, the least two times are told apart by.
+    let wait = || {
+        let now = medrec::refresh::time::now();
+        while medrec::refresh::time::now() <= now {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    };
 
     // One that cannot be written holds back the person's later ones, and
     // nobody else's.
@@ -2461,7 +2468,6 @@ fn what_a_provider_request_says_is_as_of_when_it_was_asked() {
         .as_str()
         .unwrap();
     e.ok(&["labels", "undo", id]);
-    let undone = medrec::refresh::time::now();
     std::fs::remove_file(
         e.records()
             .join(format!("_requests/done/20261124T140000Z_{last}.json")),
@@ -2473,9 +2479,7 @@ fn what_a_provider_request_says_is_as_of_when_it_was_asked() {
     assert_eq!(outcome(last, 14), "skipped");
     assert_eq!(std::fs::read(&file).unwrap(), held);
     // Asked again after that, it is.
-    while medrec::refresh::time::now() <= undone {
-        std::thread::sleep(std::time::Duration::from_millis(50));
-    }
+    wait();
     let again = "x_lateffffffffffffffff";
     let now = medrec::model::now_rfc3339();
     decision_request_at(&e, again, "provider", body, &now);
@@ -2497,10 +2501,7 @@ fn what_a_provider_request_says_is_as_of_when_it_was_asked() {
     let pass = e.ok(&["refresh", "--scheduled"]);
     assert_eq!(rows(&pass), [row(ahead, "retrying")]);
     std::fs::write(&file, &held).unwrap();
-    let tried = medrec::refresh::time::now();
-    while medrec::refresh::time::now() <= tried {
-        std::thread::sleep(std::time::Duration::from_millis(50));
-    }
+    wait();
     say("Said since", practice);
     let pass = e.ok(&["refresh", "--scheduled"]);
     assert_eq!(rows(&pass), [row(ahead, "skipped")]);
@@ -2517,6 +2518,18 @@ fn what_a_provider_request_says_is_as_of_when_it_was_asked() {
     let pass = e.ok(&["refresh", "--scheduled"]);
     assert_eq!(rows(&pass), [row(behind, "ok")]);
     assert_eq!(names().last().unwrap(), "Clock behind");
+
+    // Said again is said later: what was asked before that does not count.
+    let between = "x_lateiiiiiiiiiiiiiiii";
+    let first = say("Said twice", practice);
+    wait();
+    let now = medrec::model::now_rfc3339();
+    decision_request_at(&e, between, "provider", of("Asked between"), &now);
+    wait();
+    assert_eq!(say("Said twice", practice), first);
+    let pass = e.ok(&["refresh", "--scheduled"]);
+    assert_eq!(rows(&pass), [row(between, "skipped")]);
+    assert_eq!(names().last().unwrap(), "Said twice");
 
     // What a later medrec took back is kept, and reads.
     let mut marks: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
