@@ -127,10 +127,11 @@ enum Command {
     /// Shape every claim again, and read every record's providers, every
     /// condition's, allergy's and medicine's fields and what each source says
     /// of it, and every result's and report's status and fields (its parts, exact
-    /// values and categories too) again, from the filed raw resources, put each result about
-    /// somebody else that was filed as the person's own in a record of its
-    /// own, and read bills' and receipts' statements again, as this medrec's
-    /// import does: once after an upgrade that changes them.
+    /// values and categories too) and what each lists again, from the filed raw
+    /// resources, put each result about somebody else that was filed as the
+    /// person's own in a record of its own, link the records again, and read
+    /// bills' and receipts' statements again, as this medrec's import does: once
+    /// after an upgrade that changes them.
     Reindex(ReindexArgs),
     /// The views: each person's records cut into small files under views/,
     /// for readers that cannot parse a whole index at once. medrec brings

@@ -13,7 +13,7 @@ use std::path::Path;
 
 use pk_cli_core::CliError;
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::about;
 use crate::changes::{self, Changes};
@@ -127,6 +127,17 @@ fn content(r: &Record) -> impl PartialEq + '_ {
     )
 }
 
+/// What a record says of others, which is made of the index.
+fn links(r: &Record) -> Value {
+    if r.kind != "claim" {
+        return json!([r.fields.get(panels::MEMBERS), r.listed_by]);
+    }
+    let lines = r.fields.get("items").and_then(Value::as_array);
+    let lines = lines.into_iter().flatten().filter_map(|l| l.get("records"));
+    let lines: Vec<&Value> = lines.collect();
+    json!([r.fields.get("visit"), r.fields.get("results"), lines])
+}
+
 /// Shape every claim of `person` (everyone's by default) again from the raw
 /// file it is of. A claim the shaping would give another `key` is left as it
 /// is: re-keying is an import's to do. Bills and
@@ -153,6 +164,8 @@ pub fn claims(
         if dry_run {
             as_read.push((p, idx.clone(), md5));
         }
+        let linked = idx.records.iter().map(|r| (r.id.clone(), links(r)));
+        let linked: BTreeMap<String, Value> = linked.collect();
         let raw_of = |r: &Record| r.provenance.iter().find_map(|pr| pr.raw_path.clone());
         // One copy per folder of raw files, not one call per file.
         let dirs: BTreeSet<String> = idx
@@ -214,11 +227,10 @@ pub fn claims(
         row.papers_unread = papers.unread;
         row.statements = crate::bill::backfill(&mut idx, &folder.text(p)?);
         // As a saved index is: this medrec's rules can link it otherwise.
-        let before = idx.records.clone();
         crate::claims::link(&mut idx.records);
         crate::panels::link(&mut idx.records);
-        let links = before.iter().zip(&idx.records).filter(|(a, b)| a != b);
-        row.links_updated = links.count();
+        let other = |r: &&Record| linked.get(&r.id).is_some_and(|was| *was != links(r));
+        row.links_updated = idx.records.iter().filter(other).count();
         let changed = [
             row.reshaped,
             row.statements,

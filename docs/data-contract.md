@@ -368,10 +368,11 @@ none is left.
 
 A result with no value whose `lists` is not empty is a heading, whether what it
 lists is filed or not: no latest result and no test (`latest_results`,
-`kind: "tests"`, `tests.json`), and where a list has it its `detail` is `panel`
-(`panel (H)` in the timeline's with an `interpretation`, which a tool's answer has
-as `flag`). `heading: true` on it in a view's records says so. `results` of a report
-stays the number of results it refers to, filed or not.
+`kind: "tests"`, `tests.json`), and where a list has it its `detail` is `panel`.
+With an `interpretation` that is `panel (H)` in the lists of the command line and in
+`timeline-<n>.json`, and `panel` beside the `flag` in a tool's answer. `heading:
+true` on it in a view's records says so. `results` of a report stays the number of
+results it refers to, filed or not.
 
 A result that a questionnaire lists (a panel or a report, Questionnaires below: by
 its name and code, or a part's) is of that questionnaire, as its other answers are,
@@ -383,8 +384,9 @@ lists more.
 A medrec before 0.9.10 drops `lists` and `listed_by`, and `lists` of `given`, from
 an index it saves, and keeps `members`. An answer that is private by its panel
 alone is then open until the next `medrec reindex`, which gives back what the raw
-files tell, earlier versions included: not what a raw file that is gone listed. So
-run 0.9.10 or later on every machine that writes the folder.
+files tell, earlier versions included: not what a raw file that is gone listed, nor an
+earlier version of a resource with no id, whose raw file nothing ties to its record.
+So run 0.9.10 or later on every machine that writes the folder.
 
 **Words.** A condition's, an allergy's and a medicine's `words` (0.9.9 and
 later) is what each of its sources says of it that can differ between them.
@@ -550,9 +552,9 @@ are:
   `category` starts with `lab`, and none where the person's birth date is not
   known.
 - a panel or a report (0.9.10 and later) that lists none but such (Panels, above),
-  with what is entered in error or without it, or did: an earlier list of one of its
-  raw files counts in place of what that lists now. Of several sources', what any of
-  them lists counts, so one hides none of the person's own.
+  with what is entered in error or without it, or did: each of its raw files lists
+  none but such, now or in an earlier list, and one lists some. So where several
+  sources are of one, what one of them lists hides none of the person's own.
 - a document with the title of one, dated so, every provenance of which names a
   source's `cli`; and one that only such records list in their `documents`, no
   provenance of which is the household's own.
@@ -2656,10 +2658,12 @@ readers ship with medrec:
       payments` and `labels list` list it, and where `events apart`, `events
       together` and `bills paid` record it.
   - the latest result of each test is one per code (with its system), or per
-    name with case and accents folded when uncoded: the newest. A test's
+    name with case and accents folded when uncoded: the newest that is no heading
+    (Panels, above). A test's
     series is every `result` record whose code is the one asked for, or
     whose name holds the words asked for. A series is private when any of its
-    results is (0.9.3 and later; see the private items below).
+    results is (0.9.3 and later; see the private items below). In `kind: "tests"`
+    and `tests.json` headings are in none, and make none private.
   - a bill is a `bill` document with a `statement`, not `same_statement_as`
     another. The newest statement per organization and account is shown
     when its `amount_due` is over zero and `bills.json` does not have it

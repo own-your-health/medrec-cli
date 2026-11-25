@@ -124,9 +124,7 @@ pub fn ids(p: &Person, idx: &PersonIndex) -> BTreeSet<String> {
             out.insert(r.id.clone());
         }
     }
-    // So is a panel or a report that lists none but such, or did, with those
-    // entered in error or without them. One of several sources' lists what any
-    // does: one of them hides none of the person's own.
+    // So is a panel or a report that lists none but such, or did.
     let in_error = idx.records.iter().filter(|r| standing::record_in_error(r));
     let in_error: BTreeSet<&str> = in_error.map(|r| r.id.as_str()).collect();
     let panels = panels::every_list(&idx.records);
@@ -134,8 +132,7 @@ pub fn ids(p: &Person, idx: &PersonIndex) -> BTreeSet<String> {
         let before = out.len();
         for (i, lists) in &panels {
             let about = |id: &str| out.contains(id);
-            let mut lists = panels::together(lists).into_iter();
-            if lists.any(|ids| panels::all(&ids, &in_error, &about)) {
+            if panels::none_but(lists, &in_error, &about) {
                 out.insert(idx.records[*i].id.clone());
             }
         }

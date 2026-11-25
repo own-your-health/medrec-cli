@@ -2860,6 +2860,9 @@ fn a_heading_is_no_test_and_names_nothing_in_error() {
         (detail(&flagged_id), detail(&emptied_id)),
         (json!("panel (H)"), json!("panel"))
     );
+    let listed = e.ok(&["results", "--person", "Alex"]);
+    let row = of(listed["items"].as_array().unwrap(), &flagged_id).unwrap();
+    assert_eq!(row["detail"], "panel (H)", "{row}");
     for id in [&flagged_id, &emptied_id] {
         let shown = e.ok(&["records", "show", id]).to_string();
         assert!(!shown.contains(&wrong_id), "{shown}");

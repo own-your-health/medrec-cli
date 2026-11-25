@@ -162,24 +162,30 @@ pub fn every_list(records: &[Record]) -> Vec<(usize, Vec<List<'_>>)> {
     each.filter(|(_, lists)| !lists.is_empty()).collect()
 }
 
-/// What a record lists of all its sources together: now, and as each list that
-/// one of them gave before has it.
-pub fn together<'a>(lists: &[List<'a>]) -> Vec<Vec<&'a str>> {
-    let now = |but: Option<&str>| -> Vec<&'a str> {
-        let others = lists.iter().filter(|l| l.now && Some(l.path) != but);
-        others.flat_map(|l| l.ids.iter().copied()).collect()
-    };
-    let before = lists.iter().filter(|l| !l.now && l.own);
-    let before = before.map(|l| [l.ids.clone(), now(Some(l.path))].concat());
-    let mut out: Vec<Vec<&str>> = before.chain([now(None)]).collect();
-    out.retain(|ids| !ids.is_empty());
-    out
-}
-
 /// Whether all of a list is so, with what is entered in error or without it.
 pub fn all(ids: &[&str], in_error: &BTreeSet<&str>, so: &dyn Fn(&str) -> bool) -> bool {
     let stands: Vec<&&str> = ids.iter().filter(|id| !in_error.contains(**id)).collect();
     ids.iter().all(|id| so(id)) || (!stands.is_empty() && stands.iter().all(|id| so(id)))
+}
+
+/// Whether a record lists none but what is so, of all its sources together:
+/// each of its own raw files does, or lists nothing, now or in a list of it
+/// before, and one lists some. With what is entered in error or without it.
+pub fn none_but(lists: &[List], in_error: &BTreeSet<&str>, so: &dyn Fn(&str) -> bool) -> bool {
+    let own: Vec<&List> = lists.iter().filter(|l| l.own).collect();
+    let such = |with: bool| {
+        let of = |l: &List| -> Vec<bool> {
+            let ids = l.ids.iter().filter(|id| with || !in_error.contains(**id));
+            ids.map(|id| so(id)).collect()
+        };
+        let is = |l: &&&List| of(l).iter().all(|so| *so);
+        let each = own.iter().all(|l| {
+            let mut its = own.iter().filter(|x| x.path == l.path);
+            its.clone().any(|x| is(&x)) || !its.any(|x| x.now)
+        });
+        each && own.iter().any(|l| is(&l) && !of(l).is_empty())
+    };
+    such(true) || such(false)
 }
 
 /// Give each panel and report the ids of the results it lists that are not
@@ -201,9 +207,12 @@ pub fn link(records: &mut [Record]) {
         lists.sort_by_key(|(path, _)| first != Some(path.as_str()));
         let mut now: Vec<usize> = Vec::new();
         for (path, files) in lists {
-            let mut more = filed.listed(i, path, files);
-            more.retain(|at| !now.contains(at));
-            now.extend(more);
+            // Two of its files can be of one record.
+            for at in filed.listed(i, path, files) {
+                if !now.contains(&at) {
+                    now.push(at);
+                }
+            }
         }
         let had = before(r).flat_map(|(path, files)| filed.listed(i, path, files));
         let of: Vec<usize> = now.iter().copied().chain(had).collect();
@@ -381,6 +390,18 @@ mod tests {
         all[0].provenance[1].raw_path = Some(path.into());
         link(&mut all);
         assert_eq!(members(&all[4]), ["r_a", "r_b", "r_panel"]);
+        // Two files of one record are one member.
+        let twin = "Robin Example/Records/north/Observation/twin.json";
+        let mut again = all[0].provenance[0].clone();
+        again.raw_path = Some(twin.into());
+        all[0].provenance.push(again);
+        let listed = all[2].lists.clone();
+        let files = all[2].lists.values_mut().next().unwrap();
+        files.insert(0, "Observation/twin.json".into());
+        link(&mut all);
+        assert_eq!(members(&all[2]), ["r_a", "r_b"]);
+        all[2].lists = listed;
+        all[0].provenance.pop();
         // One that leaves, or lists another, says so.
         let path = all[4].provenance[1].raw_path.clone().unwrap();
         all[4].provenance.pop();
@@ -400,9 +421,10 @@ mod tests {
         assert!(members(&all[0]).is_empty() && !all[0].fields.contains_key(MEMBERS));
     }
 
-    /// Each list is its own, and several sources' together.
+    /// Each list is its own: of each raw file, now and before.
     #[test]
-    fn a_list_before_is_in_place_of_that_of_its_source() {
+    fn every_list_of_a_record_is_there() {
+        let c = || vec!["Observation/c.json".to_string()];
         let mut all = vec![
             of("result", "a", "One", &[]),
             of("result", "b", "Two", &[]),
@@ -410,53 +432,90 @@ mod tests {
             of("report", "north", "Example report", &["Observation/a.json"]),
         ];
         let mut south = of("report", "south", "", &["Observation/b.json"]);
-        let (its, path) = (
-            all[3].provenance[0].raw_path.clone().unwrap(),
-            south.provenance[0].raw_path.clone().unwrap(),
-        );
+        let its = all[3].provenance[0].raw_path.clone().unwrap();
         all[3].lists.append(&mut south.lists);
         all[3].provenance.append(&mut south.provenance);
-        let gave = |path: &str| json!({"lists": {path: ["Observation/c.json"]}});
-        all[3].given = serde_json::from_value(json!([gave(&its), gave("elsewhere")])).unwrap();
-        all[3].given[1].lists = all[3].given[0].lists.clone();
         let other = its.replace("/north.json", "/gone.json");
-        all[3].given[1].lists = BTreeMap::from([(other, vec!["Observation/c.json".to_string()])]);
+        all[3].given = vec![given::Given {
+            lists: BTreeMap::from([(its, c()), (other, c())]),
+            ..Default::default()
+        }];
         let lists = every_list(&all);
         assert_eq!(lists.len(), 1);
-        let each: Vec<(&[&str], bool)> = lists[0]
-            .1
-            .iter()
-            .map(|l| (l.ids.as_slice(), l.now))
-            .collect();
-        assert_eq!(
-            each,
-            [
-                (&["r_a"][..], true),
-                (&["r_b"], true),
-                (&["r_c"], false),
-                (&["r_c"], false)
-            ]
-        );
-        // What another resource listed is not its own.
-        assert_eq!(
-            together(&lists[0].1),
-            [vec!["r_c", "r_b"], vec!["r_a", "r_b"]]
-        );
-        assert!(its < path);
+        let each = lists[0].1.iter();
+        let each: Vec<(&str, bool, bool)> = each.map(|l| (l.ids[0], l.now, l.own)).collect();
+        let want = [
+            ("r_a", true, true),
+            ("r_b", true, true),
+            ("r_c", false, false),
+            ("r_c", false, true),
+        ];
+        assert_eq!(each, want);
         let is = |of: &'static [&'static str]| move |id: &str| of.contains(&id);
-        let none = BTreeSet::new();
+        let (none, b) = (BTreeSet::new(), BTreeSet::from(["r_b"]));
         assert!(super::all(&["r_a"], &none, &is(&["r_a"])));
         assert!(!super::all(&["r_a", "r_b"], &none, &is(&["r_a"])));
-        assert!(super::all(
-            &["r_a", "r_b"],
-            &BTreeSet::from(["r_b"]),
-            &is(&["r_a"])
-        ));
-        assert!(!super::all(
-            &["r_b"],
-            &BTreeSet::from(["r_b"]),
-            &is(&["r_a"])
-        ));
+        assert!(super::all(&["r_a", "r_b"], &b, &is(&["r_a"])));
+        assert!(!super::all(&["r_b"], &b, &is(&["r_a"])));
+    }
+
+    /// Of several raw files each must list none but such, now or before, and one
+    /// some.
+    #[test]
+    fn a_list_of_one_source_hides_nothing_of_anothers() {
+        let list = |path: &'static str, ids: &[&'static str], now: bool| List {
+            path,
+            ids: ids.to_vec(),
+            now,
+            own: path != "elsewhere",
+        };
+        let theirs = |id: &str| id.starts_with('t');
+        let error = BTreeSet::from(["e", "te"]);
+        for (lists, want) in [
+            (vec![list("a", &["t1", "t2"], true)], true),
+            (vec![list("a", &["t1", "o1"], true)], false),
+            (vec![list("a", &["t1", "e"], true)], true),
+            (vec![list("a", &["te"], true)], true),
+            (vec![list("a", &["e"], true)], false),
+            // What it listed before.
+            (
+                vec![list("a", &["o1"], true), list("a", &["t1"], false)],
+                true,
+            ),
+            (vec![list("a", &["t1"], false)], true),
+            (vec![list("a", &["o1"], false)], false),
+            // Another source's is the person's own.
+            (
+                vec![list("a", &["t1"], true), list("b", &["o1"], true)],
+                false,
+            ),
+            (
+                vec![list("a", &["t1"], true), list("b", &["o1"], false)],
+                true,
+            ),
+            (
+                vec![
+                    list("a", &["o1"], true),
+                    list("a", &["t1"], false),
+                    list("b", &["o2"], true),
+                    list("b", &["t2"], false),
+                ],
+                true,
+            ),
+            (
+                vec![
+                    list("a", &["o1"], true),
+                    list("a", &["t1"], false),
+                    list("b", &["o2"], true),
+                ],
+                false,
+            ),
+            // What another resource listed is not its own.
+            (vec![list("elsewhere", &["t1"], false)], false),
+        ] {
+            let of: Vec<_> = lists.iter().map(|l| (l.path, &l.ids, l.now)).collect();
+            assert_eq!(none_but(&lists, &error, &theirs), want, "{of:?}");
+        }
     }
 
     /// A panel is of a questionnaire by a part of it too.

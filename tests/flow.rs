@@ -2595,6 +2595,20 @@ fn a_claim_is_titled_priced_by_category_and_linked_to_its_visit_and_results() {
         0,
         "a second run changes nothing"
     );
+    // One that is shaped again with the links it had has none made otherwise.
+    assert_eq!(r["links_updated"], 1, "{r}");
+    assert!(claim_of(&want)["fields"]["visit"].is_string());
+    let mut old = now.clone();
+    let records = old["records"].as_array_mut().unwrap();
+    let claim = records.iter_mut().find(|r| r["kind"] == "claim").unwrap();
+    claim["display"] = serde_json::json!("Professional");
+    std::fs::write(&path, serde_json::to_string(&old).unwrap()).unwrap();
+    let r = e.ok(&["reindex"]);
+    assert_eq!(
+        (r["reshaped"].as_u64(), r["links_updated"].as_u64()),
+        (Some(1), Some(0)),
+        "{r}"
+    );
 }
 
 /// The synthetic stream with another claim in place of its own, whose totals
