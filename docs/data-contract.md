@@ -195,8 +195,8 @@ only a display.
 fact from two sources is one record; a fill and a claim are keyed by their
 identity instead, below), `date`, `code` (`{system, code,
 display}`), `display`, `status`, `fields` (kind-specific, with FHIR element
-names), `providers` and `words` (below), `documents` (linked document ids)
-and `provenance` (one per source).
+names), `providers`, `words` and `fields_from` (below), `documents` (linked
+document ids) and `provenance` (one per source).
 
 **Fields by kind.** Every name a record's `fields` can hold. A field is
 present only when the source gave it, so a reader takes none for granted.
@@ -309,32 +309,35 @@ records filed before.
 **Words.** A condition's, an allergy's and a medicine's `words` (0.9.9 and
 later) is what each of its sources says of it that can differ between them.
 There is one for each of its provenances whose raw file is kept, in their
-order, but none of a fill, which says only that it was filled:
-`{raw_path, status, verification, categories, abatement, end, end_of}`, each
-but `raw_path` absent where the source gives none. `raw_path` is the
-provenance's, and so says whose word it is and when it was read. `status` is
-the source's code for a condition's or an allergy's clinical status and for a
-medicine's status. `verification` is the code of the verification status,
-`abatement` is `abatement` or `abatement_text`, and the others are the fields
-of those names. Two resources of one source that are
-one record are two words. No word is changed for another's: a reader that says
-whether a condition is current reads every word. An older version served again
-changes no word. `medrec reindex` reads them all again from the raw files, and
-the record's `status` and `fields` from the one they are of; what a raw file
-that does not read said stays. Where no raw file is said to be the one, it is
-the first that says all the record does, else, where each reads, the first. A
-medrec before 0.9.9 drops `words` from an index it saves, so run 0.9.9
-or later on every machine that writes the folder; the next import of each
-source, or `medrec reindex`, gives them back.
+order, but none of a fill, which says only that it was filled: `{raw_path,
+status, verification, categories, abatement, end, end_of, version}`, each but
+`raw_path` absent where the source gives none. `raw_path` is the provenance's,
+and so says whose word it is and when it was read. `status` is the source's
+code for a condition's or an allergy's clinical status and for a medicine's
+status. `verification` is the code of the verification status, `abatement` is
+`abatement` or `abatement_text`, and the others are the fields of those names.
+`version` is medrec's own: which version import read into the record, as the
+first 16 hex of its content's digest. A reader ignores it, and it is absent
+after `medrec reindex` alone. Two resources of one source that are one record
+are two words. No word is changed for another's: a reader that says whether a
+condition is current reads every word. An older version served again changes no
+word. `medrec reindex` reads them all again from the raw files, and the
+record's `status` and `fields` from the one they are of; what a raw file that
+does not read said stays. Where no raw file is said to be the one, it is the
+first that says all the record does, else, where each reads, the first. A
+medrec before 0.9.9 drops `words` from an index it saves, so run 0.9.9 or later
+on every machine that writes the folder; the next import of each source, or
+`medrec reindex`, gives them back.
 
 **Whose fields.** `fields_from` (0.9.9 and later) is the raw path of the
 provenance whose resource a record's `status` and `fields` are of, where the
 record has words and several provenances. A version of that resource writes
 them each time it is served, so a later medrec's reading of it applies.
-Another's does when it is new, when it says otherwise than its source's word
-on the record, and when `fields_from` names none of the record's provenances
-or is absent (an earlier medrec saved the record); it then writes them and
-`fields_from`. Served again as it was, it changes neither. Until 0.9.9 each
+Another's does when it is new to the record (its `version` is another than its
+word's, or with none its word says otherwise: an import cut short after its raw
+files is made good by the next), and when `fields_from` names none of the
+record's provenances or is absent (an earlier medrec saved the record); it then
+writes them and `fields_from`. Served again as it was, it changes neither. Until 0.9.9 each
 import's version wrote over the other's, and still does in a record with no
 words.
 

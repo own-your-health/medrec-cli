@@ -584,6 +584,7 @@ fn word(
         abatement: text("abatement").or_else(|| text("abatement_text")),
         end: text("end"),
         end_of: text("end_of"),
+        version: None,
     })
 }
 

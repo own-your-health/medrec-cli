@@ -2897,11 +2897,21 @@ fn a_record_keeps_what_each_source_says_of_its_status() {
     let before = std::fs::read(&path).unwrap();
     import(&newer);
     assert_eq!(said("Sample stiffness"), changed);
-    // An import cut short after its raw files, and run again.
-    std::fs::write(&path, before).unwrap();
-    assert_eq!(said("Sample stiffness"), condition);
-    import(&newer);
-    assert_eq!(said("Sample stiffness"), changed);
+    // An import cut short after its raw files, and run again; and with a
+    // reindex between, which reads what the source says and writes no field
+    // of it.
+    for reindexed in [false, true] {
+        std::fs::write(&path, &before).unwrap();
+        if reindexed {
+            assert!(base.ok(&["reindex"])["statuses_updated"].as_u64() > Some(0));
+            assert_eq!(said("Sample stiffness")[1..], changed[1..]);
+            assert_eq!(said("Sample stiffness")[0], condition[0]);
+        } else {
+            assert_eq!(said("Sample stiffness"), condition);
+        }
+        import(&newer);
+        assert_eq!(said("Sample stiffness"), changed);
+    }
     let r = import(&newer);
     assert_eq!(r["records_updated"], 0, "{r}");
     import(&one);
@@ -2950,7 +2960,14 @@ fn a_record_keeps_what_each_source_says_of_its_status() {
     let r = base.ok(&["reindex"]);
     assert_eq!(r["statuses_updated"], 7, "{r}");
     assert!(r.get("dry_run").is_none());
-    assert_eq!(read()["records"], full["records"]);
+    // All but which version import read in.
+    let mut unversioned = full.clone();
+    for r in unversioned["records"].as_array_mut().unwrap() {
+        for w in r["words"].as_array_mut().into_iter().flatten() {
+            assert!(w.as_object_mut().unwrap().remove("version").is_some());
+        }
+    }
+    assert_eq!(read()["records"], unversioned["records"]);
     assert_eq!(base.ok(&["reindex"])["statuses_updated"], 0);
     // Or the next import of each, which serves the same versions: with no
     // writer named, the first to come writes, and then none changes it.

@@ -15,7 +15,7 @@ use serde_json::Value;
 
 use crate::claims::without_links;
 use crate::folder::Folder;
-use crate::model::{Household, PersonIndex, Record};
+use crate::model::{Household, PersonIndex, Record, Word};
 use crate::normalize;
 use crate::people;
 use crate::providers::Found;
@@ -202,7 +202,11 @@ fn statuses(idx: &mut PersonIndex, tmp: &Path) -> usize {
                 all_read = false;
                 continue;
             };
-            now.words.extend(new.words.iter().cloned());
+            now.words.extend(new.words.iter().cloned().map(|w| {
+                let had = r.words.iter().find(|x| x.raw_path == w.raw_path);
+                let version = had.and_then(|h| h.version.clone());
+                Word { version, ..w }
+            }));
             if new.key == r.key {
                 shapes.push((rel, new));
             }

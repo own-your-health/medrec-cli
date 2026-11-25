@@ -473,6 +473,11 @@ pub struct Word {
     pub end: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub end_of: Option<String>,
+    /// The version import read into the record: the first 16 hex of its
+    /// content's digest. Reindex leaves it, so an import cut short after its
+    /// raw files is seen by the next.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
 }
 
 /// Who a field of a record prints, as its source identifies them.

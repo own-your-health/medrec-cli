@@ -754,6 +754,9 @@ fn file_streamed(
             .get(&format!("{source_dir}/{sub}.json"))
             .copied();
         if let Some(mut rec) = normalize::record(&v, prov) {
+            for w in &mut rec.words {
+                w.version = Some(version::content_digest(r)[..16].into());
+            }
             let prescription = (r.resource_type == "MedicationDispense"
                 && !rec.fields.contains_key("prescriber"))
             .then(|| normalize::path_str(&v, "authorizingPrescription.0.reference"))
@@ -1680,6 +1683,10 @@ fn merge_fields(
             .filter(|r| r.key == rec.key || r.provenance.iter().all(same_resource))
         {
             let at = existing.provenance.iter().position(same_resource);
+            let filing = match not_read_in(existing, word) {
+                true => Some(Filing::Replaces),
+                false => filing,
+            };
             // The first resource from this source on the record writes its
             // fields; another from it that shares the key keeps only its own
             // provenance, so the two do not write over each other.
@@ -1747,6 +1754,13 @@ fn merge_fields(
         // one's fields.
         Some(i) => {
             idless.claimed.insert((key, i));
+            // A raw file filed by an import that was then cut short.
+            let filing = match &existing.provenance[i].raw_path {
+                Some(p) if incoming.raw_path.as_ref().is_some_and(|q| p != q) => {
+                    Some(Filing::Replaces)
+                }
+                _ => filing,
+            };
             if mine.first() == Some(&i) {
                 let of_several = !existing.provenance.iter().all(same_source);
                 if of_several && !writes(existing, word, filing) {
@@ -1863,12 +1877,30 @@ struct Idless {
     claimed: HashSet<(String, usize)>,
 }
 
+/// Whether a version is another than the one last read into the record,
+/// though its raw file is there: an import was cut short between them. One
+/// whose version is not known (a record an earlier medrec saved) is told by
+/// what it says.
+fn not_read_in(existing: &Record, word: Option<&Word>) -> bool {
+    let Some(word) = word else { return false };
+    let had = existing.words.iter().find(|w| w.raw_path == word.raw_path);
+    had.is_some_and(|had| match (&had.version, &word.version) {
+        (Some(a), Some(b)) => a != b,
+        _ => {
+            let version = word.version.clone();
+            let had = Word {
+                version,
+                ..had.clone()
+            };
+            had != *word
+        }
+    })
+}
+
 /// Whether a version writes the fields of a record other sources state too.
 /// One with a word does where the raw file that wrote them is its own, not
-/// known or gone, where the version is new, and where it says otherwise than
-/// its source did when last read into the record (an import cut short after
-/// its raw files). So each served again as it was writes nothing over
-/// another.
+/// known or gone, and where the version is new. So each served again as it
+/// was writes nothing over another.
 fn writes(existing: &Record, word: Option<&Word>, filing: Option<Filing>) -> bool {
     let Some(word) = word else { return true };
     let of = |p: &&str| {
@@ -1878,10 +1910,7 @@ fn writes(existing: &Record, word: Option<&Word>, filing: Option<Filing>) -> boo
             .any(|q| q.raw_path.as_deref() == Some(*p))
     };
     let writer = existing.fields_from.as_deref().filter(of);
-    let said = existing.words.iter().find(|w| w.raw_path == word.raw_path);
-    writer.is_none_or(|w| w == word.raw_path)
-        || matches!(filing, None | Some(Filing::Replaces))
-        || said.is_some_and(|w| w != word)
+    writer.is_none_or(|w| w == word.raw_path) || matches!(filing, None | Some(Filing::Replaces))
 }
 
 /// Another source's resource joins the record: the one it was of wrote its
@@ -2813,6 +2842,71 @@ mod tests {
             index.records[0].fields_from,
             index.records[0].provenance[0].raw_path
         );
+    }
+
+    /// An allergy of one source, as import reads a version of it.
+    fn allergy_of(org: &str, id: Option<&str>, criticality: &str) -> Record {
+        let mut v = serde_json::json!({"resourceType": "AllergyIntolerance",
+            "clinicalStatus": {"coding": [{"code": "active"}]},
+            "criticality": criticality, "code": {"text": "Sample nut"}});
+        if let Some(id) = id {
+            v["id"] = id.into();
+        }
+        let raw = RawResource::from_value(&v).unwrap();
+        let (_, mut p) = eob_from("", 0.0);
+        p.source.organization_id = Some(org.into());
+        p.source_resource = source_resource(&v);
+        p.raw_path = Some(format!(
+            "Robin Example/Records/{org}/{}.json",
+            raw_sub(&raw)
+        ));
+        let mut r = normalize::record(&v, p).unwrap();
+        r.words[0].version = Some(version::content_digest(&raw)[..16].into());
+        r
+    }
+
+    /// An import cut short after its raw files is made good by the next,
+    /// whose version the raw layer then has: by a change no word says, with
+    /// a reindex between them, and of a resource with no id.
+    #[test]
+    fn an_import_cut_short_is_made_good_by_the_next() {
+        for (id, filing, reindexed) in [
+            (Some("b"), Filing::Refreshed, false),
+            (Some("b"), Filing::Refreshed, true),
+            (None, Filing::Unchanged, false),
+        ] {
+            let mut index = PersonIndex::new("p_test");
+            let first = [
+                allergy_of("one", Some("a"), "low"),
+                allergy_of("two", id, "low"),
+            ];
+            for rec in first {
+                let found = Found::default();
+                merge(&mut index, rec, found, None, &mut Idless::default());
+            }
+            // Two's next version is in the raw layer and not here.
+            let next = || allergy_of("two", id, "high");
+            if reindexed {
+                let mut word = next().words.remove(0);
+                word.version = index.records[0].words[1].version.clone();
+                index.records[0].say(&word);
+            }
+            let mut import = |rec: Record, filing: Filing| {
+                let found = Found::default();
+                let m = merge(&mut index, rec, found, Some(filing), &mut Idless::default());
+                let r = &index.records[0];
+                let of = |p: &Provenance| p.raw_path.clone().unwrap();
+                let paths: Vec<String> = r.provenance.iter().map(of).collect();
+                let said: Vec<&String> = r.words.iter().map(|w| &w.raw_path).collect();
+                assert_eq!(said, paths.iter().collect::<Vec<_>>());
+                format!("{m:?} {}", r.fields["criticality"].as_str().unwrap())
+            };
+            assert_eq!(import(next(), filing), "Updated high");
+            assert_eq!(import(next(), Filing::Unchanged), "Unchanged high");
+            // The other's, as it was, writes nothing over it.
+            let one = allergy_of("one", Some("a"), "low");
+            assert_eq!(import(one, Filing::Unchanged), "Unchanged high");
+        }
     }
 
     /// Two resources of one source that are one record are two words.
