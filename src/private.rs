@@ -516,6 +516,8 @@ pub fn build(
 
     let mut out = json!({"schema": SCHEMA, "person": p.id,
         "records": {}, "documents": {}, "events": {}, "studies": {}});
+    let heads = idx.records.iter().filter(|r| crate::panels::heads(r));
+    let heads: BTreeSet<&str> = heads.map(|r| r.id.as_str()).collect();
     for (id, w) in items {
         let kind = match id.get(..2) {
             Some("r_") => "records",
@@ -524,7 +526,11 @@ pub fn build(
             Some("m_") => "studies",
             _ => continue,
         };
-        out[kind][id] = w.json();
+        let mut v = w.json();
+        if heads.contains(id.as_str()) {
+            v["heading"] = true.into();
+        }
+        out[kind][id] = v;
     }
     if !unreported.is_empty() {
         out["unreported_studies"] = unreported.into();

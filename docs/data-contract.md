@@ -2452,6 +2452,8 @@ nothing is private.
   the item, or of the one it is private with. Absent otherwise. A reader shows
   the area and no more of it. A row of `medrec private list` has it too (`yes`
   in its table's `given`).
+- **`heading`** (0.9.10 and later): `true` on a private record that is a heading
+  (Panels, above): it has no entry in `tests.json`. Absent otherwise.
 - **What a source takes back still tells** (0.9.9 and later). Nothing opens
   because a record or a paper is entered in error, the person's or one of a
   person their events read (X1, X2): each rule is judged with what is and with
