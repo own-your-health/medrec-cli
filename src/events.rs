@@ -28,6 +28,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
 use crate::model::{Document, Person, PersonIndex, PersonText, Record};
+use crate::sources::Sources;
 
 pub const SCHEMA: &str = "medrec-events/v1";
 pub const OVERRIDES_SCHEMA: &str = "medrec-overrides/v1";
@@ -103,8 +104,8 @@ pub struct Input<'a> {
     pub texts: &'a PersonText,
     pub overrides: Option<&'a Overrides>,
     pub linked: Vec<Linked<'a>>,
-    /// The household's sources: a portal's own name for its organization is
-    /// the place of a visit whose records name none.
+    /// The household's sources: the person's own one a visit came from names
+    /// its place when its records name none ([`crate::sources`]).
     pub sources: &'a [crate::model::Source],
     /// The UTC offset, in seconds, at a time: the days an event is shown
     /// on are the calendar days at it (`pk_cli_core::dates::local_utc_offset`,
@@ -1280,39 +1281,6 @@ fn is_visit(r: &Record) -> bool {
     !CONTACT.is_match(&r.display)
 }
 
-/// A record's source, as the household's sources are keyed for their
-/// organization names: CLI, organization and FHIR base.
-fn place_key(p: &[crate::model::Provenance]) -> Option<String> {
-    let s = &p.first()?.source;
-    Some(format!(
-        "{}|{}|{}",
-        s.cli.as_deref()?,
-        s.organization_id.as_deref()?,
-        s.fhir_base.as_deref().unwrap_or("").trim_end_matches('/')
-    ))
-}
-
-/// The organization names of the household's portal sources, by
-/// [`place_key`], leaving out a records connection's own name.
-fn source_places(sources: &[crate::model::Source]) -> BTreeMap<String, String> {
-    sources
-        .iter()
-        .filter_map(|s| {
-            let name = s.organization_name.as_deref()?.trim();
-            if name.is_empty() || crate::plain::is_connection(name) {
-                return None;
-            }
-            let key = format!(
-                "{}|{}|{}",
-                s.cli.as_deref()?,
-                s.organization.as_deref()?,
-                s.fhir_base.as_deref().unwrap_or("").trim_end_matches('/')
-            );
-            Some((key, name.to_string()))
-        })
-        .collect()
-}
-
 /// The plain name of a claim's first counted line with a visit code.
 fn visit_line(c: &Record) -> Option<&'static str> {
     c.fields
@@ -1354,16 +1322,6 @@ fn claim_what(c: &Record) -> Option<String> {
             .filter(|s| !s.is_empty())
             .map(|s| crate::plain::tidy(s, MEMBER_TITLE))
     })
-}
-
-fn source_key(p: &[crate::model::Provenance]) -> Option<String> {
-    let s = &p.first()?.source;
-    Some(format!(
-        "{}|{}|{}",
-        s.cli.as_deref().unwrap_or(""),
-        s.organization_id.as_deref().unwrap_or(""),
-        s.fhir_base.as_deref().unwrap_or("")
-    ))
 }
 
 const SKIPPED_STATUS: &[&str] = &["planned", "cancelled", "entered-in-error"];
@@ -1440,6 +1398,7 @@ fn portal_into_events(
     records: &[Record],
     first_claim: Option<Day>,
     dates: Dates,
+    from: Sources,
 ) {
     let idx: BTreeMap<&str, &Record> = records.iter().map(|r| (r.id.as_str(), r)).collect();
     let live = |r: &&Record| {
@@ -1472,7 +1431,7 @@ fn portal_into_events(
         let place = str_field(e, "location")
             .or_else(|| str_field(e, "service_provider"))
             .map(str::to_string)
-            .or_else(|| source_key(&e.provenance))
+            .or_else(|| from.first_key(&e.provenance))
             .unwrap_or_default();
         match pvs
             .iter_mut()
@@ -1581,7 +1540,7 @@ fn portal_into_events(
         let Some(d) = dates.record_day(e) else {
             continue;
         };
-        let key = source_key(&e.provenance);
+        let key = from.first_key(&e.provenance);
         let org = str_field(e, "service_provider");
         let best = evs
             .iter()
@@ -1592,7 +1551,7 @@ fn portal_into_events(
                     m.role == "portal"
                         && idx
                             .get(m.id.as_str())
-                            .is_some_and(|r| source_key(&r.provenance) == key)
+                            .is_some_and(|r| from.first_key(&r.provenance) == key)
                 });
                 same_source
                     || org.is_some_and(|o| event_names(ev, &idx).iter().any(|n| same_org(o, n)))
@@ -1639,7 +1598,7 @@ fn portal_into_events(
         if days.is_empty() {
             continue;
         }
-        let key = source_key(&r.provenance);
+        let key = from.first_key(&r.provenance);
         let cands: Vec<usize> = evs
             .iter()
             .enumerate()
@@ -1647,7 +1606,7 @@ fn portal_into_events(
                 ev.members.iter().any(|m| {
                     m.role == "portal"
                         && idx.get(m.id.as_str()).is_some_and(|enc| {
-                            source_key(&enc.provenance) == key
+                            from.first_key(&enc.provenance) == key
                                 && dates.record_span(enc).iter().any(|ed| {
                                     days.contains(ed)
                                         || (matches!(r.kind.as_str(), "result" | "report")
@@ -1771,7 +1730,7 @@ fn portal_into_events(
                 })
         });
         // With no claim, a day's doses from one source are one visit.
-        let key = source_key(&r.provenance);
+        let key = from.first_key(&r.provenance);
         let same_visit = || {
             evs.iter().position(|ev| {
                 ev.kind == "vaccine"
@@ -1781,7 +1740,7 @@ fn portal_into_events(
                         m.role == "vaccine"
                             && idx
                                 .get(m.id.as_str())
-                                .is_some_and(|o| source_key(&o.provenance) == key)
+                                .is_some_and(|o| from.first_key(&o.provenance) == key)
                     })
             })
         };
@@ -1945,6 +1904,7 @@ fn papers_into_events(
     records: &[Record],
     docs: &[Document],
     texts: &PersonText,
+    from: Sources,
 ) -> (Vec<Value>, Vec<Alias>) {
     let mut p = Papers {
         idx: records.iter().map(|r| (r.id.as_str(), r)).collect(),
@@ -2017,7 +1977,7 @@ fn papers_into_events(
                 .source
                 .organization_id
                 .as_ref()
-                .map(|_| source_key(std::slice::from_ref(&d.provenance)));
+                .map(|_| from.key(&d.provenance));
             let portal_cands: Vec<usize> = evs
                 .iter()
                 .enumerate()
@@ -2026,7 +1986,7 @@ fn papers_into_events(
                         m.role == "portal"
                             && p.idx.get(m.id.as_str()).is_some_and(|e| {
                                 portal_key.is_some()
-                                    && Some(source_key(&e.provenance)) == portal_key
+                                    && from.first_key(&e.provenance) == portal_key
                                     && record_days(e).iter().any(|x| *x <= dd && dd <= x + 3)
                             })
                     })
@@ -2191,7 +2151,7 @@ struct Base {
     undated: Vec<String>,
 }
 
-fn base(idx: &PersonIndex, texts: Option<&PersonText>, dates: Dates) -> Base {
+fn base(idx: &PersonIndex, texts: Option<&PersonText>, dates: Dates, from: Sources) -> Base {
     let live_claims: Vec<&Record> = idx
         .records
         .iter()
@@ -2212,13 +2172,14 @@ fn base(idx: &PersonIndex, texts: Option<&PersonText>, dates: Dates) -> Base {
     }
     let first_claim = cs.iter().map(|c| c.start).min();
     let mut evs = claims_into_events(&cs);
-    portal_into_events(&mut evs, &idx.records, first_claim, dates);
+    portal_into_events(&mut evs, &idx.records, first_claim, dates, from);
     let empty = PersonText::new(&idx.person);
     let (pending, aliases) = papers_into_events(
         &mut evs,
         &idx.records,
         &idx.documents,
         texts.unwrap_or(&empty),
+        from,
     );
     Base {
         evs,
@@ -2480,7 +2441,7 @@ fn render(
     recs: &BTreeMap<&str, &Record>,
     labels: &Labels,
     aliases: &[Alias],
-    places: &BTreeMap<String, String>,
+    from: Sources,
 ) -> Option<(Day, Day, String, Value)> {
     let (start, end) = ev.span()?;
     let id = event_id(person, &ev.anchor);
@@ -2632,11 +2593,7 @@ fn render(
                 .filter(a_place)
                 .or_else(|| str_field(e, "location").filter(a_place))
         })
-        .or_else(|| {
-            encs.iter()
-                .find_map(|e| places.get(&place_key(&e.provenance)?))
-                .map(String::as_str)
-        });
+        .or_else(|| from.place_of(encs.iter().flat_map(|e| &e.provenance)));
     let first_org = claims
         .iter()
         .filter_map(|c| str_field(c, "provider"))
@@ -2806,7 +2763,8 @@ pub fn build(inp: &Input) -> Value {
         offset: inp.utc_offset,
     };
     let pid = &inp.person.id;
-    let mut b = base(inp.index, Some(inp.texts), dates);
+    let from = Sources::of(inp.sources, inp.index);
+    let mut b = base(inp.index, Some(inp.texts), dates, from);
     let recs: BTreeMap<&str, &Record> = inp
         .index
         .records
@@ -2816,7 +2774,7 @@ pub fn build(inp: &Input) -> Value {
 
     // X1 and X2 need the other person's events as the rules make them.
     for l in &inp.linked {
-        let other = base(l.index, l.texts, dates);
+        let other = base(l.index, l.texts, dates, Sources::of(inp.sources, l.index));
         let orecs: BTreeMap<&str, &Record> =
             l.index.records.iter().map(|r| (r.id.as_str(), r)).collect();
         let stays = |evs: &[Ev]| -> Vec<(usize, Day, Day)> {
@@ -2927,7 +2885,6 @@ pub fn build(inp: &Input) -> Value {
         .map(|o| apply(&mut b.evs, inp.index, &o.events, dates))
         .unwrap_or(0);
 
-    let places = source_places(inp.sources);
     let mut labels = Labels::new();
     labels_of(inp.index, &mut labels);
     for l in &inp.linked {
@@ -2936,7 +2893,7 @@ pub fn build(inp: &Input) -> Value {
     let mut out: Vec<(Day, Day, String, Value)> = b
         .evs
         .iter()
-        .filter_map(|ev| render(pid, ev, &recs, &labels, &b.aliases, &places))
+        .filter_map(|ev| render(pid, ev, &recs, &labels, &b.aliases, from))
         .collect();
     out.sort_by(|a, z| z.0.cmp(&a.0).then(z.1.cmp(&a.1)).then(a.2.cmp(&z.2)));
     let pending: Vec<Value> = b

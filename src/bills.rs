@@ -12,7 +12,7 @@ use serde_json::{json, Map, Value};
 
 use crate::claims::{decimal, units};
 use crate::events::same_org;
-use crate::model::{Amount, Document, Person, PersonIndex};
+use crate::model::{Amount, Document, Person, PersonIndex, PersonText};
 
 pub const SCHEMA: &str = "medrec-bills/v1";
 /// How long after a bill's date a receipt can be its payment.
@@ -107,9 +107,15 @@ fn money(u: i128) -> String {
     decimal(u)
 }
 
-/// The person's `bills.json` from their index, their built events
-/// (`crate::events::build`) and the payments the household marked.
-pub fn build(p: &Person, idx: &PersonIndex, events: &Value, payments: &[Payment]) -> Value {
+/// The person's `bills.json` from their index and its texts, their built
+/// events (`crate::events::build`) and the payments the household marked.
+pub fn build(
+    p: &Person,
+    idx: &PersonIndex,
+    texts: &PersonText,
+    events: &Value,
+    payments: &[Payment],
+) -> Value {
     let docs = &idx.documents;
     let evs: Vec<&Value> = events
         .get("events")
@@ -361,15 +367,23 @@ pub fn build(p: &Person, idx: &PersonIndex, events: &Value, payments: &[Payment]
         }
         row.insert("paid".into(), json!(paid));
         row.insert("paid_total".into(), json!(money(paid_u)));
-        if let Some((due, _)) = &b.due {
-            let left = due.saturating_sub(paid_u);
+        let left = b.due.as_ref().map(|(due, _)| due.saturating_sub(paid_u));
+        let settled = left.is_some_and(|l| l <= 0);
+        if let Some(left) = left {
             row.insert("left".into(), json!(money(left.max(0))));
-            row.insert("settled".into(), json!(left <= 0));
-        } else {
-            row.insert("settled".into(), json!(false));
         }
+        row.insert("settled".into(), json!(settled));
         if let Some(o) = &superseded_by {
             row.insert("superseded_by".into(), json!(o));
+        }
+        // What an insurer was billed for is not one no insurer is.
+        let self_pay = texts
+            .texts
+            .get(&d.id)
+            .filter(|_| claim.is_none())
+            .and_then(|t| crate::bill::self_pay(d, t));
+        if let Some(kind) = self_pay {
+            row.insert("self_pay".into(), json!(kind));
         }
         out_bills.insert(d.id.clone(), Value::Object(row));
 
@@ -390,13 +404,17 @@ pub fn build(p: &Person, idx: &PersonIndex, events: &Value, payments: &[Payment]
             (Some(due), Some(o), _) if due > o => Some("asks_more"),
             (Some(due), Some(o), _) if 0 < due && due < o => Some("asks_less"),
             (Some(due), None, ev)
-                if due > 0 && !follows && ev.is_none_or(|i| claims_of(evs[i]).next().is_none()) =>
+                if due > 0
+                    && !follows
+                    && self_pay.is_none()
+                    && ev.is_none_or(|i| claims_of(evs[i]).next().is_none()) =>
             {
                 Some("no_claim")
             }
             _ => None,
         };
-        if let Some(reason) = reason {
+        // A settled bill asks for nothing more.
+        if let Some(reason) = reason.filter(|_| !settled) {
             calls.push(json!({
                 "reason": reason,
                 "bill": d.id,
@@ -516,6 +534,26 @@ pub fn build(p: &Person, idx: &PersonIndex, events: &Value, payments: &[Payment]
     })
 }
 
+/// The pairs of documents a `bills.json` ties to one balance: a bill and its
+/// copy, a bill and the one that supersedes it, a receipt and the bill it
+/// pays.
+pub fn ties(bills: &Value) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let mut pair = |a: &str, b: Option<&str>| out.extend(b.map(|b| (a.to_string(), b.to_string())));
+    for (id, b) in bills["bills"].as_object().into_iter().flatten() {
+        pair(id, b["superseded_by"].as_str());
+        for c in b["copies"].as_array().into_iter().flatten() {
+            pair(id, c.as_str());
+        }
+    }
+    for r in bills["receipts"].as_array().into_iter().flatten() {
+        if let Some(d) = r["document"].as_str() {
+            pair(d, r["bill"].as_str());
+        }
+    }
+    out
+}
+
 /// The bills a `bills.json` says are settled, by document id.
 pub fn settled(bills: &Value) -> BTreeSet<String> {
     bills["bills"]
@@ -540,6 +578,7 @@ pub fn of_person(
     let mut v = build(
         p,
         &idx,
+        &folder.text(p)?,
         &events,
         marks
             .as_ref()
@@ -713,7 +752,13 @@ mod tests {
             },
             ..paid.clone()
         };
-        let v = build(&person(), &index(), &events, &[paid, euros]);
+        let v = build(
+            &person(),
+            &index(),
+            &PersonText::new("p_test"),
+            &events,
+            &[paid, euros],
+        );
         assert_eq!(v["schema"], SCHEMA);
         let order: Vec<&str> = v["bills"]
             .as_object()
@@ -843,5 +888,79 @@ mod tests {
                 ("e_oldaaaaaaaaaaaaaaaaa", "12.00", None),
             ]
         );
+    }
+
+    fn reasons(v: &Value) -> Vec<(&str, &str)> {
+        v["worth_a_call"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| (c["bill"].as_str().unwrap(), c["reason"].as_str().unwrap()))
+            .collect()
+    }
+
+    /// A bill no insurer is billed for has no claim, and isn't asked for one.
+    #[test]
+    fn a_self_pay_bill_is_not_missing_a_claim() {
+        let events: Value = serde_json::from_str(EVENTS).unwrap();
+        let (dental, doctor) = ("d_dentbillaaaaaaaaaaaa", "d_doctorbillaaaaaaaaaa");
+        let says = |id: &str, text: &str| {
+            let mut texts = PersonText::new("p_test");
+            texts.texts.insert(id.into(), text.into());
+            build(&person(), &index(), &texts, &events, &[])
+        };
+        for (text, kind) in [
+            ("Sample storage fee\nAmount due $60.00", Some("storage")),
+            ("Specimen\n  storage, 12 months", Some("storage")),
+            ("Yearly tissue\nbank storage", Some("storage")),
+            ("Insurance: Self-pay", Some("stated")),
+            ("Financial class SELF PAY", Some("stated")),
+            ("Self-pay account", Some("stated")),
+            // What any bill may say, and what its other pages do.
+            ("If you self pay, ask about our discounts", None),
+            ("Office visit\n\u{c}Storage fee", None),
+            ("Cleaning", None),
+        ] {
+            let v = says(dental, text);
+            assert_eq!(bill(&v, dental)["self_pay"].as_str(), kind, "{text}");
+            let asked = reasons(&v).contains(&(dental, "no_claim"));
+            assert_eq!(asked, kind.is_none(), "{text}");
+        }
+        // One with a claim was billed to an insurer, whatever it says.
+        let v = says(doctor, "Insurance: Self-pay");
+        assert!(bill(&v, doctor).get("self_pay").is_none());
+        assert!(reasons(&v).contains(&(doctor, "asks_more")));
+    }
+
+    #[test]
+    fn a_settled_bill_is_not_worth_a_call() {
+        let events: Value = serde_json::from_str(EVENTS).unwrap();
+        let no_text = PersonText::new("p_test");
+        for (id, amount) in [
+            ("d_dentbillaaaaaaaaaaaa", "60.00"),
+            ("d_doctorbillaaaaaaaaaa", "76.00"),
+            ("d_labbillaaaaaaaaaaaaa", "16.00"),
+        ] {
+            let paid = |amount: &str| {
+                let p = Payment {
+                    id: "o_paidaaaaaaaaaaaaaaaa".into(),
+                    document: id.into(),
+                    on: "2026-01-14".into(),
+                    amount: Amount {
+                        amount: amount.into(),
+                        currency: "USD".into(),
+                    },
+                    at: "2026-01-14T10:00:00Z".into(),
+                    by: None,
+                    request: None,
+                };
+                build(&person(), &index(), &no_text, &events, &[p])
+            };
+            let part = paid("1.00");
+            assert!(reasons(&part).iter().any(|(b, _)| *b == id), "{id}");
+            let full = paid(amount);
+            assert_eq!(bill(&full, id)["settled"], true);
+            assert!(!reasons(&full).iter().any(|(b, _)| *b == id), "{id}");
+        }
     }
 }

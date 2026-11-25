@@ -3115,10 +3115,9 @@ mod tests {
                        "fhir_base": "https://athena.example.test/fhir/r4"},
             "method": "fhir-api", "filed_at": "2026-11-20T10:00:00Z", "filed_by": "medrec 0.9.3"}))
         .unwrap();
-        assert_eq!(
-            crate::views::source_label(&h, &pv).as_deref(),
-            Some("Example Family Health")
-        );
+        let idx = PersonIndex::new("p_a");
+        let from = crate::sources::Sources::of(&h.sources, &idx);
+        assert_eq!(from.label(&pv).as_deref(), Some("Example Family Health"));
         let orgs: Vec<&str> = h.organizations.iter().map(|o| o.name.as_str()).collect();
         assert_eq!(
             orgs,

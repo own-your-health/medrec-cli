@@ -513,6 +513,31 @@ stream's `method` otherwise), `method` (`fhir-api`, `portal`, `scan`, `file`, `m
 (`medrec`, `organize-scans`, `hand`), `derived_from` (`{document_id, rule_id}`, on a fact a rule read out of a
 document), `filed_by` (`medrec <version>`).
 
+**Which source a record or document came from** (0.9.6 and later). One CLI,
+organization and FHIR base can be several practices' and several people's: a
+records connection is. So a source in `household.json` is told apart by its
+person and its `patient_id` as well:
+
+1. The patient. The entry of the index's `imports` with the provenance's
+   `cli` and `organization_id` (its `organization`) whose `imported_at` is the
+   provenance's `filed_at` gives its `patient_id`. Entries of more than one
+   patient that match: the one of them whose `pulled_at` is the provenance's
+   `fetched_at`. No entry that matches: the one whose `pulled_at` is its
+   `fetched_at`. Otherwise the patient is not known.
+2. Its sources: those of the index's **own person** with the provenance's
+   `cli`, `organization_id` (a source's `organization`) and `fhir_base` (a
+   final `/` aside; any, where the provenance has none), and with that
+   `patient_id`, when the patient is known.
+3. Its name: the `organization_name` they all have. Where they differ, or one
+   has none, there is **no name**: never the first or the last of them. A
+   connection's own name ("… (all practices)") differs from a practice's.
+4. Its label, what a reader shows as its source: that name, else the `cli`.
+   No other person's source and no entry of `organizations` names it.
+
+Two came from one source when their `cli`, `organization_id`, `fhir_base` and
+patient are the same, the patient being step 1's, else the `patient_id` of the
+only source step 2 leaves.
+
 ## text.json (`medrec-text/v1`)
 
 `{schema, person, texts: {<document id>: <text>}}`. It is kept apart from the
@@ -1160,10 +1185,12 @@ history (a new source's first import) moves more.
 by name (`display` clipped to 200 characters with `…`), then as `index.json`
 holds them. Each keeps its `index.json` fields `id`, `kind`, `date`,
 `code`, `display`, `status` and `fields` when present. `provenance` is cut
-to its first entry's `source`, with only `fhir_base`, `cli` and, from 0.9.4,
-`organization_id` (`null` when the source has none; absent in a view an
-older medrec wrote). With it a reader tells apart the sign-ins that share a
-FHIR base, as `medrec mcp`'s source labels do.
+to its first entry's `source`, with only `fhir_base`, `cli`, from 0.9.4
+`organization_id` (`null` when the source has none) and from 0.9.6 `label`:
+the source's label (Provenance, above), or `null`. Each is absent in a view an
+older medrec wrote. A reader shows `label`, as `medrec mcp` does. Without it, a
+view holds no `imports` to find the patient by: the sources step 2 gives
+with the patient unknown name it, by steps 3 and 4.
 
 `names-<kind>.json` lists every distinct name the kind's records carry, as
 `[code, display, code display, [shard numbers]]`. `code` and `code display`
@@ -1314,7 +1341,7 @@ matching rules), then the household's decisions (`overrides.json`).
 | `start`, `end` | Local calendar dates, `YYYY-MM-DD`; equal for a one-day event. A time with an offset is on its own date. From 0.9.1 a UTC time is on its date in the zone of the machine that writes the views, when that is one of the US dates it can be (UTC−4 to UTC−10), else on the earlier of them; and a portal visit runs to its period's end, up to 90 days. |
 | `title` | Plain words for the kind; the reader adds the place. |
 | `what`, `what_from` | The portal's reason, unless it only names the kind of visit in billing words ("Return appointment"). Then, for a visit (an office, portal or ER visit; 0.9.3 and later), its visit code's plain name, the portal's encounter code before the claims' lines (below). Else that reason, or a portal visit's CPT descriptor, else the claims' services, else the papers'. A name written in capitals is put in title case, its acronyms kept (0.9.3 and later). `portal`, `claims` or `papers`. A fill's or a vaccine's is its claims' names, else (0.9.1 and later) the fills' or doses' own names from the portal, as "A", "A and B" or "A, B and N more". Absent when nothing says. |
-| `place`, `place_from` | The portal's organization: the encounter's service provider, else its location, else (0.9.3 and later) its source's organization name. Else the facility claim's provider, else the first claim's, else an N5 alias; `portal`, `claims` or `alias`. A clinician's name is never a place. Nor (0.9.3 and later) is a records connection's: a name ending "(all practices)", or a portal platform's own name such as athenahealth or MyChart; no alias is learned to one. |
+| `place`, `place_from` | The portal's organization: the encounter's service provider, else its location, else (0.9.3 and later) its source's name (from 0.9.6 the person's own source's, by "Which source", above, and none where its encounters' sources have different names). Else the facility claim's provider, else the first claim's, else an N5 alias; `portal`, `claims` or `alias`. A clinician's name is never a place. Nor (0.9.3 and later) is a records connection's: a name ending "(all practices)", or a portal platform's own name such as athenahealth or MyChart; no alias is learned to one. |
 | `clinicians` | As the portal or the claims name them. |
 | `confidence` | The lowest of its members': `sure`, `likely` or `unsure`. |
 | `status` | `unsure` when the confidence is; else `waiting` when something is `expected`; else `complete`. |
@@ -1431,6 +1458,11 @@ when they have no bills. It is made from the person's documents, their
   `left` is `amount_due` less `paid_total`, never below zero, and
   `settled` is `true` once it is zero; both need an `amount_due`, and
   `settled` is `false` without one.
+- **`self_pay`** (0.9.6 and later): what a bill with no `claim` charges for
+  that no insurer is billed for, by its first page that has any text.
+  `storage` is a fee to store samples or tissue; `stated` is a
+  bill that says it is self-pay. Absent otherwise. A reader asks for no
+  claim, and treats a value it does not know as `stated`.
 - **`superseded_by`**: the newest later bill from the same biller (the same
   account number where both give one, else the same organization). Its
   balance includes this one's, so a reader asks for that one, not both.
@@ -1438,12 +1470,13 @@ when they have no bills. It is made from the person's documents, their
   is the bill it pays. One that pays no bill, paid on a day of an event
   whose place or a claim's provider is its organization (the only such
   event), is a desk payment: `event` names that visit.
-- **`worth_a_call`**, the bills' order, then desk payments:
+- **`worth_a_call`**, the bills' order, then desk payments. A `settled` bill
+  is never in it, for any reason (0.9.6 and later):
   - `asks_more`: the bill asks more than its claim's share.
   - `asks_less`: it asks less, above zero.
   - `no_claim`: it asks above zero and its event has no claim, or it is in
     no event and follows no earlier bill from the same biller. Insurance
-    may not have been billed.
+    may not have been billed. A `self_pay` bill is not one (0.9.6 and later).
   - `desk_copay`: a desk payment above what that visit's claims from its
     organization (else all its claims) say is owed; `bill` is the receipt.
 
@@ -1496,8 +1529,10 @@ nothing is private.
   | `test` | is a result or report of a test of an area: sexually transmitted infections, pregnancy and fertility, drug screens |
   | `members` | is an event with a private claim or portal visit, or whose own members are all private |
   | `event` | is a member of a private event |
+  | `words` | is a bill or receipt whose first page that has any text says an area, by a service, a medicine or a test, or any document whose title does (0.9.6 and later) |
   | `record` | is a document that a private record links (`documents` in `records`), whatever else links it (0.9.5 and later) |
   | `report` | is an imaging study whose `report`, a document or record, is private (0.9.5 and later) |
+  | `paper` | is a document tied to a private one, either way: its copy (`same_statement_as`, `near_duplicates`), the bill that supersedes it or one it supersedes (`superseded_by` in `bills.json`), or the receipt that pays it or the bill it pays (0.9.6 and later) |
   | `household` | was marked private by the household; its `area` is the one the rules give it, else `household` |
 
 - An event's own members are those without `person`. A paper an event shows
@@ -1505,7 +1540,7 @@ nothing is private.
 - **The household has the last word** (`marks.json` `private`, above). A
   mark `true` makes an item private, with the area the rules give it, else
   `household`. A mark `false` takes it out, even as a member of a private
-  event. Marks on records and documents apply before events are judged,
+  event or a paper tied to a private one. Marks on records and documents apply before events are judged,
   marks on events after. An event's own mark comes first; else the last
   mark on an event id the person no longer has that shares a member with
   it (`marks.json`, above). A mark naming a record or document the person

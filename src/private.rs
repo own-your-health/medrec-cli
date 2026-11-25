@@ -3,7 +3,8 @@
 //! reproductive and fertility care, sexual health or substance use, and
 //! the medicines tied to them. They come from codes (ICD-10), the names of
 //! the places and clinicians, the portal they came from, the medicines and
-//! tests themselves, and the household's own marks in `marks.json`.
+//! tests themselves, a bill's own words, and the household's own marks in
+//! `marks.json`.
 //!
 //! It is discretion, not access control: a reader keeps such an item off
 //! shared screens and household-wide answers, and shows it on the person's
@@ -17,7 +18,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::model::{Document, Household, Person, PersonIndex, Record};
+use crate::model::{Document, Household, Person, PersonIndex, PersonText, Record};
 
 pub const SCHEMA: &str = "medrec-private/v1";
 
@@ -187,6 +188,33 @@ static TESTS: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
     .collect()
 });
 
+/// The words of a title, or of what a bill or receipt charges for, that say
+/// an area. Fewer of a place's, since any hospital's bill offers financial
+/// counseling, and the services' own.
+static PAPERS: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
+    [
+        (
+            r"addiction|substance (?:use|abuse)|detox\w*|chemical dependency|opioid treatment|methadone",
+            SUBSTANCE_USE,
+        ),
+        (
+            r"psychiatr\w*|psycholog\w*|behaviou?ral health|mental health|psychotherap\w*|pmhnp|psyd|lcsw|licsw|lmhc|lmft",
+            MENTAL_HEALTH,
+        ),
+        (
+            r"fertility|reproductive|ivf|in vitro|embryos?|embryology|oocytes?|egg (?:freezing|retrieval|storage|donation)|cryo-?preserv\w*|cryo-?storage|insemination|iui|andrology|family planning|contracept\w*|vasectomy",
+            REPRODUCTIVE,
+        ),
+        (
+            r"sexual health|(?:std|sti) (?:clinic|panel|screen\w*|test\w*)|hiv",
+            SEXUAL_HEALTH,
+        ),
+    ]
+    .into_iter()
+    .map(|(words, area)| (Regex::new(&format!(r"(?i)\b(?:{words})\b")).unwrap(), area))
+    .collect()
+});
+
 fn first_area(list: &[(Regex, &'static str)], text: &str) -> Option<&'static str> {
     list.iter()
         .find(|(re, _)| re.is_match(text))
@@ -274,22 +302,59 @@ fn record_why(r: &Record) -> Option<Why> {
     }
 }
 
-/// Why a document is private by the rules, if it is: its organization.
-fn document_why(d: &Document) -> Option<Why> {
-    d.organization
+/// Why a document is private by the rules, if it is: its organization, its
+/// title, or what a bill or receipt says on its first page with any text.
+fn document_why(d: &Document, text: Option<&str>) -> Option<Why> {
+    let place = d
+        .organization
         .as_deref()
         .and_then(|o| first_area(&PLACES, o))
         .map(|area| Why {
             area,
             from: "provider",
+        });
+    let words = || {
+        let title = d.title.as_deref().and_then(|t| first_area(&PAPERS, t));
+        let page = || {
+            let page = crate::bill::first_page(d, text?)?;
+            [&*PAPERS, &*MEDICINES, &*TESTS]
+                .iter()
+                .find_map(|list| first_area(list, &page))
+        };
+        title.or_else(page).map(|area| Why {
+            area,
+            from: "words",
         })
+    };
+    place.or_else(words)
+}
+
+/// The pairs of documents that tell of one another: a paper and its copy,
+/// and those [`crate::bills::ties`] ties.
+fn papers_tied(idx: &PersonIndex, bills: &Value) -> Vec<(String, String)> {
+    let mut out = crate::bills::ties(bills);
+    for d in &idx.documents {
+        let copies = d
+            .near_duplicates
+            .iter()
+            .map(|n| n.document.as_str())
+            .chain(d.same_statement_as.as_deref());
+        out.extend(copies.map(|c| (d.id.clone(), c.to_string())));
+    }
+    out
 }
 
 // ---------------------------------------------------------------- the view
 
 /// The person's `private.json` as `medrec views write` writes it: from
-/// their index, their `events.json` and their marks.
-pub fn build(p: &Person, idx: &PersonIndex, events: &Value, marks: &[Mark]) -> Value {
+/// their index and its texts, their `events.json` and their marks.
+pub fn build(
+    p: &Person,
+    idx: &PersonIndex,
+    texts: &PersonText,
+    events: &Value,
+    marks: &[Mark],
+) -> Value {
     let mut items: BTreeMap<String, Why> = BTreeMap::new();
     for r in &idx.records {
         if let Some(w) = record_why(r) {
@@ -297,7 +362,8 @@ pub fn build(p: &Person, idx: &PersonIndex, events: &Value, marks: &[Mark]) -> V
         }
     }
     for d in &idx.documents {
-        if let Some(w) = document_why(d) {
+        let text = texts.texts.get(&d.id).map(String::as_str);
+        if let Some(w) = document_why(d, text) {
             items.insert(d.id.clone(), w);
         }
     }
@@ -343,6 +409,26 @@ pub fn build(p: &Person, idx: &PersonIndex, events: &Value, marks: &[Mark]) -> V
             items.entry(d).or_insert(Why {
                 area: w.area,
                 from: "record",
+            });
+        }
+    };
+    // So is one tied to a private one.
+    let ties = papers_tied(idx, &crate::bills::build(p, idx, texts, events, &[]));
+    let tie = |items: &mut BTreeMap<String, Why>| loop {
+        let tied: Vec<(String, Why)> = ties
+            .iter()
+            .flat_map(|(a, b)| [(a, b), (b, a)])
+            .filter_map(|(from, to)| Some((to.clone(), *items.get(from)?)))
+            .filter(|(d, _)| documents.contains(d.as_str()) && !items.contains_key(d))
+            .filter(|(d, _)| mark_of.get(d.as_str()) != Some(&false))
+            .collect();
+        if tied.is_empty() {
+            return;
+        }
+        for (d, w) in tied {
+            items.entry(d).or_insert(Why {
+                area: w.area,
+                from: "paper",
             });
         }
     };
@@ -418,6 +504,7 @@ pub fn build(p: &Person, idx: &PersonIndex, events: &Value, marks: &[Mark]) -> V
             }
         }
         link(&mut items);
+        tie(&mut items);
         if items.len() == before {
             break;
         }
@@ -487,6 +574,7 @@ pub fn with_events(
     let mut v = build(
         p,
         idx,
+        &folder.text(p)?,
         &events,
         marks
             .as_ref()
@@ -853,6 +941,10 @@ mod tests {
         assert!(names("Example Behavioral Health", "behavioral"));
     }
 
+    fn no_text() -> PersonText {
+        PersonText::new("p_exampleaaaaaaaaaaaaa")
+    }
+
     fn person() -> Person {
         serde_json::from_value(
             json!({"id": "p_testaaaaaaaaaaaaaaaa", "name": "Sam Example",
@@ -920,7 +1012,7 @@ mod tests {
                 "records": [therapy.clone(), checkup.clone()]
             }))
             .unwrap();
-            build(&person(), &idx, &json!({"events": []}), marks)
+            build(&person(), &idx, &no_text(), &json!({"events": []}), marks)
         };
         let v = v_of(&[]);
         // Any record that links it is enough, and an unlinked one is not.
@@ -1014,8 +1106,112 @@ mod tests {
         let events = json!({"events": [{"id": "e_therapyaaaaaaaaaaaaa", "members": [
             {"record": "r_therapyclaimaaaaaaaa", "kind": "claim", "role": "office"},
             {"record": "r_therapyvisitaaaaaaaa", "kind": "encounter", "role": "portal"}]}]});
-        let v = build(&person(), &idx, &events, &[]);
+        let v = build(&person(), &idx, &no_text(), &events, &[]);
         assert_eq!(v["documents"]["d_summaryaaaaaaaaaaaa"]["from"], "record");
+    }
+
+    /// The papers of `tests/fixtures/private/papers.json`, and their texts.
+    fn papers() -> (PersonIndex, PersonText) {
+        let list: Vec<Value> =
+            serde_json::from_str(include_str!("../tests/fixtures/private/papers.json")).unwrap();
+        let (mut docs, mut texts) = (Vec::new(), no_text());
+        for p in list {
+            let id = p["id"].as_str().unwrap();
+            let mut d = document(id);
+            d["doc_type"] = p["type"].clone();
+            d["date"] = p["date"].clone();
+            for (to, from) in [
+                ("organization", "org"),
+                ("title", "title"),
+                ("statement", "statement"),
+                ("same_statement_as", "same_statement_as"),
+            ] {
+                if let Some(v) = p.get(from) {
+                    d[to] = v.clone();
+                }
+            }
+            for other in p["near_duplicates"].as_array().into_iter().flatten() {
+                d["near_duplicates"] = json!([{"document": other, "similarity": 0.95}]);
+            }
+            let text = p["text"].as_str().unwrap();
+            texts.texts.insert(id.to_string(), text.to_string());
+            docs.push(d);
+        }
+        let idx = serde_json::from_value(json!({
+            "schema": "medrec-index/v1", "person": "p_testaaaaaaaaaaaaaaaa", "rev": 1,
+            "imports": [], "records": [], "studies": [], "documents": docs}));
+        (idx.unwrap(), texts)
+    }
+
+    /// A bill or receipt is private by its first page's words, any document
+    /// by its title's, and a paper with the private one it is a copy of,
+    /// comes before or after, pays or is paid by.
+    #[test]
+    fn a_paper_is_private_by_its_own_words_and_takes_its_statements_along() {
+        let (idx, texts) = papers();
+        let events = json!({"events": []});
+        let why = |marks: &[Mark]| -> BTreeMap<String, (String, String)> {
+            let v = build(&person(), &idx, &texts, &events, marks);
+            v["documents"]
+                .as_object()
+                .unwrap()
+                .iter()
+                .map(|(id, w)| {
+                    let s = |k: &str| w[k].as_str().unwrap().to_string();
+                    (id.clone(), (s("area"), s("from")))
+                })
+                .collect()
+        };
+        let want = |list: &[(&str, &str, &str)]| -> BTreeMap<String, (String, String)> {
+            list.iter()
+                .map(|(id, a, f)| (id.to_string(), (a.to_string(), f.to_string())))
+                .collect()
+        };
+        let all = [
+            ("d_earlieraaaaaaaaaaaaa", MENTAL_HEALTH, "paper"),
+            ("d_labaaaaaaaaaaaaaaaaa", SEXUAL_HEALTH, "words"),
+            ("d_lateraaaaaaaaaaaaaaa", MENTAL_HEALTH, "paper"),
+            ("d_latercopyaaaaaaaaaaa", MENTAL_HEALTH, "paper"),
+            ("d_pharmacyaaaaaaaaaaaa", SEXUAL_HEALTH, "words"),
+            ("d_receiptaaaaaaaaaaaaa", MENTAL_HEALTH, "paper"),
+            ("d_rescanaaaaaaaaaaaaaa", MENTAL_HEALTH, "paper"),
+            ("d_therapyaaaaaaaaaaaaa", MENTAL_HEALTH, "words"),
+            ("d_titledaaaaaaaaaaaaaa", MENTAL_HEALTH, "words"),
+        ];
+        assert_eq!(why(&[]), want(&all));
+
+        // The household's word comes first, and what it takes out ties no
+        // other paper: without the later statement the receipt, which pays
+        // that one, and its copy are out too.
+        let mark = |item: &str, private: bool| Mark {
+            id: "o_markaaaaaaaaaaaaaaaa".into(),
+            item: item.into(),
+            private,
+            at: "2026-11-24T12:00:00Z".into(),
+            by: None,
+            request: None,
+            members: Vec::new(),
+        };
+        let out = ["d_earlier", "d_later", "d_receipt"];
+        let left: Vec<_> = all
+            .iter()
+            .filter(|(id, ..)| !out.iter().any(|o| id.starts_with(o)))
+            .copied()
+            .collect();
+        assert_eq!(
+            why(&[mark("d_lateraaaaaaaaaaaaaaa", false)]),
+            want(&left),
+            "both statements are superseded by the one taken out"
+        );
+        // And marking one private takes the same papers along.
+        let marked = why(&[
+            mark("d_therapyaaaaaaaaaaaaa", false),
+            mark("d_latercopyaaaaaaaaaaa", true),
+        ]);
+        assert_eq!(marked["d_earlieraaaaaaaaaaaaa"].1, "paper");
+        assert_eq!(marked["d_lateraaaaaaaaaaaaaaa"].0, HOUSEHOLD);
+        assert!(!marked.contains_key("d_therapyaaaaaaaaaaaaa"));
+        assert!(!marked.contains_key("d_rescanaaaaaaaaaaaaaa"));
     }
 
     #[test]
@@ -1051,7 +1247,7 @@ mod tests {
             {"id": "e_vitaminfillaaaaaaaaa", "members": [
                 {"record": "r_vitaminaaaaaaaaaaaaa", "kind": "medication", "role": "fill"}]}
         ]});
-        let v = build(&person(), &idx, &events, &[]);
+        let v = build(&person(), &idx, &no_text(), &events, &[]);
         assert_eq!(v["schema"], SCHEMA);
         // The therapy claim by its principal diagnosis, and its visit with
         // it; the sertraline fill by its medicine; the checkup's screening
@@ -1093,6 +1289,7 @@ mod tests {
         let v = build(
             &person(),
             &idx,
+            &no_text(),
             &events,
             &[
                 mark("r_vitaminaaaaaaaaaaaaa", true),
@@ -1126,6 +1323,7 @@ mod tests {
         let w = build(
             &person(),
             &idx,
+            &no_text(),
             &events,
             &[mark("r_vitaminaaaaaaaaaaaaa", true), followed],
         );
@@ -1137,7 +1335,7 @@ mod tests {
             members: vec!["r_vitaminaaaaaaaaaaaaa".into()],
             ..mark("e_oldvitaminfillaaaaa", false)
         };
-        let w = build(&person(), &idx, &events, &[own, followed]);
+        let w = build(&person(), &idx, &no_text(), &events, &[own, followed]);
         assert_eq!(
             w["events"]["e_vitaminfillaaaaaaaaa"],
             json!({"area": HOUSEHOLD, "from": "household"})
