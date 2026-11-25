@@ -43,9 +43,9 @@ use crate::hash;
 use crate::ids;
 use crate::intake::{self, classify, filetype, text};
 use crate::model::{
-    filed_by, now_rfc3339, Document, Household, Identifier, ImportRun, Organization, Origin,
-    Person, PersonIndex, PersonText, Provenance, ProvenanceSource, ProviderRef, Record, Rendering,
-    Source, SourceResource, Word,
+    filed_by, now_rfc3339, Document, Household, Identifier, ImportRun, InError, Organization,
+    Origin, Person, PersonIndex, PersonText, Provenance, ProvenanceSource, ProviderRef, Record,
+    Rendering, Source, SourceResource, Word,
 };
 use crate::normalize;
 use crate::people;
@@ -361,6 +361,41 @@ struct Owner {
     title: Option<String>,
     /// The attachments' `url`s: how the stream ties a Binary to it.
     urls: Vec<String>,
+    /// Its own word of the paper.
+    status: Option<String>,
+    /// A DocumentReference's, of the paper itself.
+    doc_status: Option<String>,
+}
+
+impl Owner {
+    fn word(&self, raw_path: &str, read: Option<String>) -> Word {
+        Word {
+            raw_path: raw_path.into(),
+            status: self.status.clone(),
+            verification: self.doc_status.clone(),
+            read,
+            ..Word::default()
+        }
+    }
+
+    fn in_error(&self) -> bool {
+        self.word("", None).in_error()
+    }
+
+    fn resource(&self) -> SourceResource {
+        SourceResource {
+            resource_type: self.kind.as_str().into(),
+            id: self.id.clone(),
+            version_id: self.version.clone(),
+            last_updated: self.last_updated.clone(),
+        }
+    }
+
+    /// Whether an attachment of it is the Binary `id`.
+    fn names(&self, id: &str) -> bool {
+        let mut urls = self.urls.iter();
+        urls.any(|u| reference_id(u, "Binary") == Some(id))
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -372,6 +407,8 @@ enum OwnerKind {
 }
 
 impl OwnerKind {
+    const ALL: [OwnerKind; 3] = [Self::DocumentReference, Self::DiagnosticReport, Self::Media];
+
     fn from_resource_type(t: &str) -> Option<Self> {
         match t {
             "DocumentReference" => Some(Self::DocumentReference),
@@ -789,6 +826,7 @@ fn file_streamed(
             }
         }
     }
+    take_from_others(folder, &mut index)?;
     let eob_docs = eob_document_links(&resources);
 
     let filed = file_binaries(
@@ -805,6 +843,11 @@ fn file_streamed(
         &eob_docs,
         &written.paths,
     )?;
+    if paper_words(folder, &mut index, &owners, &base_prov, &source_dir)? {
+        // Its other sources' words, and those an earlier medrec did not keep.
+        let tmp = pk_cli_drive::private_temp_dir("medrec-papers")?;
+        papers_again(folder, &household, &person, &mut index, tmp.path())?;
+    }
 
     let counts = trailer.counts.clone();
     let total: u64 = counts.values().sum();
@@ -1619,19 +1662,66 @@ fn merge(
     if matches!(merged, Merge::Older) {
         return merged;
     }
-    let mut changed = false;
-    if let Some(w) = word {
-        let of = |r: &&mut Record| {
-            let mut paths = r.provenance.iter().filter_map(|p| p.raw_path.as_ref());
-            paths.any(|p| *p == w.raw_path) || r.words.iter().any(|x| x.raw_path == w.raw_path)
-        };
-        for r in index.records.iter_mut().filter(of) {
-            changed |= r.say(&w);
-        }
-    }
+    let changed = word.is_some_and(|w| said(index, &w));
     match merged {
         Merge::Unchanged if changed => Merge::Updated,
         m => m,
+    }
+}
+
+/// Put a resource's word on the record it is of, with its history, and take
+/// both off one it has left. Whether that changes a record.
+fn said(index: &mut PersonIndex, word: &Word) -> bool {
+    let of = |p: &Provenance| p.raw_path.as_ref() == Some(&word.raw_path);
+    let mut changed = false;
+    let mut history = Vec::new();
+    for r in index
+        .records
+        .iter_mut()
+        .filter(|r| !r.provenance.iter().any(of))
+    {
+        let had = r.words.len();
+        r.words.retain(|w| w.raw_path != word.raw_path);
+        changed |= r.words.len() != had;
+        let (moved, left) = std::mem::take(&mut r.errors)
+            .into_iter()
+            .partition(|e| e.raw_path == word.raw_path);
+        r.errors = left;
+        history.extend::<Vec<InError>>(moved);
+    }
+    changed |= !history.is_empty();
+    for r in &mut index.records {
+        let Some(p) = r.provenance.iter().find(|p| of(p)) else {
+            continue;
+        };
+        let at = first_read(p);
+        if keeps(r, word) {
+            changed |= r.say(word);
+        }
+        r.errors.append(&mut history);
+        changed |= InError::note(&mut r.errors, word, &at);
+    }
+    changed
+}
+
+/// Whether a record keeps a source's word: a condition, an allergy or a
+/// prescription always does, and another where several sources state it, or
+/// one says or said it is entered in error.
+pub(crate) fn keeps(r: &Record, word: &Word) -> bool {
+    crate::standing::stands(r)
+        || r.provenance.len() > 1
+        || word.in_error()
+        || r.words.iter().any(|w| w.raw_path == word.raw_path)
+}
+
+/// When a version was first read, as its provenance says: when it was
+/// fetched, or when it was filed where that is the earlier (one read again
+/// since was fetched since).
+pub(crate) fn first_read(p: &Provenance) -> String {
+    let at = |s: &str| crate::refresh::time::parse(s);
+    match p.fetched_at.as_deref() {
+        Some(f) if at(f) < at(&p.filed_at) || at(&p.filed_at).is_none() => f.into(),
+        _ => p.filed_at.clone(),
     }
 }
 
@@ -1688,12 +1778,15 @@ fn merge_fields(
     {
         return Merge::Older;
     }
+    let in_error = word.is_some_and(Word::in_error);
     if incoming_id.is_some() {
+        // One entered in error can come with little of what it said: it stays
+        // on the record it was of.
         if let Some(existing) = index
             .records
             .iter_mut()
             .find(|r| r.provenance.iter().any(same_resource))
-            .filter(|r| r.key == rec.key || r.provenance.iter().all(same_resource))
+            .filter(|r| in_error || r.key == rec.key || r.provenance.iter().all(same_resource))
         {
             let at = existing.provenance.iter().position(same_resource);
             let filing = match not_read_in(existing, word) {
@@ -1704,6 +1797,12 @@ fn merge_fields(
             // only its own provenance, so the two do not write over each
             // other.
             if let Some(i) = at.filter(|&i| !can_write(existing, i)) {
+                return refresh_provenance(existing, i, incoming, filing);
+            }
+            let alone = existing.provenance.iter().all(same_resource);
+            if let Some(i) = at.filter(|&i| {
+                in_error && !alone && (existing.key != rec.key || stands_beside(existing, i))
+            }) {
                 return refresh_provenance(existing, i, incoming, filing);
             }
             let of_several = !existing.provenance.iter().all(same_source);
@@ -1722,7 +1821,9 @@ fn merge_fields(
         if let Some(existing) = index.records.iter_mut().find(|r| r.key == rec.key) {
             joined(existing, word);
             existing.provenance.push(incoming);
-            existing.providers = states_too(existing, &rec, found);
+            if !in_error {
+                existing.providers = states_too(existing, &rec, found);
+            }
             return Merge::Updated;
         }
         index.records.push(rec);
@@ -1774,6 +1875,9 @@ fn merge_fields(
                 _ => filing,
             };
             if can_write(existing, i) {
+                if in_error && stands_beside(existing, i) {
+                    return refresh_provenance(existing, i, incoming, filing);
+                }
                 let of_several = !existing.provenance.iter().all(same_source);
                 if of_several && !writes(existing, word, filing) {
                     return refresh_shared(existing, rec, found, i, incoming, filing);
@@ -1787,7 +1891,9 @@ fn merge_fields(
             idless.claimed.insert((key, existing.provenance.len()));
             joined(existing, word);
             existing.provenance.push(incoming);
-            existing.providers = states_too(existing, &rec, found);
+            if !in_error {
+                existing.providers = states_too(existing, &rec, found);
+            }
             Merge::Updated
         }
     }
@@ -1909,6 +2015,20 @@ fn not_read_in(existing: &Record, word: Option<&Word>) -> bool {
     })
 }
 
+/// Whether a resource other than that of the provenance at `i` does not say
+/// the record is entered in error.
+fn stands_beside(r: &Record, i: usize) -> bool {
+    let mut others = r.provenance.iter().enumerate().filter(|(j, _)| *j != i);
+    others.any(|(_, p)| !is_error(r, p))
+}
+
+/// Whether the word of a record's provenance is that it is entered in error.
+fn is_error(r: &Record, p: &Provenance) -> bool {
+    let path = p.raw_path.as_ref();
+    let word = r.words.iter().find(|w| path == Some(&w.raw_path));
+    word.is_some_and(Word::in_error)
+}
+
 /// Whether a version writes the fields of a record other sources state too.
 /// One with a word does where the raw file that wrote them is its own, not
 /// known or gone, and where the version is new. So each served again as it
@@ -1930,7 +2050,8 @@ pub(crate) fn writer(r: &Record) -> Option<&str> {
 
 /// Whether import lets the resource of a record's provenance write its
 /// fields: the first of its source on the record does, and of those with no
-/// id the first of its type.
+/// id the first of its type. One that says it is entered in error comes after
+/// those that do not.
 pub(crate) fn can_write(r: &Record, i: usize) -> bool {
     let p = &r.provenance[i];
     let same_source = |q: &Provenance| {
@@ -1941,12 +2062,122 @@ pub(crate) fn can_write(r: &Record, i: usize) -> bool {
     let of = |q: &Provenance| q.source_resource.as_ref().map(|s| s.resource_type.clone());
     let idless = |q: &Provenance| q.source_resource.as_ref().is_none_or(|s| s.id.is_empty());
     let like = |q: &Provenance| same_source(q) && (!idless(p) || (idless(q) && of(q) == of(p)));
-    r.provenance.iter().position(like) == Some(i)
+    let stands = r.provenance.iter().position(|q| like(q) && !is_error(r, q));
+    stands.or_else(|| r.provenance.iter().position(like)) == Some(i)
+}
+
+/// Whether a record's values are of a resource that says it is entered in
+/// error, or of one not known, and it has another that does not say so and
+/// one that does.
+fn of_an_error(r: &Record) -> bool {
+    let errors = r.provenance.iter().filter(|p| is_error(r, p)).count();
+    if errors == 0 || errors == r.provenance.len() {
+        return false;
+    }
+    let Some(path) = &r.fields_from else {
+        return true;
+    };
+    let mut named = r.provenance.iter();
+    named
+        .find(|p| p.raw_path.as_ref() == Some(path))
+        .is_none_or(|p| is_error(r, p))
+}
+
+/// A resource and the record it gives.
+type Shaped = (Value, Record);
+
+/// Take a record's values from another of its resources, where they are of
+/// one that says it is entered in error ([`of_an_error`]): the first that
+/// reads and that import lets write, else the first that reads. Whether one
+/// did.
+pub(crate) fn take_from_another(
+    r: &mut Record,
+    read: &mut dyn FnMut(&Provenance) -> Result<Option<Shaped>, CliError>,
+    found: &mut dyn FnMut(&Provenance, &Value, &Record) -> Result<Found, CliError>,
+) -> Result<bool, CliError> {
+    if !of_an_error(r) {
+        return Ok(false);
+    }
+    let mut standing: Vec<usize> = (0..r.provenance.len())
+        .filter(|&i| !is_error(r, &r.provenance[i]))
+        .collect();
+    standing.sort_by_key(|&i| !can_write(r, i));
+    for i in standing {
+        let p = r.provenance[i].clone();
+        let Some((v, mut new)) = read(&p)?.filter(|(_, n)| n.key == r.key) else {
+            continue;
+        };
+        // A fill's is its prescription's.
+        if let Some(of) = r.fields.get("prescriber") {
+            new.fields.entry("prescriber").or_insert(of.clone());
+        }
+        let refs = found(&p, &v, &new)?;
+        r.providers = refs.over(&r.providers, &r.fields, &new.fields, true);
+        r.fields = new.fields;
+        r.display = new.display;
+        r.status = new.status;
+        r.code = new.code;
+        r.date = new.date;
+        r.fields_from = p.raw_path;
+        return Ok(true);
+    }
+    Ok(false)
+}
+
+/// [`take_from_another`] for every record of a person, from the raw files
+/// here now.
+fn take_from_others(folder: &Folder, index: &mut PersonIndex) -> Result<(), CliError> {
+    for r in &mut index.records {
+        let text = |p: &Provenance| match &p.raw_path {
+            Some(rel) => folder.store.read_text(rel),
+            None => Ok(None),
+        };
+        take_from_another(
+            r,
+            &mut |p| {
+                let v: Option<Value> = text(p)?.and_then(|t| serde_json::from_str(&t).ok());
+                Ok(v.and_then(|v| normalize::record(&v, p.clone()).map(|r| (v, r))))
+            },
+            &mut |p, v, new| {
+                let dir = p.raw_path.as_deref().and_then(source_dir_of);
+                let mut held = Held {
+                    folder,
+                    source_dir: dir.unwrap_or_default(),
+                    base: p.source.fhir_base.clone(),
+                    stream: HashMap::new(),
+                    read: HashMap::new(),
+                    listed: HashMap::new(),
+                };
+                crate::providers::of(v, &new.fields, &mut held)
+            },
+        )?;
+    }
+    Ok(())
+}
+
+/// The source folder of `<source>/<Type>/<file>`.
+pub(crate) fn source_dir_of(rel: &str) -> Option<&str> {
+    let (dir, _) = rel.rsplit_once('/')?;
+    dir.rsplit_once('/').map(|(source, _)| source)
 }
 
 /// Another resource joins the record: where one source alone stated it, the
-/// first of its own wrote the fields.
+/// first of its own wrote the fields. Where the first kept no word, its
+/// status is that word.
 fn joined(existing: &mut Record, word: Option<&Word>) {
+    if let (Some(_), [only], []) = (word, &existing.provenance[..], &existing.words[..]) {
+        if let Some(raw_path) = only
+            .raw_path
+            .clone()
+            .filter(|_| !crate::standing::stands(existing))
+        {
+            existing.words.push(Word {
+                raw_path,
+                status: existing.status.clone(),
+                ..Word::default()
+            });
+        }
+    }
     let of_one = (0..existing.provenance.len()).filter(|i| can_write(existing, *i));
     if word.is_some() && existing.fields_from.is_none() && of_one.count() == 1 {
         existing.fields_from = existing.provenance[0].raw_path.clone();
@@ -1988,8 +2219,25 @@ fn refresh_provenance(
         }
         _ if existing.provenance[i] == incoming => Merge::Unchanged,
         _ => {
-            existing.provenance[i] = incoming;
+            replace(existing, i, incoming);
             Merge::Updated
+        }
+    }
+}
+
+/// Put a later version's provenance in place of the one at `i`. What the
+/// record keeps by its raw file follows it: one with no id has another.
+fn replace(existing: &mut Record, i: usize, incoming: Provenance) {
+    let had = std::mem::replace(&mut existing.provenance[i], incoming).raw_path;
+    let now = existing.provenance[i].raw_path.clone();
+    let (Some(had), Some(now)) = (had, now) else {
+        return;
+    };
+    let errors = existing.errors.iter_mut().map(|e| &mut e.raw_path);
+    let words = existing.words.iter_mut().map(|w| &mut w.raw_path);
+    for path in errors.chain(words).chain(existing.fields_from.as_mut()) {
+        if *path == had {
+            path.clone_from(&now);
         }
     }
 }
@@ -2050,7 +2298,7 @@ fn rewrite(
         (Some(Filing::Refreshed), Some(i)) => {
             existing.provenance[i] = existing.provenance[i].refreshed_by(&incoming)
         }
-        (None | Some(Filing::Replaces), Some(i)) => existing.provenance[i] = incoming,
+        (None | Some(Filing::Replaces), Some(i)) => replace(existing, i, incoming),
         (None | Some(Filing::Refreshed | Filing::Replaces), None) => {
             existing.provenance.push(incoming)
         }
@@ -2093,6 +2341,8 @@ fn owner(resource_type: &str, v: &Value) -> Option<Owner> {
         id: v.get("id").and_then(Value::as_str).unwrap_or("").into(),
         version: text("meta.versionId"),
         last_updated: text("meta.lastUpdated"),
+        status: text("status"),
+        doc_status: text("docStatus").filter(|_| kind == OwnerKind::DocumentReference),
         ..Owner::default()
     };
     match kind {
@@ -2210,20 +2460,16 @@ fn reference_id<'a>(reference: &'a str, resource_type: &str) -> Option<&'a str> 
     (ty == resource_type && !id.is_empty()).then_some(id)
 }
 
-/// The resource whose attachment is the Binary `binary`: a
-/// DocumentReference before a DiagnosticReport or Media, since its type is a
-/// document's.
+/// The resource whose attachment is the Binary `binary` ([`first_owner`]).
 fn owner_of<'a>(owners: &'a [Owner], binary: &str) -> Option<&'a Owner> {
-    let names = |o: &&Owner| {
-        o.urls
-            .iter()
-            .any(|u| reference_id(u, "Binary") == Some(binary))
-    };
-    owners
-        .iter()
-        .filter(|o| o.kind == OwnerKind::DocumentReference)
-        .find(names)
-        .or_else(|| owners.iter().find(names))
+    first_owner(owners.iter().filter(|o| o.names(binary)))
+}
+
+/// Of those that describe one paper, the one it is filed by: one that does
+/// not say it is entered in error, and a DocumentReference before a
+/// DiagnosticReport or Media, since its type is a document's.
+fn first_owner<'a>(owners: impl Iterator<Item = &'a Owner>) -> Option<&'a Owner> {
+    owners.min_by_key(|o| (o.in_error(), o.kind != OwnerKind::DocumentReference))
 }
 
 /// DocumentReference ids an ExplanationOfBenefit points at
@@ -2274,29 +2520,9 @@ fn file_binaries(
     let ctx = intake::Context::new(cfg, household);
     for b in binaries {
         let sha = hash::sha256_hex(&b.bytes);
-        // The bytes of a filed document, or of a rendering of one already
-        // noted (a portal that serves its last rendering again).
-        if index
-            .documents
-            .iter()
-            .any(|d| d.sha256 == sha || d.renderings.iter().any(|r| r.sha256 == sha))
-        {
-            filed.duplicate += 1;
-            continue;
-        }
-        let kind = filetype::sniff(&b.bytes).or_else(|| {
-            b.content_type
-                .as_deref()
-                .and_then(filetype::Kind::from_media_type)
-        });
         let dr = owner_of(owners, &b.id);
         let resource = match dr {
-            Some(d) => SourceResource {
-                resource_type: d.kind.as_str().into(),
-                id: d.id.clone(),
-                version_id: d.version.clone(),
-                last_updated: d.last_updated.clone(),
-            },
+            Some(d) => d.resource(),
             None => SourceResource {
                 resource_type: "Binary".into(),
                 id: b.id.clone(),
@@ -2304,7 +2530,23 @@ fn file_binaries(
                 last_updated: None,
             },
         };
-        let raw_path = raw_paths.get(&id_sub("Binary", &b.id)).cloned();
+        let mut prov = base.clone();
+        prov.source_resource = Some(resource);
+        prov.raw_path = raw_paths.get(&id_sub("Binary", &b.id)).cloned();
+        // The bytes of a filed document, or of a rendering of one already
+        // noted (a portal that serves its last rendering again).
+        if let Some(d) = index.documents.iter_mut().find(|d| has_bytes(d, &sha)) {
+            filed.duplicate += 1;
+            if !d.provenances().any(|p| p.raw_path == prov.raw_path) {
+                d.also_from.push(prov);
+            }
+            continue;
+        }
+        let kind = filetype::sniff(&b.bytes).or_else(|| {
+            b.content_type
+                .as_deref()
+                .and_then(filetype::Kind::from_media_type)
+        });
         let media_type = kind
             .map(|k| k.media_type().to_string())
             .or_else(|| b.content_type.clone())
@@ -2346,9 +2588,6 @@ fn file_binaries(
             Some(k) => text::extract(&ctx.tools, k, &local, &ctx.opts),
             None => text::Extracted::default(),
         };
-        let mut prov = base.clone();
-        prov.source_resource = Some(resource);
-        prov.raw_path = raw_path;
         if let Some(kept) = rendered_again(index, texts, &prov, &media_type, &extracted.text) {
             index.documents[kept].renderings.push(Rendering {
                 sha256: sha,
@@ -2397,6 +2636,9 @@ fn file_binaries(
             same_statement_as: None,
             classification: None,
             provenance: prov,
+            also_from: Vec::new(),
+            words: Vec::new(),
+            errors: Vec::new(),
         };
         crate::bill::annotate(&mut doc, &extracted.text, index, texts);
         if doc.same_statement_as.is_some() {
@@ -2433,6 +2675,311 @@ struct Filed {
     unchanged: usize,
     /// A bill filed as the same statement as one filed before.
     same_statement: usize,
+}
+
+/// What describes the papers of one source.
+struct Describes<'a> {
+    by_file: HashMap<String, Vec<&'a Owner>>,
+    by_resource: HashMap<(&'a str, &'a str), &'a Owner>,
+}
+
+impl<'a> Describes<'a> {
+    fn new(owners: &'a [Owner], source_dir: &str) -> Self {
+        let mut out = Describes {
+            by_file: HashMap::new(),
+            by_resource: HashMap::new(),
+        };
+        for o in owners {
+            out.by_resource.insert((o.kind.as_str(), &o.id), o);
+            for id in o.urls.iter().filter_map(|u| reference_id(u, "Binary")) {
+                let file = binary_file(source_dir, id);
+                out.by_file.entry(file).or_default().push(o);
+            }
+        }
+        out
+    }
+
+    /// The first ([`first_owner`]) of what describes a paper by one of its
+    /// Binaries: the resource it was filed by, and those that name the Binary.
+    fn first(&self, p: &Provenance) -> Option<&'a Owner> {
+        let resource = p.source_resource.as_ref();
+        let by = resource.and_then(|r| {
+            let key = (r.resource_type.as_str(), r.id.as_str());
+            self.by_resource.get(&key)
+        });
+        let naming = p.raw_path.as_ref().and_then(|f| self.by_file.get(f));
+        first_owner(by.into_iter().chain(naming.into_iter().flatten()).copied())
+    }
+}
+
+/// The raw file of a source's Binary.
+fn binary_file(source_dir: &str, id: &str) -> String {
+    format!("{source_dir}/{}.json", id_sub("Binary", id))
+}
+
+/// Put what a source says of a paper, by one of its Binaries, on it. Whether
+/// that changes it.
+fn paper_said(d: &mut Document, word: &Word, at: &str) -> bool {
+    let keeps = !d.also_from.is_empty()
+        || word.in_error()
+        || d.words.iter().any(|w| w.raw_path == word.raw_path);
+    let said = keeps && d.say(word);
+    InError::note(&mut d.errors, word, at) || said
+}
+
+/// What the stream says of the papers of its source, those whose Binary it
+/// does not carry included. A source says a paper is entered in error, by one
+/// of its Binaries, when everything it has that describes it there does: what
+/// earlier imports filed counts where the stream does not carry it. Whether
+/// it says so of one it did not.
+fn paper_words(
+    folder: &Folder,
+    index: &mut PersonIndex,
+    owners: &[Owner],
+    base: &Provenance,
+    source_dir: &str,
+) -> Result<bool, CliError> {
+    let read = first_read(base);
+    let carried = Describes::new(owners, source_dir);
+    let mut earlier: Option<Vec<Owner>> = None;
+    let mut newly = false;
+    for d in &mut index.documents {
+        let ours: Vec<Provenance> = papers_of(d, source_dir).cloned().collect();
+        for p in ours {
+            let Some(mut first) = carried.first(&p) else {
+                continue;
+            };
+            if first.in_error() {
+                if earlier.is_none() {
+                    earlier = Some(filed_owners(folder, source_dir, owners)?);
+                }
+                let filed = earlier.as_deref().unwrap_or_default();
+                let also = Describes::new(filed, source_dir).first(&p);
+                first = first_owner([first].into_iter().chain(also)).unwrap_or(first);
+            }
+            let path = p.raw_path.as_deref().unwrap_or_default();
+            let word = first.word(path, Some(read.clone()));
+            let had = d.words.iter().find(|w| w.raw_path == path);
+            newly |= word.in_error() && !had.is_some_and(Word::in_error);
+            paper_said(d, &word, &read);
+        }
+    }
+    Ok(newly)
+}
+
+/// The provenances of a paper that a source's raw Binaries are of.
+fn papers_of<'a>(d: &'a Document, source_dir: &'a str) -> impl Iterator<Item = &'a Provenance> {
+    d.provenances().filter(move |p| {
+        let path = p.raw_path.as_deref().unwrap_or_default();
+        path.strip_prefix(source_dir)
+            .is_some_and(|rest| rest.starts_with("/Binary/"))
+    })
+}
+
+/// What earlier imports of a source filed that describes papers, but for what
+/// the stream carries.
+fn filed_owners(
+    folder: &Folder,
+    source_dir: &str,
+    carried: &[Owner],
+) -> Result<Vec<Owner>, CliError> {
+    let tmp = pk_cli_drive::private_temp_dir("medrec-papers")?;
+    let mut out = owners_in(folder, source_dir, tmp.path())?;
+    let here: HashSet<(&str, &str)> = carried
+        .iter()
+        .map(|o| (o.kind.as_str(), o.id.as_str()))
+        .collect();
+    out.retain(|o| !here.contains(&(o.kind.as_str(), o.id.as_str())));
+    Ok(out)
+}
+
+/// The current versions of a source's resources that describe a paper, by
+/// their raw files, which `tmp` takes a copy of.
+fn owners_in(folder: &Folder, source_dir: &str, tmp: &Path) -> Result<Vec<Owner>, CliError> {
+    let mut out = Vec::new();
+    for kind in OwnerKind::ALL {
+        let dir = format!("{source_dir}/{}", kind.as_str());
+        let to = tmp.join(&dir);
+        if !to.exists() && folder.store.exists(&dir)? {
+            folder.store.fetch_tree(&dir, &to)?;
+        }
+        let files = std::fs::read_dir(&to).into_iter().flatten();
+        let mut files: Vec<PathBuf> = files.filter_map(|f| Some(f.ok()?.path())).collect();
+        files.retain(|f| {
+            f.file_name()
+                .is_some_and(|n| is_current(&n.to_string_lossy()))
+        });
+        files.sort();
+        out.extend(files.into_iter().filter_map(|f| {
+            let v: Value = serde_json::from_str(&std::fs::read_to_string(f).ok()?).ok()?;
+            owner(kind.as_str(), &v)
+        }));
+    }
+    Ok(out)
+}
+
+/// Whether resources of a type describe papers.
+pub(crate) fn describes_papers(resource_type: &str) -> bool {
+    OwnerKind::from_resource_type(resource_type).is_some()
+}
+
+/// Whether a raw file's name is that of a resource's current version.
+fn is_current(name: &str) -> bool {
+    name.ends_with(".json") && !name.contains('~')
+}
+
+/// What the raw files say of every paper of a person; and the Binaries with a
+/// paper's bytes that medrec before 0.9.9 did not keep, of its own source or
+/// another: the raw ones no paper is of. Papers changed, counted. `tmp` takes
+/// the copies.
+pub(crate) fn papers_again(
+    folder: &Folder,
+    household: &Household,
+    person: &Person,
+    index: &mut PersonIndex,
+    tmp: &Path,
+) -> Result<usize, CliError> {
+    let now = now_rfc3339();
+    let mut changed: BTreeSet<String> = BTreeSet::new();
+    let mut sources: Vec<(String, Vec<Owner>)> = Vec::new();
+    for (dir, of) in papers_sources(household, person, index) {
+        let owners = owners_in(folder, &dir, tmp)?;
+        let describes = Describes::new(&owners, &dir);
+        for (sha, mut p) in unknown_binaries(folder, index, &dir, &of, &now)? {
+            let Some(d) = index.documents.iter_mut().find(|d| has_bytes(d, &sha)) else {
+                continue;
+            };
+            if let Some(o) = describes.first(&p) {
+                p.source_resource = Some(o.resource());
+            }
+            d.also_from.push(p);
+            changed.insert(d.id.clone());
+        }
+        sources.push((dir, owners));
+    }
+    for (dir, owners) in sources {
+        let describes = Describes::new(&owners, &dir);
+        for d in &mut index.documents {
+            let ours: Vec<Provenance> = papers_of(d, &dir).cloned().collect();
+            for p in ours {
+                let Some(o) = describes.first(&p) else {
+                    continue;
+                };
+                let path = p.raw_path.as_deref().unwrap_or_default();
+                let had = d.words.iter().find(|w| w.raw_path == path);
+                let word = o.word(path, had.and_then(|w| w.read.clone()));
+                if paper_said(d, &word, &now) {
+                    changed.insert(d.id.clone());
+                }
+            }
+        }
+    }
+    Ok(changed.len())
+}
+
+/// Each source folder of a person, with the provenance of what it files.
+fn papers_sources(
+    household: &Household,
+    person: &Person,
+    index: &PersonIndex,
+) -> BTreeMap<String, Provenance> {
+    let mut out = BTreeMap::new();
+    for s in household.sources.iter().filter(|s| s.person == person.id) {
+        let (Some(cli), Some(org)) = (&s.cli, &s.organization) else {
+            continue;
+        };
+        let dir = folder::records_dir(person, &source_slug(cli, org));
+        let mut runs = index.imports.iter().rev().filter(|r| r.source_dir == dir);
+        let method = match s.kind.as_str() {
+            "fhir" => "fhir-api",
+            m => m,
+        };
+        out.entry(dir.clone()).or_insert_with(|| Provenance {
+            source: ProvenanceSource {
+                kind: s.kind.clone(),
+                cli: Some(cli.clone()),
+                cli_version: runs.next().map(|r| r.cli_version.clone()),
+                organization_id: Some(org.clone()),
+                fhir_base: s.fhir_base.clone(),
+            },
+            method: method.into(),
+            source_resource: None,
+            fetched_at: None,
+            filed_at: String::new(),
+            raw_path: None,
+            classified_by: None,
+            derived_from: None,
+            filed_by: filed_by(),
+        });
+    }
+    out
+}
+
+/// The raw Binaries of a source no paper is of, by their bytes' digest.
+fn unknown_binaries(
+    folder: &Folder,
+    index: &PersonIndex,
+    dir: &str,
+    of: &Provenance,
+    now: &str,
+) -> Result<Vec<(String, Provenance)>, CliError> {
+    let known: HashSet<&str> = index
+        .documents
+        .iter()
+        .flat_map(|d| d.provenances())
+        .filter_map(|p| p.raw_path.as_deref())
+        .collect();
+    let binaries = format!("{dir}/Binary");
+    if !folder.store.exists(&binaries)? {
+        return Ok(Vec::new());
+    }
+    let mut out = Vec::new();
+    for file in folder.store.list(&binaries)? {
+        let rel = format!("{binaries}/{}", file.rel);
+        let name = rel.rsplit('/').next().unwrap_or_default();
+        if known.contains(rel.as_str()) || !is_current(name) {
+            continue;
+        }
+        let text = folder.store.read_text(&rel)?;
+        let Some((id, sha)) = text.as_deref().and_then(binary_bytes) else {
+            continue;
+        };
+        out.push((
+            sha,
+            Provenance {
+                source_resource: Some(SourceResource {
+                    resource_type: "Binary".into(),
+                    id,
+                    version_id: None,
+                    last_updated: None,
+                }),
+                filed_at: now.into(),
+                raw_path: Some(rel),
+                ..of.clone()
+            },
+        ));
+    }
+    Ok(out)
+}
+
+/// A raw Binary's id, and the digest of the bytes it holds.
+fn binary_bytes(text: &str) -> Option<(String, String)> {
+    let v: Value = serde_json::from_str(text).ok()?;
+    let data: Vec<u8> = v.get("data")?.as_str()?.bytes().collect();
+    let data: Vec<u8> = data
+        .into_iter()
+        .filter(|b| !b.is_ascii_whitespace())
+        .collect();
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data)
+        .ok()?;
+    let id = v.get("id").and_then(Value::as_str).unwrap_or_default();
+    (!bytes.is_empty()).then(|| (id.to_string(), hash::sha256_hex(&bytes)))
+}
+
+/// Whether a paper has these bytes, as filed or as it was served since.
+fn has_bytes(d: &Document, sha: &str) -> bool {
+    d.sha256 == sha || d.renderings.iter().any(|r| r.sha256 == sha)
 }
 
 /// The document a document from `prov` renders again, if it does: the

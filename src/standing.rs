@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 use crate::import;
-use crate::model::{Person, PersonIndex, Provenance, Record, Source, Word};
+use crate::model::{Document, Person, PersonIndex, Provenance, Record, Source, Word};
 use crate::sources::Sources;
 use crate::summary::{day, series_key};
 
@@ -120,7 +120,7 @@ pub struct Standings {
 }
 
 /// A code as its letters, whatever its case and its spaces.
-fn code(s: Option<&str>) -> String {
+pub(crate) fn code(s: Option<&str>) -> String {
     let s = s.unwrap_or("").trim().to_lowercase();
     s.replace([' ', '_'], "-")
 }
@@ -133,8 +133,7 @@ fn is_visit_diagnosis(categories: &[String]) -> bool {
 /// What a word says by itself, whatever the day.
 fn of_word(kind: &str, w: &Word) -> Is {
     let status = code(w.status.as_deref());
-    let either = |s: &str| status == s || code(w.verification.as_deref()) == s;
-    if either("entered-in-error") {
+    if w.in_error() {
         return Is::Error;
     }
     if kind == "medication" {
@@ -146,7 +145,7 @@ fn of_word(kind: &str, w: &Word) -> Is {
             _ => Is::Current,
         };
     }
-    if either("refuted") {
+    if status == "refuted" || code(w.verification.as_deref()) == "refuted" {
         return Is::Refuted;
     }
     let ended = match status.as_str() {
@@ -188,6 +187,42 @@ fn last_day(end: &str) -> Option<String> {
 /// The day a word was last read at its source.
 fn read_on(p: &Provenance) -> Option<String> {
     day(p.fetched_at.as_deref()).or_else(|| day(Some(&p.filed_at)))
+}
+
+/// Whether a record has a standing: a condition, an allergy or a medicine
+/// that is not a fill.
+pub(crate) fn stands(r: &Record) -> bool {
+    KINDS.contains(&r.kind.as_str()) && !is_fill(r)
+}
+
+/// Whether a record is entered in error: every one of its sources says so.
+pub fn record_in_error(r: &Record) -> bool {
+    let (said, unheard) = words(r);
+    unheard.is_empty() && said.iter().all(|(w, _)| w.in_error())
+}
+
+/// Whether a paper is entered in error: every one of its sources says so. One
+/// whose word is not kept does not.
+pub fn document_in_error(d: &Document) -> bool {
+    let word = |p: &Provenance| {
+        d.words
+            .iter()
+            .find(|w| Some(&w.raw_path) == p.raw_path.as_ref())
+    };
+    d.provenances().all(|p| word(p).is_some_and(Word::in_error))
+}
+
+/// Whether some source says a paper is entered in error and another does not.
+pub fn document_differs(d: &Document) -> bool {
+    d.words.iter().any(Word::in_error) && !document_in_error(d)
+}
+
+/// Whether some source says a record is entered in error and another does
+/// not.
+pub fn record_differs(r: &Record) -> bool {
+    let (said, unheard) = words(r);
+    let errors = said.iter().filter(|(w, _)| w.in_error()).count();
+    errors > 0 && (errors < said.len() || !unheard.is_empty())
 }
 
 fn is_fill(r: &Record) -> bool {
@@ -238,7 +273,7 @@ fn own(r: &Record) -> Word {
         abatement: text("abatement").or_else(|| text("abatement_text")),
         end: text("end"),
         end_of: text("end_of"),
-        version: None,
+        ..Word::default()
     }
 }
 
@@ -261,8 +296,8 @@ impl Standings {
         let mut diagnoses: BTreeMap<usize, Vec<String>> = BTreeMap::new();
         let mut lists: BTreeSet<usize> = BTreeSet::new();
         for r in &idx.records {
-            let mut error = code(r.status.as_deref()) == "entered-in-error";
-            if KINDS.contains(&r.kind.as_str()) && !is_fill(r) {
+            let error = record_in_error(r);
+            if stands(r) {
                 let (heard, unheard) = words(r);
                 let mut said: Vec<Said> = Vec::new();
                 for (w, p) in heard {
@@ -299,9 +334,7 @@ impl Standings {
                         lists.insert(source);
                     }
                 }
-                let s = standing(r, said, missing);
-                error = s.is == Is::Error;
-                records.insert(r.id.clone(), s);
+                records.insert(r.id.clone(), standing(r, said, missing));
             }
             if error {
                 let of = in_error.entry(r.kind.clone()).or_default();

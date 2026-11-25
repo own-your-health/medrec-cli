@@ -143,10 +143,14 @@ fetched_at}]`: each distinct rendering later imports served of it with the
 same text, and those of a copy folded in by `documents merge`, once; served
 again byte for byte, it is a duplicate),
 `classification` (what was detected, with scores and evidence),
-`statement` and `same_statement_as` (a bill's, below), and `provenance`. An imported document's `provenance.raw_path` names its
+`statement` and `same_statement_as` (a bill's, below), `provenance`, and
+`also_from`, `words` and `errors` (Entered in error, below). An imported document's `provenance.raw_path` names its
 Binary's raw file, which holds the latest rendering the source served;
 earlier ones stay beside it as `<id>~<md5>.json`, as for every raw
-resource, and the document's own bytes are the filed file.
+resource, and the document's own bytes are the filed file. `also_from` (0.9.9
+and later) is where else the same bytes came from, a provenance for each: what
+another source serves, or its own by another Binary, is not filed again, and
+neither is a file of the household's, which has no `raw_path` there.
 
 Document types: `visit_summary`, `lab_report`, `imaging_report`,
 `immunization_record`, `discharge_summary`, `referral`, `prescription`,
@@ -195,8 +199,8 @@ only a display.
 fact from two sources is one record; a fill and a claim are keyed by their
 identity instead, below), `date`, `code` (`{system, code,
 display}`), `display`, `status`, `fields` (kind-specific, with FHIR element
-names), `providers`, `words` and `fields_from` (below), `documents` (linked
-document ids) and `provenance` (one per source).
+names), `providers`, `words`, `errors` and `fields_from` (below), `documents`
+(linked document ids) and `provenance` (one per source).
 
 **Fields by kind.** Every name a record's `fields` can hold. A field is
 present only when the source gave it, so a reader takes none for granted.
@@ -309,9 +313,11 @@ records filed before.
 **Words.** A condition's, an allergy's and a medicine's `words` (0.9.9 and
 later) is what each of its sources says of it that can differ between them.
 There is one for each of its provenances whose raw file is kept, in their
-order, but none of a fill, which says only that it was filled: `{raw_path,
-status, verification, categories, abatement, end, end_of, version}`, each but
-`raw_path` absent where the source gives none. `raw_path` is the provenance's,
+order: `{raw_path, status, verification, categories, abatement, end, end_of,
+version}`, each but `raw_path` absent where the source gives none. A fill's and
+another kind's record has them only where several of its provenances state it
+or one says or said it is entered in error, and then each is its `status`.
+`raw_path` is the provenance's,
 and so says whose word it is and when it was read. `status` is the source's
 code for a condition's or an allergy's clinical status and for a medicine's
 status. `verification` is the code of the verification status, `abatement` is
@@ -332,8 +338,8 @@ of each source, or `medrec reindex`, gives them back.
 **Whose fields.** `fields_from` (0.9.9 and later) is the raw path of the
 provenance whose resource a record's `status` and `fields` are of, where the
 record has words and several provenances. It is a source's first on the record
-(of those with no id, the first of its type); one that names another names
-none. A version of that resource writes
+(of those with no id, the first of its type) that does not say it is entered
+in error, or with none the first; one that names another names none. A version of that resource writes
 them each time it is served, so a later medrec's reading of it applies.
 Another's does when it is new to the record (its `version` is another than its
 word's, or with none its word says otherwise: an import cut short after its raw
@@ -342,6 +348,45 @@ record's provenances or is absent (an earlier medrec saved the record); it then
 writes them and `fields_from`. Served again as it was, it changes neither. Until 0.9.9 each
 import's version wrote over the other's, and still does in a record with no
 words.
+
+**Entered in error** (0.9.9 and later). A source says a record of any kind is
+entered in error by its word's `status` or `verification`, whose code is
+`entered-in-error`. It says so of a paper by the `status`, or by the
+`docStatus`, of what describes it: the DocumentReference, DiagnosticReport or
+Media that names its Binary or that it was filed by. Where several of one
+source's describe a paper there, it says so when each does, the ones earlier
+imports filed included. A paper's word is `{raw_path, status, verification,
+read}`, with `docStatus` as `verification` and `read` when it was last read. It
+has them where one says or said it is entered in error, or `also_from` is
+there.
+
+- A record or a paper is entered in error while every one of its provenances
+  has a word and each word says so (a record's own status is the word of its
+  only provenance, or of the one that wrote its fields, where none is kept). A
+  source whose word is not kept does not say so, and a file of the household's
+  has none, so it stands.
+- One that only some say so of stands, and differs. Its values are never those
+  of a source that says so: when the resource `fields_from` names does, medrec
+  reads `date`, `code`, `display`, `status`, `fields` and `providers` again from
+  the raw file of another that does not and that reads, and names it; a version
+  that says so writes nothing while another does not say so.
+- A version that says so stays on the record it was of, whatever else it
+  leaves out.
+- It comes back by itself when a later version of the same source's no longer
+  says so. `errors` keeps each time it did: `{raw_path, from, until}`, when
+  medrec first read the version that says so (a paper's, its word) and the
+  first after it that does not; `until` is absent while it says so. They stay
+  with their resource when it moves to another record.
+- A paper filed before 0.9.9 kept one source only, so another that served the
+  same bytes is in no `also_from`. The next import from that source adds it,
+  and files nothing again. So does `medrec reindex`, and the import that first
+  reads a source saying a paper is entered in error, for every source at once:
+  a raw Binary that no paper is of has the bytes. One whose raw Binary is gone
+  cannot be told, and until its next import the other's word alone ends the
+  paper.
+- A medrec before 0.9.9 drops `also_from`, `words` and `errors` from an index
+  it saves. `medrec reindex` gives back the first two, and `errors` for what a
+  source says now; a time that ended is lost.
 
 **Providers.** A record's `providers` (0.9.6 and later) is what its sources
 say of the people and places its fields print, beyond their names: a list
@@ -393,8 +438,11 @@ under the source, filed by an earlier import). A pharmacy `claim`
 `claims` (how many there are), `reshaped`, `unchanged` and `without_raw`
 (claims with no raw file), `statements` (bills and receipts whose statement
 gained fields), `providers_updated` (0.9.6 and later: records whose
-`providers` changed) and `statuses_updated` (0.9.9 and later: conditions,
-allergies and medicines whose `status`, `fields` or `words` changed).
+`providers` changed), `statuses_updated` (0.9.9 and later: records whose
+`words` or `errors` changed, or whose values another source's took the place
+of, and conditions, allergies and medicines whose `status` or `fields`
+changed) and `papers_updated` (0.9.9 and later: papers whose `also_from`,
+`words` or `errors` changed).
 
 A `claim` (an ExplanationOfBenefit) is shaped for costs (0.5.0 and later).
 An earlier import's claims take this shape when their source serves them
@@ -987,7 +1035,8 @@ re-serialised, with each string in `requested_by` and `app` cut to 200
 characters, then `handled`. Nothing else of the request is kept. For an
 `invalid` request it holds only `schema`, `id` (from the file name, when the
 name has one; else `null`), `received` (`{"bytes": n, "sha256": "…"}` of the
-file as found) and `handled`. A `done/` file is at most 8 KiB.
+file as found; `sha256` is `null` for one refused for its size, which medrec
+does not read past the limit) and `handled`. A `done/` file is at most 8 KiB.
 
 ```json
 "handled": {
@@ -1938,10 +1987,10 @@ word wins over another's. Every person has one.
   and `error` say nothing here), or give another `verification`.
   **`differs_after`**: they differ after this day, when a word that says it is
   current ends and another has not.
-- **`in_error`**: the person's records entered in error, by kind: those whose
-  `is` is `error`, and of every record with no standing (a fill, a result, a
-  vaccine) those whose own status is `entered-in-error`. `views.json` has the
-  same object, for a reader that opens no other view.
+- **`in_error`**: the person's records entered in error (index.json, "Entered
+  in error"), by kind, those with no standing too (a fill, a result, a
+  vaccine). `views.json` has the same object, for a reader that opens no other
+  view.
 - **`no_problem_list`**: each source with a diagnosis given for a visit and no
   other condition, heard or not, and those diagnoses. A condition that is
   `error`, and a word of no source, are neither.

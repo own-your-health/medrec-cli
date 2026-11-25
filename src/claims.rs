@@ -646,10 +646,8 @@ pub fn link(records: &mut [Record]) {
 /// A record a claim can have paid for: not one only planned, cancelled or
 /// entered in error.
 fn happened(r: &Record) -> bool {
-    !matches!(
-        r.status.as_deref(),
-        Some("planned" | "cancelled" | "entered-in-error")
-    )
+    !matches!(r.status.as_deref(), Some("planned" | "cancelled"))
+        && !crate::standing::record_in_error(r)
 }
 
 #[cfg(test)]
@@ -861,6 +859,7 @@ mod tests {
             fields: fields.as_object().cloned().unwrap_or_default(),
             providers: Vec::new(),
             words: Vec::new(),
+            errors: Vec::new(),
             fields_from: None,
             documents: Vec::new(),
             provenance: Vec::new(),
