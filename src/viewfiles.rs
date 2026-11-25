@@ -83,7 +83,7 @@ pub struct ViewsIndex {
     /// The MD5 (hex) of `household.json` as the views were made from it.
     pub household: String,
     /// What the ids of provider labels are salted with: random, made once
-    /// with the folder's first label (0.9.6 and later).
+    /// with the folder's first label (0.9.7 and later).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label_salt: Option<String>,
     pub people: BTreeMap<String, PersonViews>,
@@ -116,11 +116,11 @@ pub struct PersonViews {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code_table: Option<String>,
     /// The provider directory these views' labels were made with, absent as
-    /// `code_table` is (0.9.6 and later). A reader need not check it.
+    /// `code_table` is (0.9.7 and later). A reader need not check it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub directory: Option<String>,
     /// The MD5 of the person's `provider-state.json`, absent when there is
-    /// none (0.9.6 and later). A reader need not check it: the pass that
+    /// none (0.9.7 and later). A reader need not check it: the pass that
     /// writes it makes the views it changes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_state: Option<String>,

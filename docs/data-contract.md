@@ -25,8 +25,8 @@ views/                        each person's records cut into small files, for re
   text.json                   extracted text per document
   overrides.json              the household's decisions on events (0.9.0 and later)
   marks.json                  the household's payments and private marks (0.9.1 and later)
-  provider-state.json         what a provider directory gave (0.9.6 and later)
-  provider-state~unread-<8 hex>.json   one that did not read, kept (0.9.6 and later)
+  provider-state.json         what a provider directory gave (0.9.7 and later)
+  provider-state~unread-<8 hex>.json   one that did not read, kept (0.9.7 and later)
   Documents/<YYYY>/<YYYY-MM-DD>_<type>_<org>_<details>_<original name>
   Claims/<YYYY>/              EOBs, bills and receipts, named the same way
   Imaging/<YYYY-MM-DD>_<modality>_<body part>_<facility>/
@@ -1011,7 +1011,7 @@ views/<person id>/events.json            0.9.0 and later
 views/<person id>/bills.json             0.9.1 and later
 views/<person id>/private.json           0.9.1 and later
 views/<person id>/code-names.json        0.9.4 and later, when there are any
-views/<person id>/providers.json         0.9.6 and later, when there are any
+views/<person id>/providers.json         0.9.7 and later, when there are any
 ```
 
 A person's directory is named by their id in `household.json`, not their
@@ -1075,7 +1075,7 @@ what is private now, and adds none.
   with no warning. A reader need not check which table made it
   (`code_table` in `views.json`, below).
 
-### Provider labels (`providers.json`, `medrec-providers/v1`, 0.9.6 and later)
+### Provider labels (`providers.json`, `medrec-providers/v1`, 0.9.7 and later)
 
 A name, practice, role and phone for a provider the person's items print,
 with how sure medrec is and why. **A label changes nothing from a source.**
@@ -1147,7 +1147,7 @@ provider has no `providers.json`.
 - **Machines** (README, "Provider directory"). What a directory gave is kept
   in `provider-state.json` (below), so what is labelled and what is private do
   not depend on which machine wrote last. Every machine that writes the folder
-  needs 0.9.6 or later, as for `providers` in an index. One with no directory, or an older
+  needs 0.9.7 or later, as for `providers` in an index. One with no directory, or an older
   one than the last, keeps what is there for the NPIs and names still printed,
   and splits it by what is private now; the older one adds providers whose NPI
   nothing is known of. A newer one replaces what it has, and takes away only
@@ -1254,14 +1254,14 @@ A reader decides freshness by MD5, as Drive reports it (`md5Checksum`):
 |---|---|
 | `medrec` | The version that wrote them. Another version makes every view again. |
 | `household` | The MD5 (hex) of `household.json` as the views were made from it. |
-| `label_salt` | What the ids of provider labels are salted with: random, made with the folder's first label and kept (0.9.6 and later). Absent before that. A reader does not use it. |
+| `label_salt` | What the ids of provider labels are salted with: random, made with the folder's first label and kept (0.9.7 and later). Absent before that. A reader does not use it. |
 | `people.<id>.index`, `.text` | The MD5s of the person's `index.json` and `text.json` as read; `null` when the file is absent. |
 | `people.<id>.overrides` | The MD5 of the person's `overrides.json` as read; `null` when there is none (0.9.0 and later). |
 | `people.<id>.marks` | The MD5 of the person's `marks.json` as read; `null` when there is none (0.9.1 and later). |
 | `people.<id>.linked` | For each person linked to this one (Events, below), the MD5s of their `index.json` and `text.json` as read, as `{"index", "text"}`, each `null` when the file is absent; `{}` when no one is linked (0.9.0 and later). |
 | `people.<id>.code_table` | The code table the person's names were made with (`icd10cm FY2027`); absent when the pass that made the views had none, whatever names it carried over (0.9.4 and later). A pass on a machine with another table makes the person's views again, which fills in the names; one on a machine with none leaves them. |
-| `people.<id>.directory` | Which provider directory the pass that made the views had: the last day it covers and when it was fetched, so that a newer one sorts after (0.9.6 and later). Absent when it had none. A pass on a machine with a newer one makes the person's views again; one with an older one or none leaves them. |
-| `people.<id>.provider_state` | The MD5 of the person's `provider-state.json`, absent when there is none (0.9.6 and later). A reader need not check it: the pass that writes the file makes the views it changes. |
+| `people.<id>.directory` | Which provider directory the pass that made the views had: the last day it covers and when it was fetched, so that a newer one sorts after (0.9.7 and later). Absent when it had none. A pass on a machine with a newer one makes the person's views again; one with an older one or none leaves them. |
+| `people.<id>.provider_state` | The MD5 of the person's `provider-state.json`, absent when there is none (0.9.7 and later). A reader need not check it: the pass that writes the file makes the views it changes. |
 | `row` | `documents`, `records`, `studies`, and `newest` and `last_import` when there are any: the person's line in `medrec_summary`'s people list, without `notes`. |
 | `records` | For each record kind, `{"shards": [[newest day, oldest day, count], …], "undated": count}`: its dated shards by number, and how many records its undated file holds. |
 | `timeline` | The timeline's shards, the same way. |
@@ -1641,7 +1641,7 @@ nothing is private.
   |---|---|
   | `source` | came from a portal whose records are all of one area: a behavioral health or a fertility clinic's record system |
   | `code` | is a condition whose ICD-10 code is in an area, or a claim whose principal diagnosis (the lowest `sequence`) is: F10–F19 and Z71.4–Z71.5 substance use; the other F codes mental health; Z30–Z32, Z33.2, O00–O08, N46 and N96–N98 reproductive; A50–A64, B20, Z21, Z11.3–Z11.4, Z20.2, Z20.6 and Z72.5 sexual health |
-  | `provider` | was made by a practice or clinician whose name or credential says its area: a claim's provider or facility, a visit's place, location or clinician, a medicine's prescriber, a result's performer, a document's organization; or is a record that prints a provider with a sure label (Provider labels, above) whose name, practice or role does (0.9.6 and later) |
+  | `provider` | was made by a practice or clinician whose name or credential says its area: a claim's provider or facility, a visit's place, location or clinician, a medicine's prescriber, a result's performer, a document's organization; or is a record that prints a provider with a sure label (Provider labels, above) whose name, practice or role does (0.9.7 and later) |
   | `medicine` | is a medicine of an area by its name or code: antidepressants, antipsychotics, anxiolytics, stimulants and lithium; fertility drugs and contraceptives; HIV medicines and those for erectile dysfunction; medicines for substance use and smoking |
   | `test` | is a result or report of a test of an area: sexually transmitted infections, pregnancy and fertility, drug screens |
   | `members` | is an event with a private claim or portal visit, or whose own members are all private |
@@ -1676,7 +1676,7 @@ nothing is private.
   person's items may then be one the household marked private, so a
   reader holds all of them back from shared screens and household-wide
   answers until it reads.
-- **`labels_unreadable`** (0.9.6 and later): `true` when what a provider label
+- **`labels_unreadable`** (0.9.7 and later): `true` when what a provider label
   makes private is not known (`provider-state.json`, above). Absent otherwise.
   `marks_unreadable` is `true` with it, so a reader that does not know it
   holds everything back too. It ends when a pass has a provider directory that
@@ -1740,7 +1740,7 @@ readers ship with medrec:
     its area. A person whose `marks.json` does not read has all their
     items held back from answers about the whole household, with a
     `private-marks-unreadable` warning naming them. So has one whose provider
-    labels do not read (`labels_unreadable`, 0.9.6 and later), with a
+    labels do not read (`labels_unreadable`, 0.9.7 and later), with a
     `private-labels-unreadable` warning. The commands are the household's own
     terminal and leave nothing out.
   - `kind: "conditions"` rows and the summary's condition lines carry
