@@ -607,6 +607,8 @@ struct PrivateItems {
     errors: std::collections::BTreeSet<String>,
     /// The bills entered in error the household marked a payment on.
     paid_errors: std::collections::BTreeSet<String>,
+    /// Whether the list is of bills.
+    bills: bool,
 }
 
 impl PrivateItems {
@@ -729,13 +731,12 @@ impl PrivateItems {
         let (returned, last) = (page.info.returned, page.info.next_cursor.is_none());
         let n = left_out.on_page(views::Why::Error, offset, returned, last);
         let paid = left_out.on_page(views::Why::PaidError, offset, returned, last);
-        if paid > 0 {
-            page.warn(
-                "entered-in-error",
-                crate::bills::in_error_line(n + paid, paid),
-            );
-        } else if n > 0 {
-            page.warn("entered-in-error", standing::in_error(n));
+        if n + paid > 0 {
+            let line = match self.bills {
+                true => crate::bills::in_error_line(n + paid, paid),
+                false => standing::in_error(n),
+            };
+            page.warn("entered-in-error", line);
         }
         let n = left_out.on_page(views::Why::Private, offset, returned, last);
         if n > 0 {
@@ -1092,15 +1093,15 @@ impl MedrecTools {
                         |x: &Record| person.is_some() || !private.held_back(&x.id) || listed(x);
                     let list = st.list(&idx, kind, active, &today, &asked, &shows);
                     items.extend(list.rows.into_iter().map(|row| {
-                        let one = item(row.record);
-                        Item {
+                        let mut one = item(row.record);
+                        one.group = row.group;
+                        if row.standing.is_some() {
                             // Its words say its status, each source's.
-                            status: one.status.clone().filter(|_| row.standing.is_none()),
-                            standing: row.standing,
-                            says: joined(row.says),
-                            group: row.group,
-                            ..one
+                            one.status = None;
+                            one.standing = row.standing;
+                            one.says = joined(row.says);
                         }
+                        one
                     }));
                     notes.extend(list.notes.into_iter().map(|n| match person {
                         Some(_) => n,
@@ -1157,6 +1158,7 @@ impl MedrecTools {
             }
             (_, None) => {
                 let bills = a.kind == Kind::Bills;
+                private.bills = bills;
                 for p in &selected {
                     // What is paid and left on each bill (`bills.json`).
                     let of_bills = match bills {

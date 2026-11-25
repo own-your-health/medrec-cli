@@ -838,7 +838,8 @@ impl Standings {
 /// A row of a list of conditions, allergies or medicines.
 pub struct Row<'a> {
     pub record: &'a Record,
-    /// What it is, as a reader says it; none of a fill.
+    /// What it is, as a reader says it; none of a fill, of which
+    /// [`record_says`] tells.
     pub standing: Option<String>,
     pub says: Vec<String>,
     /// Current ones first, then those on hold, then those ended by their

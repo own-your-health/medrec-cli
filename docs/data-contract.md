@@ -2231,8 +2231,8 @@ readers ship with medrec:
       for each not heard. A word is the source, a colon, its `status` (or `no
       status`), its `verification` unless that is `confirmed`, `ended
       <abatement>` and `ends <end> (<end_of>)`, joined by commas, then ` (read
-      <day>)`. A fill has neither `standing` nor `says`, and keeps its
-      `status`.
+      <day>)`. A fill has none of its own and keeps its `status`; its
+      sources can differ on it as on any other item (below).
     - `medrec_records` with `active` has a row for each current line, then for
       each medicine on hold, then for each ended by its date; in each group
       newest first, then by title. A line's row is the first of its records

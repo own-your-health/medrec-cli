@@ -321,6 +321,58 @@
     }
    ],
    "status": "entered-in-error"
+  },
+  {
+   "id": "r_filldiffersaaaaaaaaa",
+   "kind": "medication",
+   "key": "medication|filldiffers|2024-03-09",
+   "date": "2024-03-09",
+   "display": "Sample tablet",
+   "fields": {
+    "source": "dispense"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-07-02T10:00:00Z",
+     "filed_at": "2024-07-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/Binary/filldiffers.json"
+    },
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "east",
+      "fhir_base": "https://east.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-07-03T10:00:00Z",
+     "filed_at": "2024-07-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/east/Binary/filldiffers.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/north/Binary/filldiffers.json",
+     "status": "completed",
+     "read": "2024-07-02T10:00:00Z"
+    },
+    {
+     "raw_path": "Robin Example/Records/east/Binary/filldiffers.json",
+     "status": "entered-in-error",
+     "read": "2024-07-03T10:00:00Z"
+    }
+   ],
+   "fields_from": "Robin Example/Records/north/Binary/filldiffers.json",
+   "status": "completed"
   }
  ],
  "documents": [
