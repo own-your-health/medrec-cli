@@ -344,6 +344,8 @@ pub(crate) fn sync_with(
     let mut people = BTreeMap::new();
     let mut files = BTreeMap::new();
     let mut states: Vec<NewState> = Vec::new();
+    // The state each person's views are made from.
+    let mut made_from: Vec<(String, Option<String>)> = Vec::new();
     // Each person's files read once, whoever's events need them.
     let mut loaded: BTreeMap<String, Loaded> = BTreeMap::new();
     fn load(
@@ -535,6 +537,7 @@ pub(crate) fn sync_with(
             from,
             &mut files,
         )?;
+        made_from.push((crate::labels::state_rel(p), v.provider_state.clone()));
         people.insert(p.id.clone(), v);
     }
     let index = fresh(people);
@@ -564,6 +567,8 @@ pub(crate) fn sync_with(
             store.display_path(DIR)
         );
     }
+    #[cfg(test)]
+    tests::before_writing();
     // Before the views made with them: a pass cut short here leaves views
     // the next one makes again.
     for s in &states {
@@ -572,6 +577,13 @@ pub(crate) fn sync_with(
     out.files_written = upload(store, &uploads)?;
     let index_bytes = json(&index);
     if old_text.as_deref().map(str::as_bytes) != Some(index_bytes.as_slice()) {
+        // No reader takes a view of what was private by another machine's
+        // state for current.
+        for (rel, md5) in &made_from {
+            if store.md5(rel)? != *md5 {
+                return Err(folder::changed_elsewhere(rel));
+            }
+        }
         store.write_bytes(INDEX, &index_bytes)?;
     }
 
@@ -659,6 +671,7 @@ pub fn current_view(
         || md5(&folder::text_rel(p))? != v.text
         || md5(&crate::events::overrides_rel(p))? != v.overrides
         || md5(&crate::marks::rel(p))? != v.marks
+        || md5(&crate::labels::state_rel(p))? != v.provider_state
     {
         return Ok(None);
     }
@@ -717,11 +730,11 @@ struct NewState {
 
 impl NewState {
     /// Nothing else says what the file does: one another machine wrote since
-    /// it was read stays, and the next pass makes these views again with it.
-    /// One that did not read stays beside it.
+    /// it was read stays, and the pass ends. One that did not read stays
+    /// beside it.
     fn write(&self, store: &crate::store::Store) -> Result<(), CliError> {
         if store.md5(&self.rel)? != self.was {
-            return Ok(());
+            return Err(folder::changed_elsewhere(&self.rel));
         }
         if let Some(text) = &self.unread {
             let aside = self.rel.trim_end_matches(".json");
@@ -1406,8 +1419,24 @@ fn report(r: Result<Synced, CliError>) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    thread_local! {
+        static BEFORE_WRITING: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+            const { std::cell::RefCell::new(None) };
+    }
+
+    /// What another machine does before this thread's next pass writes.
+    pub(crate) fn meanwhile(f: impl FnOnce() + 'static) {
+        BEFORE_WRITING.with(|b| *b.borrow_mut() = Some(Box::new(f)));
+    }
+
+    pub(super) fn before_writing() {
+        if let Some(f) = BEFORE_WRITING.with(|b| b.borrow_mut().take()) {
+            f();
+        }
+    }
 
     fn days(d: &[Option<&str>]) -> Vec<Option<String>> {
         d.iter().map(|x| x.map(str::to_string)).collect()
@@ -1440,12 +1469,12 @@ mod tests {
             if let Some(t) = held {
                 std::fs::write(&path, t).unwrap();
             }
-            state.write(&st).unwrap();
+            assert_eq!(state.write(&st).is_ok(), after != "theirs");
             assert_eq!(std::fs::read_to_string(&path).unwrap(), after);
         }
         // One that is gone since is another machine's to have removed.
         std::fs::remove_file(&path).unwrap();
-        new(Some("read"), None).write(&st).unwrap();
+        assert!(new(Some("read"), None).write(&st).is_err());
         assert!(!path.exists());
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
         let _ = std::fs::remove_dir_all(&dir);

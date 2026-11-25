@@ -1329,6 +1329,13 @@ mod tests {
         /// Write the views, with the directory or on a machine without it:
         /// how many people's were made.
         fn sync(&self, directory: bool) -> usize {
+            self.try_sync(directory).unwrap().people_rebuilt
+        }
+
+        fn try_sync(
+            &self,
+            directory: bool,
+        ) -> Result<crate::viewfiles::Synced, pk_cli_core::CliError> {
             self.put(
                 "Robin Example/index.json",
                 &serde_json::to_string(&self.index).unwrap(),
@@ -1341,8 +1348,6 @@ mod tests {
                 None,
                 directory.then_some(d.as_path()),
             )
-            .unwrap()
-            .people_rebuilt
         }
 
         fn view(&self, name: &str) -> Value {
@@ -1731,6 +1736,39 @@ mod tests {
             assert!(c.private("r_talkaaaaaaaaaaaaaaaa"), "{n}");
             assert_eq!(c.state(), state, "{n}");
             assert!(c.labels()["directory"].is_object(), "{n}");
+        }
+    }
+
+    /// Another machine wrote the state during a pass, whether or not the
+    /// pass writes one: no view of it is taken for current, and the next
+    /// makes them from what is there.
+    #[test]
+    fn a_state_written_during_a_pass_ends_it() {
+        for directory in [false, true] {
+            let mut c = Case::new();
+            c.sync(directory);
+            let views = c.root.join("views/views.json");
+            let before = std::fs::read(&views).unwrap();
+            // Theirs is a sure psychologist's label on the visit's NPI.
+            let mut theirs = match directory {
+                true => c.state(),
+                false => serde_json::from_str(fixture!("provider-state.json")).unwrap(),
+            };
+            theirs["by_npi"]["0000000006"] = theirs["by_npi"]["0000000014"].clone();
+            let (at, text) = (c.state_path(), theirs.to_string());
+            let theirs = text.clone();
+            crate::viewfiles::tests::meanwhile(move || std::fs::write(at, text).unwrap());
+            c.index.records[0].date = Some("2026-04-01".into());
+            if directory {
+                // This one writes a state as well.
+                c.add("r_secondvisitaaaaaaaaa", "T PLACEHOLDER", "0000000055");
+            }
+            let err = c.try_sync(directory).unwrap_err();
+            assert!(err.message().contains("another machine"), "{directory}");
+            assert_eq!(std::fs::read(&views).unwrap(), before, "{directory}");
+            assert_eq!(std::fs::read_to_string(c.state_path()).unwrap(), theirs);
+            assert_eq!(c.sync(false), 1);
+            assert!(c.private("r_samplevisitaaaaaaaaa"), "{directory}");
         }
     }
 

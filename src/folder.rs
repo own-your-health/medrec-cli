@@ -711,7 +711,7 @@ fn how_long(d: Duration) -> String {
     }
 }
 
-fn changed_elsewhere(rel: &str) -> CliError {
+pub(crate) fn changed_elsewhere(rel: &str) -> CliError {
     CliError::Other(format!(
         "{rel} changed while this command ran (another machine wrote it), so medrec left it as it \
          is. Run the command again: a file it already filed is found and indexed, not copied again."

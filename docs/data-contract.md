@@ -26,6 +26,7 @@ views/                        each person's records cut into small files, for re
   overrides.json              the household's decisions on events (0.9.0 and later)
   marks.json                  the household's payments and private marks (0.9.1 and later)
   provider-state.json         what a provider directory gave (0.9.6 and later)
+  provider-state~unread-<8 hex>.json   one that did not read, kept (0.9.6 and later)
   Documents/<YYYY>/<YYYY-MM-DD>_<type>_<org>_<details>_<original name>
   Claims/<YYYY>/              EOBs, bills and receipts, named the same way
   Imaging/<YYYY-MM-DD>_<modality>_<body part>_<facility>/
@@ -1140,15 +1141,17 @@ and roles with the rest. medrec judges what is private by it, in its own
 answers too. No other reader reads it or serves it. Nothing else in the folder
 says it again, so it stays when the views are removed, and an earlier medrec
 leaves it alone. `people.<id>.provider_state` in `views.json` is its MD5. A
-write is read back, and leaves a file another machine wrote since it was read.
+write is read back. When another machine wrote the file since it was read, the
+pass leaves it, ends with an error and publishes no views.
 When it does not read, or is gone and the views were made with one (a pass
 then writes one that says `lost`), what labels make private is not known:
 `private.json` and medrec's own answers say `labels_unreadable` (Private,
 below), until a pass has a directory that was asked of every NPI the records
 carry (`medrec tables fetch nppes`, then `medrec views write`). Until then
 medrec writes nothing over a file that does not read, and then keeps its bytes
-beside the new one as `provider-state~unread-<8 hex>.json`. It never writes
-over a later `medrec-provider-state/`.
+beside the new one as `provider-state~unread-<8 hex>.json`, which no pass
+removes and no reader reads. It never writes over a later
+`medrec-provider-state/`.
 
 ### When they are written
 
