@@ -3337,6 +3337,9 @@ fn a_practice_a_bill_told_of_holds_claims_whatever_becomes_of_it() {
         claim_is(claim);
     };
     assert_eq!(after(&both), why(true));
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
 /// A visit is private by its name and its reason, a condition with no ICD-10
 /// code by its name, a medicine and its fill by a brand, a report by its
 /// conclusion, a result by a value that is a text, and a condition by the codes
