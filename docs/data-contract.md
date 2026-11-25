@@ -1837,7 +1837,10 @@ the same text:
 
 - **Documents:** the title, then the organization and document type, then
   the document's text.
-- **Records:** the name, then the record's fields flattened. A claim's
+- **Records:** the name, then the record's fields flattened: each text and
+  number in them, but no id (0.9.9 and later: a text that is one lowercase
+  letter, `_` and 20 of `a` to `z` and `2` to `7`). So no snippet has the id of
+  an item that is not to be shown, and none is found by another's id. A claim's
   fields include its lines' `payer_notes`, so the payer's words are
   searched; the household's `notes.md` is the notes set aside.
 - **Studies:** the description, then the modalities, body part, facility
