@@ -1149,6 +1149,20 @@ fn what_is_entered_in_error_is_counted_and_opened_by_its_id() {
     let fields = &v["items"][0]["fields"];
     assert_eq!(fields["in_error"], json!([LETTER, SKIN_BILL]));
     assert_eq!(fields["not_applied"][0]["id"], "o_togetheraaaaaaaaaaaa");
+    // A private one of an open event is not named where no person is, nor what
+    // was decided of it; a private event is shown whole.
+    e.ok(&["private", "mark", LETTER]);
+    let of = |v: &Value| v["items"][0]["fields"].clone();
+    let some = of(&ask(RECORDS, json!({"kind": "events", "id": visit})));
+    assert_eq!(some["in_error"], json!([SKIN_BILL]));
+    assert!(!some.to_string().contains(LETTER), "{some}");
+    assert!(!some.to_string().contains("o_together"), "{some}");
+    e.ok(&["private", "mark", &visit]);
+    let whole = of(&ask(RECORDS, json!({"kind": "events", "id": visit})));
+    assert_eq!(whole["in_error"], json!([LETTER, SKIN_BILL]));
+    assert_eq!(whole["not_applied"][0]["id"], "o_togetheraaaaaaaaaaaa");
+    e.ok(&["private", "reset", &visit]);
+    e.ok(&["private", "reset", LETTER]);
     let views: Value = {
         e.ok(&["views", "write"]);
         let pid = h_id(&e, "Alex Testperson");

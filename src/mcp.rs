@@ -1485,8 +1485,10 @@ impl MedrecTools {
             if e["entered_in_error"] == true && id.is_none() {
                 private.errors.extend(e["id"].as_str().map(str::to_string));
             }
-            // What an answer could not show it does not count or name.
-            if person.or(id).is_none() {
+            // What an answer could not show it does not count or name. One
+            // asked for by its id that is private is shown whole.
+            let own = id.filter(|id| private.areas.contains_key(*id));
+            if person.is_none() && own.is_none_or(|id| e["id"] != id) {
                 let shown = |x: &Value| x.as_str().is_some_and(|x| !private.held_back(x));
                 if let Some(ids) = e["in_error"].as_array_mut() {
                     ids.retain(shown);
