@@ -104,8 +104,13 @@
      "from": "first_name",
      "state": "FL",
      "city": "Exampleton",
-     "printed": "Drew Specimen, MD",
-     "npi": "0000000089"
+     "printed": "Drew Specimen, MD"
+    },
+    {
+     "from": "first_name",
+     "state": "FL",
+     "city": "Exampleton",
+     "printed": "SPECIMEN, DREW MD"
     }
    ]
   }
@@ -116,7 +121,9 @@
   "R PLACEHOLDER": "v_paperaaaaaaaaaaaaaaa",
   "J SAMPLE": "v_sampleaaaaaaaaaaaaaa",
   "L FILLER": "v_lateraaaaaaaaaaaaaaa",
-  "Drew Specimen, MD": "v_firstaaaaaaaaaaaaaaa"
+  "Drew Specimen, MD": "v_firstaaaaaaaaaaaaaaa",
+  "SPECIMEN, DREW MD": "v_firstaaaaaaaaaaaaaaa",
+  "D SPECIMEN": "v_firstaaaaaaaaaaaaaaa"
  },
  "by_item": {
   "r_otheraaaaaaaaaaaaaaa": {

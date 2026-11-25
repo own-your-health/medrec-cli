@@ -996,22 +996,29 @@ fn degrees_agree(p: &Provider, text: &str) -> bool {
 }
 
 /// Whether a city is one the record's source gives this field's provider,
-/// else any of its providers, where both are known.
+/// else any of its providers, where it gives one. An address an earlier
+/// medrec read may have had another.
 fn city_agrees(city: &str, r: &Record, field: &str) -> bool {
-    let cities = |own: bool| -> BTreeSet<String> {
+    let of = |own: bool| -> Vec<&Option<String>> {
         r.providers
             .iter()
-            .filter(|x| !own || x.field == field)
-            .filter_map(|x| Some(nppes::fold(x.city.as_deref()?)))
-            .filter(|c| !c.is_empty())
+            .filter(|x| x.state.is_some() && (!own || x.field == field))
+            .map(|x| &x.city)
             .collect()
     };
-    let mut given = cities(true);
-    if given.is_empty() {
-        given = cities(false);
+    let mut read = of(true);
+    if read.is_empty() {
+        read = of(false);
     }
+    let Some(given) = read
+        .into_iter()
+        .map(|c| Some(nppes::fold(c.as_deref()?)))
+        .collect::<Option<BTreeSet<String>>>()
+    else {
+        return false;
+    };
     let city = nppes::fold(city);
-    given.is_empty() || city.is_empty() || given.contains(&city)
+    given.iter().all(String::is_empty) || city.is_empty() || given.contains(&city)
 }
 
 /// Whether a match an earlier pass made still stands for the record: its
@@ -3326,6 +3333,7 @@ mod tests {
         c.add(NAMED, text, "");
         let r = c.index.records.last_mut().unwrap();
         r.providers[0].npi = None;
+        r.providers[0].city = Some(String::new());
         of(r);
         c
     }
@@ -3425,6 +3433,13 @@ mod tests {
         assert!(is(&|r| r.fields["category"] = json!("dental")).is_null());
         // Its city, the field's own before another provider's.
         let city = |c: &str| Some(c.to_string());
+        // As read by a medrec that did not look for one, it may be another.
+        assert!(is(&|r| r.providers[0].city = None).is_null());
+        assert!(!is(&|r| {
+            r.providers[0].city = None;
+            r.providers[0].state = None;
+        })
+        .is_null());
         assert!(!is(&|r| r.providers[0].city = city("Exampleton")).is_null());
         assert!(is(&|r| r.providers[0].city = city("Sampleburg")).is_null());
         let facility = |own: Option<String>| {
@@ -3434,7 +3449,10 @@ mod tests {
                 p.field = "facility".into();
                 p.city = Some("Sampleburg".into());
                 r.providers.push(p);
-                r.providers[0].city = own.clone();
+                match &own {
+                    Some(c) => r.providers[0].city = Some(c.clone()),
+                    None => r.providers[0].state = None,
+                }
             }
         };
         assert!(is(&facility(None)).is_null());
@@ -3522,14 +3540,14 @@ mod tests {
         // It is not where an earlier medrec reads its matches.
         assert!(c.state()["matched"].get(NAMED).is_none());
         assert!(c.state()["first_names"].get(NAMED).is_some());
-        let of_record = |c: &mut Case, city: &str| {
+        let of_record = |c: &mut Case, city: Option<&str>| {
             let r = c.index.records.iter_mut().find(|r| r.id == NAMED).unwrap();
-            r.providers[0].city = Some(city.into());
+            r.providers[0].city = city.map(str::to_string);
             c.sync(false);
             c.labels()["claims"].get(NAMED).is_some()
         };
-        assert!(of_record(&mut c, "Exampleton"));
-        assert!(!of_record(&mut c, "Sampleburg"));
+        assert!(of_record(&mut c, Some("Exampleton")));
+        assert!(!of_record(&mut c, Some("Sampleburg")));
         assert!(c.state().get("first_names").is_none());
     }
 }

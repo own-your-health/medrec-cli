@@ -230,11 +230,16 @@ impl Labels {
             }
             may.then_some(Value::Object(out))
         };
-        let evidence: Vec<Value> = label
-            .get("evidence")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
+        let reasons = || {
+            let all = label.get("evidence").and_then(Value::as_array);
+            all.into_iter().flatten()
+        };
+        // A label has one for each text whose first name told; this text's is
+        // why it is this text's.
+        let of_another = |e: &Value| e["from"] == "first_name" && e["printed"] != p.text.as_str();
+        let own = reasons().any(|e| e["from"] == "first_name" && !of_another(e));
+        let evidence: Vec<Value> = reasons()
+            .filter(|e| !own || !of_another(e))
             .filter_map(|e| match e["from"].as_str()? {
                 "only_match" => from(e, &["state"]),
                 "first_name" => from(e, &["state", "city", "printed"]),
@@ -344,6 +349,18 @@ mod tests {
                 &json!([{"from": "first_name", "state": "FL", "city": "Exampleton",
                     "printed": "Drew Specimen, MD"}])
             )
+        );
+        // Another text of the same provider is not why; a text said to be the
+        // same provider's has the text that was.
+        let printed = |text: &str| -> Vec<Value> {
+            let l = &shown(VISIT, text, true)[0];
+            let all = l["evidence"].as_array().unwrap();
+            all.iter().map(|e| e["printed"].clone()).collect()
+        };
+        assert_eq!(printed("SPECIMEN, DREW MD"), ["SPECIMEN, DREW MD"]);
+        assert_eq!(
+            printed("D SPECIMEN"),
+            ["Drew Specimen, MD", "SPECIMEN, DREW MD"]
         );
         // Exactly as printed, and one item can have its own.
         assert!(shown(VISIT, "J Sample", true).is_empty());

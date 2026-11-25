@@ -128,7 +128,7 @@ pub fn of(
                 field: field.into(),
                 npi: facts.npi,
                 state: facts.place.as_ref().map(|p| p.state.clone()),
-                city: facts.place.and_then(|p| p.city),
+                city: facts.place.map(|p| p.city),
             });
         }
     }
@@ -231,7 +231,7 @@ struct Facts {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Place {
     state: String,
-    city: Option<String>,
+    city: String,
 }
 
 /// The NPI and address a reference leads to: its own identifier, then the
@@ -358,10 +358,10 @@ fn npi_of_one(id: &Value) -> Option<String> {
 fn address(v: &Value) -> Option<Place> {
     let a = v.get("address")?;
     let one = |a: &Value| {
-        let city = a.get("city").and_then(Value::as_str).map(str::trim);
+        let city = a.get("city").and_then(Value::as_str).unwrap_or("");
         Some(Place {
             state: a.get("state").and_then(Value::as_str).and_then(state)?,
-            city: city.filter(|c| !c.is_empty()).map(str::to_string),
+            city: city.trim().to_string(),
         })
     };
     match a.as_array() {
@@ -527,7 +527,7 @@ mod tests {
         );
         assert_eq!(
             of(json!([{"state": "FL", "city": " "}, {"state": "NY", "city": "Sampleburg"}])),
-            [entry("performer", None, Some("FL"))]
+            [at("FL", "")]
         );
         assert!(of(json!({"city": "Exampleton"})).is_empty());
 
@@ -594,7 +594,11 @@ mod tests {
         });
         let of = |f: Value| of(&r, &map(f), &mut One).unwrap();
         let both = of(json!({"performer": "Jordan Sample", "location": "Example Annex"}));
-        assert_eq!(both.refs, [entry("location", None, Some("NY"))]);
+        let ny = ProviderRef {
+            field: "location".into(),
+            ..at("NY", "")
+        };
+        assert_eq!(both.refs, [ny]);
         assert_eq!(both.unresolved, BTreeSet::from(["performer"]));
         assert!(of(json!({"location": "Example Clinic"})).refs.is_empty());
         assert!(of(json!({})).refs.is_empty());

@@ -701,8 +701,8 @@ medrec tables list                                  # what is kept, and of which
   9,000,000 rows is refused. A file that fails leaves the last one in use.
   Each month's file replaces the one before, so there is no hash to record
   here: its link, month, size, SHA-256 and row count are kept with the rows.
-- Records need their providers' NPI and state: those filed before 0.9.6 get
-  them from `medrec reindex`.
+- Records need their providers' NPI, state and city: those filed before 0.9.8
+  get them from `medrec reindex`.
 - **What it is for**: a name, role and phone beside a provider a record
   prints, sure or likely and with the reason, in `views/` as
   `providers.json` (docs/data-contract.md, "Provider labels"). The record's
