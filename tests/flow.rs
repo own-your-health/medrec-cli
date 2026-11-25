@@ -2616,6 +2616,146 @@ fn with_left_out_line() -> String {
         .collect()
 }
 
+/// The raw files of a record, and of many, by the names of their elements and
+/// how many of each, and what a later version changed, with no value.
+#[test]
+fn the_raw_files_of_a_record_are_counted_by_the_names_of_their_elements() {
+    let base = Env::new("raw-files");
+    setup(&base);
+    let import = |version: u32, mark: bool| {
+        let stream: String = with_left_out_line()
+            .lines()
+            .map(|l| {
+                let mut v: Value = serde_json::from_str(l).unwrap();
+                if v["resourceType"] == "ExplanationOfBenefit" {
+                    v["meta"] = serde_json::json!({"versionId": version.to_string(),
+                        "lastUpdated": format!("2026-03-0{version}T00:00:00Z")});
+                    if mark {
+                        let of = v["item"][0]["adjudication"].as_array_mut().unwrap();
+                        of.push(
+                            serde_json::json!({"category": {"coding": [{"code": "not-counted"}]}}),
+                        );
+                    }
+                }
+                format!("{v}\n")
+            })
+            .collect();
+        provider_env(&base, &stream).ok(&[
+            "import",
+            "--from",
+            "fakeprov",
+            "--from-profile",
+            "adult1",
+            "--patient",
+            "pat-0001",
+            "--person",
+            "Robin",
+        ])
+    };
+    import(1, false);
+    import(2, true);
+    let index = std::fs::read(base.records().join("Robin Testperson/index.json")).unwrap();
+    let index: Value = serde_json::from_slice(&index).unwrap();
+    let records = index["records"].as_array().unwrap().iter();
+    let claims: Vec<&Value> = records.filter(|r| r["kind"] == "claim").collect();
+    let id = claims[0]["id"].as_str().unwrap().to_string();
+
+    // As its source sent it, each version that is kept.
+    let raw = base.ok(&["records", "raw", &id]);
+    assert_eq!(raw["schema"], "record-raw/v1");
+    let files = raw["files"].as_array().unwrap();
+    assert_eq!(files.len(), 2, "{raw}");
+    let versions: Vec<&Value> = files
+        .iter()
+        .map(|f| &f["resource"]["meta"]["versionId"])
+        .collect();
+    assert_eq!(versions, ["1", "2"]);
+    assert_eq!(files[1]["version"], "current");
+    assert_ne!(files[0]["version"], "current");
+
+    // What the later one changed, and no value of either.
+    let no_value = |text: &str| {
+        for word in [
+            "eob-rehab",
+            "Sample",
+            "Example Health",
+            "97110",
+            "200",
+            "2024",
+            "2026-03",
+            "Robin",
+        ] {
+            assert!(!text.contains(word), "{word}: {text}");
+        }
+    };
+    let changes = base.ok(&["records", "raw", &id, "--changes"]);
+    let of = &changes["files"][0];
+    assert_eq!(
+        (&of["cli"], &of["versions"]),
+        (&"fakeprov".into(), &2.into()),
+        "{changes}"
+    );
+    let changed = of["steps"][0]["changed"].as_array().unwrap();
+    let row = |path: &str| {
+        changed
+            .iter()
+            .find(|c| c["path"] == path)
+            .cloned()
+            .unwrap_or_default()
+    };
+    let code = "item[].adjudication[].category.coding[].code";
+    assert_eq!(
+        row(code),
+        serde_json::json!({"path": code, "added": 1, "removed": 0})
+    );
+    let at = "meta.versionId";
+    assert_eq!(
+        row(at),
+        serde_json::json!({"path": at, "added": 1, "removed": 1})
+    );
+    no_value(&changes["files"].to_string());
+
+    let fields = base.ok(&["records", "raw", &id, "--fields"]);
+    let word = |v: &Value, word: &str| -> Value {
+        let words = v["types"][0]["words"].as_array().unwrap().iter();
+        let mut of = words.filter(|w| w["path"] == code && w["word"] == word);
+        of.next().map_or(Value::Null, |w| w["n"].clone())
+    };
+    assert_eq!(word(&fields, "not-counted"), 1, "{fields}");
+    no_value(&fields["types"].to_string());
+
+    // Of many, each file once.
+    let all = base.ok(&["records", "fields", "--person", "Robin", "--kind", "claim"]);
+    assert_eq!(all["schema"], "raw-fields/v1");
+    let counts = ["records", "without_raw", "unread"].map(|k| all[k].as_u64().unwrap());
+    assert_eq!(counts, [claims.len() as u64, 0, 0]);
+    assert_eq!(all["types"].as_array().unwrap().len(), 1, "{all}");
+    assert_eq!(all["types"][0]["resource_type"], "ExplanationOfBenefit");
+    assert_eq!(word(&all, "not-counted"), 1, "{all}");
+    no_value(&all.to_string());
+    let every = base.ok(&["records", "fields"]);
+    assert!(every["types"].as_array().unwrap().len() > 4, "{every}");
+    for args in [
+        &["records", "fields", "--kind", "claim"][..],
+        &["records", "raw", &id, "--fields"],
+        &["records", "raw", &id, "--changes"],
+    ] {
+        let out = base.run(args);
+        let text = String::from_utf8(out.stdout).unwrap();
+        assert!(text.contains(code), "{text}");
+        no_value(&text);
+    }
+
+    // One file that does not read is counted, and named when it is asked for.
+    let path = base.records().join(files[1]["path"].as_str().unwrap());
+    std::fs::write(&path, "{").unwrap();
+    let all = base.ok(&["records", "fields", "--kind", "claim"]);
+    assert_eq!(all["unread"], 1, "{all}");
+    assert!(!base.run(&["records", "raw", &id]).status.success());
+    let none = base.run(&["records", "raw", "r_aaaaaaaaaaaaaaaaaaaa"]);
+    assert_eq!(none.status.code(), Some(4));
+}
+
 /// What each record says of the providers it prints, by its kind and field.
 fn providers_of(index: &Value) -> Vec<String> {
     let mut out: Vec<String> = index["records"]

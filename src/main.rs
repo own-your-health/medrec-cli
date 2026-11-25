@@ -23,7 +23,9 @@ use medrec::folder::{Access, Folder};
 use medrec::intake::{self, Given};
 use medrec::store::{Location, BIN};
 use medrec::views::Range;
-use medrec::{imaging, import, maint, notes, nppes, people, review, store, tables, view, views};
+use medrec::{
+    imaging, import, maint, notes, nppes, people, raw, review, store, tables, view, views,
+};
 
 const REPO: &str = "own-your-health/medrec-cli";
 
@@ -794,6 +796,26 @@ struct LabelsOf {
 enum RecordsCmd {
     /// One record, also one that no list shows.
     Show { id: String },
+    /// The raw files a record was read from, as its sources sent them.
+    Raw {
+        id: String,
+        /// The names of their elements and how many of each, with no value.
+        #[arg(long, conflicts_with = "changes")]
+        fields: bool,
+        /// The names of the elements that differ between the versions kept of
+        /// each, with no value.
+        #[arg(long)]
+        changes: bool,
+    },
+    /// The names of the elements in the raw files of many records, and how
+    /// many of each, with no value.
+    Fields {
+        #[arg(long)]
+        person: Option<String>,
+        /// Records of this kind (claim, result, …).
+        #[arg(long)]
+        kind: Option<String>,
+    },
     /// The ids of what is in a person's chart and about somebody else: a
     /// screening a parent answers about themselves, a result its source says
     /// is another's. Lists only count these.
@@ -3252,6 +3274,45 @@ fn one_record_cmd(cli: &Cli, cmd: &RecordsCmd, store: &ConfigStore) -> Result<()
                 output::kv(v, 0)
             });
         }
+        RecordsCmd::Raw {
+            id,
+            fields,
+            changes,
+        } => {
+            let (p, r) = raw::record(&f, &h, id)?;
+            let of = |v: Value| {
+                let mut out = json!({"person": p.id, "id": r.id, "kind": r.kind});
+                for (k, v) in v.as_object().into_iter().flatten() {
+                    out[k] = v.clone();
+                }
+                out
+            };
+            if *changes {
+                let c = raw::changes(&f, &r)?;
+                output::emit(json, "record-changes", of(json!({"files": c})), |_| {
+                    changes_lines(&c).iter().for_each(|l| println!("{l}"));
+                });
+            } else if *fields {
+                let c = raw::fields_of(&f, &r)?;
+                output::emit(json, "record-fields", of(to_value(&c)), |_| {
+                    fields_lines(&c).iter().for_each(|l| println!("{l}"));
+                });
+            } else {
+                let files = raw::files(&f, &r)?;
+                output::emit(json, "record-raw", of(json!({"files": files})), |_| {
+                    for x in &files {
+                        println!("{} ({})", x.path, x.version);
+                        println!("{:#}", x.resource);
+                    }
+                });
+            }
+        }
+        RecordsCmd::Fields { person, kind } => {
+            let c = raw::fields(&f, &h, person.as_deref(), kind.as_deref())?;
+            output::emit(json, "raw-fields", to_value(&c), |_| {
+                fields_lines(&c).iter().for_each(|l| println!("{l}"));
+            });
+        }
         RecordsCmd::AboutAnother { person, list } => {
             let mut rows = Vec::new();
             for p in medrec::people::selected(&h, person.as_deref())? {
@@ -3266,6 +3327,46 @@ fn one_record_cmd(cli: &Cli, cmd: &RecordsCmd, store: &ConfigStore) -> Result<()
         }
     }
     Ok(())
+}
+
+fn fields_lines(c: &raw::Fields) -> Vec<String> {
+    let mut out = vec![format!(
+        "{} records, {} with no raw file; {} raw files do not read",
+        c.records, c.without_raw, c.unread
+    )];
+    for t in &c.types {
+        out.push(format!("{} {}: {} files", t.cli, t.resource_type, t.files));
+        for e in t.elements.iter().chain(&t.words) {
+            let word = e.word.as_ref().map_or(String::new(), |w| format!(" = {w}"));
+            out.push(format!("  {}{word}: {} in {} files", e.path, e.n, e.files));
+        }
+    }
+    out
+}
+
+fn changes_lines(all: &[raw::Changes]) -> Vec<String> {
+    let mut out = Vec::new();
+    for c in all {
+        out.push(format!(
+            "{} {}: {} versions",
+            c.cli, c.resource_type, c.versions
+        ));
+        for s in &c.steps {
+            let said = if s.reordered {
+                ", in another order"
+            } else {
+                ""
+            };
+            out.push(format!("  {} to {}{said}", s.from, s.to));
+            for e in &s.changed {
+                out.push(format!(
+                    "    {}: {} added, {} removed",
+                    e.path, e.added, e.removed
+                ));
+            }
+        }
+    }
+    out
 }
 
 /// Copy one file into a fresh private open folder and return its path.
