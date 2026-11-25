@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use clap_complete::Shell;
-use pk_cli_auth::AuthStatus;
+use pk_cli_auth::{AuthStatus, KeyArgs};
 use pk_cli_config::profile::ProfileName;
 use pk_cli_config::ConfigStore;
 use pk_cli_core::info::{AuthInfo, CliInfo};
@@ -31,7 +31,7 @@ const REPO: &str = "own-your-health/medrec-cli";
 /// scans and files with local OCR, imaging studies, provider and insurer
 /// imports, timelines, search and notes.
 #[derive(Parser, Debug)]
-#[command(name = BIN, version, about, long_about = None)]
+#[command(name = BIN, version, long_version = pk_cli_core::version!(), about, long_about = None)]
 struct Cli {
     #[command(flatten)]
     common: CommonArgs,
@@ -947,6 +947,10 @@ enum AuthCmd {
     /// The records folder's Drive sign-in, as `medrec drive status` reports
     /// it; none is needed for a folder on a local disk.
     Status,
+    /// Read the vault's key from the Keychain once, past every cache, and say
+    /// what macOS did (auth-key/v1): the first call after an install. It
+    /// needs no profile: one key seals every Drive sign-in.
+    Key(KeyArgs),
 }
 
 #[derive(Subcommand, Debug)]
@@ -1310,6 +1314,13 @@ fn run(cli: &Cli) -> Result<(), CliError> {
             Ok(())
         }
         Command::Config(cmd) => config_cmd(cli, cmd, &store),
+        Command::Auth(AuthCmd::Key(args)) => {
+            let code = store::shared_vault()?.check_key(args)?.emit(json);
+            if code != 0 {
+                std::process::exit(code);
+            }
+            Ok(())
+        }
         Command::Auth(AuthCmd::Status)
             if cli.profile.is_none()
                 && std::env::var(medrec::config::PROFILE_ENV).map_or(true, |v| v.is_empty()) =>
@@ -1396,7 +1407,8 @@ fn run(cli: &Cli) -> Result<(), CliError> {
                 },
                 // Its records-folder commands take --profile.
                 &[pk_med_records::LOGIN_PROFILES],
-            );
+            )
+            .with_build(pk_cli_core::build_info!());
             output::json(&to_value(&info));
             Ok(())
         }
@@ -2479,7 +2491,12 @@ fn refresh_cmd(cli: &Cli, a: &RefreshArgs, store: &ConfigStore) -> Result<(), Cl
         } else {
             Mode::Manual
         };
-        let r = refresh::pass(&cfg, mode, pick.as_ref())?;
+        let r = refresh::pass(&cfg, mode, pick.as_ref()).inspect_err(|_| {
+            // The LaunchAgent's log has the time of every line but an error's.
+            if mode == Mode::Scheduled && !json {
+                println!("{} failed", medrec::model::now_rfc3339());
+            }
+        })?;
         let failed = r.attempts.iter().any(|x| x.outcome == "failed");
         let needs = r.attempts.iter().any(|x| x.outcome == "needs_person");
         if mode == Mode::Scheduled && r.status == "idle" && !json {
@@ -2519,11 +2536,6 @@ fn refresh_cmd(cli: &Cli, a: &RefreshArgs, store: &ConfigStore) -> Result<(), Cl
                     q.request,
                     q.outcome,
                     why.unwrap_or_default()
-                );
-            }
-            if let Some(c) = &r.command {
-                println!(
-                    "  the Drive sign-in waits on a Keychain approval; run `{c}` at the screen"
                 );
             }
         });

@@ -797,17 +797,17 @@ fn a_reimport_names_the_patient_by_the_providers_label() {
     let _ = std::fs::remove_dir_all(Path::new(&e.root));
 }
 
-/// One connection serves Alex three practices and Robin a fourth under one
-/// organization id and FHIR base. Each of Alex's visits has its own
-/// practice's name and its own practice's result, and no one's records have
-/// another person's practice.
+/// Sources that a CLI, an organization and a FHIR base do not tell apart:
+/// each person's records have the name of the source they came from, and no
+/// other's, whichever was imported first.
 #[test]
-fn practices_of_one_connection_keep_their_own_names() {
-    let base = Env::new("connection");
+fn sources_with_one_key_keep_their_own_names() {
+    let base = Env::new("shared-key");
     setup(&base);
     let e = provider_env(&base, medrec::testdata::STREAM);
-    medrec::testdata::write_connection(&base.root.join("provider"));
-    for (patient, person, _) in medrec::testdata::connection_streams() {
+    medrec::testdata::write_shared_key(&base.root.join("provider"));
+    let streams = medrec::testdata::shared_key_streams();
+    for (patient, person, _, _) in &streams {
         e.ok(&[
             "import",
             "--from",
@@ -821,96 +821,82 @@ fn practices_of_one_connection_keep_their_own_names() {
         ]);
     }
     let people = e.ok(&["people", "list"]);
-    let id = |name: &str| -> String {
-        let p = people["items"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|p| p["name"] == name)
-            .unwrap();
-        p["id"].as_str().unwrap().to_string()
-    };
-    let alex = id("Alex Testperson");
     let views = e.records().join("views");
     let read = |path: PathBuf| -> Value {
         serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
     };
     let index = read(views.join("views.json"));
-    let view = |name: &str| {
-        let md5 = index["people"][&alex]["files"][name].as_str().unwrap();
-        read(
-            views
-                .join(&alex)
-                .join(medrec::viewfiles::stored_name(name, md5)),
-        )
-    };
-    let events = view("events.json");
-    let mut visits: Vec<(String, Vec<String>)> = events["events"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|ev| {
-            let members = ev["members"].as_array().unwrap().iter();
-            (
-                ev["place"].as_str().unwrap().to_string(),
-                members
-                    .map(|m| m["title"].as_str().unwrap().to_string())
-                    .filter(|t| t.starts_with("Sample level"))
-                    .collect(),
-            )
-        })
-        .collect();
-    visits.sort();
-    assert_eq!(visits.len(), 3, "{events}");
-    for ((place, results), (practice, patient)) in visits.iter().zip([
-        ("Example Eye Center", "eye-1"),
-        ("Placeholder Hearing Clinic", "hearing-1"),
-        ("Sample Skin Studio", "studio-1"),
-    ]) {
-        assert_eq!(place, practice);
-        assert_eq!(results.len(), 1, "{results:?}");
-        assert!(results[0].contains(patient), "{place}: {results:?}");
-    }
-
-    // The same names on the record lists, the timeline and the views.
-    let names = |v: &Value, at: &str| -> Vec<String> {
-        let mut named: Vec<String> = v["items"]
+    for who in ["Alex", "Robin"] {
+        let person = people["items"]
             .as_array()
             .unwrap()
             .iter()
-            .map(|r| r.pointer(at).unwrap().as_str().unwrap().to_string())
+            .find(|p| p["name"] == format!("{who} Testperson"))
+            .unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let view = |name: &str| {
+            let md5 = index["people"][&person]["files"][name].as_str().unwrap();
+            read(
+                views
+                    .join(&person)
+                    .join(medrec::viewfiles::stored_name(name, md5)),
+            )
+        };
+        let own: Vec<(&str, &str)> = streams
+            .iter()
+            .filter(|(_, p, _, _)| *p == who)
+            .map(|(patient, _, name, _)| (*patient, *name))
             .collect();
-        named.sort();
-        named
-    };
-    let all = [
-        "Example Eye Center",
-        "Placeholder Hearing Clinic",
-        "Sample Skin Studio",
-    ];
-    let rows = e.ok(&["results", "--person", "Alex"]);
-    assert_eq!(names(&rows, "/sources/0"), all, "{rows}");
-    let visits = e.ok(&["timeline", "--person", "Alex", "--kind", "encounter"]);
-    assert_eq!(names(&visits, "/source"), all, "{visits}");
-    let labels: Vec<Value> = view("records-encounter-0.json")
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|r| r["provenance"][0]["source"]["label"].clone())
-        .collect();
-    assert_eq!(labels.len(), 3);
-    assert!(
-        all.iter().all(|p| labels.contains(&(*p).into())),
-        "{labels:?}"
-    );
-    let mut sources: Vec<String> = view("summary.json")["sources"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|s| s["source"].as_str().unwrap().to_string())
-        .collect();
-    sources.sort();
-    assert_eq!(sources, all);
+        assert_eq!(own.len(), 2);
+
+        // Each visit has its source's name, and the reading of its source.
+        let events = view("events.json");
+        for (patient, name) in &own {
+            let reading = format!("Reading at {patient}");
+            let visits: Vec<&Value> = events["events"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|ev| {
+                    let mut members = ev["members"].as_array().unwrap().iter();
+                    members.any(|m| m["title"] == *reading)
+                })
+                .collect();
+            assert_eq!(visits.len(), 1, "{events}");
+            assert_eq!(visits[0]["place"], *name, "{events}");
+            let titles = visits[0]["members"].as_array().unwrap().iter();
+            let readings = titles.filter(|m| m["title"].as_str().unwrap().starts_with("Reading"));
+            assert_eq!(readings.count(), 1, "{events}");
+        }
+
+        // The same names on the record lists, the timeline and the views.
+        let mut all: Vec<&str> = own.iter().map(|(_, name)| *name).collect();
+        all.sort();
+        let names = |v: &Value, at: &str| -> Vec<String> {
+            let mut named: Vec<String> = v
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|r| r.pointer(at).unwrap().as_str().unwrap().to_string())
+                .collect();
+            named.sort();
+            named
+        };
+        let rows = e.ok(&["results", "--person", who]);
+        assert_eq!(names(&rows["items"], "/sources/0"), all, "{rows}");
+        let visits = e.ok(&["timeline", "--person", who, "--kind", "encounter"]);
+        assert_eq!(names(&visits["items"], "/source"), all, "{visits}");
+        assert_eq!(
+            names(
+                &view("records-encounter-0.json"),
+                "/provenance/0/source/label"
+            ),
+            all
+        );
+        assert_eq!(names(&view("summary.json")["sources"], "/source"), all);
+    }
     let _ = std::fs::remove_dir_all(&e.root);
 }
 

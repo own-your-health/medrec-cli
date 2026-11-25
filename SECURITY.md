@@ -58,13 +58,11 @@ client's secret as not confidential, and PKCE protects each sign-in.
 - A scheduled refresh never waits on a person. A provider's `auth status` that
   hangs on a Keychain approval is stopped after 30 seconds, and the source is
   not tried again in the background until a person runs `medrec refresh
-  sign-in <id>`, so the LaunchAgent never piles up dialogs. medrec's own
-  Drive sign-in is held to the same rule: a scheduled pass reads it first,
-  waiting at most 30 seconds for the Keychain and sending nothing to
-  Google. A read that does not answer in time (a new build or an update
-  that macOS has not yet been allowed to let read the key) ends the pass,
-  and no scheduled pass by that binary asks again until a person runs
-  `medrec --profile <NAME> refresh` at the screen. One process reads the
+  sign-in <id>`, so the LaunchAgent never piles up dialogs. For medrec's own
+  Drive sign-in a scheduled pass raises none: it reads the key first with
+  macOS's dialogs turned off, sending nothing to Google, and a key that a
+  person would have to allow (a new build or an update, a locked keychain)
+  ends the pass, naming `medrec auth key` to run at the screen. One process reads the
   key once: every later sign-in in that run uses it, so a person's "Allow"
   covers the whole run, and "Always Allow" covers that binary from then
   on.
