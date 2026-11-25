@@ -501,7 +501,8 @@ pub(crate) fn result_row(from: Sources, r: &Record) -> ResultRow {
 /// when; `records` newest first.
 pub(crate) fn latest_results(from: Sources, records: &[&Record]) -> Vec<ResultRow> {
     let mut by: Vec<(String, ResultRow)> = Vec::new();
-    for r in records.iter().filter(|r| r.kind == "result") {
+    let each = records.iter().filter(|r| r.kind == "result");
+    for r in each.filter(|r| !crate::panels::heads(r)) {
         let key = series_key(r);
         match by.iter_mut().find(|(k, _)| *k == key) {
             Some((_, row)) => {

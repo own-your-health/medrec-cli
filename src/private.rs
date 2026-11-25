@@ -23,6 +23,7 @@ use crate::given;
 use crate::marks::{failed, Failed, Marks, LABELS, READ, READ_DECISIONS, RECORDS, WRITE};
 use crate::model::{Document, Household, Person, PersonIndex, PersonText, Record};
 use crate::normalize::COMPONENTS;
+use crate::panels;
 use crate::parts::{self, Parts};
 use crate::questionnaires;
 use crate::services;
@@ -369,10 +370,8 @@ fn record_why(r: &Record) -> Option<Why> {
         // A reading is, by any of its parts.
         "result" | "report" => questionnaires::told_by(r)
             .iter()
-            .find_map(|(name, code)| {
-                first_area(&TESTS, name)
-                    .or_else(|| questionnaires::of(name, code.as_ref()).map(|q| q.area))
-            })
+            .find_map(|(name, _)| first_area(&TESTS, name))
+            .or_else(|| questionnaires::asked_by(r).first().map(|q| q.area))
             .or_else(|| parts_say(r).find_map(words))
             .map(|area| Why::of(area, "test"))
             .or_else(|| by_names(&["performer"])),
@@ -491,7 +490,7 @@ pub fn build(
             let w = w.or_else(|| label(&d.id));
             items.extend(w.map(|w| (d.id.clone(), w)));
         }
-        follow(&mut items, idx, events, &ties, marks, label);
+        follow(&mut items, idx, events, &ties, marks, given, label);
         for (study, of) in &reports {
             let mut why = of.iter().flatten();
             if let Some(w) = why.find_map(|r| items.get(r).copied()) {
@@ -607,13 +606,14 @@ fn parts_of(
 }
 
 /// What is private with what is: by the household's marks, the records and
-/// papers tied to it, and events.
+/// papers tied to it, and events. `given`: by what a panel listed before too.
 fn follow(
     items: &mut BTreeMap<String, Why>,
     idx: &PersonIndex,
     events: &Value,
     ties: &[(String, String)],
     marks: &[Mark],
+    given: bool,
     by_label: impl Fn(&str) -> Option<Why>,
 ) {
     // The household's marks on records, then the documents a private record
@@ -674,6 +674,32 @@ fn follow(
     for r in &idx.records {
         apply(items, &r.id, mark_of.get(r.id.as_str()).copied());
     }
+    // A panel or a report one list of which has none but private results, with
+    // those entered in error or without them. To any depth.
+    let in_error = idx.records.iter().filter(|r| standing::record_in_error(r));
+    let in_error: BTreeSet<&str> = in_error.map(|r| r.id.as_str()).collect();
+    let panels: Vec<(&str, Vec<panels::List>)> = panels::every_list(&idx.records)
+        .into_iter()
+        .map(|(i, lists)| (idx.records[i].id.as_str(), lists))
+        .filter(|(id, _)| mark_of.get(id) != Some(&false))
+        .collect();
+    let panel = |items: &mut BTreeMap<String, Why>| loop {
+        let before = items.len();
+        for (id, lists) in &panels {
+            let private = |id: &str| items.contains_key(id);
+            let mut lists = lists.iter().filter(|l| given || l.now);
+            let list = lists.find(|l| panels::all(&l.ids, &in_error, &private));
+            let first = list.and_then(|l| l.ids.iter().find_map(|id| items.get(*id)));
+            let why = first.map(|w| Why::of(w.area, "members"));
+            if let Some(w) = why.filter(|_| !items.contains_key(*id)) {
+                items.insert(id.to_string(), w);
+            }
+        }
+        if items.len() == before {
+            break;
+        }
+    };
+    panel(items);
     link(items);
     for d in &idx.documents {
         apply(items, &d.id, mark_of.get(d.id.as_str()).copied());
@@ -734,6 +760,7 @@ fn follow(
                 }
             }
         }
+        panel(items);
         link(items);
         tie(items);
         if items.len() == before {

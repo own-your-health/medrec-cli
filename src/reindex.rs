@@ -13,7 +13,7 @@ use std::path::Path;
 
 use pk_cli_core::CliError;
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::about;
 use crate::changes::{self, Changes};
@@ -23,6 +23,7 @@ use crate::given::{self, Given};
 use crate::import;
 use crate::model::{today, Household, InError, Person, PersonIndex, Provenance, Record, Word};
 use crate::normalize;
+use crate::panels;
 use crate::people;
 use crate::viewfiles;
 
@@ -58,9 +59,12 @@ pub struct Reindexed {
     pub given_updated: usize,
     /// Results that were filed with one about somebody else.
     pub results_split: usize,
-    /// Results and reports whose values changed: their fields, status, name,
-    /// code or date.
+    /// Results and reports whose values, or what they list, changed: their
+    /// fields, status, name, code, date or `lists`.
     pub results_updated: usize,
+    /// Records whose links to others are made otherwise: a claim's, a panel's,
+    /// and the questionnaires that list a result.
+    pub links_updated: usize,
     /// Papers whose sources, or what one says or gave of them, changed.
     pub papers_updated: usize,
     /// Raw files of papers that do not read.
@@ -79,9 +83,12 @@ pub struct PersonReindexed {
     pub statuses_updated: usize,
     pub given_updated: usize,
     pub results_split: usize,
-    /// Results and reports whose values changed: their fields, status, name,
-    /// code or date.
+    /// Results and reports whose values, or what they list, changed: their
+    /// fields, status, name, code, date or `lists`.
     pub results_updated: usize,
+    /// Records whose links to others are made otherwise: a claim's, a panel's,
+    /// and the questionnaires that list a result.
+    pub links_updated: usize,
     pub papers_updated: usize,
     pub papers_unread: usize,
     /// Of a dry run: what would change in the person's views.
@@ -120,6 +127,18 @@ fn content(r: &Record) -> impl PartialEq + '_ {
     )
 }
 
+/// What a record says of others, which is made of the index.
+fn links(r: &Record) -> Value {
+    if r.kind != "claim" {
+        return json!([r.fields.get(panels::MEMBERS), r.listed_by]);
+    }
+    let lines = r.fields.get("items").and_then(Value::as_array);
+    let lines = lines.into_iter().flatten().enumerate();
+    let lines = lines.filter_map(|(i, l)| Some((i, l.get("records")?)));
+    let lines: Vec<(usize, &Value)> = lines.collect();
+    json!([r.fields.get("visit"), r.fields.get("results"), lines])
+}
+
 /// Shape every claim of `person` (everyone's by default) again from the raw
 /// file it is of. A claim the shaping would give another `key` is left as it
 /// is: re-keying is an import's to do. Bills and
@@ -146,6 +165,8 @@ pub fn claims(
         if dry_run {
             as_read.push((p, idx.clone(), md5));
         }
+        let linked = idx.records.iter().map(|r| (r.id.clone(), links(r)));
+        let linked: BTreeMap<String, Value> = linked.collect();
         let raw_of = |r: &Record| r.provenance.iter().find_map(|pr| pr.raw_path.clone());
         // One copy per folder of raw files, not one call per file.
         let dirs: BTreeSet<String> = idx
@@ -206,6 +227,11 @@ pub fn claims(
         row.papers_updated = papers.changed;
         row.papers_unread = papers.unread;
         row.statements = crate::bill::backfill(&mut idx, &folder.text(p)?);
+        // As a saved index is: this medrec's rules can link it otherwise.
+        crate::claims::link(&mut idx.records);
+        crate::panels::link(&mut idx.records);
+        let other = |r: &&Record| linked.get(&r.id).is_some_and(|was| *was != links(r));
+        row.links_updated = idx.records.iter().filter(other).count();
         let changed = [
             row.reshaped,
             row.statements,
@@ -214,13 +240,11 @@ pub fn claims(
             row.given_updated,
             row.results_split,
             row.results_updated,
+            row.links_updated,
             row.papers_updated,
         ];
-        match (changed.iter().any(|n| *n > 0), dry_run) {
-            (true, false) => folder.save_index(p, &mut idx)?,
-            // As a saved index is.
-            (true, true) => crate::claims::link(&mut idx.records),
-            (false, _) => {}
+        if !dry_run && changed.iter().any(|n| *n > 0) {
+            folder.save_index(p, &mut idx)?;
         }
         if dry_run {
             would_be.insert(p.id.clone(), idx);
@@ -231,6 +255,7 @@ pub fn claims(
         out.given_updated += row.given_updated;
         out.results_split += row.results_split;
         out.results_updated += row.results_updated;
+        out.links_updated += row.links_updated;
         out.papers_updated += row.papers_updated;
         out.papers_unread += row.papers_unread;
         out.claims += row.claims;
@@ -507,11 +532,13 @@ fn apart(
             n.words = kept.cloned().collect();
             let kept = r.errors.iter().filter(|e| its(&e.raw_path));
             n.errors = kept.cloned().collect();
+            n.listed_by = r.listed_by.clone();
         }
         let left = r.provenance.iter().filter_map(|p| p.raw_path.clone());
         let left: Vec<String> = left.collect();
         r.words.retain(|w| left.contains(&w.raw_path));
         r.errors.retain(|e| left.contains(&e.raw_path));
+        r.lists.retain(|path, _| left.contains(path));
         if again {
             import::values_again(&mut r, &mut |p| Ok(shape(p)))?;
         }
@@ -534,6 +561,8 @@ fn apart(
                 r.documents.push(d);
             }
         }
+        panels::keep(r, n.listed_by);
+        r.lists.extend(n.lists);
         r.provenance.extend(n.provenance);
         r.words.extend(n.words);
         r.errors.extend(n.errors);
@@ -679,39 +708,53 @@ fn statuses(idx: &mut PersonIndex, tmp: &Path) -> Result<usize, CliError> {
 /// The values of each result and report again, from the raw file they are of:
 /// one that does not say it is entered in error, and would not give the record
 /// another `key`. Of several sources' it is the one the record names, else one
-/// its values agree with, else none. Records changed, counted.
+/// its values agree with, else none. And what each of its raw files lists.
+/// Records changed, counted.
 fn results(idx: &mut PersonIndex, tmp: &Path) -> usize {
     let mut changed = 0;
     let each = idx.records.iter_mut();
     for r in each.filter(|r| matches!(r.kind.as_str(), "result" | "report")) {
-        let shape = |p: &Provenance| {
-            let new = normalize::record(&read(tmp, p.raw_path.as_ref()?)?, p.clone())?;
-            let in_error = new.words.iter().any(|w| w.in_error());
-            (new.key == r.key && new.kind == r.kind && !in_error).then_some(new)
-        };
-        let shape = match (r.provenance.as_slice(), import::writer(r)) {
-            ([only], _) => shape(only),
-            (all, Some(path)) => {
-                let of = |p: &&Provenance| p.raw_path.as_deref() == Some(path);
-                all.iter().find(of).and_then(shape)
-            }
-            (all, None) => {
-                let may = all
-                    .iter()
-                    .enumerate()
-                    .filter(|(i, _)| import::can_write(r, *i));
-                may.filter_map(|(_, p)| shape(p)).find(|n| agrees(n, r))
-            }
-        };
-        let Some(new) = shape else { continue };
         let mut now = r.clone();
-        now.display = new.display;
-        now.status = new.status;
-        now.code = new.code;
-        now.date = new.date;
-        now.fields = new.fields;
-        if let Some(who) = r.fields.get(about::FIELD) {
-            now.fields.entry(about::FIELD).or_insert(who.clone());
+        let of = |f: &String| r.provenance.iter().any(|p| p.raw_path.as_ref() == Some(f));
+        now.lists.retain(|f, _| of(f));
+        let mut shapes: Vec<Option<Record>> = Vec::new();
+        for p in &r.provenance {
+            let path = p.raw_path.as_ref();
+            let shape = path.and_then(|f| normalize::record(&read(tmp, f)?, p.clone()));
+            let shape = shape.filter(|n| n.kind == r.kind);
+            if let (Some(path), Some(new)) = (path, &shape) {
+                now.lists.remove(path);
+                now.lists.extend(new.lists.clone());
+            }
+            shapes.push(shape.filter(|n| {
+                let in_error = n.words.iter().any(|w| w.in_error());
+                n.key == r.key && !in_error
+            }));
+        }
+        let its = match import::writer(r) {
+            _ if shapes.len() == 1 => Some(0),
+            Some(path) => {
+                let of = |p: &Provenance| p.raw_path.as_deref() == Some(path);
+                r.provenance.iter().position(of)
+            }
+            None => (0..shapes.len()).find(|i| {
+                let agree = shapes[*i].as_ref().is_some_and(|n| agrees(n, r));
+                agree && import::can_write(r, *i)
+            }),
+        };
+        if let Some(new) = its.and_then(|i| shapes[i].take()) {
+            now.display = new.display;
+            now.status = new.status;
+            now.code = new.code;
+            now.date = new.date;
+            now.fields = new.fields;
+            // Whom it is about by another version, and what it lists, which is
+            // made of the index when it is saved.
+            for k in [about::FIELD, panels::MEMBERS] {
+                if let Some(v) = r.fields.get(k) {
+                    now.fields.entry(k).or_insert(v.clone());
+                }
+            }
         }
         if now != *r {
             *r = now;
@@ -722,8 +765,9 @@ fn results(idx: &mut PersonIndex, tmp: &Path) -> usize {
 }
 
 /// Whether a record's status and fields are of this shape of one of its raw
-/// files: it has each, but the prescriber import finds elsewhere, and what says
-/// that a result's value is a bound, which medrec before 0.9.10 did not read.
+/// files: it has each, but what is found elsewhere (a prescriber, whom another
+/// version says it is about, the members of a panel), and what says that a
+/// result's value is a bound, which medrec before 0.9.10 did not read.
 fn agrees(shape: &Record, r: &Record) -> bool {
     if r.kind == "claim" {
         return content(shape) == content(r);
@@ -735,8 +779,10 @@ fn agrees(shape: &Record, r: &Record) -> bool {
         }
         Some(v)
     };
+    let elsewhere = ["prescriber", about::FIELD, panels::MEMBERS];
     let said = |(k, v): (&String, &Value)| {
-        k == "prescriber" || shape.fields.get(k) == Some(v) || read(k).as_ref() == Some(v)
+        let same = shape.fields.get(k) == Some(v) || read(k).as_ref() == Some(v);
+        same || elsewhere.contains(&k.as_str())
     };
     shape.status == r.status && r.fields.iter().all(said)
 }

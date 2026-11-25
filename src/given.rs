@@ -39,6 +39,10 @@ pub struct Given {
     /// The NPI of the provider a field prints.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub npis: BTreeMap<String, String>,
+    /// What a panel or a report listed, by the raw file that listed it
+    /// ([`Record::lists`]): each whole, where it lists another now.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub lists: BTreeMap<String, Vec<String>>,
 }
 
 /// The same of a paper.
@@ -106,6 +110,7 @@ pub fn of(r: &Record) -> Given {
         code: r.code.clone().filter(|_| coded),
         npis: r.providers.iter().filter_map(npi).collect(),
         fields,
+        lists: r.lists.clone(),
     }
 }
 
@@ -118,8 +123,10 @@ impl Given {
             code,
             fields,
             npis,
+            lists,
         } = self;
-        cli.is_none() && display.is_none() && code.is_none() && fields.is_empty() && npis.is_empty()
+        let named = cli.is_some() || display.is_some() || code.is_some();
+        !named && fields.is_empty() && npis.is_empty() && lists.is_empty()
     }
 
     /// The parts that `shown` does not have. A provider's NPI goes with the
@@ -135,6 +142,7 @@ impl Given {
         let fields = &self.fields;
         self.npis
             .retain(|k, n| fields.contains_key(k) || shown.npis.get(k) != Some(n));
+        self.lists.retain(|k, v| shown.lists.get(k) != Some(v));
         self
     }
 
@@ -145,6 +153,7 @@ impl Given {
             && same(&self.display, &other.display)
             && (self.code.is_none() || self.code == other.code)
             && (self.fields.iter()).all(|(k, v)| other.fields.get(k) == Some(v))
+            && (self.lists.iter()).all(|(k, v)| other.lists.get(k) == Some(v))
             && (self.npis.iter()).all(|(k, n)| {
                 other.npis.get(k) == Some(n) && other.fields.get(k) == self.fields.get(k)
             })
