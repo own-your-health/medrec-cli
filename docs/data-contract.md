@@ -492,12 +492,15 @@ there.
 sources gave of it, then or now, that the rules of what is private read and
 that the record does not show: a list of `{raw_path, cli, display, code,
 fields, npis, lists}`, each with the parts that are other than those shown. `display`
-is a medication's, a result's, a report's, a procedure's or a claim's, and `code`
+is a medication's, a result's, a report's, a procedure's or a claim's, and (0.9.10
+and later) a visit's, or a condition's with no ICD-10 code, where it says an area, and `code`
 a condition's, a medication's, a result's, a report's or a procedure's; `fields`
 are a claim's `diagnoses`, its `payer_notes` and its `items` (of each line
 `service`, `revenue`, `payer_notes` and `counted`), a result's `about`, its
 `components` (0.9.10 and later: of each part its `code`, of those with no value
-too, and its `value` where that is a text that says an area), and the fields that print a provider (Providers, below); `npis` has the NPI of the provider a field prints,
+too, and its `value` where that is a text that says an area), and (0.9.10 and later)
+a result's `value`, a report's `conclusion` and a visit's `reason`, each a text that
+says one, and the fields that print a provider (Providers, below); `npis` has the NPI of the provider a field prints,
 by that field; `lists` (0.9.10 and later) is what a panel or a report listed
 otherwise, as its `lists` has it, each raw file's whole; `cli` is that of a source that no longer has the record.
 `raw_path` is the raw file of the current version of what gave it, absent
@@ -2437,13 +2440,13 @@ nothing is private.
   |---|---|
   | `source` | came from a portal whose records are all of one area: a behavioral health or a fertility clinic's record system |
   | `service` | is a claim each line of which that its totals count is of a service in an area (the first line's), or one with no such line whose own name says it; or a procedure that is one (0.9.9 and later; Services, below) |
-  | `code` | is a condition whose ICD-10 code is in an area, or a claim whose principal diagnosis (the lowest `sequence`) is: F10–F19 and Z71.4–Z71.5 substance use, and (0.9.9 and later) Z71.6, Z72.0, Z77.22, Z87.891 and O99.33; the other F codes mental health; Z30–Z32, Z33.2, O00–O08, N46 and N96–N98 reproductive; A50–A64, B20, Z21, Z11.3–Z11.4, Z20.2, Z20.6 and Z72.5 sexual health |
+  | `code` | is a condition whose ICD-10 code is in an area, or a claim whose principal diagnosis (the lowest `sequence`) is: F10–F19 and Z71.4–Z71.5 substance use, and (0.9.9 and later) Z71.6, Z72.0, Z77.22, Z87.891 and O99.33, and (0.9.10 and later) Z81.1–Z81.4; the other F codes mental health, and (0.9.10 and later) Z13.3, R45.851, T14.91, Z91.5, Z86.5 and the rest of Z81; Z30–Z32, Z33.2, O00–O08, N46 and N96–N98 reproductive; A50–A64, B20, Z21, Z11.3–Z11.4, Z20.2, Z20.6 and Z72.5 sexual health |
   | `provider` | was made by a practice or clinician whose name or credential says its area: a claim's provider or facility, a visit's place, location or clinician, a medicine's prescriber, a result's performer, a document's organization; or is a record that prints a provider with a sure label (Provider labels, above) whose name, practice or role does, or a record, document or event that prints one the household calls so (0.9.7 and later) |
-  | `medicine` | is a medicine of an area by its name or code, or (0.9.9 and later) a pharmacy claim its `display` names as one: antidepressants, antipsychotics, anxiolytics, stimulants and lithium; fertility drugs and contraceptives; HIV medicines and those for erectile dysfunction; medicines for substance use and smoking |
-  | `test` | is a result or report of a test of an area: sexually transmitted infections, pregnancy and fertility, drug screens; or (0.9.9 and later) of a questionnaire of one, or of tobacco use (Questionnaires, below); by its own name and code or those of any of its parts, or by a text that is the value of a part (0.9.10 and later) |
+  | `medicine` | is a medicine of an area by its name, its brand's (0.9.10 and later) or code, or (0.9.9 and later) a pharmacy claim its `display` names as one: antidepressants, antipsychotics, anxiolytics, stimulants and lithium; fertility drugs and contraceptives; HIV medicines and those for erectile dysfunction; medicines for substance use and smoking |
+  | `test` | is a result or report of a test of an area: sexually transmitted infections, pregnancy and fertility, drug screens; or (0.9.9 and later) of a questionnaire of one, or of tobacco use (Questionnaires, below); by its own name and code or those of any of its parts, or by a text that is its value or the value of a part, or a report's `conclusion`, as a bill's page (0.9.10 and later) |
   | `members` | is an event with a private claim or portal visit, or whose own members are all private, or (0.9.10 and later) a panel or a report all of what one source lists of which (Panels, above), now or before, is private, with what is entered in error or without it |
   | `event` | is a member of a private event |
-  | `words` | is a bill or receipt whose first page that has any text says an area, by a service, a medicine or a test, or any document whose title does (0.9.6 and later), or whose title is a questionnaire's, or with an `original_name` that says either (0.9.9 and later; `_`, `.` and `-` read as spaces) |
+  | `words` | is a bill or receipt whose first page that has any text says an area, by a service, a medicine or a test, or any document whose title does (0.9.6 and later), or whose title is a questionnaire's, or with an `original_name` that says either (0.9.9 and later; `_`, `.` and `-` read as spaces); or (0.9.10 and later) a condition with no ICD-10 code whose name, or its code's, is of a condition of an area, or a visit whose name or `reason` is, or says one as a paper's title does |
   | `record` | is a document that a private record links (`documents` in `records`), whatever else links it (0.9.5 and later) |
   | `report` | is an imaging study whose `report`, a document or record, is private (0.9.5 and later) |
   | `paper` | is a document tied to a private one, either way: its copy (`same_statement_as`, `near_duplicates`), the bill that supersedes it or one it supersedes (`superseded_by` in `bills.json`), or the receipt that pays it or the bill it pays (0.9.6 and later) |

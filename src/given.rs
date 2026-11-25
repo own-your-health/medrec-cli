@@ -102,6 +102,14 @@ pub fn of(r: &Record) -> Given {
         };
         fields.insert(COMPONENTS.into(), parts.iter().map(read).collect());
     }
+    // A text that says an area, and no other.
+    let mut named = named;
+    for (part, _) in private::said(r) {
+        match r.fields.get(part) {
+            Some(text) => drop(fields.insert(part.into(), text.clone())),
+            None => named = true,
+        }
+    }
     let npi = |p: &ProviderRef| Some((p.field.clone(), p.npi.clone()?));
     Given {
         raw_path: None,
@@ -204,6 +212,10 @@ pub fn as_given(r: &Record) -> impl Iterator<Item = Record> + '_ {
         }
         if let Some(c) = &g.code {
             x.code = Some(c.clone());
+        }
+        // A condition's name is kept where it had no ICD-10 code.
+        if r.kind == "condition" && g.display.is_some() {
+            x.code = g.code.clone();
         }
         // A provider's NPI is of the name it was given with.
         x.providers
