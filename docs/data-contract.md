@@ -1184,6 +1184,7 @@ views/<person id>/search-labs-<n>.json
 views/<person id>/events.json            0.9.0 and later
 views/<person id>/bills.json             0.9.1 and later
 views/<person id>/private.json           0.9.1 and later
+views/<person id>/standing.json          0.9.9 and later
 views/<person id>/code-names.json        0.9.4 and later, when there are any
 views/<person id>/providers.json         0.9.7 and later, when there are any
 ```
@@ -1408,8 +1409,8 @@ removes and no reader reads. It never writes over a later
   stored names are uploaded. An unchanged view keeps its name and is not
   written again. A person whose views lack one every person has
   (`summary.json`, `tests.json`, `documents.json`, `events.json`,
-  `bills.json`, `private.json`) gets them made again: a build of the same
-  version wrote them before that view existed.
+  `bills.json`, `private.json`, `standing.json`) gets them made again: a build
+  of the same version wrote them before that view existed.
 - **`views.json` last.** It records the MD5 of every view, so a reader
   checks each view it reads and never mixes two passes, whatever order an
   uploader sends them in. Views that it no longer names, a person's who
@@ -1832,6 +1833,96 @@ when they have no bills. It is made from the person's documents, their
   read (above), so no household payment is counted. Absent otherwise.
 - Amounts are decimal strings with two places. A reader treats a field it
   does not know as unknown.
+
+### Standing (`standing.json`, `medrec-standing/v1`, 0.9.9 and later)
+
+What is current among the person's conditions, allergies and medicines, by
+what each of their sources says of it (`words`, Records, above). No source's
+word wins over another's. Every person has one.
+
+```json
+{"schema": "medrec-standing/v1", "person": "p_…",
+ "sources": ["Example Health", "Sample Clinic East"],
+ "records": {
+   "r_…": {"kind": "condition", "is": "current", "line": "http://example.org/codes|C-1",
+           "differs": true,
+           "words": [{"source": 0, "read": "2024-05-02", "is": "current", "status": "active"},
+                     {"source": 1, "read": "2024-05-03", "is": "ended", "status": "resolved"}]},
+   "r_…": {"kind": "medication", "is": "current", "until": "2024-03-31", "until_of": "prescription",
+           "filled": {"record": "r_…", "date": "2024-04-02"},
+           "words": [{"source": 0, "read": "2024-05-02", "is": "current", "status": "active",
+                      "end": "2024-03-31", "end_of": "prescription"}]}},
+ "no_problem_list": [{"source": 1, "records": ["r_…"]}]}
+```
+
+- **`sources`**: the names of the sources, each at its place; two can have one
+  name, and a source with none is null. A reader names one only by a word of a
+  record it shows.
+- **`records`**: every condition, allergy and medicine by id, but a fill
+  (`source: dispense`), which is a fact and has no standing.
+- **`words`**: what each source says, in the order of the record's provenances:
+  `source`; `read`, the day it was last read saying so; `is`, below; and
+  `status`, `verification`, `abatement`, `end` and `end_of` as the record's
+  word has them. A record that keeps no words (it was added by hand, or saved
+  by an earlier medrec) has its own status as its one word.
+- **`is`**, of a word and of the record:
+
+  | `is` | A word is, whose | In |
+  |---|---|---|
+  | `current` | is none of those below, `unknown`, `provisional`, `differential` and `unconfirmed` too | the current list, with its word |
+  | `on_hold` | medicine's status is `on-hold` | a group of its own, "On hold" |
+  | `draft` | medicine's status is `draft` | the list of all |
+  | `ended` | status is `completed`, `stopped`, `inactive`, `resolved`, `remission` or `cancelled`, or a medicine's `not-taken`, or which has no status and is a condition with an abatement | the list of all |
+  | `refuted` | status or verification is `refuted`, of a condition or an allergy | the list of all |
+  | `visit` | categories have `encounter-diagnosis` and not `problem-list-item`, of a condition that would be `current` | the list of all, with its category |
+  | `error` | status or verification is `entered-in-error` | none, unless asked for by its id |
+
+  A record is the first of these, in this order, that any of its words is. So
+  it is current while any source says so, and one entered in error counts for
+  nothing beside another word.
+- **`line`**, of a condition or an allergy: its code with its system, or `~`
+  and its name with case and accents folded. Records with one line are one
+  line of a list. A medicine has none: each prescription is its own.
+- **`until`** and **`until_of`**, of a current medicine whose every current
+  word has an end: the last day of the last to end, and what of it ends
+  (`end_of`). A month or a year ends with its last day. After that day it is not
+  current but in a group of its own, "Ended by its date", with the day and
+  what ended. An allergy or a condition never stops being current by a date.
+- **`filled`**: the last fill of the medicine after `until`, a fact to show
+  beside it. It changes nothing.
+- **`differs`**: its words differ: some say another `is` than the rest (`visit`
+  and `error` say nothing here), or give another `verification`.
+  **`differs_after`**: they differ after this day, when a word that says it is
+  current ends and another has not.
+- **`no_problem_list`**: each source with a diagnosis given for a visit and no
+  other condition, and those diagnoses.
+
+**As a reader lists them**, of the records it may show, on the day it answers:
+
+1. A medicine that is `current`, with `until` before that day, is ended by its
+   date. Every other record is where its `is` says.
+2. The current list has one line for each `line`, and one for each medicine. A
+   line is current while any of its records is. Its name is that of the first
+   of those, newest first.
+3. A line differs when one of its current records does (`differs`, or
+   `differs_after` before that day), or when a source of which no word on the
+   line is current has one that is ended or refuted. A source's own earlier
+   episode that ended does not differ from its current one.
+4. A current line says what each source says, with its name and `read`: its
+   `status`, and its `verification` unless that is `confirmed`. On a line that
+   differs, those that say otherwise too.
+5. What is entered in error is out of every list, and of the timeline and the
+   search, and the list says how many: "1 entered in error, not shown".
+6. A list of conditions names each source in `no_problem_list` with a diagnosis
+   there that the answer may show: "No problem list from <source>; diagnoses
+   from visits are listed under All".
+7. A record the answer may not show (`private.json`) is left out before the
+   rest is worked out: its word, its fill and its source are not shown, and it
+   makes no line current or differ.
+
+`tests/fixtures/standing/` in medrec's repository has a person's `index.json`,
+the `standing.json` it gives, and `lists.json`, the lists a reader makes of it:
+each with the day, the records the answer may not show, and why.
 
 ### Private (`private.json`, `medrec-private/v1`, 0.9.1 and later)
 

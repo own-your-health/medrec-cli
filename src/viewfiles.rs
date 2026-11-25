@@ -48,6 +48,7 @@ const EVERY_PERSON: &[&str] = &[
     "events.json",
     "bills.json",
     "private.json",
+    crate::standing::FILE,
 ];
 
 /// A records or timeline shard closes once it holds this many bytes, never
@@ -1062,6 +1063,10 @@ pub(crate) fn person(
     put("events.json", json(&from.events));
     put("bills.json", json(&from.bills));
     put("private.json", json(&from.private));
+    put(
+        crate::standing::FILE,
+        json(&crate::standing::Standings::of(&h.sources, p, idx)),
+    );
     if let Some(v) = &from.code_names {
         put(crate::code_names::FILE, json(v));
     }
