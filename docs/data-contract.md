@@ -869,10 +869,12 @@ filed file's MD5 by its path in the study folder, for `verify`), `filed_at`,
 
 **ImportRun**, one `medrec import`: `id`, `source_dir`, `stream_sha256`,
 `stream_bytes`, `cli`, `cli_version`, `organization`, `patient_id`,
-`pulled_at`, `imported_at`, `counts`, `skipped`, and the counts the import
-report gives (below): `resources_written`, `resources_unchanged`,
+`pulled_at`, `from_files` (whether it was of downloaded files; 0.9.10 and later,
+absent in a run filed before), `imported_at`, `counts`, `skipped`, and the counts
+the import report gives (below): `resources_written`, `resources_unchanged`,
 `records_added`, `records_updated`, `records_unchanged`, `records_older`
-(0.2.7 and later; 0 in a run filed before), `documents_added`,
+(0.2.7 and later; 0 in a run filed before), `records_not_served` (0.9.10 and
+later; absent where it cannot be told), `documents_added`,
 `documents_duplicate` and `documents_unchanged`.
 
 **Provenance** (the `provenance/v1` fields of medical-common's
@@ -1180,7 +1182,7 @@ the month (UTC) the attempt started.
 | `exit_code` | The import's exit code (Import, below); `null` for a skip, and for a `needs_person` found before the import ran. |
 | `error` | `null`, or `{"code", "message", "remedy"[, "provider_message"]}` from the failing command's `--json` error (the family's error shape). `message` is at most 300 characters. When the provider's export answered that its sign-in ended (exit 3), `code` is `needs_person`, `message` and `remedy` are medrec's own (the remedy runs `medrec refresh sign-in <source>`), and the provider's own words, which can name the provider's own sign-in command, are in `provider_message` (0.7.0 and later; before 0.9.9 after `<cli> needs a sign-in`, which was there where the provider gave no text). `provider_message` is present only then, always (an empty string when the provider gave no text), and is at most 300 characters too. Show `remedy` as the one thing to do, and `provider_message` at most as detail. A profile name in `message`, `remedy` or `provider_message` is replaced, a provider profile's by `<provider profile>` and a medrec profile's by `<profile>`, so the folder holds none. medrec's own codes are `timeout` (a call outlived its limit), `interrupted` (the pass running it stopped before it finished) and `needs_person`. |
 | `import` | The `ImportRun` id in the person's `index.json`, when `ok`. |
-| `counts` | When `ok`, the import report's counts: `records_added`, `records_updated`, `records_unchanged`, `records_older`, `resources_written`, `resources_unchanged`, `documents_added`, `documents_duplicate`, `documents_unchanged`, `documents_same_statement`, `papers_unread` (0.9.9 and later). A count the import report gains later is added here too. |
+| `counts` | When `ok`, the import report's counts: `records_added`, `records_updated`, `records_unchanged`, `records_older`, `resources_written`, `resources_unchanged`, `documents_added`, `documents_duplicate`, `documents_unchanged`, `documents_same_statement`, `papers_unread` (0.9.9 and later) and `records_not_served` (0.9.10 and later; absent where it cannot be told). A count the import report gains later is added here too. |
 
 A scheduled pass records nothing for a source that is not due. A skip is
 recorded only when a request or a terminal command asked for that source.
@@ -2634,7 +2636,10 @@ readers ship with medrec:
       the bills on it, and `events` counts those in `events_in_error`; an event
       on it says how many of its own are, of those the answer may show, in its
       `detail` ("1 entered in error, not shown"), and has `in_error` and
-      `not_applied` in its `fields` when those are in the answer.
+      `not_applied` in its `fields` when those are in the answer, each absent
+      when nothing is left of it. So with an event asked for by its id in a call
+      that names no person (0.9.10 and later; 0.9.9 named them all). One that is
+      private itself, asked for by its id or named, has all of its own.
     - any other item its sources differ on has `standing` `sources differ` and
       `says`, as `standing.json`'s words are said; the household's own file is
       `the household's own file`. It keeps its `status`.
@@ -2938,11 +2943,39 @@ characters and the invisible format characters that reorder or hide text
 | `records_updated` | records whose content or version changed |
 | `records_unchanged` | records the same as filed, a refresh included |
 | `records_older` | versions not later than the one filed, which stayed (0.2.7 and later) |
+| `records_not_served` | records this source gave before that this export does not have (0.9.10 and later), which are kept; `null` where that cannot be told |
 | `documents_added` | documents filed |
 | `documents_duplicate` | Binaries with the bytes of a document or rendering already filed |
 | `documents_unchanged` | renderings of a document already filed |
 | `documents_same_statement` | bills filed that are the same statement as a bill filed before (0.2.9 and later) |
 | `papers_unread` | raw files that describe papers, or are the bytes of one, and do not read (0.9.9 and later): the source's, where the stream says that something describing a paper is entered in error or carries an older version of it, and those of the person's other sources, where a paper is newly entered in error; otherwise 0 |
+
+`records_not_served` is of an export through a sign-in of all the source has: it is
+`null` with `--since`, where the export's header has `since`, with `--from-files`,
+where the source's folder has imports of another patient, and where a skip names
+neither a type nor a search. A record is not counted while any of its resources
+from this source is in the export, or may be among those it left out (its type was
+withheld or cut short, it is itself among the skips, or it is a `MedicationRequest`
+and a `MedicationDispense` is), nor when it is about another person. Nor is it
+where the provenance of one of them is not from a sign-in's run (its `fetched_at`
+is that run's `pulled_at`): files can have what the source gives no sign-in. A
+sign-in that gives the same version again, no later, leaves the provenance as it
+was. A run says which it was (`from_files`); with neither `--from-profile` nor
+`--from-files`, a provider that reads files (`records-files`) may have read some,
+and the run is of files. One filed before 0.9.10 does not say, and is taken for a
+sign-in's where the provider reads no files, else for neither. A record that is
+counted stays in the count of each later import that can tell it. `not_served`
+(0.9.10 and later) has the count of each kind, `{<kind>: n}`, and is `null` when
+the count is.
+
+`updated` (0.9.10 and later) is a list of the records updated, `{id, kind,
+changed}`: `changed` has the names of what is other than it was, a member of the
+record (`status`, `code`, `display`, `date`, `words`, `errors`, `providers`,
+`lists`, `documents`) or a field as `fields.<name>`, and no value. It is empty for a
+version that differs in nothing medrec reads, or only in what no reader shows
+(`given`, `listed_by`). Several resources of one record make one entry. A
+record about another person has none, and neither does one that this same import
+first added, though `records_updated` counts a later resource that joins it.
 
 A field added to `import/v1` is additive: a script reads a missing one as
 absent, never as an error.

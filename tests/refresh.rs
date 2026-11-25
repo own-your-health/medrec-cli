@@ -338,6 +338,7 @@ fn refresh_imports_on_request_and_never_waits_on_a_person() {
         "documents_unchanged",
         "papers_unread",
         "records_added",
+        "records_not_served",
         "records_older",
         "records_unchanged",
         "records_updated",
