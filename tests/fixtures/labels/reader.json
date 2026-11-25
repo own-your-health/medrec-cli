@@ -1,0 +1,141 @@
+{
+ "schema": "medrec-providers/v1",
+ "person": "p_robinaaaaaaaaaaaaaaa",
+ "labels": {
+  "v_sampleaaaaaaaaaaaaaa": {
+   "name": "Jordan Sample, MD",
+   "role": "family doctor",
+   "phone": "555-010-0101",
+   "phone_from": {
+    "from": "directory",
+    "date": "2026-03-08"
+   },
+   "confidence": "sure",
+   "evidence": [
+    {
+     "from": "npi"
+    }
+   ]
+  },
+  "v_otheraaaaaaaaaaaaaaa": {
+   "name": "Jamie Sample, DO",
+   "confidence": "sure",
+   "evidence": [
+    {
+     "from": "npi"
+    }
+   ]
+  },
+  "v_paperaaaaaaaaaaaaaaa": {
+   "practice": "Sample Health Partners",
+   "phone": "555-010-0150",
+   "phone_from": {
+    "from": "paper",
+    "document": "d_closedaaaaaaaaaaaaaa"
+   },
+   "confidence": "likely",
+   "evidence": [
+    {
+     "from": "paper",
+     "document": "d_closedaaaaaaaaaaaaaa"
+    }
+   ]
+  },
+  "v_bothaaaaaaaaaaaaaaaa": {
+   "practice": "Sample Health Partners",
+   "phone": "555-010-0150",
+   "phone_from": {
+    "from": "paper",
+    "document": "d_closedaaaaaaaaaaaaaa"
+   },
+   "confidence": "likely",
+   "evidence": [
+    {
+     "from": "only_match",
+     "state": "FL"
+    },
+    {
+     "from": "paper",
+     "document": "d_closedaaaaaaaaaaaaaa"
+    },
+    {
+     "from": "paper",
+     "document": "d_openaaaaaaaaaaaaaaaa"
+    }
+   ]
+  },
+  "v_saidaaaaaaaaaaaaaaaa": {
+   "name": "Pat Dummy",
+   "phone": "555-010-0166",
+   "phone_from": {
+    "from": "household",
+    "id": "o_saidaaaaaaaaaaaaaaaa"
+   },
+   "confidence": "household",
+   "evidence": [
+    {
+     "from": "household",
+     "id": "o_saidaaaaaaaaaaaaaaaa",
+     "by": "Robin Example",
+     "at": "2026-03-09T12:00:00Z"
+    }
+   ]
+  },
+  "v_lateraaaaaaaaaaaaaaa": {
+   "name": "Lee Filler",
+   "phone": "555-010-0177",
+   "phone_from": {
+    "from": "a dream"
+   },
+   "confidence": "certain",
+   "evidence": [
+    {
+     "from": "telepathy",
+     "by": "Robin Example"
+    }
+   ]
+  }
+ },
+ "by_name": {
+  "M TEMPLATE": "v_bothaaaaaaaaaaaaaaaa",
+  "P DUMMY": "v_saidaaaaaaaaaaaaaaaa",
+  "R PLACEHOLDER": "v_paperaaaaaaaaaaaaaaa",
+  "J SAMPLE": "v_sampleaaaaaaaaaaaaaa",
+  "L FILLER": "v_lateraaaaaaaaaaaaaaa"
+ },
+ "by_item": {
+  "r_otheraaaaaaaaaaaaaaa": {
+   "J SAMPLE": "v_otheraaaaaaaaaaaaaaa"
+  }
+ },
+ "private": {
+  "labels": {
+   "v_talkaaaaaaaaaaaaaaaa": {
+    "name": "Casey Example",
+    "role": "therapist",
+    "confidence": "sure",
+    "evidence": [
+     {
+      "from": "npi"
+     }
+    ]
+   }
+  },
+  "by_name": {
+   "C EXAMPLE": "v_talkaaaaaaaaaaaaaaaa",
+   "J SAMPLE": "v_sampleaaaaaaaaaaaaaa"
+  },
+  "by_item": {},
+  "overrides": [
+   {
+    "id": "o_saidaaaaaaaaaaaaaaaa",
+    "kind": "set",
+    "printed": [
+     "P DUMMY"
+    ],
+    "by": "Robin Example",
+    "at": "2026-03-09T12:00:00Z"
+   }
+  ]
+ }
+}

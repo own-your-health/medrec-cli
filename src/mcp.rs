@@ -7,6 +7,7 @@
 use std::time::Duration;
 
 use pk_cli_core::CliError;
+use pk_cli_mcp::shape::{ENVELOPE_RESERVE, SIZE_BUDGET};
 use pk_cli_mcp::{
     parse_args, ListArgs, Page, PageRequest, Server, ToolDef, ToolError, ToolOutput, Toolset,
 };
@@ -20,6 +21,7 @@ use crate::folder::{Access, Folder};
 use crate::intake::classify;
 use crate::model::{today, Household, Record};
 use crate::people;
+use crate::provider_labels::{Asked, Labels, Printed};
 use crate::refresh::signin;
 use crate::sources::Sources;
 use crate::store::{Location, BIN};
@@ -160,6 +162,7 @@ pub struct PersonSummary {
     pub person: String,
     pub as_of: String,
     /// Records per kind.
+    #[schemars(with = "std::collections::BTreeMap<String, i64>")]
     pub counts: std::collections::BTreeMap<String, usize>,
     pub sources: Vec<summary::SourceRow>,
     pub sections: Vec<Section>,
@@ -170,6 +173,7 @@ pub struct Section {
     pub section: String,
     pub items: Vec<Line>,
     /// Lines left out for length.
+    #[schemars(with = "i64")]
     pub more: usize,
 }
 
@@ -366,11 +370,15 @@ pub struct Item {
     pub id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub code: Option<String>,
-    /// For `conditions`: the key of the plain name, and whose record it is.
+    /// For `conditions`: the key of the plain name.
     #[serde(skip)]
     pub name_key: Option<String>,
+    /// Whose it is.
     #[serde(skip)]
     pub person_id: String,
+    /// Some of its `provider_labels` did not fit beside it.
+    #[serde(skip)]
+    pub labels_left_out: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -381,6 +389,7 @@ pub struct Item {
     pub flag: Option<String>,
     /// For `tests`: results of the test on file.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<i64>")]
     pub results: Option<usize>,
     /// For `tests`: the ids of every result in the series, the latest's
     /// included, so that a private one among them holds the series back.
@@ -398,6 +407,11 @@ pub struct Item {
     pub you_owe: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub private: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub provider_labels: Vec<Map<String, Value>>,
+    /// The providers it prints, to label.
+    #[serde(skip)]
+    pub printed: Vec<Printed>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fields: Option<Map<String, Value>>,
 }
@@ -409,7 +423,7 @@ pub struct DocumentArgs {
     /// Start at this page (from 1).
     #[serde(default)]
     pub page: Option<u32>,
-    /// Start at a previous answer's `next_offset`.
+    /// A previous answer's `next_offset`.
     #[serde(default)]
     pub offset: Option<u64>,
 }
@@ -430,18 +444,27 @@ pub struct DocumentOut {
     pub amount_due: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub due_date: Option<String>,
+    // The definitions have a budget: these schemas say no minimum.
+    #[schemars(with = "i64")]
     pub text_chars: usize,
+    #[schemars(with = "i64")]
     pub offset: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<i64>")]
     pub next_offset: Option<usize>,
+    #[schemars(with = "i64")]
     pub first_page: u32,
+    #[schemars(with = "i64")]
     pub last_page: u32,
+    #[schemars(with = "i64")]
     pub text_pages: u32,
     pub text: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub records: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub private: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub provider_labels: Vec<Map<String, Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hint: Option<String>,
 }
@@ -462,7 +485,9 @@ impl Toolset for MedrecTools {
                  that name the item. Keep them out of anything shared. Give the date and \
                  source of each fact you use, and say when the records \
                  do not answer the question. Each result carries its lab's own reference range \
-                 and flag, and labs may report one test in different units. For decisions about \
+                 and flag, and labs may report one test in different units. provider_labels say \
+                 who a printed provider is, beside the source's words: call a likely one likely \
+                 and give its evidence, and say where a phone is from. For decisions about \
                  care, suggest the user ask their clinician.",
             )
     }
@@ -622,6 +647,49 @@ impl PrivateItems {
         })
     }
 
+    /// The labels of what an item prints, for an answer about the household
+    /// (`whole`) or one person.
+    fn labels(
+        &self,
+        labels: &Labels,
+        item: &str,
+        printed: &[Printed],
+        whole: bool,
+    ) -> Vec<Map<String, Value>> {
+        let asked = Asked {
+            whole,
+            private: &|id| self.areas.contains_key(id),
+            held_back: &|id| self.held_back(id),
+        };
+        labels.shown(item, printed, &asked)
+    }
+
+    /// The labels of the items a page can have, which count in its size.
+    fn label(
+        &self,
+        f: &Folder,
+        h: &Household,
+        people: &[&crate::model::Person],
+        page: &PageRequest,
+        items: &mut [Item],
+        whole: bool,
+    ) {
+        let start = page.offset().min(items.len());
+        let end = start.saturating_add(page.limit()).min(items.len());
+        let items = &mut items[start..end];
+        for p in people {
+            let theirs = |i: &&mut Item| i.person_id == p.id && !i.printed.is_empty();
+            if !items.iter_mut().any(|i| theirs(&i)) {
+                continue;
+            }
+            let labels = Labels::read(f, h, p);
+            for i in items.iter_mut().filter(theirs) {
+                i.provider_labels = self.labels(&labels, &i.id, &i.printed, whole);
+                i.fit_labels();
+            }
+        }
+    }
+
     /// Says on a page, starting at `offset`, how many items it left out,
     /// and whose marks did not read.
     fn warn<T>(&self, page: &mut Page<T>, offset: usize, left_out: &views::LeftOut) {
@@ -656,10 +724,42 @@ impl PrivateItems {
     }
 }
 
+/// Characters of JSON one item of a page may have: the page's, less its
+/// brackets and the item's comma.
+const ITEM_ROOM: usize = SIZE_BUDGET - ENVELOPE_RESERVE - 3;
+
+impl Item {
+    /// A label yields to the record: an item that fits a page without its
+    /// labels is never too large for one with them. It keeps the first that
+    /// fit.
+    fn fit_labels(&mut self) {
+        let had = self.provider_labels.len();
+        let size = |i: &Item| serde_json::to_string(i).map_or(0, |j| j.chars().count());
+        while !self.provider_labels.is_empty() && size(self) > ITEM_ROOM {
+            self.provider_labels.pop();
+        }
+        self.labels_left_out = self.provider_labels.len() < had;
+    }
+}
+
+/// Says on a page how many of its items' labels did not fit.
+fn warn_labels(page: &mut Page<Item>) {
+    let n = page.items.iter().filter(|i| i.labels_left_out).count();
+    if n > 0 {
+        page.warn(
+            "provider-labels-left-out",
+            format!(
+                "{n} item{} on this page: some of the provider_labels did not fit and are left out, the rest of it is whole",
+                if n == 1 { "" } else { "s" },
+            ),
+        );
+    }
+}
+
 /// An `events.json` event as a list item: `source` is where it happened,
 /// and `detail` what it was, who, how sure the grouping is and what is
 /// still expected. `detailed` adds its money, members and evidence in
-/// `fields`.
+/// `fields`, and its members' labels.
 fn event_item(e: &Value, detailed: bool) -> Item {
     let s = |k: &str| e[k].as_str().map(str::to_string);
     let mut parts: Vec<String> = Vec::new();
@@ -726,6 +826,8 @@ fn event_item(e: &Value, detailed: bool) -> Item {
             .as_str()
             .map(|o| format!("{o} {}", e["money"]["currency"].as_str().unwrap_or("USD"))),
         fields,
+        person_id: s("person").unwrap_or_default(),
+        printed: Printed::of_event(e, detailed),
         ..Default::default()
     }
 }
@@ -930,11 +1032,23 @@ impl MedrecTools {
                 }
             }
             (Kind::Timeline, None) => {
+                let mut claims = std::collections::BTreeMap::new();
+                for p in &selected {
+                    let of = |x: &Record| (x.id.clone(), Printed::of_claim(&x.fields));
+                    let idx = f.index(p)?;
+                    claims.extend(idx.records.iter().filter(|x| x.kind == "claim").map(of));
+                }
                 for e in views::timeline(&f, &h, person, &r, &[])? {
                     if !named(&e.title) {
                         continue;
                     }
+                    let printed = match e.kind.as_str() {
+                        "document" => Printed::of_document(e.source.as_deref()),
+                        _ => claims.remove(&e.id).unwrap_or_default(),
+                    };
                     items.push(Item {
+                        person_id: e.person,
+                        printed,
                         kind: e.kind,
                         person: e.person_name,
                         date: e.date,
@@ -1016,6 +1130,8 @@ impl MedrecTools {
                             due_date: due,
                             doc_type: d.doc_type.clone(),
                             has_text: Some(d.text.as_ref().is_some_and(|t| t.chars > 0)),
+                            person_id: p.id.clone(),
+                            printed: Printed::of_document(d.organization.as_deref()),
                             ..Default::default()
                         });
                     }
@@ -1024,10 +1140,12 @@ impl MedrecTools {
         }
         items.sort_by(|a, b| b.date.cmp(&a.date).then(a.title.cmp(&b.title)));
         let private = PrivateItems::of(&f, &h, &selected)?;
-        let (items, left_out) = private.keep(items, |i| {
+        let (mut items, left_out) = private.keep(items, |i| {
             person.is_some() || name.is_some_and(|n| crate::private::names(&i.title, n))
         });
+        private.label(&f, &h, &selected, &page, &mut items, person.is_none());
         let mut out = page.page(items, "person, since/until, active or name")?;
+        warn_labels(&mut out);
         // Only for the people on the page, and after the private items are
         // out: what is kept is decided from the source's own words.
         if a.kind == Kind::Conditions {
@@ -1099,7 +1217,7 @@ impl MedrecTools {
             );
         }
         let private = PrivateItems::of(&f, &h, &selected)?;
-        let (items, left_out) = private.keep(items, |i| {
+        let (mut items, left_out) = private.keep(items, |i| {
             person.is_some()
                 || id.is_some()
                 || name.is_some_and(|n| {
@@ -1113,7 +1231,9 @@ impl MedrecTools {
                     .any(|t| crate::private::names(t, n))
                 })
         });
+        private.label(&f, &h, &selected, &page, &mut items, person.is_none());
         let mut out = page.page(items, "person, since/until or name")?;
+        warn_labels(&mut out);
         private.warn(&mut out, page.offset(), &left_out);
         ToolOutput::new(&out)
     }
@@ -1158,6 +1278,14 @@ impl MedrecTools {
             .map(|r| clip(&r.display, CLIP))
             .collect();
         let s = d.statement.as_ref();
+        // Asked for by id: a private document is the person's, named. Its
+        // labels are in no answer that names no person.
+        let private = PrivateItems::of(&f, &h, &[&p])?;
+        let printed = Printed::of_document(d.organization.as_deref());
+        let provider_labels = match printed.is_empty() {
+            true => Vec::new(),
+            false => private.labels(&Labels::read(&f, &h, &p), &d.id, &printed, true),
+        };
         let mut out = DocumentOut {
             id: d.id.clone(),
             person: p.name.clone(),
@@ -1173,8 +1301,8 @@ impl MedrecTools {
             last_page: 1,
             text_pages,
             records,
-            // Asked for by id: a private document is the person's, named.
-            private: PrivateItems::of(&f, &h, &[&p])?.area(&d.id),
+            private: private.area(&d.id),
+            provider_labels,
             ..Default::default()
         };
         if chars.is_empty() {
@@ -1401,6 +1529,11 @@ fn record_item(from: Sources, person: &str, r: Record, detailed: bool) -> Item {
         source: record_source(from, &r),
         code: r.code.as_ref().and_then(|c| c.code.clone()),
         name_key: crate::code_names::condition_key(&r),
+        printed: match (detailed, r.kind.as_str()) {
+            (true, _) => Printed::of_record(&r.fields),
+            (false, "claim") => Printed::of_claim(&r.fields),
+            (false, _) => Vec::new(),
+        },
         fields: detailed.then(|| r.fields.clone()),
         ..Default::default()
     };

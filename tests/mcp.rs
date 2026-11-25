@@ -1031,6 +1031,341 @@ fn labels_that_do_not_read_hold_a_person_back() {
     assert!(shown(&v, talk), "{v}");
 }
 
+/// A label stands beside what an item prints, in a list of its own: nothing a
+/// source says is changed, and nothing is found by it.
+#[test]
+fn a_printed_provider_has_its_label_beside_it() {
+    let e = Env::new("providerlabels");
+    household(&e);
+    let h: Value =
+        serde_json::from_slice(&std::fs::read(e.records().join("household.json")).unwrap())
+            .unwrap();
+    let alex = h["people"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["name"] == "Alex Testperson")
+        .unwrap()
+        .clone();
+    let folder = e.records().join(alex["folder"].as_str().unwrap());
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/labels");
+    for name in ["index.json", "text.json", "provider-state.json"] {
+        let mut v: Value =
+            serde_json::from_slice(&std::fs::read(fixtures.join(name)).unwrap()).unwrap();
+        v["person"] = alex["id"].clone();
+        std::fs::write(folder.join(name), serde_json::to_vec(&v).unwrap()).unwrap();
+    }
+    e.ok(&["views", "write"]);
+    let t = e.tools();
+    let ask = |tool: &str, args: Value| {
+        let r = call(&t, tool, args);
+        assert!(!r.is_error(), "{tool}: {}", r.text());
+        assert_fits(&t, tool, &r).clone()
+    };
+    let item = |v: &Value, id: &str| -> Value {
+        v["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|i| i["id"] == id)
+            .unwrap_or_else(|| panic!("no {id}: {v}"))
+            .clone()
+    };
+    let of = |v: &Value, id: &str| item(v, id)["provider_labels"].clone();
+    let (sample, portal, talk) = (
+        "r_samplevisitaaaaaaaaa",
+        "r_sampleportalaaaaaaaa",
+        "r_talkaaaaaaaaaaaaaaaa",
+    );
+    let directory = json!({"from": "directory", "date": "2026-03-08"});
+
+    // A claim's provider: the claim's row has its title, so not the name.
+    let claims = ask(RECORDS, json!({"kind": "claims"}));
+    assert_eq!(
+        of(&claims, sample),
+        json!([{"field": "provider", "name": "Jordan Sample, MD", "role": "family doctor",
+            "phone": "555-010-0101", "phone_from": directory, "confidence": "sure",
+            "evidence": [{"from": "npi"}]}])
+    );
+    assert_eq!(item(&claims, sample)["title"], "Sample service");
+    // A likely one says why; one with none has no list.
+    assert_eq!(
+        of(&claims, "r_onepaperaaaaaaaaaaaa")[0]["evidence"],
+        json!([{"from": "only_match", "state": "FL"},
+            {"from": "paper", "document": "d_billaaaaaaaaaaaaaaaa"}])
+    );
+    assert_eq!(of(&claims, "r_twomatchesaaaaaaaaaa"), Value::Null);
+
+    // A private item's is in an answer about the person, and in none about the
+    // household, whatever it names.
+    let about = ask(RECORDS, json!({"kind": "claims", "person": "Alex"}));
+    assert_eq!(of(&about, talk)[0]["role"], "psychologist");
+    assert_eq!(item(&about, talk)["private"], "mental_health");
+    let named = ask(RECORDS, json!({"kind": "claims", "name": "Sample service"}));
+    assert_eq!(item(&named, talk)["private"], "mental_health");
+    assert_eq!(of(&named, talk), Value::Null);
+    assert_eq!(of(&named, sample), of(&claims, sample));
+
+    // Every labelled field in full, as the record prints it.
+    let visits = json!({"kind": "visits", "person": "Alex"});
+    assert_eq!(of(&ask(RECORDS, visits.clone()), portal), Value::Null);
+    let mut full = visits;
+    full["response_format"] = json!("detailed");
+    let full = ask(RECORDS, full);
+    let fields: Vec<(Value, Value)> = of(&full, portal)
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| (l["field"].clone(), l["printed"].clone()))
+        .collect();
+    assert_eq!(
+        fields,
+        [
+            (json!("practitioner"), json!("Jordan Sample, MD")),
+            (json!("service_provider"), json!("Example Primary Care"))
+        ]
+    );
+
+    // What the household says of a paper's organization is beside it, on the
+    // paper, its bill, in the timeline and where it is read.
+    let org = "Example Family Practice";
+    e.ok(&[
+        "labels",
+        "set",
+        "--person",
+        "Alex",
+        "--printed",
+        org,
+        "--name",
+        "Our practice",
+        "--phone",
+        "555-010-0142",
+    ]);
+    let stale = ask(RECORDS, json!({"kind": "claims"}));
+    assert_eq!(of(&stale, sample), of(&claims, sample), "the views follow");
+    let bill = "d_billaaaaaaaaaaaaaaaa";
+    for kind in ["documents", "bills", "timeline"] {
+        let v = ask(RECORDS, json!({"kind": kind, "limit": 100}));
+        let l = &of(&v, bill)[0];
+        assert_eq!(
+            (&l["field"], &l["printed"], &l["name"], &l["confidence"]),
+            (
+                &json!("organization"),
+                &json!(org),
+                &json!("Our practice"),
+                &json!("household")
+            ),
+            "{kind}: {l}"
+        );
+        assert_eq!(l["phone_from"]["from"], "household");
+        assert_eq!(item(&v, bill)["source"], org);
+    }
+    let v = ask(RECORDS, json!({"kind": "timeline", "limit": 100}));
+    assert_eq!(of(&v, sample), of(&claims, sample));
+    assert_eq!(of(&v, portal), Value::Null);
+    let v = ask(DOCUMENT, json!({"id": bill}));
+    assert_eq!(v["provider_labels"][0]["name"], "Our practice");
+    assert_eq!(v["organization"], org);
+
+    // An event's place and clinicians, and in full its members'.
+    let events = ask(RECORDS, json!({"kind": "events", "limit": 100}));
+    let event = |v: &Value, member: &str| -> Value {
+        let all = e.ok(&["events", "list", "--person", "Alex"]);
+        let id = all["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|x| x["members"].to_string().contains(member))
+            .unwrap()["id"]
+            .clone();
+        item(v, id.as_str().unwrap())
+    };
+    let place = event(&events, "r_officevisitaaaaaaaaa");
+    let l = &place["provider_labels"];
+    assert!(
+        l.as_array()
+            .unwrap()
+            .iter()
+            .any(|l| l["printed"] == "EXAMPLE PRIMARY CARE GROUP LLC"
+                && l["name"] == "Example Primary Care"),
+        "{place}"
+    );
+    let one = ask(
+        RECORDS,
+        json!({"kind": "events", "id": event(&events, sample)["id"]}),
+    );
+    let one = &one["items"][0];
+    let mut seen = std::collections::BTreeSet::new();
+    for l in one["provider_labels"].as_array().unwrap() {
+        assert!(
+            seen.insert((l["printed"].to_string(), l["name"].to_string())),
+            "{one}"
+        );
+    }
+    assert!(!seen.is_empty(), "{one}");
+
+    // Nothing is found by a label, and the summary has none.
+    for q in ["Our practice", "psychologist", "Avery"] {
+        let v = ask(SEARCH, json!({"query": q}));
+        assert!(v["items"].as_array().unwrap().is_empty(), "{v}");
+        for kind in ["claims", "documents", "events", "timeline"] {
+            let v = ask(RECORDS, json!({"kind": kind, "name": q}));
+            assert!(v["items"].as_array().unwrap().is_empty(), "{kind}: {v}");
+        }
+    }
+    let v = ask(SUMMARY, json!({"person": "Alex"}));
+    assert!(!v.to_string().contains("provider_labels"), "{v}");
+
+    // Views older than the folder's files label nothing.
+    let marks = folder.join("marks.json");
+    let mut v: Value = serde_json::from_slice(&std::fs::read(&marks).unwrap()).unwrap();
+    v["later"] = json!(true);
+    std::fs::write(&marks, serde_json::to_vec(&v).unwrap()).unwrap();
+    let v = ask(RECORDS, json!({"kind": "claims"}));
+    assert_eq!(of(&v, sample), Value::Null);
+
+    // The labels count in a page's size.
+    let mut idx: Value =
+        serde_json::from_slice(&std::fs::read(folder.join("index.json")).unwrap()).unwrap();
+    let records = idx["records"].as_array_mut().unwrap();
+    let claim = records.iter().find(|r| r["id"] == sample).unwrap().clone();
+    for n in 0..190 {
+        let mut c = claim.clone();
+        let tail = |n: usize| (b'a' + n as u8) as char;
+        c["id"] = json!(format!(
+            "r_many{}{}aaaaaaaaaaaaaa",
+            tail(n / 20),
+            tail(n % 20)
+        ));
+        c["key"] = json!(format!("claim|many{n}"));
+        records.push(c);
+    }
+    std::fs::write(folder.join("index.json"), serde_json::to_vec(&idx).unwrap()).unwrap();
+    e.ok(&["views", "write"]);
+    let mut args = json!({"kind": "claims", "person": "Alex", "limit": 200});
+    let mut total = 0;
+    loop {
+        let v = ask(RECORDS, args.clone());
+        for i in v["items"].as_array().unwrap() {
+            total += usize::from(i["id"].as_str().unwrap().starts_with("r_many"));
+            if i["id"].as_str().unwrap().starts_with("r_many") {
+                assert_eq!(i["provider_labels"], of(&claims, sample));
+            }
+        }
+        match v["next_cursor"].as_str() {
+            Some(c) => {
+                assert_eq!(v["truncated"], true);
+                args["cursor"] = json!(c);
+            }
+            None => break,
+        }
+    }
+    assert_eq!(total, 190);
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
+/// An event that fits a page only without its labels is still answered, with
+/// those that fit, and says so.
+#[test]
+fn a_label_yields_to_a_record_it_does_not_fit_beside() {
+    let e = Env::new("labelsyield");
+    household(&e);
+    let h: Value =
+        serde_json::from_slice(&std::fs::read(e.records().join("household.json")).unwrap())
+            .unwrap();
+    let alex = h["people"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["name"] == "Alex Testperson")
+        .unwrap()
+        .clone();
+    let folder = e.records().join(alex["folder"].as_str().unwrap());
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/labels");
+    let sample = "r_samplevisitaaaaaaaaa";
+    let t = e.tools();
+    // Visits of one day with one clinician, each printed its own way.
+    for (visits, all) in [(10, true), (120, false)] {
+        for name in ["index.json", "provider-state.json"] {
+            let mut v: Value =
+                serde_json::from_slice(&std::fs::read(fixtures.join(name)).unwrap()).unwrap();
+            v["person"] = alex["id"].clone();
+            if name == "index.json" {
+                let records = v["records"].as_array_mut().unwrap();
+                let claim = records.iter().find(|r| r["id"] == sample).unwrap().clone();
+                let mut facility = claim.clone();
+                facility["id"] = json!("r_facilityaaaaaaaaaaaa");
+                facility["key"] = json!("claim|facility");
+                facility["fields"]["type"] = json!("institutional");
+                facility["fields"]["provider"] = json!("EXAMPLE SURGERY CENTER");
+                facility["providers"] = json!([]);
+                records.push(facility);
+                for n in 0..visits {
+                    let mut c = claim.clone();
+                    let at = |n: u8| (b'a' + n) as char;
+                    let (a, b) = (at(n / 20), at(n % 20));
+                    c["id"] = json!(format!("r_many{a}{b}aaaaaaaaaaaaaa"));
+                    c["key"] = json!(format!("claim|many{n}"));
+                    c["fields"]["provider"] = json!(format!("J SAMPLE {a}{b}").to_uppercase());
+                    records.push(c);
+                }
+            }
+            std::fs::write(folder.join(name), serde_json::to_vec(&v).unwrap()).unwrap();
+        }
+        e.ok(&["views", "write"]);
+        let events = e.ok(&["events", "list", "--person", "Alex"]);
+        let one = events["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|x| x["members"].to_string().contains("r_manyaa"))
+            .unwrap();
+        let check = |v: &Value| {
+            let item = v["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|i| i["id"] == one["id"])
+                .unwrap_or_else(|| panic!("no {}", one["id"]));
+            let labels = item["provider_labels"].as_array().unwrap().len();
+            let names = one["clinicians"].as_array().unwrap().len();
+            assert!(names + 5 > usize::from(visits), "{names}");
+            assert_eq!(item["fields"]["members"], one["members"]);
+            let warned = v["warnings"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .any(|w| w["code"] == "provider-labels-left-out");
+            assert_eq!(warned, !all, "{}", v["warnings"]);
+            assert_eq!(labels >= names, all, "{labels} of {names}");
+            assert!(labels > 0);
+        };
+        let ask = |args: Value| {
+            let r = call(&t, RECORDS, args);
+            assert!(!r.is_error(), "{visits}: {}", r.text());
+            assert_fits(&t, RECORDS, &r).clone()
+        };
+        check(&ask(json!({"kind": "events", "id": one["id"]})));
+        // And a detailed list reads past it.
+        let mut args = json!({"kind": "events", "person": "Alex", "response_format": "detailed"});
+        let mut seen = 0;
+        loop {
+            let v = ask(args.clone());
+            let items = v["items"].as_array().unwrap();
+            seen += items.len();
+            if items.iter().any(|i| i["id"] == one["id"]) {
+                check(&v);
+            }
+            match v["next_cursor"].as_str() {
+                Some(c) => args["cursor"] = json!(c),
+                None => break,
+            }
+        }
+        assert_eq!(seen, events["items"].as_array().unwrap().len());
+    }
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
 #[test]
 fn a_condition_has_its_plain_name_from_the_folders_views() {
     let e = Env::new("codenames");

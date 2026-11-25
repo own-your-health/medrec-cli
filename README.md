@@ -805,6 +805,11 @@ whose warnings say how many. An answer about one person includes them, and
 so does one that names the item ("sertraline", not "tablets"), each marked
 `private` with its area.
 
+Claims, events, documents and bills carry `provider_labels` beside the source's
+words: who a printed provider is (Provider labels, above), how sure that is and
+why, and where a phone is from. `detailed` adds them for every record that
+prints one. A private item has them only in an answer about its person.
+
 Claude Desktop: install the release's `medrec-<version>.mcpb` (open the
 file, or Settings > Extensions > Install Extension) and enter the profile's
 name when asked. The extension carries its own medrec binary and reads the

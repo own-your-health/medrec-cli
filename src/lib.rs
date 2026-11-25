@@ -32,6 +32,7 @@ pub mod plain;
 pub mod private;
 pub mod proc;
 pub mod prompt;
+pub mod provider_labels;
 pub mod providers;
 pub mod refresh;
 pub mod reindex;

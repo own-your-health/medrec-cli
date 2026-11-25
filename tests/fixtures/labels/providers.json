@@ -134,21 +134,17 @@
   "r_imagingaaaaaaaaaaaaa": {
    "A TESTPERSON": "v_hefx2hw7lnrlbexer5sw"
   },
-  "r_namesakeaaaaaaaaaaaa": {
-   "EXAMPLE PRIMARY CARE GROUP LLC": "v_dkuvnq2cxpiepdpemguk"
-  },
   "r_officevisitaaaaaaaaa": {
    "EXAMPLE PRIMARY CARE GROUP LLC": "v_jqqys54esdin4fmkdaqe"
-  },
-  "r_onepaperaaaaaaaaaaaa": {
-   "R PLACEHOLDER": "v_oraklnoqfvzv2vuwya5u"
-  },
-  "r_paperaloneaaaaaaaaaa": {
-   "M TEMPLATE": "v_dfc2rhprf4wcyfngq4i2"
-  },
-  "r_samplevisitaaaaaaaaa": {
-   "J SAMPLE": "v_fmdwr5pyo4gcvi6yoszh"
   }
+ },
+ "claims": {
+  "r_imagingaaaaaaaaaaaaa": "v_hefx2hw7lnrlbexer5sw",
+  "r_namesakeaaaaaaaaaaaa": "v_dkuvnq2cxpiepdpemguk",
+  "r_officevisitaaaaaaaaa": "v_jqqys54esdin4fmkdaqe",
+  "r_onepaperaaaaaaaaaaaa": "v_oraklnoqfvzv2vuwya5u",
+  "r_paperaloneaaaaaaaaaa": "v_dfc2rhprf4wcyfngq4i2",
+  "r_samplevisitaaaaaaaaa": "v_fmdwr5pyo4gcvi6yoszh"
  },
  "private": {
   "labels": {
@@ -183,13 +179,10 @@
    "C EXAMPLE": "v_vybukuxxbglvl3r47eh7",
    "R PLACEHOLDER": "v_zt6t2lijjdjxppflmlwv"
   },
-  "by_item": {
-   "r_privatevisitaaaaaaaa": {
-    "R PLACEHOLDER": "v_zt6t2lijjdjxppflmlwv"
-   },
-   "r_talkaaaaaaaaaaaaaaaa": {
-    "C EXAMPLE": "v_vybukuxxbglvl3r47eh7"
-   }
+  "by_item": {},
+  "claims": {
+   "r_privatevisitaaaaaaaa": "v_zt6t2lijjdjxppflmlwv",
+   "r_talkaaaaaaaaaaaaaaaa": "v_vybukuxxbglvl3r47eh7"
   }
  }
 }
