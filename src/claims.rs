@@ -863,6 +863,8 @@ mod tests {
             fields_from: None,
             given: Vec::new(),
             absent: Vec::new(),
+            lists: Default::default(),
+            listed_by: Vec::new(),
             documents: Vec::new(),
             provenance: Vec::new(),
         }

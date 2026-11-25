@@ -127,10 +127,11 @@ enum Command {
     /// Shape every claim again, and read every record's providers, every
     /// condition's, allergy's and medicine's fields and what each source says
     /// of it, and every result's and report's status and fields (its parts, exact
-    /// values and categories too) again, from the filed raw resources, put each result about
-    /// somebody else that was filed as the person's own in a record of its
-    /// own, and read bills' and receipts' statements again, as this medrec's
-    /// import does: once after an upgrade that changes them.
+    /// values and categories too) and what each lists again, from the filed raw
+    /// resources, put each result about somebody else that was filed as the
+    /// person's own in a record of its own, link the records again, and read
+    /// bills' and receipts' statements again, as this medrec's import does: once
+    /// after an upgrade that changes them.
     Reindex(ReindexArgs),
     /// The views: each person's records cut into small files under views/,
     /// for readers that cannot parse a whole index at once. medrec brings
@@ -1330,8 +1331,8 @@ fn run(cli: &Cli) -> Result<(), CliError> {
                     println!("nothing was written; a run would do this:");
                 }
                 println!(
-                    "{} claims: {} shaped again, {} unchanged, {} with no raw file; {} bills and receipts read again; {} records gained or changed what is said of their providers; {} records and {} papers what their sources say of them; {} results and reports their fields; {} records keep more of what their sources gave; {} results about somebody else put in records of their own",
-                    r.claims, r.reshaped, r.unchanged, r.without_raw, r.statements, r.providers_updated, r.statuses_updated, r.papers_updated, r.results_updated, r.given_updated, r.results_split
+                    "{} claims: {} shaped again, {} unchanged, {} with no raw file; {} bills and receipts read again; {} records gained or changed what is said of their providers; {} records and {} papers what their sources say of them; {} results and reports their fields or what they list; {} records their links to others; {} records keep more of what their sources gave; {} results about somebody else put in records of their own",
+                    r.claims, r.reshaped, r.unchanged, r.without_raw, r.statements, r.providers_updated, r.statuses_updated, r.papers_updated, r.results_updated, r.links_updated, r.given_updated, r.results_split
                 );
                 if let Some(n) = papers_unread(r.papers_unread) {
                     println!("{n}");
@@ -3284,12 +3285,12 @@ fn one_record_cmd(cli: &Cli, cmd: &RecordsCmd, store: &ConfigStore) -> Result<()
             fields,
             changes,
         } => {
-            let (p, r) = raw::record(&f, &h, id)?;
+            let (p, r, who) = raw::record(&f, &h, id)?;
             // The counts have no name.
-            let about = match *fields || *changes {
-                true => medrec::about::record(&p, &r).map(|who| format!("about {who}")),
-                false => medrec::about::of_record(&p, &r),
-            };
+            let about = who.map(|who| match *fields || *changes {
+                true => format!("about {who}"),
+                false => medrec::about::says(&p, who),
+            });
             let said: Vec<String> = about.into_iter().collect();
             said.iter().for_each(|n| note(cli, n));
             let of = |v: Value| {

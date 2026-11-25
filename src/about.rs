@@ -13,6 +13,7 @@ use serde_json::Value;
 use crate::given;
 use crate::import;
 use crate::model::{Document, Person, PersonIndex, Record};
+use crate::panels;
 use crate::questionnaires::{self, Answers};
 use crate::standing;
 
@@ -123,6 +124,22 @@ pub fn ids(p: &Person, idx: &PersonIndex) -> BTreeSet<String> {
             out.insert(r.id.clone());
         }
     }
+    // So is a panel or a report that lists none but such, or did.
+    let in_error = idx.records.iter().filter(|r| standing::record_in_error(r));
+    let in_error: BTreeSet<&str> = in_error.map(|r| r.id.as_str()).collect();
+    let panels = panels::every_list(&idx.records);
+    loop {
+        let before = out.len();
+        for (i, lists) in &panels {
+            let about = |id: &str| out.contains(id);
+            if panels::none_but(lists, &in_error, &about) {
+                out.insert(idx.records[*i].id.clone());
+            }
+        }
+        if out.len() == before {
+            break;
+        }
+    }
     for d in &idx.documents {
         let links = |r: &&Record| r.documents.contains(&d.id);
         let mut by = idx.records.iter().filter(links).peekable();
@@ -142,6 +159,8 @@ pub struct Counted {
     pub said: usize,
     /// Those a grown person answers, of a day the person had not grown.
     pub by_age: usize,
+    /// Panels and reports that list none but such.
+    pub listing: usize,
     pub documents: usize,
 }
 
@@ -155,15 +174,22 @@ pub fn counted(p: &Person, idx: &PersonIndex) -> Counted {
     for r in of {
         match of_resource(r, import::wrote(r)) {
             Some(_) => out.said += 1,
-            None => out.by_age += 1,
+            None if record(p, r).is_some() => out.by_age += 1,
+            None => out.listing += 1,
         }
     }
     out
 }
 
+/// Whom a record is about, where that is somebody else.
+pub fn who(p: &Person, idx: &PersonIndex, r: &Record) -> Option<&'static str> {
+    let listing = || ids(p, idx).contains(&r.id).then_some(ANOTHER);
+    record(p, r).or_else(listing)
+}
+
 /// What is said of a record opened by its id, where it is about somebody else.
-pub fn of_record(p: &Person, r: &Record) -> Option<String> {
-    record(p, r).map(|who| says(p, who))
+pub fn of_record(p: &Person, idx: &PersonIndex, r: &Record) -> Option<String> {
+    who(p, idx, r).map(|who| says(p, who))
 }
 
 /// The same of a paper.
@@ -171,7 +197,7 @@ pub fn of_paper(p: &Person, idx: &PersonIndex, id: &str) -> Option<String> {
     ids(p, idx).contains(id).then(|| says(p, ANOTHER))
 }
 
-fn says(p: &Person, who: &str) -> String {
+pub fn says(p: &Person, who: &str) -> String {
     format!("about {who}, in {}'s chart", crate::printable(&p.name))
 }
 
