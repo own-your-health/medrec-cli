@@ -50,6 +50,13 @@ pub fn is_valid(prefix: &str, s: &str) -> bool {
     rest.len() == 20 && rest.bytes().all(|c| ALPHABET.contains(&c))
 }
 
+/// Whether `s` is an id this module could have produced, of anything.
+pub fn is_id(s: &str) -> bool {
+    s.split_once('_')
+        .is_some_and(|(prefix, _)| prefix.len() == 1 && is_valid(prefix, s))
+        && s.starts_with(|c: char| c.is_ascii_lowercase())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -63,6 +70,17 @@ mod tests {
         assert_eq!(a.len(), 22);
         assert!(is_valid("p", &a));
         assert!(!is_valid("o", &a));
+        assert!(is_id(&a) && is_id(&from_digest("e", &[7; 32])));
+        let text = [
+            "r_aaaaaaaaaaaaaaaaaaaa b",
+            "a_aaaaaaaaaaaaaaaaaaa",
+            "R_aaaaaaaaaaaaaaaaaaaa",
+            "1_aaaaaaaaaaaaaaaaaaaa",
+            "pp_aaaaaaaaaaaaaaaaaaaa",
+            "_aaaaaaaaaaaaaaaaaaaa",
+            "",
+        ];
+        assert!(text.iter().all(|t| !is_id(t)));
     }
 
     #[test]

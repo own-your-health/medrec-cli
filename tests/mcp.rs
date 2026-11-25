@@ -2755,7 +2755,7 @@ fn every_answer(t: &MedrecTools, person: Option<&str>) -> BTreeMap<String, Value
         }
     }
     // Words of theirs, and one that finds every result.
-    for q in ["survey", "score", "risk", "use", "labs"] {
+    for q in ["survey", "score", "risk", "use", "labs", "sunlight"] {
         ask(format!("search, {q}"), SEARCH, json!({"query": q}));
     }
     ask("summary".into(), SUMMARY, json!({}));
@@ -2824,6 +2824,19 @@ fn what_a_questionnaire_asks_is_private_everywhere() {
         assert!(v.to_string().contains("sunlight"), "{kind}: {v}");
     }
     assert!(shared["search, survey"].to_string().contains(SUNLIGHT));
+    // A claim is found by its words, not by the ids of its results.
+    let found = shared["search, sunlight"]["items"].as_array().unwrap();
+    assert!(found.iter().any(|i| i["id"] == SUNLIGHT), "{found:?}");
+    assert!(
+        found.iter().all(|i| i["id"] != "r_seenvisitaaaaaaaaaaa"),
+        "{found:?}"
+    );
+    let hay = &view_bytes(&e, &alex)["search-hay-0.bin"];
+    let hay = String::from_utf8_lossy(hay);
+    assert!(hay.contains("Example sunlight index"));
+    for id in [SUNLIGHT, USE[1], GROWN[2]] {
+        assert!(!hay.contains(id), "{id}");
+    }
     for kind in ["conditions", "timeline"] {
         let v = &shared[&format!("{kind}, concise")];
         assert!(v.to_string().contains(ANKLE), "{kind}: {v}");
