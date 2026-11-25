@@ -537,6 +537,32 @@ to 0.9.1, `medrec reindex` reads the bills and receipts filed before. Each
 person's bills are also a view, `views/<person id>/bills.json`
 ([docs/data-contract.md](docs/data-contract.md), "Bills").
 
+### What is current
+
+A condition, an allergy or a medicine often comes from several sources, and
+they can differ. medrec keeps each source's word with the day it was read, and
+no source's word wins:
+
+- It is current while any source says so. Where another says otherwise, its
+  line says `sources differ` and gives each word.
+- A diagnosis given for a visit is not a current condition. It is in the list
+  without `--active`, and a list of current conditions names each source that
+  sends diagnoses and no problem list.
+- What a source calls refuted is not current. A record of any kind entered in
+  error is in no list, the timeline or the search, which say how many are not
+  shown.
+- A source's word that medrec does not keep yet never lets the others end a
+  record: its line says `not every source heard`. After upgrading to 0.9.9 run
+  `medrec reindex`, which reads them from the raw files.
+- A prescription whose end date has passed is not current: it follows the
+  current ones with that date and any fill after it, as one on hold does. A
+  fill is a fact and changes nothing. An allergy is never ended by a date.
+
+`medrec conditions`, `allergies` and `meds` show what each is and what each
+source says of it, and `--active` the current ones. The person's
+`standing.json` holds the same for readers (docs/data-contract.md,
+"Standing").
+
 ### Private items
 
 Records, documents, events and imaging studies about mental health,
@@ -808,9 +834,9 @@ supported.
 
 | Tool | What it answers |
 |---|---|
-| `medrec_summary` | The household's people. With `person`: their current medicines, conditions and allergies, immunizations, the latest result of each test with the lab's range and flag, recent visits, and bills with an amount due |
+| `medrec_summary` | The household's people. With `person`: their current medicines (and those on hold or ended by their date), conditions and allergies, immunizations, the latest result of each test with the lab's range and flag, recent visits, and bills with an amount due |
 | `medrec_search` | Documents, records, imaging studies and notes holding every word of a query; a query naming lab tests (`blood tests`, `labs`) also finds every lab result, report and lab claim |
-| `medrec_records` | One kind, newest first: `medications`, `conditions`, `allergies`, `immunizations`, `visits`, `procedures`, `results` (with `name`, one test over time), `tests` (the latest result of each), `reports`, `claims`, `coverage`, `bills`, `documents`, `notes`, `timeline` or `events` (what happened: one per visit, ER trip, stay, test or fill, with `you_owe`; `id` gives one with its money and members); `active` keeps current ones (not for `events`, whose `status` says which are still waiting) |
+| `medrec_records` | One kind, newest first: `medications`, `conditions`, `allergies`, `immunizations`, `visits`, `procedures`, `results` (with `name`, one test over time), `tests` (the latest result of each), `reports`, `claims`, `coverage`, `bills`, `documents`, `notes`, `timeline` or `events` (what happened: one per visit, ER trip, stay, test or fill, with `you_owe`; `id` gives one with its money and members); `active` keeps current ones (not for `events`, whose `status` says which are still waiting), and conditions, allergies and medicines say what each source says of them ("What is current") |
 | `medrec_document` | A filed document's extracted text, in parts of up to 16,000 characters, with page breaks marked |
 
 Private items (above) are left out of an answer about the whole household,

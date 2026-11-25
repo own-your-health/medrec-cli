@@ -479,6 +479,38 @@ impl Standing {
         self.differs || self.differs_after.as_deref().is_some_and(|d| d < today)
     }
 
+    /// What it is on a day, as a reader says it of its line.
+    pub fn title(&self, today: &str, line: &Line) -> String {
+        let mut is = match (self.on(today), self.is) {
+            (At::Current, _) => "current".to_string(),
+            (At::OnHold, _) => "on hold".into(),
+            (At::Error, _) => "entered in error".into(),
+            (At::EndedByDate, _) => {
+                let of = self.until_of.as_deref();
+                let mut s = format!(
+                    "ended by its date {}{}",
+                    self.until.as_deref().unwrap_or_default(),
+                    of.map(|of| format!(" ({of})")).unwrap_or_default()
+                );
+                if let Some(f) = &line.filled {
+                    s.push_str(&format!(", filled {}", f.date));
+                }
+                s
+            }
+            (At::All, Is::Draft) => "draft".into(),
+            (At::All, Is::Refuted) => "refuted".into(),
+            (At::All, Is::Visit) => "diagnosis from a visit".into(),
+            (At::All, _) => "ended".into(),
+        };
+        if line.differs {
+            is.push_str(", sources differ");
+        }
+        if !line.unheard.is_empty() {
+            is.push_str(", not every source heard");
+        }
+        is
+    }
+
     /// The last of its fills that an answer may show.
     pub fn fill(&self, may_show: &dyn Fn(&str) -> bool) -> Option<&Filled> {
         self.filled.iter().find(|f| may_show(&f.record))
@@ -489,7 +521,79 @@ impl Standing {
     }
 }
 
+impl Said {
+    /// Its word, and the day it was read.
+    fn text(&self) -> String {
+        let mut said = vec![self.status.as_deref().unwrap_or("no status").to_string()];
+        let sure = self.verification.as_deref();
+        said.extend(
+            sure.filter(|v| code(Some(v)) != "confirmed")
+                .map(str::to_string),
+        );
+        said.extend(self.abatement.as_ref().map(|a| format!("ended {a}")));
+        if let Some(end) = &self.end {
+            let of = self.end_of.as_deref();
+            let of = of.map(|of| format!(" ({of})")).unwrap_or_default();
+            said.push(format!("ends {end}{of}"));
+        }
+        let read = self.read.as_ref().map(|d| format!(" (read {d})"));
+        format!("{}{}", said.join(", "), read.unwrap_or_default())
+    }
+}
+
+/// What a list says of a source that sends no problem list.
+pub fn no_problem_list(source: &str) -> String {
+    format!("No problem list from {source}; diagnoses from visits are listed under All")
+}
+
+/// What a list says of those it does not show.
+pub fn in_error(n: usize) -> String {
+    format!("{n} entered in error, not shown")
+}
+
 impl Standings {
+    /// A source's name, as a reader says it.
+    pub fn name(&self, source: usize) -> &str {
+        let name = self.sources.get(source).and_then(Option::as_deref);
+        name.unwrap_or("a source with no name")
+    }
+
+    /// What each source says on a line, with its name, each once, and those
+    /// not heard.
+    pub fn says(&self, line: &Line) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        let ids = line.records.iter().chain(&line.against);
+        let words = ids
+            .filter_map(|id| self.records.get(id))
+            .flat_map(|s| &s.words);
+        let said = words.map(|w| format!("{}: {}", self.name(w.source), w.text()));
+        let unheard = line.unheard.iter();
+        let unheard = unheard.map(|n| format!("{}: not heard", self.name(*n)));
+        for x in said.chain(unheard) {
+            if !out.contains(&x) {
+                out.push(x);
+            }
+        }
+        out
+    }
+
+    /// A record by itself.
+    fn alone(&self, id: &str, s: &Standing, may_show: &dyn Fn(&str) -> bool, today: &str) -> Line {
+        let filled = s.fill(may_show);
+        Line {
+            records: vec![id.to_string()],
+            against: Vec::new(),
+            differs: s.differs_on(today),
+            filled: filled.filter(|_| s.on(today) == At::EndedByDate).cloned(),
+            unheard: s.unheard.clone(),
+        }
+    }
+
+    /// Every record entered in error, by id.
+    pub fn errors(&self) -> impl Iterator<Item = &String> {
+        self.in_error.values().flatten()
+    }
+
     /// The lists of one kind ([`KINDS`]; another has none), of the records a
     /// reader may show.
     pub fn lists(&self, kind: &str, may_show: &dyn Fn(&str) -> bool, today: &str) -> Lists {
@@ -509,16 +613,7 @@ impl Standings {
             }
         }
         for (id, s) in &shown {
-            let one = || Line {
-                records: vec![id.to_string()],
-                against: Vec::new(),
-                differs: s.differs_on(today),
-                filled: s
-                    .fill(may_show)
-                    .filter(|_| s.on(today) == At::EndedByDate)
-                    .cloned(),
-                unheard: s.unheard.clone(),
-            };
+            let one = || self.alone(id, s, may_show, today);
             match s.on(today) {
                 At::Error | At::All => {}
                 At::OnHold => out.on_hold.push(one()),
@@ -545,6 +640,97 @@ impl Standings {
     }
 }
 
+/// A row of a list of conditions, allergies or medicines.
+pub struct Row<'a> {
+    pub record: &'a Record,
+    /// What it is, as a reader says it; none of a fill.
+    pub standing: Option<String>,
+    pub says: Vec<String>,
+    /// Current ones first, then those on hold, then those ended by their
+    /// date.
+    pub group: u8,
+    /// Entered in error, to be counted and not shown.
+    pub error: bool,
+}
+
+/// A list, and what it says of sources with no problem list.
+pub struct List<'a> {
+    pub rows: Vec<Row<'a>>,
+    pub notes: Vec<String>,
+}
+
+impl Standings {
+    /// A list of one kind: with `active` a row for each line of what is
+    /// current, on hold or ended by its date, without it one for each record.
+    /// Of those `asked` for. A row of a record that may not be shown (`shows`)
+    /// is there to be left out and counted, as one entered in error is.
+    pub fn list<'a>(
+        &self,
+        idx: &'a PersonIndex,
+        kind: &str,
+        active: bool,
+        today: &str,
+        asked: &dyn Fn(&Record) -> bool,
+        shows: &dyn Fn(&Record) -> bool,
+    ) -> List<'a> {
+        let of_kind = idx.records.iter().filter(|r| r.kind == kind);
+        let by: BTreeMap<&str, &'a Record> = of_kind.map(|r| (r.id.as_str(), r)).collect();
+        let may_show = |id: &str| by.get(id).is_some_and(|r| shows(r));
+        let errors: BTreeSet<&String> = self.in_error.get(kind).into_iter().flatten().collect();
+        let row = |x: &'a Record, of: Option<&Line>, group: u8| {
+            let s = self.records.get(&x.id);
+            let s = s.zip(of);
+            Row {
+                record: x,
+                standing: s.map(|(s, of)| s.title(today, of)),
+                says: s.map(|(_, of)| self.says(of)).unwrap_or_default(),
+                group,
+                error: errors.contains(&x.id),
+            }
+        };
+        let alone = |x: &'a Record, group: u8| {
+            let s = self.records.get(&x.id);
+            let of = s.map(|s| self.alone(&x.id, s, &may_show, today));
+            row(x, of.as_ref(), group)
+        };
+        let asked_for = idx.records.iter().filter(|x| x.kind == kind && asked(x));
+        if !active {
+            return List {
+                rows: asked_for.map(|x| alone(x, 0)).collect(),
+                notes: Vec::new(),
+            };
+        }
+        let lists = self.lists(kind, &may_show, today);
+        let mut rows: Vec<Row<'a>> = Vec::new();
+        for (lines, group) in [
+            (&lists.current, 0),
+            (&lists.on_hold, 1),
+            (&lists.ended_by_date, 2),
+        ] {
+            for l in lines {
+                let mut of = l.records.iter().filter_map(|id| by.get(id.as_str()));
+                rows.extend(of.find(|x| asked(x)).map(|x| row(x, Some(l), group)));
+            }
+        }
+        for x in asked_for {
+            let at = self.records.get(&x.id).map(|s| s.on(today));
+            let group = match (shows(x), at) {
+                (true, _) if errors.contains(&x.id) => 0,
+                (false, Some(At::Current)) => 0,
+                (false, Some(At::OnHold)) => 1,
+                (false, Some(At::EndedByDate)) => 2,
+                _ => continue,
+            };
+            rows.push(alone(x, group));
+        }
+        let none = lists.without_problem_list.iter();
+        List {
+            rows,
+            notes: none.map(|n| no_problem_list(self.name(*n))).collect(),
+        }
+    }
+}
+
 /// One line of the records of one code or name.
 fn merged(of: &[(&str, &Standing)], today: &str) -> Line {
     let current = |i: Is| i == Is::Current;
@@ -568,8 +754,11 @@ fn merged(of: &[(&str, &Standing)], today: &str) -> Line {
     };
     let records = ids(&is_current);
     let against = ids(&|s| !is_current(s) && other.iter().any(|n| s.has(*n, ended)));
-    let differs =
-        !against.is_empty() || of.iter().any(|(_, s)| is_current(s) && s.differs_on(today));
+    let says_so = of
+        .iter()
+        .any(|(_, s)| s.words.iter().any(|w| current(w.is)));
+    let differs = (says_so && !other.is_empty())
+        || of.iter().any(|(_, s)| is_current(s) && s.differs_on(today));
     let mut unheard: Vec<usize> = Vec::new();
     for n in of.iter().flat_map(|(_, s)| &s.unheard) {
         if !unheard.contains(n) {

@@ -314,7 +314,7 @@
    }
   },
   {
-   "why": "Two sources' uncoded names alike are one line, newest first. No date ends an allergy. A source not heard never lets the others' words end one.",
+   "why": "Two sources' uncoded names alike are one line, newest first. No date ends an allergy. A source not heard never lets the others' words end one. A line differs only where some word on it is current: a source that refutes it beside one that states it differs, though its own record is current for a source not heard; one that ended beside a source not heard does not.",
    "kind": "allergy",
    "day": "2024-06-15",
    "hidden": [],
@@ -340,6 +340,27 @@
       ],
       "unheard": [
        1
+      ]
+     },
+     {
+      "records": [
+       "r_unheardrefutedaaaaaa",
+       "r_besiderefutedaaaaaaa"
+      ],
+      "differs": true,
+      "unheard": [
+       3
+      ]
+     },
+     {
+      "records": [
+       "r_unheardendedaaaaaaaa"
+      ],
+      "against": [
+       "r_besideendedaaaaaaaaa"
+      ],
+      "unheard": [
+       3
       ]
      },
      {

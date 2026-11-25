@@ -1547,7 +1547,8 @@ result:
   "entries":[[date, name number, shard, place in shard, rank], …]}, …]
 ```
 
-`entries` holds every result of the series, newest first. `shard` and
+`entries` holds every result of the series, newest first, but those entered in
+error (0.9.9 and later). `shard` and
 `place` locate it in `records-result-<shard>.json` (`-1`: the undated file).
 `rank` is its place among all the person's results, newest first, then by
 name.
@@ -1575,6 +1576,15 @@ vaccine its last dose's and a latest result its own (0.9.1 and later), so
 a reader finds them in `private.json`. A condition whose code can have a
 name carries `name_key`, its key in `code-names.json` (0.9.4 and later).
 
+`medications`, `conditions` and `allergies` are 0.9.8's lists, by each record's
+own `status`, for a reader of those. `standing` (0.9.9 and later) is what the
+summary's lists are made of, since what is current changes with the day and
+with what an answer may show: `medications`, `conditions` and `allergies`, each
+every record that `standing.json` has as `current` or `on_hold`, uncut, in its
+`order`, as the same lines. A reader makes the lists by the rules of "As a
+reader lists them", cuts each, and shows a line by the first of its `records`.
+Immunizations, results and visits leave out what is entered in error.
+
 ### documents.json and text-<n>.bin
 
 `documents.json` is `index.json`'s `documents`, each with two fields added:
@@ -1582,7 +1592,8 @@ name carries `name_key`, its key in `code-names.json` (0.9.4 and later).
 - `text_at`: where its text is, `[pack, byte offset, byte length,
   characters]`. Absent when the document has no text.
 - `linked`: the names (`display`) of the first 20 records that list it in
-  their `documents`, in `index.json` order. Absent when none do.
+  their `documents`, in `index.json` order, but those entered in error (0.9.9
+  and later). Absent when none do.
 
 `text-<n>.bin` holds the documents' texts, UTF-8, one after another in
 document order. A pack closes before a text would take it past 1,000,000
@@ -1898,7 +1909,7 @@ word wins over another's. Every person has one.
   | `current` | is none of those below, `unknown`, `provisional`, `differential` and `unconfirmed` too | the current list, with its word |
   | `on_hold` | medicine's status is `on-hold` | a group of its own, "On hold" |
   | `draft` | medicine's status is `draft` | the list of all |
-  | `ended` | status is `completed`, `stopped`, `inactive`, `resolved`, `remission` or `cancelled`, or a medicine's `not-taken`, or which has no status and is a condition with an abatement | the list of all |
+  | `ended` | status is `completed`, `stopped`, `inactive`, `resolved`, `remission` or `cancelled`, or a medicine's `not-taken` or `refuted`, or which has no status and is a condition with an abatement | the list of all |
   | `refuted` | status or verification is `refuted`, of a condition or an allergy | the list of all |
   | `visit` | categories have `encounter-diagnosis` and not `problem-list-item`, of a condition that would be `current` | the list of all, with its category |
   | `error` | status or verification is `entered-in-error` | none, unless asked for by its id |
@@ -1914,12 +1925,14 @@ word wins over another's. Every person has one.
   those with one line under one heading.
 - **`until`** and **`until_of`**, of a current medicine whose every current
   word has an end, with no source unheard: the last day of the last to end, and
-  what of it ends (`end_of`). A month or a year ends with its last day. After
-  that day it is not current but in a group of its own, "Ended by its date",
+  what of it ends (`end_of`). A month or a year ends with its last day, and an
+  end that is no date is none. After that day it is not current but in a group of its own, "Ended by its date",
   with the day and what ended. An allergy or a condition never stops being
   current by a date.
-- **`filled`**: the fills of the medicine after `until`, newest first. A reader
-  shows the first it may, a fact beside it that changes nothing.
+- **`filled`**: the fills of the medicine after `until`, newest first, of one
+  day the greater record id first: those whose `status` is `completed` or
+  `unknown`, or that have none. Of a medicine ended by its date a reader shows
+  the first it may, a fact beside it that changes nothing.
 - **`differs`**: its words differ: some say another `is` than the rest (`visit`
   and `error` say nothing here), or give another `verification`.
   **`differs_after`**: they differ after this day, when a word that says it is
@@ -1929,7 +1942,8 @@ word wins over another's. Every person has one.
   vaccine) those whose own status is `entered-in-error`. `views.json` has the
   same object, for a reader that opens no other view.
 - **`no_problem_list`**: each source with a diagnosis given for a visit and no
-  other condition, heard or not, and those diagnoses.
+  other condition, heard or not, and those diagnoses. A condition that is
+  `error`, and a word of no source, are neither.
 
 **As a reader lists them**, of the records it may show, on the day it answers:
 
@@ -1940,12 +1954,13 @@ word wins over another's. Every person has one.
    records is. Its name is that of the first of those in `order`. The other
    groups have one for each record.
 3. A line differs when one of its current records does (`differs`, or
-   `differs_after` before that day), or when a source of which no word on the
-   line is current has one that is ended or refuted. A source's own earlier
-   episode that ended does not differ from its current one.
+   `differs_after` before that day), or when a word on the line is current and
+   a source of which none is has one that is ended or refuted. A source's own
+   earlier episode that ended does not differ from its current one.
 4. A line says what each source says, with its name and `read`: its `status`,
-   and its `verification` unless that is `confirmed`; and names the sources
-   not heard. On a line that differs, those that say otherwise too.
+   and its `verification` unless that is `confirmed`; then what those records
+   say that are not current and have an ended or refuted word of a source of
+   which no word on the line is current; and names the sources not heard.
 5. What is in `in_error`, of any kind, is out of every list, and of the
    timeline and the search, and the list says how many: "1 entered in error,
    not shown". The views' other files hold it as they hold the rest.
@@ -1966,7 +1981,7 @@ the `standing.json` it gives, and `lists.json`, the lists a reader makes of it.
 Each case has why, the kind, the day, the records the answer may not show
 (`hidden`), and `lists`, a shape of the fixture's alone: `current`, `on_hold`
 and `ended_by_date` are lines, each with `records` (those of it that are there,
-the first its name's), `against` (those of other sources that say otherwise),
+the first its name's), `against` (those that rule 4 adds),
 `differs`, `filled` (the fill shown) and `unheard`; `in_error` is how many, and
 `without_problem_list` the places in `sources` of those that rule 6 names.
 
@@ -2056,12 +2071,51 @@ readers ship with medrec:
 - **`medrec mcp`**, for Claude Desktop and Claude Code, reads the same files
   through the same views, per call, with no lock. It writes nothing,
   `_requests/` included. Its answers are computed, not stored:
-  - a person's summary takes medicines, conditions and allergies whose
-    `status` is not ended (`completed`, `stopped`, `inactive`, `resolved`,
-    `remission`, `entered-in-error`, `cancelled`, `refuted`). It keeps one
-    per code (with its system), or per name with case and accents folded
-    when uncoded: the newest.
-  - the latest result of each test is grouped the same way. A test's
+  - what is current among conditions, allergies and medicines is what
+    `standing.json` makes of it (0.9.9 and later; "As a reader lists them"):
+    - an item, or a summary's line, has `standing`, what it is on the day of
+      the answer, and `says`, what each source says, and no `status`, which is
+      one source's. `standing` is `current`, `on hold`, `ended by its date
+      <until> (<until_of>)` with `, filled <date>` for the fill shown, `draft`,
+      `ended`, `refuted` or `diagnosis from a visit`; then `, sources differ`
+      where they do; then `, not every source heard` where one is `unheard`.
+      `says` is what each word says, each once, joined by `; `: the words of
+      the line's records, then of those of other sources that say otherwise,
+      each in `order` and a record's as they stand, then `<source>: not heard`
+      for each not heard. A word is the source, a colon, its `status` (or `no
+      status`), its `verification` unless that is `confirmed`, `ended
+      <abatement>` and `ends <end> (<end_of>)`, joined by commas, then ` (read
+      <day>)`. A fill has neither `standing` nor `says`, and keeps its
+      `status`.
+    - `medrec_records` with `active` has a row for each current line, then for
+      each medicine on hold, then for each ended by its date; in each group
+      newest first, then by title. A line's row is the first of its records
+      that the question fits (`name`, `since`, `until`): they choose lines, and
+      change nothing a line says. In an answer about the whole household a
+      private record counts on a line only where the answer lists it, so where
+      the question fits it and names it. Without `active`, each record is a
+      row, with its own words.
+    - what a page of an `active` list leaves out sits by its date in a group: a
+      private record in the group it would be in alone (one that would be in
+      none is not left out), and one entered in error with the current ones.
+    - a `no-problem-list` warning says which sources send no problem list, by
+      rule 6: with `active`, on each page. An answer about the whole
+      household names the person first.
+    - an `entered-in-error` warning says how many are not shown, of any kind,
+      page by page as `private-left-out` does, in `medrec_records` (`timeline`
+      too) and `medrec_search`. It counts none that is left out as private.
+      `tests` is made of the results that are not, and counts none.
+      `medrec_document` names none.
+    - a person's summary has the current lists, each line once, with
+      `medications_on_hold` and `medications_ended_by_date` after
+      `medications` when they are not empty. A list's `note` has what its
+      warnings would say: of sources with no problem list, then of those
+      entered in error, each a sentence, joined by `. `.
+    - the commands give the same: `conditions`, `allergies` and `meds` have
+      `standing` and `says`, and the lists, the timeline and the search have
+      `notes`, with what they say of those not shown.
+  - the latest result of each test is one per code (with its system), or per
+    name with case and accents folded when uncoded: the newest. A test's
     series is every `result` record whose code is the one asked for, or
     whose name holds the words asked for. A series is private when any of its
     results is (0.9.3 and later; see the private items below).
@@ -2102,7 +2156,7 @@ readers ship with medrec:
     `private-marks-unreadable` warning naming them. So has one whose provider
     labels do not read (`labels_unreadable`, 0.9.7 and later), with a
     `private-labels-unreadable` warning. The commands are the household's own
-    terminal and leave nothing out.
+    terminal and leave nothing private out.
   - `kind: "conditions"` rows and the summary's condition lines carry
     `plain_name`, the code's name in the person's current
     `code-names.json` (0.9.4 and later). `title` and `name` stay the

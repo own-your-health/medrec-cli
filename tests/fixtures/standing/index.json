@@ -1317,6 +1317,153 @@
    "status": "entered-in-error"
   },
   {
+   "id": "r_unheardrefutedaaaaaa",
+   "kind": "allergy",
+   "key": "allergy|unheardrefuted|2024-03-12",
+   "date": "2024-03-12",
+   "display": "Sample moss",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-02T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/unheardrefuted-0.json"
+    },
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "dropin",
+      "fhir_base": "https://dropin.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-05T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/dropin/unheardrefuted-1.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/north/unheardrefuted-0.json",
+     "status": "active",
+     "verification": "refuted"
+    }
+   ],
+   "status": "active"
+  },
+  {
+   "id": "r_besiderefutedaaaaaaa",
+   "kind": "allergy",
+   "key": "allergy|besiderefuted|2024-03-11",
+   "date": "2024-03-11",
+   "display": "Sample moss",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "east",
+      "fhir_base": "https://east.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-03T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/east/besiderefuted-0.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/east/besiderefuted-0.json",
+     "status": "active"
+    }
+   ],
+   "status": "active"
+  },
+  {
+   "id": "r_unheardendedaaaaaaaa",
+   "kind": "allergy",
+   "key": "allergy|unheardended|2024-03-10",
+   "date": "2024-03-10",
+   "display": "Sample fern",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-02T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/unheardended-0.json"
+    },
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "dropin",
+      "fhir_base": "https://dropin.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-05T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/dropin/unheardended-1.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/north/unheardended-0.json",
+     "status": "inactive"
+    }
+   ],
+   "status": "inactive"
+  },
+  {
+   "id": "r_besideendedaaaaaaaaa",
+   "kind": "allergy",
+   "key": "allergy|besideended|2024-03-09",
+   "date": "2024-03-09",
+   "display": "Sample fern",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "east",
+      "fhir_base": "https://east.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-03T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/east/besideended-0.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/east/besideended-0.json",
+     "status": "inactive"
+    }
+   ],
+   "status": "inactive"
+  },
+  {
    "id": "r_fillbeforeaaaaaaaaaa",
    "kind": "medication",
    "key": "medication|fillbefore|2024-03-05",

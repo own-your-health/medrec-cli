@@ -7,11 +7,14 @@ use pk_cli_core::CliError;
 use serde::Serialize;
 use serde_json::Value;
 
+use std::collections::BTreeSet;
+
 use crate::folder::Folder;
 use crate::intake::classify;
 use crate::model::{Household, Note, Person, PersonIndex, PersonText, Record};
 use crate::people;
 use crate::sources::Sources;
+use crate::standing::{self, Standings};
 
 #[derive(Debug, Clone, Default)]
 pub struct Range {
@@ -95,6 +98,21 @@ pub fn validate_kinds(kinds: &[String]) -> Result<(), CliError> {
 }
 
 pub fn timeline(
+    folder: &Folder,
+    h: &Household,
+    person: Option<&str>,
+    range: &Range,
+    kinds: &[String],
+) -> Result<(Vec<Event>, Vec<String>), CliError> {
+    let all = everything(folder, h, person, range, kinds)?;
+    let errors = entered_in_error(folder, h, person)?;
+    let error = |e: &mut Event| errors.contains(&e.id).then_some(Why::Error);
+    let (out, left_out) = LeftOut::split(all, error);
+    Ok((out, left_out.notes()))
+}
+
+/// As `timeline`, those entered in error too.
+pub(crate) fn everything(
     folder: &Folder,
     h: &Household,
     person: Option<&str>,
@@ -374,14 +392,23 @@ pub struct RecordRow {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
     pub sources: Vec<String>,
+    /// What its sources' words make of a condition, an allergy or a medicine,
+    /// and what each says.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub standing: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub says: Vec<String>,
     pub fields: serde_json::Map<String, Value>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub documents: Vec<String>,
 }
 
-/// Records of `kinds` for the selected people, newest first. `active`
-/// keeps those whose status is not ended (`active`, `on-hold`,
-/// `unconfirmed` and unknown).
+/// Records of `kinds` for the selected people, newest first, and what the
+/// list says of those it does not show. Of conditions, allergies and
+/// medicines, `active` keeps one line for each that is current by what its
+/// sources say, then those on hold, then those ended by their date
+/// ([`Standings::list`]); of other kinds, those whose status is not ended.
+#[allow(clippy::too_many_arguments)]
 pub fn records(
     folder: &Folder,
     h: &Household,
@@ -390,27 +417,56 @@ pub fn records(
     range: &Range,
     active: bool,
     code: Option<&str>,
-) -> Result<Vec<RecordRow>, CliError> {
+    today: &str,
+) -> Result<(Vec<RecordRow>, Vec<String>), CliError> {
     range.validate()?;
-    let mut out = Vec::new();
-    for p in people::selected(h, person)? {
+    let mut out: Vec<(u8, RecordRow)> = Vec::new();
+    let mut notes = Vec::new();
+    let mut in_error = 0;
+    let selected = people::selected(h, person)?;
+    for p in &selected {
         let idx = folder.index(p)?;
         let from = Sources::of(&h.sources, &idx);
-        for r in &idx.records {
-            if !kinds.contains(&r.kind.as_str()) || !range.holds(r.date.as_deref()) {
+        let asked =
+            |r: &Record| range.holds(r.date.as_deref()) && code.is_none_or(|q| matches_code(r, q));
+        let st = Standings::of(&h.sources, p, &idx);
+        for kind in kinds {
+            if !standing::KINDS.contains(kind) {
+                let errors = st.in_error.get(*kind);
+                for r in idx.records.iter().filter(|r| r.kind == *kind && asked(r)) {
+                    if errors.is_some_and(|e| e.contains(&r.id)) {
+                        in_error += 1;
+                    } else if !active || !is_ended(r.status.as_deref()) {
+                        out.push((0, row(from, p, r.clone())));
+                    }
+                }
                 continue;
             }
-            if active && is_ended(r.status.as_deref()) {
-                continue;
+            let list = st.list(&idx, kind, active, today, &asked, &|_| true);
+            for r in list.rows {
+                if r.error {
+                    in_error += 1;
+                    continue;
+                }
+                let mut one = row(from, p, r.record.clone());
+                one.standing = r.standing;
+                one.says = r.says;
+                out.push((r.group, one));
             }
-            if code.is_some_and(|q| !matches_code(r, q)) {
-                continue;
-            }
-            out.push(row(from, p, r.clone()));
+            notes.extend(list.notes.into_iter().map(|n| match selected.len() {
+                1 => n,
+                _ => format!("{}: {n}", p.name),
+            }));
         }
     }
-    out.sort_by(|a, b| b.date.cmp(&a.date).then(a.display.cmp(&b.display)));
-    Ok(out)
+    out.sort_by(|(g, a), (k, b)| {
+        let date = || b.date.cmp(&a.date).then(a.display.cmp(&b.display));
+        g.cmp(k).then_with(date)
+    });
+    if in_error > 0 {
+        notes.push(standing::in_error(in_error));
+    }
+    Ok((out.into_iter().map(|(_, r)| r).collect(), notes))
 }
 
 /// `q` is the record's code (`718-7`, `J45.909`), or words of its name
@@ -472,6 +528,8 @@ fn row(from: Sources, p: &Person, r: Record) -> RecordRow {
         status: r.status,
         code: r.code.and_then(|c| c.code),
         sources,
+        standing: None,
+        says: Vec::new(),
         fields: r.fields,
         documents: r.documents,
     }
@@ -535,8 +593,34 @@ pub fn search(
     query: &str,
     range: &Range,
     limit: usize,
-) -> Result<Vec<Hit>, CliError> {
-    Ok(search_leaving_out(folder, h, person, query, range, limit, &|_| false)?.0)
+) -> Result<(Vec<Hit>, Vec<String>), CliError> {
+    range.validate()?;
+    let errors = entered_in_error(folder, h, person)?;
+    let error = |x: &Hit| errors.contains(&x.id).then_some(Why::Error);
+    let (hits, left_out) = search_leaving_out(folder, h, person, query, range, limit, &error)?;
+    Ok((hits, left_out.notes()))
+}
+
+/// The selected people's records entered in error, which no list shows.
+fn entered_in_error(
+    folder: &Folder,
+    h: &Household,
+    person: Option<&str>,
+) -> Result<BTreeSet<String>, CliError> {
+    let mut out = BTreeSet::new();
+    for p in people::selected(h, person)? {
+        let st = Standings::of(&h.sources, p, &folder.index(p)?);
+        out.extend(st.errors().cloned());
+    }
+    Ok(out)
+}
+
+/// Why a list leaves an item out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Why {
+    Private,
+    /// A record entered in error.
+    Error,
 }
 
 /// Where the items a list left out sat in it, so that each page can say
@@ -548,21 +632,32 @@ pub struct LeftOut {
     /// The place in the whole list of each item kept, in order.
     pub kept_at: Vec<usize>,
     /// The places of the items left out.
-    pub held_at: Vec<usize>,
+    pub held_at: Vec<(usize, Why)>,
 }
 
 impl LeftOut {
+    /// What a command's list says of those it left out.
+    fn notes(&self) -> Vec<String> {
+        match self.held_at.len() {
+            0 => Vec::new(),
+            n => vec![standing::in_error(n)],
+        }
+    }
+
     /// Sorts `items` out by `held`, keeping their order: what is kept, and
     /// where each was.
-    pub fn split<T>(items: Vec<T>, mut held: impl FnMut(&mut T) -> bool) -> (Vec<T>, LeftOut) {
+    pub fn split<T>(
+        items: Vec<T>,
+        mut held: impl FnMut(&mut T) -> Option<Why>,
+    ) -> (Vec<T>, LeftOut) {
         let mut out = LeftOut {
             len: items.len(),
             ..Default::default()
         };
         let mut kept = Vec::new();
         for (i, mut x) in items.into_iter().enumerate() {
-            if held(&mut x) {
-                out.held_at.push(i);
+            if let Some(why) = held(&mut x) {
+                out.held_at.push((i, why));
             } else {
                 out.kept_at.push(i);
                 kept.push(x);
@@ -571,11 +666,11 @@ impl LeftOut {
         (kept, out)
     }
 
-    /// How many items left out sort within a page of the kept items that
+    /// How many items left out for `why` sort within a page of the kept items that
     /// starts at `offset` and holds `returned`: after the previous page's
     /// last item, up to this page's last, or to the end on the `last` page.
     /// The pages' counts add up to all of them.
-    pub fn on_page(&self, offset: usize, returned: usize, last: bool) -> usize {
+    pub fn on_page(&self, why: Why, offset: usize, returned: usize, last: bool) -> usize {
         // A page past the kept items (a cursor from before the list
         // shrank) follows the true last page, which counted the rest.
         if offset > 0 && offset >= self.kept_at.len() {
@@ -595,7 +690,7 @@ impl LeftOut {
         };
         self.held_at
             .iter()
-            .filter(|&&i| i >= from && i < to)
+            .filter(|&&(i, w)| w == why && i >= from && i < to)
             .count()
     }
 }
@@ -609,7 +704,7 @@ pub fn search_leaving_out(
     query: &str,
     range: &Range,
     limit: usize,
-    leave_out: &dyn Fn(&Hit) -> bool,
+    leave_out: &dyn Fn(&Hit) -> Option<Why>,
 ) -> Result<(Vec<Hit>, LeftOut), CliError> {
     range.validate()?;
     let terms: Vec<String> = classify::fold(query)
@@ -921,19 +1016,29 @@ mod tests {
     #[test]
     fn each_page_counts_what_was_left_out_between_it_and_the_last() {
         // Six items, the second and the last two left out; pages of two.
-        let (kept, out) = LeftOut::split((0..6).collect::<Vec<_>>(), |i| [1, 4, 5].contains(i));
+        let (kept, out) = LeftOut::split((0..6).collect::<Vec<_>>(), |i| {
+            [1, 4, 5].contains(i).then_some(Why::Private)
+        });
         assert_eq!(kept, vec![0, 2, 3]);
-        assert_eq!(out.on_page(0, 2, false), 1);
-        assert_eq!(out.on_page(2, 1, true), 2);
+        assert_eq!(out.on_page(Why::Private, 0, 2, false), 1);
+        assert_eq!(out.on_page(Why::Private, 2, 1, true), 2);
         // One page holding all: all of them.
-        assert_eq!(out.on_page(0, 3, true), 3);
+        assert_eq!(out.on_page(Why::Private, 0, 3, true), 3);
         // Nothing kept: the one page counts everything.
-        let (_, none) = LeftOut::split(vec![1, 2], |_| true);
-        assert_eq!(none.on_page(0, 0, true), 2);
+        let (_, none) = LeftOut::split(vec![1, 2], |_| Some(Why::Private));
+        assert_eq!(none.on_page(Why::Private, 0, 0, true), 2);
         // A page past the end, from a stale cursor, counts nothing again.
-        assert_eq!(out.on_page(3, 0, true), 0);
-        assert_eq!(out.on_page(5, 0, true), 0);
-        assert_eq!(none.on_page(2, 0, true), 0);
+        assert_eq!(out.on_page(Why::Private, 3, 0, true), 0);
+        assert_eq!(out.on_page(Why::Private, 5, 0, true), 0);
+        assert_eq!(none.on_page(Why::Private, 2, 0, true), 0);
+        // Each reason is counted apart.
+        let (_, two) = LeftOut::split((0..4).collect::<Vec<_>>(), |i| match i {
+            1 => Some(Why::Error),
+            2 => Some(Why::Private),
+            _ => None,
+        });
+        assert_eq!(two.on_page(Why::Error, 0, 2, true), 1);
+        assert_eq!(two.on_page(Why::Private, 0, 2, true), 1);
     }
 
     #[test]

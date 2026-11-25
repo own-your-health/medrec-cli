@@ -949,6 +949,404 @@ fn private_items_stay_out_of_household_wide_answers_unless_asked_about() {
     assert_eq!(warned, 1, "{v}");
 }
 
+/// The folder with Alex's records those of tests/fixtures/standing, at its
+/// three places.
+fn standing_household(e: &Env) {
+    household(e);
+    let read = |p: &Path| -> Value { serde_json::from_slice(&std::fs::read(p).unwrap()).unwrap() };
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/standing");
+    let path = e.records().join("household.json");
+    let mut h = read(&path);
+    let alex = h["people"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["name"] == "Alex Testperson")
+        .unwrap()
+        .clone();
+    for s in read(&fixtures.join("household.json"))["sources"]
+        .as_array()
+        .unwrap()
+    {
+        let mut s = s.clone();
+        s["person"] = alex["id"].clone();
+        h["sources"].as_array_mut().unwrap().push(s);
+    }
+    std::fs::write(&path, serde_json::to_vec(&h).unwrap()).unwrap();
+    let mut idx = read(&fixtures.join("index.json"));
+    idx["person"] = alex["id"].clone();
+    let dir = e.records().join(alex["folder"].as_str().unwrap());
+    std::fs::write(dir.join("index.json"), serde_json::to_vec(&idx).unwrap()).unwrap();
+}
+
+fn h_id(e: &Env, name: &str) -> String {
+    let h = std::fs::read(e.records().join("household.json")).unwrap();
+    let h: Value = serde_json::from_slice(&h).unwrap();
+    let mut people = h["people"].as_array().unwrap().iter();
+    let found = people.find(|p| p["name"] == name).unwrap();
+    found["id"].as_str().unwrap().to_string()
+}
+
+#[test]
+fn what_is_current_is_by_every_sources_word() {
+    let e = Env::new("standing");
+    standing_household(&e);
+    let t = e.tools();
+    let ask = |tool: &str, args: Value| {
+        let r = call(&t, tool, args);
+        assert!(!r.is_error(), "{tool}: {}", r.text());
+        assert_fits(&t, tool, &r).clone()
+    };
+    let ids = |v: &Value| -> Vec<String> {
+        let items = v["items"].as_array().unwrap().iter();
+        items
+            .map(|i| i["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let item = |v: &Value, id: &str| -> Value {
+        let mut items = v["items"].as_array().unwrap().iter();
+        let found = items.find(|i| i["id"].as_str().unwrap().starts_with(&format!("r_{id}aa")));
+        found.unwrap_or_else(|| panic!("no {id}: {v}")).clone()
+    };
+    let warned = |v: &Value, code: &str| -> Vec<String> {
+        let all = v["warnings"].as_array().into_iter().flatten();
+        all.filter(|w| w["code"] == code)
+            .map(|w| w["message"].as_str().unwrap().to_string())
+            .collect()
+    };
+    // The reader's lists of the fixture, as it has them after every date.
+    let cases: Value = serde_json::from_str(include_str!("fixtures/standing/lists.json")).unwrap();
+    let want = |kind: &str| -> Vec<String> {
+        let cases = cases["cases"].as_array().unwrap();
+        let whole = cases.iter().filter(|c| c["hidden"] == json!([]));
+        let c = whole
+            .filter(|c| c["kind"] == kind)
+            .max_by_key(|c| c["day"].as_str().unwrap())
+            .unwrap();
+        ["current", "on_hold", "ended_by_date"]
+            .iter()
+            .flat_map(|g| c["lists"][g].as_array().into_iter().flatten())
+            .map(|l| l["records"][0].as_str().unwrap().to_string())
+            .collect()
+    };
+    let in_error = |v: &Value| -> usize {
+        let said = warned(v, "entered-in-error");
+        let n = |m: &String| m.split(' ').next().unwrap().parse::<usize>().unwrap();
+        said.iter().map(n).sum()
+    };
+    for (kind, of, errors) in [
+        ("conditions", "condition", 1),
+        ("allergies", "allergy", 1),
+        ("medications", "medication", 2),
+    ] {
+        let args = json!({"kind": kind, "person": "Alex", "active": true, "limit": 50});
+        let v = ask(RECORDS, args);
+        assert_eq!((ids(&v), in_error(&v)), (want(of), errors), "{kind}");
+        // Page by page, the same, and each left out is counted once.
+        let (mut paged, mut counted) = (Vec::new(), 0);
+        let mut args = json!({"kind": kind, "person": "Alex", "active": true, "limit": 2});
+        loop {
+            let v = ask(RECORDS, args.clone());
+            paged.extend(ids(&v));
+            counted += in_error(&v);
+            match v["next_cursor"].as_str() {
+                Some(c) => args["cursor"] = c.into(),
+                None => break,
+            }
+        }
+        assert_eq!((paged, counted), (want(of), errors), "{kind}");
+    }
+
+    let v = ask(
+        RECORDS,
+        json!({"kind": "conditions", "person": "Alex", "active": true, "limit": 50}),
+    );
+    let one = item(&v, "bothsay");
+    assert_eq!(one["standing"], "current, sources differ");
+    assert_eq!(
+        one["says"],
+        "Example Health: active (read 2024-05-02); Sample Clinic East: resolved (read 2024-05-03)"
+    );
+    assert_eq!(
+        item(&v, "tworecords")["standing"],
+        "current, sources differ"
+    );
+    assert_eq!(
+        item(&v, "again")["says"],
+        "Example Health: active (read 2024-05-02)"
+    );
+    assert_eq!(
+        item(&v, "provisional")["says"],
+        "Example Health: active, provisional (read 2024-05-02)"
+    );
+    assert_eq!(
+        warned(&v, "no-problem-list"),
+        ["No problem list from Example Walk-in; diagnoses from visits are listed under All"]
+    );
+    let v = ask(
+        RECORDS,
+        json!({"kind": "allergies", "person": "Alex", "active": true}),
+    );
+    let one = item(&v, "oneheard");
+    assert_eq!(one["standing"], "current, not every source heard");
+    assert_eq!(
+        one["says"],
+        "Sample Clinic East: inactive (read 2024-05-03); Example Health: not heard"
+    );
+    assert_eq!(
+        item(&v, "nut")["says"],
+        "Example Health: active (read 2024-05-02); Sample Clinic East: active (read 2024-05-03)"
+    );
+
+    // All of them, each with what it is.
+    let v = ask(
+        RECORDS,
+        json!({"kind": "conditions", "person": "Alex", "limit": 50}),
+    );
+    assert!(warned(&v, "no-problem-list").is_empty());
+    assert_eq!(item(&v, "visitonly")["standing"], "diagnosis from a visit");
+    assert_eq!(item(&v, "refuted")["standing"], "refuted");
+    assert_eq!(
+        item(&v, "abated")["says"],
+        "Example Health: no status, ended 2022-05 (read 2024-05-02)"
+    );
+    let v = ask(
+        RECORDS,
+        json!({"kind": "medications", "person": "Alex", "limit": 50}),
+    );
+    assert_eq!(
+        item(&v, "ends")["standing"],
+        "ended by its date 2024-03-31 (prescription), filled 2024-05-02"
+    );
+    assert_eq!(item(&v, "onhold")["standing"], "on hold");
+    assert_eq!(item(&v, "draft")["standing"], "draft");
+    assert_eq!(item(&v, "nottaken")["standing"], "ended");
+    assert!(item(&v, "fillafter").get("standing").is_none());
+    assert!(!ids(&v).iter().any(|i| i.starts_with("r_error")));
+
+    // What is entered in error, of any kind, is out of the timeline and the
+    // search too.
+    let args = json!({"kind": "timeline", "person": "Alex", "limit": 100});
+    let v = ask(RECORDS, args);
+    assert!(!ids(&v).iter().any(|i| i == "r_erroraaaaaaaaaaaaaaa"));
+    assert_eq!(in_error(&v), 5);
+    let v = ask(SEARCH, json!({"query": "sample burn", "person": "Alex"}));
+    assert_eq!((ids(&v).len(), in_error(&v)), (0, 1), "{v}");
+    let v = ask(RECORDS, json!({"kind": "results", "person": "Alex"}));
+    assert_eq!((ids(&v).len(), in_error(&v)), (0, 1), "{v}");
+    let v = ask(RECORDS, json!({"kind": "tests", "person": "Alex"}));
+    assert_eq!((ids(&v).len(), in_error(&v)), (0, 0), "{v}");
+    let v = ask(
+        RECORDS,
+        json!({"kind": "medications", "person": "Alex", "limit": 50}),
+    );
+    assert_eq!(in_error(&v), 2);
+    assert!(!ids(&v).iter().any(|i| i == "r_fillerroraaaaaaaaaaa"));
+
+    // The summary has the same lists.
+    let v = ask(SUMMARY, json!({"person": "Alex"}));
+    let section = |name: &str| -> Value {
+        let mut all = v["summary"]["sections"].as_array().unwrap().iter();
+        all.find(|s| s["section"] == name)
+            .unwrap_or_else(|| panic!("no {name}"))
+            .clone()
+    };
+    let names = |s: &Value| -> Vec<String> {
+        let items = s["items"].as_array().unwrap().iter();
+        items
+            .map(|i| i["name"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let s = section("conditions");
+    assert_eq!(
+        s["items"].as_array().unwrap().len(),
+        want("condition").len()
+    );
+    assert_eq!(
+        s["note"],
+        "No problem list from Example Walk-in; diagnoses from visits are listed under All. 1 entered in error, not shown"
+    );
+    assert_eq!(s["items"][1]["standing"], "current, sources differ");
+    assert!(s["items"][1].get("detail").is_none());
+    assert_eq!(names(&section("medications_on_hold")), ["Sample patch"]);
+    assert_eq!(
+        names(&section("medications_ended_by_date")),
+        ["Sample capsule", "Sample drops", "Sample cream"]
+    );
+
+    // The view's, of which a reader makes the same lists on its own day.
+    e.ok(&["views", "write"]);
+    let view = |name: &str| -> Value {
+        let path = find(&e.records().join("views"), &format!("{name}.json"))
+            .unwrap_or_else(|| panic!("no {name}"));
+        serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
+    };
+    let pid = h_id(&e, "Alex Testperson");
+    let dir = e.records().join("views").join(&pid);
+    let stored = |name: &str| -> Value {
+        let index = view("views");
+        let md5 = index["people"][&pid]["files"][name]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let path = dir.join(medrec::viewfiles::stored_name(name, &md5));
+        serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
+    };
+    let (summary, st) = (stored("summary.json"), stored("standing.json"));
+    assert_eq!(view("views")["people"][&pid]["in_error"], st["in_error"]);
+    let st: medrec::standing::Standings = serde_json::from_value(st).unwrap();
+    for (name, of) in [
+        ("conditions", "condition"),
+        ("allergies", "allergy"),
+        ("medications", "medication"),
+    ] {
+        let lists = st.lists(of, &|_| true, &medrec::model::today());
+        let lines = lists
+            .current
+            .iter()
+            .chain(&lists.on_hold)
+            .chain(&lists.ended_by_date);
+        let firsts: Vec<String> = lines.map(|l| l.records[0].clone()).collect();
+        let held = summary["standing"][name].as_array().unwrap();
+        assert!(firsts.iter().all(|id| held.iter().any(|i| i["id"] == **id)));
+        // The older lists are as they were.
+        assert!(summary[name]["items"].as_array().unwrap().len() <= 25);
+        assert_eq!(firsts, want(of), "{name}");
+    }
+
+    // A record the answer may not show makes no line differ, and is in no
+    // line's words.
+    let v = ask(
+        RECORDS,
+        json!({"kind": "conditions", "active": true, "limit": 50}),
+    );
+    assert_eq!(
+        item(&v, "tworecords")["standing"],
+        "current, sources differ"
+    );
+    let told = warned(&v, "no-problem-list");
+    assert_eq!(told.len(), 1, "{v}");
+    assert!(
+        told[0].starts_with("Alex Testperson: No problem list from"),
+        "{told:?}"
+    );
+    e.ok(&["private", "mark", "r_tworecordsotheraaaaa"]);
+    e.ok(&["private", "mark", "r_fillafteraaaaaaaaaaa"]);
+    let v = ask(
+        RECORDS,
+        json!({"kind": "conditions", "active": true, "limit": 50}),
+    );
+    assert_eq!(item(&v, "tworecords")["standing"], "current");
+    assert_eq!(
+        item(&v, "tworecords")["says"],
+        "Example Health: active (read 2024-05-02)"
+    );
+    let v = ask(
+        RECORDS,
+        json!({"kind": "medications", "active": true, "limit": 50}),
+    );
+    // The last fill it may show.
+    assert_eq!(
+        item(&v, "ends")["standing"],
+        "ended by its date 2024-03-31 (prescription), filled 2024-04-10"
+    );
+    let v = ask(
+        RECORDS,
+        json!({"kind": "conditions", "person": "Alex", "active": true, "limit": 50}),
+    );
+    assert_eq!(
+        item(&v, "tworecords")["standing"],
+        "current, sources differ"
+    );
+    // A question that names it lists it, and it counts on the line; one whose
+    // dates leave it out does not.
+    let named = json!({"kind": "conditions", "name": "rash", "active": true});
+    let v = ask(RECORDS, named);
+    assert_eq!(
+        item(&v, "tworecords")["standing"],
+        "current, sources differ"
+    );
+    let args = json!({"kind": "conditions", "name": "rash", "active": true, "since": "2024-04-18"});
+    let v = ask(RECORDS, args);
+    assert_eq!(item(&v, "tworecords")["standing"], "current");
+    // One entered in error that the answer may not show is counted as private.
+    let v = ask(RECORDS, json!({"kind": "results"}));
+    let before = in_error(&v);
+    e.ok(&["private", "mark", "r_resulterroraaaaaaaaa"]);
+    let v = ask(RECORDS, json!({"kind": "results"}));
+    assert_eq!((before, in_error(&v)), (1, 0));
+    assert_eq!(warned(&v, "private-left-out").len(), 1, "{v}");
+}
+
+/// The commands list the same.
+#[test]
+fn the_record_commands_list_what_is_current_by_every_sources_word() {
+    let e = Env::new("standing-commands");
+    standing_household(&e);
+    let v = e.ok(&["conditions", "--person", "Alex", "--active"]);
+    let items = v["items"].as_array().unwrap();
+    assert_eq!(items.len(), 11);
+    assert_eq!(items[1]["standing"], "current, sources differ");
+    assert_eq!(items[1]["says"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        v["notes"],
+        json!([
+            "No problem list from Example Walk-in; diagnoses from visits are listed under All",
+            "1 entered in error, not shown"
+        ])
+    );
+    let v = e.ok(&["meds", "--person", "Alex", "--active"]);
+    let standing: Vec<&str> = v["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["standing"].as_str().unwrap())
+        .collect();
+    assert_eq!(standing.len(), 11);
+    assert!(standing[..7].iter().all(|s| s.starts_with("current")));
+    assert_eq!(standing[7], "on hold");
+    assert!(standing[8..]
+        .iter()
+        .all(|s| s.starts_with("ended by its date")));
+    let v = e.ok(&["meds", "--person", "Alex"]);
+    assert_eq!(v["items"].as_array().unwrap().len(), 17);
+    assert_eq!(v["notes"], json!(["2 entered in error, not shown"]));
+    let v = e.ok(&["results", "--person", "Alex"]);
+    assert_eq!(v["items"], json!([]));
+    assert_eq!(v["notes"], json!(["1 entered in error, not shown"]));
+    // At the terminal, each source's word.
+    let text = |args: &[&str]| {
+        let mut cmd = e.command();
+        let out = cmd.args(args).output().unwrap();
+        String::from_utf8(out.stdout).unwrap()
+    };
+    let shown = text(&["conditions", "--person", "Alex", "--active"]);
+    for said in [
+        "current, sources differ",
+        "Example Health: active (read 2024-05-02); Sample Clinic East: resolved (read 2024-05-03)",
+        "1 entered in error, not shown",
+    ] {
+        assert!(shown.contains(said), "{said}: {shown}");
+    }
+    let v = e.ok(&["timeline", "--person", "Alex"]);
+    let ids: Vec<&str> = v["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["id"].as_str().unwrap())
+        .collect();
+    assert!(!ids.contains(&"r_erroraaaaaaaaaaaaaaa"));
+    assert!(ids.contains(&"r_errorbesideaaaaaaaaa"));
+    assert_eq!(v["notes"], json!(["5 entered in error, not shown"]));
+    let v = e.ok(&["search", "sample burn", "--person", "Alex"]);
+    assert_eq!(v["items"], json!([]));
+    assert_eq!(v["notes"], json!(["1 entered in error, not shown"]));
+    assert!(e
+        .ok(&["timeline", "--person", "Robin"])
+        .get("notes")
+        .is_none());
+}
+
 /// Puts `code-names.json` in a person's views, as a medrec with the tables
 /// writes it.
 fn put_code_names(e: &Env, pid: &str, v: &Value) {

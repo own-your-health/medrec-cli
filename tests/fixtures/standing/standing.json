@@ -17,6 +17,10 @@
    "r_errorallergyaaaaaaaa",
    "r_oneheardaaaaaaaaaaaa",
    "r_errorunheardaaaaaaaa",
+   "r_unheardrefutedaaaaaa",
+   "r_besiderefutedaaaaaaa",
+   "r_unheardendedaaaaaaaa",
+   "r_besideendedaaaaaaaaa",
    "r_oldpollenaaaaaaaaaaa"
   ],
   "condition": [
@@ -98,6 +102,32 @@
      "is": "ended",
      "status": "resolved",
      "abatement": "2019-03-01"
+    }
+   ]
+  },
+  "r_besideendedaaaaaaaaa": {
+   "kind": "allergy",
+   "is": "ended",
+   "line": "~sample fern",
+   "words": [
+    {
+     "source": 1,
+     "read": "2024-05-03",
+     "is": "ended",
+     "status": "inactive"
+    }
+   ]
+  },
+  "r_besiderefutedaaaaaaa": {
+   "kind": "allergy",
+   "is": "current",
+   "line": "~sample moss",
+   "words": [
+    {
+     "source": 1,
+     "read": "2024-05-03",
+     "is": "current",
+     "status": "active"
     }
    ]
   },
@@ -688,6 +718,39 @@
      "is": "ended",
      "status": "resolved"
     }
+   ]
+  },
+  "r_unheardendedaaaaaaaa": {
+   "kind": "allergy",
+   "is": "current",
+   "line": "~sample fern",
+   "words": [
+    {
+     "source": 0,
+     "read": "2024-05-02",
+     "is": "ended",
+     "status": "inactive"
+    }
+   ],
+   "unheard": [
+    3
+   ]
+  },
+  "r_unheardrefutedaaaaaa": {
+   "kind": "allergy",
+   "is": "current",
+   "line": "~sample moss",
+   "words": [
+    {
+     "source": 0,
+     "read": "2024-05-02",
+     "is": "refuted",
+     "status": "active",
+     "verification": "refuted"
+    }
+   ],
+   "unheard": [
+    3
    ]
   },
   "r_unknownaaaaaaaaaaaaa": {

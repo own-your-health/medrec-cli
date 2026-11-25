@@ -982,6 +982,15 @@ struct SummaryView<'a> {
     latest_results: &'a summary::Listed<summary::ResultRow>,
     recent_visits: &'a summary::Listed<summary::Line>,
     bills: &'a summary::Listed<summary::Bill>,
+    standing: CanBeCurrent,
+}
+
+/// What `standing.json` can have as current or on hold on some day.
+#[derive(Serialize)]
+struct CanBeCurrent {
+    medications: Vec<summary::Line>,
+    conditions: Vec<summary::Line>,
+    allergies: Vec<summary::Line>,
 }
 
 /// A timeline event without the person.
@@ -1087,18 +1096,26 @@ pub(crate) fn person(
         },
         &Default::default(),
     );
+    let sources = crate::sources::Sources::of(&h.sources, idx);
+    let by_status = |kind: &str| summary::by_status(sources, idx, kind, crate::mcp::SUMMARY_LINES);
+    let can_be_current = |kind: &str| summary::can_be_current(sources, idx, &st, kind);
     put(
         "summary.json",
         json(&SummaryView {
             counts: &s.counts,
             sources: &s.sources,
-            medications: &s.medications,
-            conditions: &s.conditions,
-            allergies: &s.allergies,
+            medications: &by_status("medication"),
+            conditions: &by_status("condition"),
+            allergies: &by_status("allergy"),
             immunizations: &s.immunizations,
             latest_results: &s.latest_results,
             recent_visits: &s.recent_visits,
             bills: &s.bills,
+            standing: CanBeCurrent {
+                medications: can_be_current("medication"),
+                conditions: can_be_current("condition"),
+                allergies: can_be_current("allergy"),
+            },
         }),
     );
 
@@ -1108,7 +1125,6 @@ pub(crate) fn person(
     for r in &idx.records {
         by_kind.entry(r.kind.as_str()).or_default().push(r);
     }
-    let sources = crate::sources::Sources::of(&h.sources, idx);
     let mut records = BTreeMap::new();
     let mut place: HashMap<*const Record, (i64, usize)> = HashMap::new();
     for (kind, mut list) in by_kind {
@@ -1158,8 +1174,13 @@ pub(crate) fn person(
     }
 
     // Each test's results, newest first, the series in the order of their
-    // newest result.
-    let mut results: Vec<&Record> = idx.records.iter().filter(|r| r.kind == "result").collect();
+    // newest result, without those entered in error.
+    let errors: BTreeSet<&String> = st.errors().collect();
+    let mut results: Vec<&Record> = idx
+        .records
+        .iter()
+        .filter(|r| r.kind == "result" && !errors.contains(&r.id))
+        .collect();
     results.sort_by(|a, b| b.date.cmp(&a.date).then_with(|| a.display.cmp(&b.display)));
     let mut series: Vec<Series> = Vec::new();
     let mut keyed: HashMap<String, usize> = HashMap::new();
@@ -1243,7 +1264,7 @@ pub(crate) fn person(
         pack.extend_from_slice(b);
     }
     let mut linked: HashMap<&str, Vec<&str>> = HashMap::new();
-    for r in &idx.records {
+    for r in idx.records.iter().filter(|r| !errors.contains(&r.id)) {
         let mut seen = BTreeSet::new();
         for doc in &r.documents {
             if seen.insert(doc.as_str()) {
@@ -1762,6 +1783,51 @@ pub(crate) mod tests {
             .next()
             .unwrap();
         assert_eq!(st["in_error"], serde_json::json!(v.in_error));
+    }
+
+    /// Nor are the latest results, a test's series or a document's links of
+    /// one.
+    #[test]
+    fn what_is_entered_in_error_is_in_no_list_made_at_the_write() {
+        let mut records = history(3);
+        records[0].status = Some("entered-in-error".into());
+        for r in &mut records {
+            r.documents = vec!["d_exampleaaaaaaaaaaaaaa".into()];
+        }
+        let mut idx = index_of(records.clone());
+        idx.documents = vec![serde_json::from_value(serde_json::json!({
+            "id": "d_exampleaaaaaaaaaaaaaa", "path": "x.pdf", "sha256": "0", "md5": "0",
+            "size": 1, "media_type": "application/pdf", "origin": {"kind": "file", "action": "copied"},
+            "filed_at": "2026-12-28T00:00:00Z",
+            "provenance": {"source": {"kind": "manual"}, "method": "manual",
+            "filed_at": "2026-12-28T00:00:00Z", "filed_by": "medrec 0.9.9"}}))
+        .unwrap()];
+        let (out, _) = write(&idx);
+        let view = |name: &str| -> Value {
+            let (_, b) = out.iter().find(|(rel, _)| rel.ends_with(name)).unwrap();
+            serde_json::from_slice(b).unwrap()
+        };
+        let entries: usize = view("/tests.json")
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["entries"].as_array().unwrap().len())
+            .sum();
+        assert_eq!(entries, 2);
+        let linked = view("/documents.json")[0]["linked"]
+            .as_array()
+            .unwrap()
+            .len();
+        assert_eq!(linked, 2);
+        let latest = view("/summary.json")["latest_results"].to_string();
+        assert!(!latest.contains(&records[0].id), "{latest}");
+        // A shard holds it as it holds the rest.
+        let shards: String = out
+            .iter()
+            .filter(|(rel, _)| rel.contains("/records-result-"))
+            .map(|(_, b)| String::from_utf8_lossy(b).into_owned())
+            .collect();
+        assert!(shards.contains(&records[0].id));
     }
 
     #[test]
