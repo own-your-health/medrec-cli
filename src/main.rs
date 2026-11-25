@@ -621,7 +621,9 @@ struct RecordArgs {
     person: Option<String>,
     #[command(flatten)]
     range: RangeArgs,
-    /// Only current ones (not completed, stopped, resolved or inactive).
+    /// Only current ones. Conditions, allergies and medicines are current
+    /// while any of their sources says so; medicines on hold and those whose
+    /// end date has passed follow.
     #[arg(long)]
     active: bool,
     #[command(flatten)]
@@ -992,6 +994,14 @@ fn items<T: Serialize>(rows: &[T]) -> Value {
     json!({ "items": to_value(&rows) })
 }
 
+/// A list, with what it says of those it does not show.
+fn noted(mut list: Value, notes: &[String]) -> Value {
+    if !notes.is_empty() {
+        list["notes"] = to_value(&notes);
+    }
+    list
+}
+
 fn table(v: &Value, columns: &[&str]) {
     output::table(&output::table_view(&output::rows_of(v, "items"), columns));
 }
@@ -1188,19 +1198,22 @@ fn run(cli: &Cli) -> Result<(), CliError> {
         Command::Tables(cmd) => tables_cmd(cli, cmd, &store),
         Command::Timeline(a) => {
             let (f, h) = read(&store, cli)?;
-            let rows = views::timeline(&f, &h, a.person.as_deref(), &a.range.range(), &a.kinds)?;
-            output::emit(json, "timeline", items(a.list.take(&rows)), |v| {
+            let (rows, notes) =
+                views::timeline(&f, &h, a.person.as_deref(), &a.range.range(), &a.kinds)?;
+            let out = noted(items(a.list.take(&rows)), &notes);
+            output::emit(json, "timeline", out, |v| {
                 table(
                     v,
                     &["date", "person_name", "kind", "title", "detail", "source"],
-                )
+                );
+                notes.iter().for_each(|n| note(cli, n));
             });
             Ok(())
         }
         Command::Search(a) => {
             let (f, h) = read(&store, cli)?;
             let q = a.query.join(" ");
-            let rows = views::search(
+            let (rows, notes) = views::search(
                 &f,
                 &h,
                 a.person.as_deref(),
@@ -1208,11 +1221,12 @@ fn run(cli: &Cli) -> Result<(), CliError> {
                 &a.range.range(),
                 a.limit as usize,
             )?;
-            output::emit(json, "search", items(&rows), |v| {
+            output::emit(json, "search", noted(items(&rows), &notes), |v| {
                 table(
                     v,
                     &["date", "person_name", "kind", "id", "title", "snippet"],
-                )
+                );
+                notes.iter().for_each(|n| note(cli, n));
             });
             Ok(())
         }
@@ -3010,7 +3024,7 @@ fn records_cmd(
     record: &str,
 ) -> Result<(), CliError> {
     let (f, h) = read(store, cli)?;
-    let rows = views::records(
+    let (rows, notes) = views::records(
         &f,
         &h,
         a.person.as_deref(),
@@ -3018,25 +3032,35 @@ fn records_cmd(
         &a.range.range(),
         a.active,
         a.code.as_deref(),
+        &medrec::model::today(),
     )?;
-    output::emit(
-        cli.common.json,
-        &format!("{record}-list"),
-        items(a.list.take(&rows)),
-        |v| {
-            table(
-                v,
-                &[
-                    "date",
-                    "person_name",
-                    "display",
-                    "detail",
-                    "status",
-                    "sources",
-                ],
-            )
-        },
-    );
+    let out = noted(items(a.list.take(&rows)), &notes);
+    output::emit(cli.common.json, &format!("{record}-list"), out, |v| {
+        // What all its sources make of it for its status, and what each says
+        // for its sources, where it has them.
+        let mut v = v.clone();
+        for row in v["items"].as_array_mut().into_iter().flatten() {
+            if let Some(standing) = row.get("standing").cloned() {
+                row["status"] = standing;
+            }
+            if let Some(says) = row.get("says").and_then(Value::as_array) {
+                let each: Vec<&str> = says.iter().filter_map(Value::as_str).collect();
+                row["sources"] = each.join("; ").into();
+            }
+        }
+        table(
+            &v,
+            &[
+                "date",
+                "person_name",
+                "display",
+                "detail",
+                "status",
+                "sources",
+            ],
+        );
+        notes.iter().for_each(|n| note(cli, n));
+    });
     Ok(())
 }
 

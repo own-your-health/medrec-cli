@@ -116,6 +116,10 @@ RECORDS = [
     rec("errorallergy", A, "2024-03-15", "Sample dye", [("north", con("active", "entered-in-error", None))]),
     rec("oneheard", A, "2024-03-14", "Sample glue", [("north", con("active", None, None)), ("east", con("inactive", None, None))], heard=["east"], wrote=None),
     rec("errorunheard", A, "2024-03-13", "Sample resin", [("north", con("entered-in-error", None, None)), ("east", con("active", None, None))], heard=["north"], wrote=None),
+    rec("unheardrefuted", A, "2024-03-12", "Sample moss", [("north", con("active", "refuted", None)), ("dropin", con("active", None, None))], heard=["north"], wrote=None),
+    rec("besiderefuted", A, "2024-03-11", "Sample moss", [("east", con("active", None, None))]),
+    rec("unheardended", A, "2024-03-10", "Sample fern", [("north", con("inactive", None, None)), ("dropin", con("active", None, None))], heard=["north"], wrote=None),
+    rec("besideended", A, "2024-03-09", "Sample fern", [("east", con("inactive", None, None))]),
     # Medicines
     rec("noend", M, "2024-02-20", "Sample tablet", [("north", med("active"))], "M-1"),
     rec("noendtwice", M, "2024-02-19", "Sample tablet", [("east", med("active"))], "M-1"),

@@ -14,6 +14,7 @@ use crate::folder::Folder;
 use crate::intake::classify;
 use crate::model::{Household, Person, PersonIndex, Record};
 use crate::sources::Sources;
+use crate::standing::{self, Is, Standings};
 use crate::views::{is_ended, record_detail, record_source, value_text};
 
 /// Longest name or detail a summary line carries, in characters.
@@ -87,6 +88,12 @@ pub struct Line {
     /// For a condition: its key in `code-names.json` (0.9.4 and later).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name_key: Option<String>,
+    /// For a medicine, condition or allergy: what its sources' words make of
+    /// it on the summary's day, and what each says. None in `summary.json`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub standing: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub says: Vec<String>,
 }
 
 /// One vaccine: its doses on file and the last one.
@@ -181,12 +188,17 @@ pub struct Summary {
     /// Records per kind (`result`, `medication`, `encounter`, `claim`...).
     pub counts: BTreeMap<String, usize>,
     pub sources: Vec<SourceRow>,
-    /// Medicines not marked stopped or completed, one per medicine, newest
-    /// first.
+    /// What is current by what its sources say ([`Standings`]), newest
+    /// first: each prescription, and one line for each condition or allergy.
     pub medications: Listed<Line>,
-    /// Conditions not marked resolved or inactive.
+    pub on_hold: Listed<Line>,
+    pub ended_by_date: Listed<Line>,
     pub conditions: Listed<Line>,
     pub allergies: Listed<Line>,
+    /// What the lists say of those not shown, each with its list's name.
+    #[schemars(skip)]
+    #[serde(skip)]
+    pub notes: Vec<(&'static str, String)>,
     pub immunizations: Listed<Vaccine>,
     /// The latest result of each test, newest first.
     pub latest_results: Listed<ResultRow>,
@@ -252,24 +264,47 @@ pub(crate) fn of_index(
     let mut sources: Vec<SourceRow> = sources.into_values().collect();
     sources.sort_by(|a, b| b.records.cmp(&a.records).then(a.source.cmp(&b.source)));
 
-    let current = |kind: &str| {
-        let mut seen = std::collections::BTreeSet::new();
-        records
-            .iter()
-            .filter(|r| r.kind == kind && !is_ended(r.status.as_deref()))
-            .filter(|r| seen.insert(series_key(r)))
-            .map(|r| line(from, r))
-            .collect::<Vec<_>>()
+    let st = Standings::of(&h.sources, p, idx);
+    let errors: std::collections::BTreeSet<&String> = st.errors().collect();
+    records.retain(|r| !errors.contains(&r.id));
+    let lists = |kind: &str| st.lists(kind, &|_| true, today);
+    let current = |lines: &[standing::Line]| {
+        let found = lines.iter().filter_map(|l| {
+            let id = l.records.first()?;
+            let r = records.iter().find(|r| r.id == *id)?;
+            let mut line = line(from, r);
+            line.standing = Some(st.records[id].title(today, l));
+            line.says = st.says(l);
+            Some(line)
+        });
+        Listed::cut(found.collect(), n)
     };
+    let (medicines, conditions) = (lists("medication"), lists("condition"));
+    let allergies = lists("allergy");
+    let mut said: Vec<(&'static str, String)> = Vec::new();
+    for (section, l) in [
+        ("medications", &medicines),
+        ("conditions", &conditions),
+        ("allergies", &allergies),
+    ] {
+        let none = l.without_problem_list.iter();
+        said.extend(none.map(|s| (section, standing::no_problem_list(st.name(*s)))));
+        if l.in_error > 0 {
+            said.push((section, standing::in_error(l.in_error)));
+        }
+    }
 
     Summary {
         person: person_row(p, idx, notes),
         as_of: today.to_string(),
         counts,
         sources,
-        medications: Listed::cut(current("medication"), n),
-        conditions: Listed::cut(current("condition"), n),
-        allergies: Listed::cut(current("allergy"), n),
+        medications: current(&medicines.current),
+        on_hold: current(&medicines.on_hold),
+        ended_by_date: current(&medicines.ended_by_date),
+        conditions: current(&conditions.current),
+        allergies: current(&allergies.current),
+        notes: said,
         immunizations: Listed::cut(vaccines(from, &records), n),
         latest_results: Listed::cut(latest_results(from, &records), n),
         recent_visits: Listed::cut(
@@ -346,7 +381,38 @@ fn line(from: Sources, r: &Record) -> Line {
         source: record_source(from, r),
         id: Some(r.id.clone()),
         name_key: crate::code_names::condition_key(r),
+        standing: None,
+        says: Vec::new(),
     }
+}
+
+/// The records of a kind that a list of current ones can have on some day,
+/// in its order, for a reader to make it from (`summary.json`).
+pub(crate) fn can_be_current(
+    from: Sources,
+    idx: &PersonIndex,
+    st: &Standings,
+    kind: &str,
+) -> Vec<Line> {
+    let of_kind = st.order.get(kind).into_iter().flatten();
+    let can = of_kind.filter(|id| matches!(st.records[*id].is, Is::Current | Is::OnHold));
+    can.filter_map(|id| idx.records.iter().find(|r| r.id == *id))
+        .map(|r| line(from, r))
+        .collect()
+}
+
+/// What 0.9.8 listed as current, for a reader of its lists: by each record's
+/// own status, the newest of each series.
+pub(crate) fn by_status(from: Sources, idx: &PersonIndex, kind: &str, n: usize) -> Listed<Line> {
+    let mut records: Vec<&Record> = idx.records.iter().filter(|r| r.kind == kind).collect();
+    records.sort_by(|a, b| b.date.cmp(&a.date).then(a.display.cmp(&b.display)));
+    let mut seen = std::collections::BTreeSet::new();
+    let found = records
+        .into_iter()
+        .filter(|r| !is_ended(r.status.as_deref()))
+        .filter(|r| seen.insert(series_key(r)))
+        .map(|r| line(from, r));
+    Listed::cut(found.collect(), n)
 }
 
 fn vaccines(from: Sources, records: &[&Record]) -> Vec<Vaccine> {

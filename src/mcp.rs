@@ -24,6 +24,7 @@ use crate::people;
 use crate::provider_labels::{Asked, Labels, Printed};
 use crate::refresh::signin;
 use crate::sources::Sources;
+use crate::standing::{self, Standings};
 use crate::store::{Location, BIN};
 use crate::summary::{self, clip, day, PersonRow, ResultRow, CLIP};
 use crate::views::{self, first_line, is_ended, label, record_detail, record_source, Range};
@@ -175,6 +176,9 @@ pub struct Section {
     /// Lines left out for length.
     #[schemars(with = "i64")]
     pub more: usize,
+    // How many are entered in error, and which sources send no problem list.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Default, Serialize, JsonSchema)]
@@ -188,6 +192,11 @@ pub struct Line {
     pub date: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
+    // As an item's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub standing: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub says: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -201,12 +210,12 @@ pub struct Line {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SearchArgs {
-    /// Words that must all appear.
+    /// Words to find.
     pub query: String,
-    /// A name, alias or id.
+    /// Name, alias or id.
     #[serde(default)]
     pub person: Option<String>,
-    /// YYYY-MM-DD, inclusive.
+    /// YYYY-MM-DD.
     #[serde(default)]
     pub since: Option<String>,
     /// YYYY-MM-DD, inclusive.
@@ -312,10 +321,10 @@ pub struct RecordsArgs {
     /// visits: encounters. tests: each test's latest result. bills: filed
     /// statements. timeline: all.
     pub kind: Kind,
-    /// A name, alias or id.
+    /// Name, alias or id.
     #[serde(default)]
     pub person: Option<String>,
-    /// YYYY-MM-DD, inclusive.
+    /// YYYY-MM-DD.
     #[serde(default)]
     pub since: Option<String>,
     /// YYYY-MM-DD, inclusive.
@@ -365,6 +374,15 @@ pub struct Item {
     pub detail: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
+    // What its sources' words make of a condition, an allergy or a medicine,
+    // and what each says. No doc comments, as above.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub standing: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub says: Option<String>,
+    /// Its group in a list of current ones, the first first.
+    #[serde(skip)]
+    pub group: u8,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
     pub id: String,
@@ -387,7 +405,7 @@ pub struct Item {
     pub range: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub flag: Option<String>,
-    /// For `tests`: results of the test on file.
+    /// For `tests`: how many.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<i64>")]
     pub results: Option<usize>,
@@ -420,10 +438,10 @@ pub struct Item {
 pub struct DocumentArgs {
     /// The document's id.
     pub id: String,
-    /// Start at this page (from 1).
+    /// Start at this page.
     #[serde(default)]
     pub page: Option<u32>,
-    /// A previous answer's `next_offset`.
+    /// An earlier `next_offset`.
     #[serde(default)]
     pub offset: Option<u64>,
 }
@@ -487,8 +505,10 @@ impl Toolset for MedrecTools {
                  do not answer the question. Each result carries its lab's own reference range \
                  and flag, and labs may report one test in different units. provider_labels say \
                  who a printed provider is, beside the source's words: call a likely one likely \
-                 and give its evidence, and say where a phone is from. For decisions about \
-                 care, suggest the user ask their clinician.",
+                 and give its evidence, and say where a phone is from. standing is what a \
+                 condition, an allergy or a medicine is by all of its sources, and says has each \
+                 source's word and the day it was read: where sources differ, give each word and \
+                 choose none. For decisions about care, suggest the user ask their clinician.",
             )
     }
 
@@ -496,7 +516,7 @@ impl Toolset for MedrecTools {
         vec![
             ToolDef::read(
                 SUMMARY,
-                "Household or person summary",
+                "Summary",
                 "The people, and with person their summary. Use it first. Medicines, \
                  conditions, allergies, vaccines, results, visits, bills.",
             )
@@ -513,7 +533,7 @@ impl Toolset for MedrecTools {
             .output::<Page<SearchItem>>(),
             ToolDef::read(
                 RECORDS,
-                "List records by kind",
+                "List records",
                 "One kind of record, newest first. events: what happened, one per visit, stay \
                  or fill, with you_owe; id gives one in full. results with name: one test over \
                  time, with range and flag.",
@@ -522,10 +542,10 @@ impl Toolset for MedrecTools {
             .output::<Page<Item>>(),
             ToolDef::read(
                 DOCUMENT,
-                "Read a document's text",
-                "A filed document's text, with its title, date, type and organization. Read \
-                 a visit summary, lab report, letter or bill. Long text comes in parts: pass \
-                 next_offset as offset, or page to jump.",
+                "Read a document",
+                "A filed document's text, with its title, date, type and organization. Read a \
+                 visit summary, lab report, letter or bill. Long text comes in parts: pass \
+                 next_offset as offset, or page.",
             )
             .input::<DocumentArgs>()
             .output::<DocumentOut>(),
@@ -583,6 +603,8 @@ struct PrivateItems {
     /// The record, document, event and study ids of those people, and
     /// every study with no report, which nothing judges.
     held: std::collections::BTreeSet<String>,
+    /// The records entered in error, which no list shows.
+    errors: std::collections::BTreeSet<String>,
 }
 
 impl PrivateItems {
@@ -612,6 +634,8 @@ impl PrivateItems {
                         ),
                 );
             }
+            let standings = Standings::of(&h.sources, p, &idx);
+            out.errors.extend(standings.errors().cloned());
             let items = crate::private::Private::of(&v);
             out.held.extend(items.unreported_studies);
             out.areas.extend(items.items);
@@ -631,19 +655,23 @@ impl PrivateItems {
 
     /// Marks an answer's private items with their area when the call is
     /// about one person or names the item (`open`); otherwise leaves them
-    /// out. What is kept, and where those left out sat.
+    /// out, as it does what is entered in error. What is kept, and where
+    /// those left out sat.
     /// A series of tests counts as private when any of its results does.
     fn keep(&self, items: Vec<Item>, open: impl Fn(&Item) -> bool) -> (Vec<Item>, views::LeftOut) {
         views::LeftOut::split(items, |i| {
             let ids = || std::iter::once(&i.id).chain(&i.members);
-            if !ids().any(|id| self.held_back(id)) {
-                return false;
+            let private = ids().any(|id| self.held_back(id));
+            if private && !open(i) {
+                return Some(views::Why::Private);
             }
-            if !open(i) {
-                return true;
+            if self.errors.contains(&i.id) {
+                return Some(views::Why::Error);
             }
-            i.private = ids().find_map(|id| self.area(id));
-            false
+            if private {
+                i.private = ids().find_map(|id| self.area(id));
+            }
+            None
         })
     }
 
@@ -693,7 +721,12 @@ impl PrivateItems {
     /// Says on a page, starting at `offset`, how many items it left out,
     /// and whose marks did not read.
     fn warn<T>(&self, page: &mut Page<T>, offset: usize, left_out: &views::LeftOut) {
-        let n = left_out.on_page(offset, page.info.returned, page.info.next_cursor.is_none());
+        let (returned, last) = (page.info.returned, page.info.next_cursor.is_none());
+        let n = left_out.on_page(views::Why::Error, offset, returned, last);
+        if n > 0 {
+            page.warn("entered-in-error", standing::in_error(n));
+        }
+        let n = left_out.on_page(views::Why::Private, offset, returned, last);
         if n > 0 {
             page.warn(
                 "private-left-out",
@@ -886,14 +919,19 @@ impl MedrecTools {
         if let Some(q) = person {
             people::resolve(&h, q).map_err(person_error)?;
         }
-        let private = PrivateItems::of(&f, &h, &people::selected(&h, person)?)?;
+        let items = PrivateItems::of(&f, &h, &people::selected(&h, person)?)?;
         // Household-wide, a private hit is left out unless the query names it.
         let (hits, left_out) =
             views::search_leaving_out(&f, &h, person, &a.query, &r, page.wanted(), &|x| {
-                person.is_none()
-                    && private.held_back(&x.id)
-                    && !crate::private::names(&x.title, &a.query)
+                let private = person.is_none()
+                    && items.held_back(&x.id)
+                    && !crate::private::names(&x.title, &a.query);
+                match private {
+                    true => Some(views::Why::Private),
+                    false => items.errors.contains(&x.id).then_some(views::Why::Error),
+                }
             })?;
+        let private = items;
         let items = hits
             .into_iter()
             .map(|x| SearchItem {
@@ -963,6 +1001,10 @@ impl MedrecTools {
             |title: &str| name.is_none_or(|n| classify::fold(title).contains(&classify::fold(n)));
         let today = today();
         let mut items: Vec<Item> = Vec::new();
+        let private = PrivateItems::of(&f, &h, &selected)?;
+        let open =
+            |title: &str| person.is_some() || name.is_some_and(|n| crate::private::names(title, n));
+        let mut notes: Vec<String> = Vec::new();
         match (a.kind, a.kind.record_kind()) {
             (Kind::Tests, _) => {
                 for p in &selected {
@@ -971,6 +1013,7 @@ impl MedrecTools {
                         .records
                         .iter()
                         .filter(|x| x.kind == "result" && r.holds(x.date.as_deref()))
+                        .filter(|x| !private.errors.contains(&x.id))
                         .filter(|x| name.is_none_or(|n| views::matches_code(x, n)))
                         .collect();
                     results.sort_by(|a, b| b.date.cmp(&a.date).then(a.display.cmp(&b.display)));
@@ -999,18 +1042,52 @@ impl MedrecTools {
                 for p in &selected {
                     let idx = f.index(p)?;
                     let from = Sources::of(&h.sources, &idx);
-                    for x in idx.records.clone() {
-                        if x.kind != kind
-                            || !r.holds(x.date.as_deref())
-                            || (active && is_ended(x.status.as_deref()))
-                            || name.is_some_and(|n| !views::matches_code(&x, n))
-                        {
-                            continue;
-                        }
-                        let mut item = record_item(from, &p.name, x, detailed);
+                    let asked = |x: &Record| {
+                        x.kind == kind
+                            && r.holds(x.date.as_deref())
+                            && name.is_none_or(|n| views::matches_code(x, n))
+                    };
+                    let item = |x: &Record| {
+                        let mut item = record_item(from, &p.name, x.clone(), detailed);
                         item.person_id = p.id.clone();
-                        items.push(item);
+                        item
+                    };
+                    if !standing::KINDS.contains(&kind) {
+                        items.extend(
+                            idx.records
+                                .iter()
+                                .filter(|x| asked(x))
+                                .filter(|x| {
+                                    !active
+                                        || !is_ended(x.status.as_deref())
+                                        || private.errors.contains(&x.id)
+                                })
+                                .map(item),
+                        );
+                        continue;
                     }
+                    let st = Standings::of(&h.sources, p, &idx);
+                    // A private one counts on a line of an answer about the
+                    // whole household only where the answer lists it.
+                    let listed = |x: &Record| asked(x) && open(&clip(&x.display, CLIP));
+                    let shows =
+                        |x: &Record| person.is_some() || !private.held_back(&x.id) || listed(x);
+                    let list = st.list(&idx, kind, active, &today, &asked, &shows);
+                    items.extend(list.rows.into_iter().map(|row| {
+                        let one = item(row.record);
+                        Item {
+                            // Its words say its status, each source's.
+                            status: one.status.clone().filter(|_| row.standing.is_none()),
+                            standing: row.standing,
+                            says: joined(row.says),
+                            group: row.group,
+                            ..one
+                        }
+                    }));
+                    notes.extend(list.notes.into_iter().map(|n| match person {
+                        Some(_) => n,
+                        None => format!("{}: {n}", crate::printable(&p.name)),
+                    }));
                 }
             }
             (Kind::Notes, None) => {
@@ -1038,7 +1115,7 @@ impl MedrecTools {
                     let idx = f.index(p)?;
                     claims.extend(idx.records.iter().filter(|x| x.kind == "claim").map(of));
                 }
-                for e in views::timeline(&f, &h, person, &r, &[])? {
+                for e in views::everything(&f, &h, person, &r, &[])? {
                     if !named(&e.title) {
                         continue;
                     }
@@ -1138,11 +1215,11 @@ impl MedrecTools {
                 }
             }
         }
-        items.sort_by(|a, b| b.date.cmp(&a.date).then(a.title.cmp(&b.title)));
-        let private = PrivateItems::of(&f, &h, &selected)?;
-        let (mut items, left_out) = private.keep(items, |i| {
-            person.is_some() || name.is_some_and(|n| crate::private::names(&i.title, n))
+        items.sort_by(|a, b| {
+            let date = || b.date.cmp(&a.date).then(a.title.cmp(&b.title));
+            a.group.cmp(&b.group).then_with(date)
         });
+        let (mut items, left_out) = private.keep(items, |i| open(&i.title));
         private.label(&f, &h, &selected, &page, &mut items, person.is_none());
         let mut out = page.page(items, "person, since/until, active or name")?;
         warn_labels(&mut out);
@@ -1161,6 +1238,9 @@ impl MedrecTools {
                     }
                 }
             }
+        }
+        for note in notes {
+            out.warn("no-problem-list", note);
         }
         private.warn(&mut out, page.offset(), &left_out);
         ToolOutput::new(&out)
@@ -1269,18 +1349,18 @@ impl MedrecTools {
             (Some(n), _) => breaks[n as usize - 2] + 1,
             (None, Some(o)) => usize::try_from(o).unwrap_or(usize::MAX).min(chars.len()),
         };
+        // Asked for by id: a private document is the person's, named. Its
+        // labels are in no answer that names no person.
+        let private = PrivateItems::of(&f, &h, &[&p])?;
         let records: Vec<String> = f
             .index(&p)?
             .records
             .iter()
-            .filter(|r| r.documents.contains(&d.id))
+            .filter(|r| r.documents.contains(&d.id) && !private.errors.contains(&r.id))
             .take(20)
             .map(|r| clip(&r.display, CLIP))
             .collect();
         let s = d.statement.as_ref();
-        // Asked for by id: a private document is the person's, named. Its
-        // labels are in no answer that names no person.
-        let private = PrivateItems::of(&f, &h, &[&p])?;
         let printed = Printed::of_document(d.organization.as_deref());
         let provider_labels = match printed.is_empty() {
             true => Vec::new(),
@@ -1336,22 +1416,32 @@ impl MedrecTools {
     }
 }
 
+/// What each source says, as one text.
+fn joined(says: Vec<String>) -> Option<String> {
+    (!says.is_empty()).then(|| says.join("; "))
+}
+
 /// A summary as sections of short lines.
 fn sections(s: summary::Summary) -> PersonSummary {
-    let mut out = Vec::new();
+    let mut out: Vec<Section> = Vec::new();
     let mut section = |name: &str, more: usize, items: Vec<Line>| {
         out.push(Section {
             section: name.into(),
             items,
             more,
+            note: None,
         })
     };
-    for (name, list) in [
-        ("medications", s.medications),
-        ("conditions", s.conditions),
-        ("allergies", s.allergies),
+    for (name, list, always) in [
+        ("medications", s.medications, true),
+        ("medications_on_hold", s.on_hold, false),
+        ("medications_ended_by_date", s.ended_by_date, false),
+        ("conditions", s.conditions, true),
+        ("allergies", s.allergies, true),
     ] {
-        section(name, list.more, list.items.into_iter().map(line).collect());
+        if always || !list.items.is_empty() {
+            section(name, list.more, list.items.into_iter().map(line).collect());
+        }
     }
     section(
         "immunizations",
@@ -1415,6 +1505,14 @@ fn sections(s: summary::Summary) -> PersonSummary {
             })
             .collect(),
     );
+    for (name, note) in s.notes {
+        if let Some(of) = out.iter_mut().find(|x| x.section == name) {
+            of.note = Some(match of.note.take() {
+                Some(had) => format!("{had}. {note}"),
+                None => note,
+            });
+        }
+    }
     PersonSummary {
         person: s.person.name,
         as_of: s.as_of,
@@ -1425,7 +1523,9 @@ fn sections(s: summary::Summary) -> PersonSummary {
 }
 
 fn line(l: summary::Line) -> Line {
-    let detail = match (l.detail, l.status) {
+    // Its words say its status.
+    let status = l.status.filter(|_| l.standing.is_none());
+    let detail = match (l.detail, status) {
         (Some(d), Some(s)) => Some(format!("{d} ({s})")),
         (d, s) => d.or(s),
     };
@@ -1433,6 +1533,8 @@ fn line(l: summary::Line) -> Line {
         name: l.name,
         date: l.date,
         detail,
+        standing: l.standing,
+        says: joined(l.says),
         source: l.source,
         id: l.id,
         name_key: l.name_key,
