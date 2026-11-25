@@ -134,7 +134,11 @@ pub(crate) fn icd10_area(code: &str) -> Option<&'static str> {
         b'A' if (50..=64).contains(&n) => Some(SEXUAL_HEALTH),
         b'B' if n == 20 => Some(SEXUAL_HEALTH),
         b'O' if n <= 8 => Some(REPRODUCTIVE),
-        b'O' if n == 99 && c.get(3..5) == Some("33") => Some(SUBSTANCE_USE),
+        b'O' if n == 99 && c.get(3..4) == Some("3") => match c.get(4..5) {
+            Some("1" | "2" | "3") => Some(SUBSTANCE_USE),
+            Some("4") => Some(MENTAL_HEALTH),
+            _ => None,
+        },
         b'N' if n == 46 || (96..=98).contains(&n) => Some(REPRODUCTIVE),
         b'R' if n == 45 && c.get(3..6) == Some("851") => Some(MENTAL_HEALTH),
         b'T' if n == 14 && c.get(3..5) == Some("91") => Some(MENTAL_HEALTH),
@@ -144,7 +148,9 @@ pub(crate) fn icd10_area(code: &str) -> Option<&'static str> {
             (81, _) => Some(MENTAL_HEALTH),
             (21, _) => Some(SEXUAL_HEALTH),
             (11, Some("3" | "4")) | (20, Some("2" | "6")) | (72, Some("5")) => Some(SEXUAL_HEALTH),
+            (29, Some("8")) if c.get(4..5) == Some("1") => Some(SEXUAL_HEALTH),
             (30..=32, _) | (33, Some("2")) => Some(REPRODUCTIVE),
+            (79, Some("3")) | (97, Some("5")) => Some(REPRODUCTIVE),
             (71, Some("4" | "5" | "6")) | (72, Some("0")) => Some(SUBSTANCE_USE),
             (77, Some("2")) if c.get(4..5) == Some("2") => Some(SUBSTANCE_USE),
             (87, Some("8")) if c.get(4..6) == Some("91") => Some(SUBSTANCE_USE),
@@ -302,11 +308,11 @@ static CONDITIONS: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
 });
 
 /// What has the words of one and is none: what is lower than it was, a liver's
-/// that drink does not explain, and what one hears with.
+/// that drink does not explain, what one hears with, and what anyone is asked.
 static OTHERWISE: LazyLock<Regex> = LazyLock::new(|| {
     let lower = "st|segment|respiratory|marrow|myocardial|cardiac|cns|nervous system";
     Regex::new(&format!(
-        r"(?i)\b(?:(?:{lower}) depression|non[- ]alcoholic|hearing[- ]aids?)\b"
+        r"(?i)\b(?:(?:{lower}) depression|non[- ]alcoholic|hearing[- ]aids?)\b|^gender identity$"
     ))
     .unwrap()
 });
@@ -319,6 +325,11 @@ fn condition_name(text: &str) -> Option<&'static str> {
 /// The area of a paper by its title.
 fn title(text: &str) -> Option<&'static str> {
     first_area(&PAPERS, text).or_else(|| questionnaires::of(text, None).map(|q| q.area))
+}
+
+/// The area of what a visit, a result or a report is called.
+fn named(text: &str) -> Option<&'static str> {
+    title(text).or_else(|| condition_name(text))
 }
 
 /// Tests that are about the areas themselves.
@@ -383,7 +394,6 @@ pub(crate) fn said(r: &Record) -> Vec<(&'static str, &'static str)> {
     let of = |part: &'static str, text: Option<&str>, area: fn(&str) -> Option<&'static str>| {
         Some((part, area(text?)?))
     };
-    let visit: fn(&str) -> Option<&'static str> = |t| title(t).or_else(|| condition_name(t));
     let name = Some(r.display.as_str());
     let each = match r.kind.as_str() {
         "condition" => [
@@ -395,8 +405,8 @@ pub(crate) fn said(r: &Record) -> Vec<(&'static str, &'static str)> {
             None,
         ],
         "encounter" => [
-            of("display", name, visit),
-            of("reason", field(r, "reason"), visit),
+            of("display", name, named),
+            of("reason", field(r, "reason"), named),
         ],
         "report" => [of("conclusion", field(r, "conclusion"), words), None],
         "result" => [of("value", field(r, "value"), words), None],
@@ -528,7 +538,7 @@ fn record_why(r: &Record) -> Option<Why> {
         // A reading is, by any of its parts.
         "result" | "report" => questionnaires::told_by(r)
             .iter()
-            .find_map(|(name, _)| first_area(&TESTS, name))
+            .find_map(|(name, _)| first_area(&TESTS, name).or_else(|| named(name)))
             .or_else(|| questionnaires::asked_by(r).first().map(|q| q.area))
             .or_else(|| parts_say(r).find_map(words))
             .or_else(said_area)
@@ -1441,6 +1451,19 @@ mod tests {
             ("Z81.2", Some(SUBSTANCE_USE)),
             ("Z81.8", Some(MENTAL_HEALTH)),
             ("Z82.49", None),
+            ("Z29.81", Some(SEXUAL_HEALTH)),
+            ("Z29.8", None),
+            ("Z97.5", Some(REPRODUCTIVE)),
+            ("Z97.4", None),
+            ("Z79.3", Some(REPRODUCTIVE)),
+            ("Z79.4", None),
+            ("O99.310", Some(SUBSTANCE_USE)),
+            ("O99.323", Some(SUBSTANCE_USE)),
+            ("O99.335", Some(SUBSTANCE_USE)),
+            ("O99.345", Some(MENTAL_HEALTH)),
+            ("O99.35", None),
+            ("O99.89", None),
+            ("Z34.00", None),
             ("I10", None),
             ("", None),
             ("F", None),
@@ -1627,6 +1650,28 @@ mod tests {
             value("Chlamydia not seen".into()),
             words(SEXUAL_HEALTH, "test")
         );
+        // A result and a report are of their own names, and their parts', as
+        // a visit is.
+        let named = |kind: &str, name: &str| why_of(kind, name, Value::Null, json!({}));
+        for (kind, name, area) in [
+            ("result", "Psychotherapy session count", MENTAL_HEALTH),
+            ("report", "Depression screening report", MENTAL_HEALTH),
+            ("result", "Embryo grade", REPRODUCTIVE),
+            ("report", "Substance use evaluation", SUBSTANCE_USE),
+        ] {
+            assert_eq!(named(kind, name), words(area, "test"), "{name}");
+        }
+        for name in [
+            "Hemoglobin",
+            "ST depression",
+            "Gender identity",
+            "Hearing aids",
+        ] {
+            assert_eq!(named("result", name), None, "{name}");
+        }
+        let part = json!({"components": [{"code": {"display": "Anxiety score"}, "value": 2}]});
+        let of_part = why_of("result", "Example panel", Value::Null, part);
+        assert_eq!(of_part, words(MENTAL_HEALTH, "test"));
     }
 
     /// A medicine is of its brand too. A brand that is a name is of a medicine
