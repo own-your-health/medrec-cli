@@ -1180,9 +1180,10 @@ provider, of whom the household said nothing, has no `providers.json`.
    "evidence": [{"from": "only_match", "state": "FL"}, {"from": "paper", "document": "d_…"}]}},
  "by_name": {"J SAMPLE": "v_…"},
  "by_item": {"r_…": {"J SAMPLE": "v_…"}},
+ "claims": {"r_…": "v_…"},
  "overrides": [{"id": "o_…", "kind": "set", "printed": ["R PLACEHOLDER"], "item": "r_…",
    "by": "Alex Testperson", "at": "2026-11-24T12:00:00Z"}],
- "private": {"labels": {…}, "by_name": {…}, "by_item": {…}, "overrides": […]}}
+ "private": {"labels": {…}, "by_name": {…}, "by_item": {…}, "claims": {…}, "overrides": […]}}
 ```
 
 - **Looking one up.** An item is a record, a document or an event, and a
@@ -1199,7 +1200,9 @@ provider, of whom the household said nothing, has no `providers.json`.
   `not_billed` row by its claim.
 - **`by_name`** has a printed name only when every item that prints it has a
   label. **`by_item`** has the items whose label is not the one `by_name`
-  gives, and always a claim's `provider`.
+  gives. **`claims`** has the label of each labelled claim's `provider`, for a
+  reader that shows a claim without its fields; it says nothing the other two
+  do not.
 - **`confidence`**: `household` (the household said so), `sure`, or `likely`. A
   reader treats one it does not know as likely. A likely label is marked as
   likely, with its evidence, and never leads the source's words.
@@ -1874,6 +1877,37 @@ readers ship with medrec:
     source's. `medrec mcp` reads it from the views, unlike the rest of its
     answer, so a reader of the views gives the same names. In an answer
     about the whole household it names no private item.
+  - `provider_labels` (0.9.7 and later) is the labels of what an item prints,
+    from the person's current `providers.json`, beside the source's own words
+    and never in them:
+    `[{field, record?, printed?, name?, practice?, role?, phone?, phone_from?,
+    confidence, evidence}]`. `field` is where it is printed: a record's field in
+    the order `provider`, `practitioner`, `performer`, `prescriber`,
+    `service_provider`, `facility`, `location`, `pharmacy`; a document's
+    `organization`; an event's `place`, then its `clinicians`, then its
+    `members`. Two that print the same and have one label are one, the first.
+    - `claims`, `events`, `documents` and `bills` have it, and the claims and
+      documents of `timeline`, and `medrec_document`. A claim has its
+      `provider`'s, without `printed`, which only its title can say. Any other
+      record has none until `response_format` is `detailed`: then each record
+      (not in `timeline`) has every labelled field's. An event in full
+      (`detailed`, or by `id`) has its own members' `provider`s too, `record`
+      naming the member.
+    - In an answer about the whole household (no `person`, so `medrec_document`
+      too), an item that is private, or held back, has none, even one the
+      question names, and an event's private member gives none. `private` is
+      read only in an answer about the person, for an item that is private.
+    - Evidence, and a phone's `phone_from`, that names a paper held back from
+      such an answer is left out, and so is one naming something the household
+      said that is in `private.overrides`; a phone goes with its `phone_from`. A
+      likely label left with no evidence is left out. A confidence medrec does
+      not know is `likely`, and evidence it does not know is its `from` alone.
+    - They are added before a page is cut, so they count in its size. An item
+      that would be too large for a page with all of its own has the first that
+      fit, and a `provider-labels-left-out` warning says how many items on the
+      page that is: a record is never lost to its labels. No tool
+      finds, sorts or filters by one, and `medrec_search` and `medrec_summary`
+      have none.
   - a reader that answers from the views without a current `private.json`
     for a person cannot tell which of their items are private: theirs is
     stale or absent (views from 0.9.0 or earlier), or the reader falls
