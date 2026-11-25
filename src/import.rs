@@ -977,7 +977,7 @@ fn file_streamed(
         records_older: older,
         records_not_served,
         not_served,
-        updated: served::updated(&person, &before, &index.records, &updated_ids),
+        updated: served::updated(&person, &before, &index, &updated_ids),
         documents_added: filed.added,
         documents_duplicate: filed.duplicate,
         documents_unchanged: filed.unchanged,

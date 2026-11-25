@@ -2965,9 +2965,9 @@ changed}`: `changed` has the names of what is other than it was, a member of the
 record (`status`, `code`, `display`, `date`, `words`, `errors`, `providers`,
 `documents`) or a field as `fields.<name>`, and no value. It is empty for a
 version that differs in nothing medrec reads, or only in what no reader shows
-(`given`). Several resources of one record make one entry. A record about another
-person has none, and neither does one that this same import first added, though
-`records_updated` counts a later resource that joins it.
+(`given`, `lists`, `listed_by`). Several resources of one record make one entry. A
+record about another person has none, and neither does one that this same import
+first added, though `records_updated` counts a later resource that joins it.
 
 A field added to `import/v1` is additive: a script reads a missing one as
 absent, never as an error.

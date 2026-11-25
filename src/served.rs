@@ -22,17 +22,27 @@ pub struct Updated {
 }
 
 /// What names no part of what a record says, and what no reader shows.
-const APART: [&str; 6] = ["id", "kind", "key", "provenance", "fields_from", "given"];
+const APART: [&str; 8] = [
+    "id",
+    "kind",
+    "key",
+    "provenance",
+    "fields_from",
+    "given",
+    "lists",
+    "listed_by",
+];
 
 /// What of these records is other than it was, in the order they are in.
 pub fn updated(
     person: &Person,
     before: &[Record],
-    now: &[Record],
+    now: &PersonIndex,
     ids: &HashSet<String>,
 ) -> Vec<Updated> {
-    let of = now.iter().filter(|r| ids.contains(&r.id));
-    of.filter(|r| about::record(person, r).is_none())
+    let others = about::ids(person, now);
+    let of = now.records.iter().filter(|r| ids.contains(&r.id));
+    of.filter(|r| !others.contains(&r.id))
         .filter_map(|r| {
             let was = before.iter().find(|b| b.id == r.id)?;
             Some(Updated {
@@ -145,6 +155,7 @@ pub fn not_served(
                 || with.is_some_and(|w| types.contains(w) || each.iter().any(|(t, _)| *t == w))
         })
     };
+    let others = about::ids(person, index);
     let mut out = BTreeMap::new();
     for r in &index.records {
         let paths = r.provenance.iter().filter_map(|p| {
@@ -156,7 +167,7 @@ pub fn not_served(
             any = true;
             gone &= !served.contains(&path) && gave(p) && !left_out(p);
         }
-        if any && gone && about::record(person, r).is_none() {
+        if any && gone && !others.contains(&r.id) {
             *out.entry(r.kind.clone()).or_default() += 1;
         }
     }
@@ -324,10 +335,13 @@ mod tests {
         now.words[0].read = Some("2024-03-02".into());
         now.provenance[0].filed_at = "2024-03-02T10:00:00Z".into();
         now.given = vec![Default::default()];
+        now.lists = BTreeMap::from([(format!("{DIR}/Observation/a.json"), vec![])]);
         let ids: HashSet<String> = ["one".to_string(), "new".to_string()].into();
         let names = |now: &Record| {
+            let mut idx = PersonIndex::new("p_test");
             let new = record("new", "result", &[(DIR, "Observation/b")]);
-            updated(&person(), &[was.clone()], &[now.clone(), new], &ids)
+            idx.records = vec![now.clone(), new];
+            updated(&person(), &[was.clone()], &idx, &ids)
         };
         let of = |changed: &[&str]| Updated {
             id: "one".into(),
@@ -347,6 +361,8 @@ mod tests {
         // Nor is one about somebody else named.
         now.fields.insert(about::FIELD.into(), "another".into());
         assert_eq!(names(&now), []);
-        assert!(updated(&person(), &[was.clone()], &[was.clone()], &HashSet::new()).is_empty());
+        let mut idx = PersonIndex::new("p_test");
+        idx.records = vec![was.clone()];
+        assert!(updated(&person(), &[was.clone()], &idx, &HashSet::new()).is_empty());
     }
 }
