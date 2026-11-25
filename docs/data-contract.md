@@ -64,6 +64,12 @@ views/                        each person's records cut into small files, for re
   Otherwise it is put back, and a current copy that is not the replacement
   (an upload that did not read back) is kept beside it as an earlier
   version.
+- `Records/<source>/importing.json` (0.9.9 and later) is there from before an
+  import of that source uploads raw files until what they give is in
+  `index.json`. One left by an import cut short has the source's next import
+  read every version of its raw files again for what they gave (What a source
+  gave, below), and goes when that one finishes. `{started_at}` is when the
+  first of them began.
 
 ## Rules
 
@@ -438,6 +444,8 @@ where that is not known. A document's is `{raw_path, organization, title}`.
   that claim was given too.
 - An import keeps what a version gives, an older one served late included, and
   what the record showed before another version or another source's values.
+  One that follows an import of its source that was cut short keeps what the
+  versions filed by that one gave too, whether it serves the resource or not.
   `medrec reindex` keeps what every version of a record's raw files gives that
   is there, and what describes a paper, earlier versions included; and, for a
   record with a raw file that is not there or does not read, what the record

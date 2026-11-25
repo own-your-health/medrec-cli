@@ -111,10 +111,11 @@ pub fn claims(
             person: p.id.clone(),
             ..PersonReindexed::default()
         };
-        fetch(folder, &idx, tmp.path(), &dirs, normalize::WORD_TYPES)?;
-        fetch(folder, &idx, tmp.path(), &dirs, RAW_TYPES)?;
+        let sources = sources(&idx);
+        fetch(folder, &sources, tmp.path(), &dirs, normalize::WORD_TYPES)?;
+        fetch(folder, &sources, tmp.path(), &dirs, RAW_TYPES)?;
         fetch_said(folder, &idx, tmp.path())?;
-        let older = fetch_older(folder, &idx, tmp.path())?;
+        let older = fetch_older(folder, &idx, &sources, tmp.path())?;
         let showed: Vec<Given> = idx.records.iter().map(import::showed).collect();
         row.statuses_updated = statuses(&mut idx, tmp.path())?;
         for r in idx.records.iter_mut().filter(|r| r.kind == "claim") {
@@ -178,21 +179,21 @@ pub fn claims(
     Ok(out)
 }
 
-/// A copy of the raw files of these types, of every source, where there is
-/// none yet.
+/// The folders of raw files the records are of, one per source.
+fn sources(idx: &PersonIndex) -> BTreeSet<String> {
+    let of = |pr: &Provenance| import::source_dir_of(pr.raw_path.as_ref()?).map(str::to_string);
+    let records = idx.records.iter();
+    records.flat_map(|r| &r.provenance).filter_map(of).collect()
+}
+
+/// A copy of these sources' raw files of these types, where there is none yet.
 fn fetch(
     folder: &Folder,
-    idx: &PersonIndex,
+    sources: &BTreeSet<String>,
     tmp: &Path,
     fetched: &BTreeSet<String>,
     types: &[&str],
 ) -> Result<(), CliError> {
-    let sources: BTreeSet<&str> = idx
-        .records
-        .iter()
-        .flat_map(|r| &r.provenance)
-        .filter_map(|pr| import::source_dir_of(pr.raw_path.as_ref()?))
-        .collect();
     for source in sources {
         for ty in types {
             let dir = format!("{source}/{ty}");
@@ -239,19 +240,16 @@ fn fetch_said(folder: &Folder, idx: &PersonIndex, tmp: &Path) -> Result<(), CliE
 /// How many files of one folder are read one by one.
 const FEW: usize = 20;
 
-/// The raw files that earlier versions of the records' resources are kept in,
-/// by the current one's, and a copy of them.
+/// The raw files of these sources that earlier versions of the records'
+/// resources are kept in, by the current one's, and a copy of them.
 fn fetch_older(
     folder: &Folder,
     idx: &PersonIndex,
+    sources: &BTreeSet<String>,
     tmp: &Path,
 ) -> Result<BTreeMap<String, Vec<String>>, CliError> {
-    let of = || idx.records.iter().flat_map(|r| &r.provenance);
-    let known: BTreeSet<&str> = of().filter_map(|p| p.raw_path.as_deref()).collect();
-    let sources: BTreeSet<&str> = known
-        .iter()
-        .filter_map(|rel| import::source_dir_of(rel))
-        .collect();
+    let of = idx.records.iter().flat_map(|r| &r.provenance);
+    let known: BTreeSet<&str> = of.filter_map(|p| p.raw_path.as_deref()).collect();
     let mut out: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for source in sources {
         let mut wanted: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -261,7 +259,10 @@ fn fetch_older(
             else {
                 continue;
             };
-            let dir = rel.rsplit_once('/').map_or(source, |(d, _)| d).to_string();
+            let dir = rel
+                .rsplit_once('/')
+                .map_or(source.as_str(), |(d, _)| d)
+                .to_string();
             wanted.entry(dir).or_default().push(rel.clone());
             out.entry(current).or_default().push(rel);
         }
@@ -297,6 +298,36 @@ fn fetch_files(
         }
     }
     Ok(())
+}
+
+/// What a source gave of the records it states, by every version of its raw
+/// files: those filed by an import that did not finish were never read in.
+/// Records changed, counted.
+pub(crate) fn given_by(
+    folder: &Folder,
+    idx: &mut PersonIndex,
+    source_dir: &str,
+) -> Result<usize, CliError> {
+    let tmp = pk_cli_drive::private_temp_dir("medrec-given")?;
+    let sources = BTreeSet::from([source_dir.to_string()]);
+    let mut wanted: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    let of = idx.records.iter().flat_map(|r| &r.provenance);
+    for rel in of.filter_map(|p| p.raw_path.as_deref()) {
+        if import::source_dir_of(rel) != Some(source_dir) {
+            continue;
+        }
+        if let Some((dir, _)) = rel.rsplit_once('/') {
+            wanted.entry(dir).or_default().insert(rel);
+        }
+    }
+    for (dir, files) in wanted {
+        let files: Vec<&str> = files.into_iter().collect();
+        fetch_files(folder, tmp.path(), dir, &files)?;
+    }
+    fetch(folder, &sources, tmp.path(), &BTreeSet::new(), RAW_TYPES)?;
+    let older = fetch_older(folder, idx, &sources, tmp.path())?;
+    let showed: Vec<Given> = idx.records.iter().map(import::showed).collect();
+    given(idx, &showed, &older, tmp.path())
 }
 
 /// What the sources gave of each record that it does not show: by every

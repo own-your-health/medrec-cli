@@ -40,9 +40,9 @@ impl Env {
         self.records().join("Robin Testperson")
     }
 
-    fn ok(&self, args: &[&str]) -> Value {
+    fn run(&self, args: &[&str]) -> std::process::Output {
         let path = std::env::var("PATH").unwrap_or_default();
-        let out = Command::cargo_bin("medrec")
+        Command::cargo_bin("medrec")
             .unwrap()
             .env("XDG_CONFIG_HOME", self.root.join("config"))
             .env("XDG_CACHE_HOME", self.root.join("cache"))
@@ -57,7 +57,11 @@ impl Env {
             .arg("--json")
             .args(args)
             .output()
-            .unwrap();
+            .unwrap()
+    }
+
+    fn ok(&self, args: &[&str]) -> Value {
+        let out = self.run(args);
         assert!(
             out.status.success(),
             "medrec {args:?}: {}{}",
@@ -70,18 +74,21 @@ impl Env {
     /// Import a source's stream. How many records that changes.
     fn import(&self, stream: &str) -> u64 {
         medrec::testdata::write_provider(&self.root.join("provider"), stream);
-        let r = self.ok(&[
-            "import",
-            "--from",
-            "fakeprov",
-            "--from-profile",
-            "adult1",
-            "--patient",
-            "pat-0001",
-            "--person",
-            "Robin",
-        ]);
-        r["records_updated"].as_u64().unwrap()
+        self.ok(IMPORT)["records_updated"].as_u64().unwrap()
+    }
+
+    /// The same, cut short once the raw files are written: the person's folder
+    /// takes no index.
+    fn import_cut_short(&self, stream: &str) {
+        use std::os::unix::fs::PermissionsExt;
+        medrec::testdata::write_provider(&self.root.join("provider"), stream);
+        let was = std::fs::metadata(self.folder()).unwrap().permissions();
+        let closed = std::fs::Permissions::from_mode(0o500);
+        std::fs::set_permissions(self.folder(), closed).unwrap();
+        let out = self.run(IMPORT);
+        std::fs::set_permissions(self.folder(), was).unwrap();
+        assert!(!out.status.success());
+        assert!(self.raw("one", UNFINISHED).exists());
     }
 
     /// A raw file of the source `org`.
@@ -146,6 +153,21 @@ impl Env {
         p
     }
 }
+
+const IMPORT: &[&str] = &[
+    "import",
+    "--from",
+    "fakeprov",
+    "--from-profile",
+    "adult1",
+    "--patient",
+    "pat-0001",
+    "--person",
+    "Robin",
+];
+
+/// What marks an import that has not finished, beside the raw files.
+const UNFINISHED: &str = "importing.json";
 
 /// The synthetic stream as an organization serves it, each resource as
 /// `change` leaves it, or left out.
@@ -904,6 +926,19 @@ fn visit_at(org: &str, place: Option<&str>, status: &str, version: u32) -> Strin
     })
 }
 
+/// A condition's code as a source gives it.
+fn coded(code: &str, version: u32) -> String {
+    stream("one", |id, v| {
+        if id == "cond-0001" {
+            let at = format!("2026-03-05T1{version}:00:00Z");
+            v["meta"] = json!({"versionId": version.to_string(), "lastUpdated": at});
+            let icd10 = "http://hl7.org/fhir/sid/icd-10-cm";
+            v["code"] = json!({"coding": [{"system": icd10, "code": code}]});
+        }
+        id != "obs-0001"
+    })
+}
+
 /// Whether the visit is private, and by a place it does not show.
 fn held(e: &Env) -> Option<bool> {
     let why = e.private().remove(&e.visit().id)?;
@@ -984,17 +1019,6 @@ fn what_an_earlier_version_gave_stays_private() {
 /// next, which finds them there.
 #[test]
 fn an_import_cut_short_loses_nothing_that_was_given() {
-    let coded = |code: &str, version: u32| {
-        stream("one", |id, v| {
-            if id == "cond-0001" {
-                let at = format!("2026-03-05T1{version}:00:00Z");
-                v["meta"] = json!({"versionId": version.to_string(), "lastUpdated": at});
-                let icd10 = "http://hl7.org/fhir/sid/icd-10-cm";
-                v["code"] = json!({"coding": [{"system": icd10, "code": code}]});
-            }
-            id != "obs-0001"
-        })
-    };
     let visit = |place: &str, version: u32| visit_at("one", Some(place), "finished", version);
     // Its source says it is the same version, read later.
     let read = r#""pulled_at":"2026-03-05T1"#;
@@ -1019,6 +1043,92 @@ fn an_import_cut_short_loses_nothing_that_was_given() {
         // Once: what comes again is kept.
         assert_eq!(e.import(&is), 0, "{kind}");
     }
+}
+
+/// What an import cut short filed was given, though the index never had it:
+/// by the source's next import, whatever that one serves.
+#[test]
+fn a_version_no_import_read_in_was_given() {
+    let visit = |place: &str, version: u32| visit_at("one", Some(place), "finished", version);
+    let titled = |title: &str, version: u32| {
+        stream("one", |id, v| {
+            if id == "doc-0001" {
+                say(v, "current", version);
+                v["description"] = title.into();
+            }
+            true
+        })
+    };
+    let gone = |id: &str| id != "enc-0001" && id != "obs-0001";
+    let secret = "Psychotherapy summary";
+    let shown = |e: &Env, of: &str| {
+        let idx = e.index();
+        let record = idx.records.iter().find(|r| r.kind == of);
+        let paper = idx.documents.iter().find(|_| of == "document");
+        record.map(|r| r.id.clone()).or(paper.map(|d| d.id.clone()))
+    };
+    for (tag, kind, cut, served) in [
+        (
+            "encounter",
+            "encounter",
+            vec![visit(PRIVATE, 2)],
+            visit(OPEN, 3),
+        ),
+        (
+            "condition",
+            "condition",
+            vec![coded("F32.1", 2)],
+            coded("J45.909", 3),
+        ),
+        (
+            "paper",
+            "document",
+            vec![titled(secret, 2)],
+            titled("Visit summary", 3),
+        ),
+        // Cut short twice, and the last of them served again.
+        (
+            "twice",
+            "encounter",
+            vec![visit(PRIVATE, 2), visit(OPEN, 3)],
+            visit(OPEN, 3),
+        ),
+        // No longer served.
+        (
+            "gone",
+            "encounter",
+            vec![visit(PRIVATE, 2)],
+            stream("one", |id, _| gone(id)),
+        ),
+    ] {
+        let e = Env::new(&format!("gave-unread-{tag}"));
+        e.import(&match kind {
+            "encounter" => visit(OPEN, 1),
+            "condition" => coded("J45.909", 1),
+            _ => titled("Visit summary", 1),
+        });
+        let mark = e.raw("one", UNFINISHED);
+        assert!(!mark.exists(), "{tag}");
+        let id = shown(&e, kind).unwrap();
+        for s in &cut {
+            e.import_cut_short(s);
+        }
+        assert!(!e.private().contains_key(&id), "{tag}");
+        e.import(&served);
+        assert_eq!(e.private()[&id]["given"], true, "{tag}");
+        assert_eq!(shown(&e, kind), Some(id), "{tag}");
+        // Once: it finished, and what comes again is kept.
+        assert!(!mark.exists(), "{tag}");
+        assert_eq!(e.import(&served), 0, "{tag}");
+        assert!(!mark.exists(), "{tag}");
+    }
+
+    // The first that reads in a resource the cut one filed.
+    let e = Env::new("gave-unread-new");
+    e.import(&stream("one", |id, _| gone(id)));
+    e.import_cut_short(&visit(PRIVATE, 1));
+    e.import(&visit(OPEN, 2));
+    assert_eq!((shows_place(&e).as_str(), held(&e)), (OPEN, Some(true)));
 }
 
 /// What was given before medrec kept it is read from the raw files, every

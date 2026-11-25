@@ -859,7 +859,11 @@ fn file_streamed(
         &written.paths,
     )?;
     let mut papers = paper_words(folder, &mut index, &owners, &base_prov, &source_dir)?;
-    if papers.changed > 0 {
+    if written.cut_short {
+        // Versions were filed that no import read in.
+        crate::reindex::given_by(folder, &mut index, &source_dir)?;
+    }
+    if papers.changed > 0 || written.cut_short {
         // Its other sources' words, and those an earlier medrec did not keep.
         let tmp = pk_cli_drive::private_temp_dir("medrec-papers")?;
         papers = papers_again(folder, &household, &person, &mut index, tmp.path())?;
@@ -893,6 +897,10 @@ fn file_streamed(
     });
     folder.save_index(&person, &mut index)?;
     folder.save_text(&person, &texts)?;
+    if written.written > 0 || written.cut_short {
+        // One that stays has the next import read the raw files again.
+        let _ = folder.store.delete(&unfinished(&source_dir));
+    }
 
     record_source(&mut household, &person.id, &req.from, &header);
     folder.save_household(&mut household)?;
@@ -1222,6 +1230,14 @@ struct Written {
     filings: HashMap<String, Filing>,
     written: usize,
     unchanged: usize,
+    /// Whether an earlier import of the source did not finish.
+    cut_short: bool,
+}
+
+/// What marks that an import of a source files raw files, until what they give
+/// is in the person's index.
+fn unfinished(source_dir: &str) -> String {
+    format!("{source_dir}/importing.json")
 }
 
 /// A resource's raw file under its source, without `.json`: its type and
@@ -1323,6 +1339,8 @@ fn write_raw(
         folder.store.move_no_clobber(&left, &current)?;
         existing.insert(current, md5);
     }
+    let mark = unfinished(source_dir);
+    let cut_short = existing.contains_key(&mark);
     let staging = pk_cli_drive::private_temp_dir("medrec-import")?;
     let mut paths = HashMap::new();
     let mut filings = HashMap::new();
@@ -1467,6 +1485,10 @@ fn write_raw(
         staged.push((rel, md5));
     }
     if !staged.is_empty() {
+        if !cut_short {
+            let at = serde_json::json!({"started_at": base.filed_at});
+            folder.store.write_text(&mark, &format!("{at}\n"))?;
+        }
         folder.store.put_tree(staging.path(), source_dir)?;
         let after: HashMap<String, Option<String>> = folder
             .store
@@ -1494,6 +1516,7 @@ fn write_raw(
         filings,
         written: staged.len(),
         unchanged,
+        cut_short,
     })
 }
 
