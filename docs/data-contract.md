@@ -371,9 +371,10 @@ there.
   other field does (a condition's, an allergy's or a medicine's `differs` is in
   `standing.json`, below). Its values are never those
   of a source that says so: when the resource `fields_from` names does, medrec
-  reads `date`, `code`, `display`, `status`, `fields` and `providers` again from
-  the raw file of another that does not and that reads, and names it; a version
-  that says so writes nothing while another does not say so.
+  reads `date`, `code`, `display`, `status` and `fields` again from the raw file
+  of another that does not and that reads, and names it; a version that says so
+  writes nothing while another does not say so. Its `providers` are read again
+  from all that do not say so, and nothing of them is kept from before.
 - A version that says so stays on the record it was of, whatever else it
   leaves out.
 - It comes back by itself when a later version of the same source's no longer
@@ -419,7 +420,8 @@ one is followed only under the source's own FHIR base. A name with nothing
 more behind it has no entry. Where two sources state one record, each fills
 what the other lacks of a provider both print, and the value there first
 stands. A provider whose reference leads to something the source does not
-give keeps what the record had where nothing is read in its place. `medrec
+give keeps what the record had where nothing is read in its place (but where
+its sources differ: Entered in error, above). `medrec
 reindex` reads them all again from the raw files, every source of a record in
 turn, and so takes a correction that import, for a record two sources state,
 leaves as it was; it also gives records filed before 0.9.6 theirs, and those

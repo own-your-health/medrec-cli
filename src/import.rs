@@ -2102,17 +2102,13 @@ fn of_an_error(r: &Record) -> bool {
         .is_none_or(|p| is_error(r, p))
 }
 
-/// A resource and the record it gives.
-type Shaped = (Value, Record);
-
 /// Take a record's values from another of its resources, where they are of
 /// one that says it is entered in error ([`of_an_error`]): the first that
 /// reads and that import lets write, else the first that reads. Whether one
 /// did.
 pub(crate) fn take_from_another(
     r: &mut Record,
-    read: &mut dyn FnMut(&Provenance) -> Result<Option<Shaped>, CliError>,
-    found: &mut dyn FnMut(&Provenance, &Value, &Record) -> Result<Found, CliError>,
+    read: &mut dyn FnMut(&Provenance) -> Result<Option<Record>, CliError>,
 ) -> Result<bool, CliError> {
     if !of_an_error(r) {
         return Ok(false);
@@ -2123,15 +2119,13 @@ pub(crate) fn take_from_another(
     standing.sort_by_key(|&i| !can_write(r, i));
     for i in standing {
         let p = r.provenance[i].clone();
-        let Some((v, mut new)) = read(&p)?.filter(|(_, n)| n.key == r.key) else {
+        let Some(mut new) = read(&p)?.filter(|n| n.key == r.key) else {
             continue;
         };
         // A fill's is its prescription's.
         if let Some(of) = r.fields.get("prescriber") {
             new.fields.entry("prescriber").or_insert(of.clone());
         }
-        let refs = found(&p, &v, &new)?;
-        r.providers = refs.over(&r.providers, &r.fields, &new.fields, true);
         r.fields = new.fields;
         r.display = new.display;
         r.status = new.status;
@@ -2143,33 +2137,62 @@ pub(crate) fn take_from_another(
     Ok(false)
 }
 
-/// [`take_from_another`] for every record of a person, from the raw files
+/// What a record's resources say of the providers it prints, the first to say
+/// something of one standing: those that do not say it is entered in error,
+/// or all where every one does. `found` is what one says, where its raw file
+/// reads. What the record had stands in for what is not read, but where a
+/// resource that does not speak may have given it.
+pub(crate) fn providers_again(
+    r: &Record,
+    found: &mut dyn FnMut(&Provenance) -> Result<Option<Found>, CliError>,
+) -> Result<Vec<ProviderRef>, CliError> {
+    let errors = r.provenance.iter().filter(|p| is_error(r, p)).count();
+    let in_part = errors > 0 && errors < r.provenance.len();
+    let mut all = Found::default();
+    for p in &r.provenance {
+        if p.raw_path.is_none() || (in_part && is_error(r, p)) {
+            continue;
+        }
+        match found(p)? {
+            Some(of) => all = all.and(of),
+            None => all.unresolved.extend(crate::providers::FIELDS),
+        }
+    }
+    let had = if in_part { &[][..] } else { &r.providers };
+    Ok(all.over(had, &r.fields, &r.fields, false))
+}
+
+/// [`take_from_another`] and [`providers_again`] for every record of a person
+/// that a resource says, or said, is entered in error, from the raw files
 /// here now.
 fn take_from_others(folder: &Folder, index: &mut PersonIndex) -> Result<(), CliError> {
-    for r in &mut index.records {
-        let text = |p: &Provenance| match &p.raw_path {
-            Some(rel) => folder.store.read_text(rel),
-            None => Ok(None),
+    let read = |p: &Provenance| -> Result<Option<Value>, CliError> {
+        let text = match &p.raw_path {
+            Some(rel) => folder.store.read_text(rel)?,
+            None => None,
         };
-        take_from_another(
-            r,
-            &mut |p| {
-                let v: Option<Value> = text(p)?.and_then(|t| serde_json::from_str(&t).ok());
-                Ok(v.and_then(|v| normalize::record(&v, p.clone()).map(|r| (v, r))))
-            },
-            &mut |p, v, new| {
-                let dir = p.raw_path.as_deref().and_then(source_dir_of);
-                let mut held = Held {
-                    folder,
-                    source_dir: dir.unwrap_or_default(),
-                    base: p.source.fhir_base.clone(),
-                    stream: HashMap::new(),
-                    read: HashMap::new(),
-                    listed: HashMap::new(),
-                };
-                crate::providers::of(v, &new.fields, &mut held)
-            },
-        )?;
+        Ok(text.and_then(|t| serde_json::from_str(&t).ok()))
+    };
+    for r in &mut index.records {
+        take_from_another(r, &mut |p| {
+            Ok(read(p)?.and_then(|v| normalize::record(&v, p.clone())))
+        })?;
+        if r.errors.is_empty() || r.provenance.len() == 1 {
+            continue;
+        }
+        r.providers = providers_again(r, &mut |p| {
+            let Some(v) = read(p)? else { return Ok(None) };
+            let dir = p.raw_path.as_deref().and_then(source_dir_of);
+            let mut held = Held {
+                folder,
+                source_dir: dir.unwrap_or_default(),
+                base: p.source.fhir_base.clone(),
+                stream: HashMap::new(),
+                read: HashMap::new(),
+                listed: HashMap::new(),
+            };
+            crate::providers::of(&v, &r.fields, &mut held).map(Some)
+        })?;
     }
     Ok(())
 }

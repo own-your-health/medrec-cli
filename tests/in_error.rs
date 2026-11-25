@@ -808,3 +808,65 @@ fn reindex_reads_every_visits_providers_beside_one_two_sources_state() {
     assert_eq!(e.ok(&["reindex"])["providers_updated"], some.len());
     assert_eq!(providers(), full);
 }
+
+/// No provider of a record that stands is one only a source that says it is
+/// entered in error gives, by an import as by `reindex`, and it comes back
+/// with that source.
+#[test]
+fn a_source_in_error_says_nothing_of_the_providers() {
+    let says = |org: &str, npi: Option<&str>, status: &str, version: u32| {
+        stream_of(medrec::testdata::PROVIDERS_STREAM, org, |id, v| {
+            if id == "enc-a" {
+                say(v, status, version);
+                v["class"]["display"] = format!("class {org}").into();
+            }
+            if id == "prac-one" {
+                v["identifier"] = match npi {
+                    Some(n) => json!([{"system": "http://hl7.org/fhir/sid/us-npi", "value": n}]),
+                    None => json!([]),
+                };
+            }
+            ["enc-a", "prac-one", "loc-one", "org-one"].contains(&id)
+        })
+    };
+    let npi = |e: &Env| {
+        let refs = e.visit().providers;
+        let of = refs.into_iter().find(|r| r.field == "practitioner");
+        of.and_then(|r| r.npi)
+    };
+    let is = |e: &Env, of: Option<&str>, class: &str| {
+        assert_eq!(npi(e).as_deref(), of);
+        assert_eq!(e.visit().fields["class"], class);
+        assert_eq!(e.ok(&["reindex"])["providers_updated"], 0);
+        assert_eq!(npi(e).as_deref(), of);
+    };
+    let (one, two) = ("0000000006", "0000000014");
+
+    // Each gives its own of the name both print.
+    let e = Env::new("npis");
+    e.import(&says("one", Some(one), "finished", 1));
+    e.import(&says("two", Some(two), "finished", 1));
+    is(&e, Some(one), "class one");
+    e.import(&says("one", Some(one), "entered-in-error", 2));
+    is(&e, Some(two), "class two");
+    e.import(&says("two", Some(two), "finished", 1));
+    is(&e, Some(two), "class two");
+    e.import(&says("one", Some(one), "finished", 3));
+    is(&e, Some(one), "class one");
+
+    // The values are another's, and one whose NPI filled them takes it back.
+    let e = Env::new("npis-filled");
+    e.import(&says("one", None, "finished", 1));
+    e.import(&says("two", Some(two), "finished", 1));
+    is(&e, Some(two), "class one");
+    e.import(&says("two", Some(two), "entered-in-error", 2));
+    is(&e, None, "class one");
+    e.import(&says("two", Some(two), "finished", 3));
+    is(&e, Some(two), "class two");
+
+    // One that joins in error adds none.
+    let e = Env::new("npis-joined");
+    e.import(&says("one", None, "finished", 1));
+    e.import(&says("two", Some(two), "entered-in-error", 1));
+    is(&e, None, "class one");
+}

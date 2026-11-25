@@ -20,7 +20,6 @@ use crate::import;
 use crate::model::{Household, InError, PersonIndex, Provenance, Record, Word};
 use crate::normalize;
 use crate::people;
-use crate::providers::Found;
 
 #[derive(Debug, Default, Serialize)]
 pub struct Reindexed {
@@ -309,11 +308,9 @@ fn statuses(idx: &mut PersonIndex, tmp: &Path) -> Result<usize, CliError> {
             let mut of = shapes
                 .iter()
                 .filter(|(_, rel, _)| p.raw_path.as_ref() == Some(*rel));
-            of.next().map(|(_, _, n)| (Value::Null, n.clone()))
+            of.next().map(|(_, _, n)| n.clone())
         };
-        import::take_from_another(&mut now, &mut |p| Ok(of(p)), &mut |_, _, _| {
-            Ok(Found::default())
-        })?;
+        import::take_from_another(&mut now, &mut |p| Ok(of(p)))?;
         if now != *r {
             *r = now;
             changed += 1;
@@ -343,20 +340,17 @@ fn providers(idx: &mut PersonIndex, tmp: &Path) -> Result<usize, CliError> {
     };
     let mut changed = 0;
     for r in &mut idx.records {
-        // Every source of the record, in the order it names them, so that
-        // the first to say something of a provider they all print stands.
-        let mut found = Found::default();
-        for pr in &r.provenance {
-            let Some(rel) = &pr.raw_path else { continue };
+        let now = import::providers_again(r, &mut |pr| {
+            let Some(rel) = &pr.raw_path else {
+                return Ok(None);
+            };
             let Some(v) = read(tmp, rel) else {
-                found.unresolved.extend(crate::providers::FIELDS);
-                continue;
+                return Ok(None);
             };
             held.source = import::source_dir_of(rel).unwrap_or_default().to_string();
             held.base = pr.source.fhir_base.clone();
-            found = found.and(crate::providers::of(&v, &r.fields, &mut held)?);
-        }
-        let now = found.over(&r.providers, &r.fields, &r.fields, false);
+            crate::providers::of(&v, &r.fields, &mut held).map(Some)
+        })?;
         if now != r.providers {
             r.providers = now;
             changed += 1;
