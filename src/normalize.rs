@@ -520,6 +520,7 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
         display,
         status,
         fields,
+        providers: Vec::new(),
         documents: Vec::new(),
         provenance: vec![provenance],
     })

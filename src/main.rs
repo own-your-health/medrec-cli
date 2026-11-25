@@ -1089,8 +1089,8 @@ fn run(cli: &Cli) -> Result<(), CliError> {
             let r = medrec::reindex::claims(&f, &h, a.person.as_deref())?;
             output::emit(json, "reindex", to_value(&r), |_| {
                 println!(
-                    "{} claims: {} shaped again, {} unchanged, {} with no raw file; {} bills and receipts read again",
-                    r.claims, r.reshaped, r.unchanged, r.without_raw, r.statements
+                    "{} claims: {} shaped again, {} unchanged, {} with no raw file; {} bills and receipts read again; {} records' providers read again",
+                    r.claims, r.reshaped, r.unchanged, r.without_raw, r.statements, r.providers
                 );
             });
             Ok(())

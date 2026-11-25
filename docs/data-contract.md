@@ -192,7 +192,8 @@ only a display.
 fact from two sources is one record; a fill and a claim are keyed by their
 identity instead, below), `date`, `code` (`{system, code,
 display}`), `display`, `status`, `fields` (kind-specific, with FHIR element
-names), `documents` (linked document ids) and `provenance` (one per source).
+names), `providers` (below), `documents` (linked document ids) and
+`provenance` (one per source).
 
 **Fields by kind.** Every name a record's `fields` can hold. A field is
 present only when the source gave it, so a reader takes none for granted.
@@ -273,6 +274,23 @@ The last column is the FHIR element the value comes from.
 | `claim` | `brand_generic` | text | `supportingInfo` (`brandgenericindicator`) |
 | `claim` | `visit` | a record id | its links, below |
 | `claim` | `results` | a list of record ids | its links, below |
+
+**Providers.** A record's `providers` (0.9.6 and later) is what its source
+says of the people and places its fields print, beyond their names: a list
+of `{field, npi, state}`, with one entry for each field that has either.
+`field` is the field that prints the provider: `practitioner`, `location`
+and `service_provider` of an encounter, `prescriber` and `pharmacy` of a
+medication, `performer` of an immunization, `performer` and `location` of a
+procedure, `provider` and `facility` of a claim. `npi` is a National Provider
+Identifier whose check digit holds, from the reference's own `identifier` or
+from the resource it points at. `state` is two letters, from that resource's
+address. A reference is followed to a resource contained in the record's
+own, served in the same stream, or filed by an earlier import of the same
+source, through a PractitionerRole (the person's NPI, the place's state) and
+a Location's `managingOrganization`. A name with nothing more behind it has
+no entry. `medrec reindex` gives records filed before 0.9.6 theirs. No answer
+or view shows it. An earlier medrec drops it from an index it saves, so run
+0.9.6 or later on every machine that writes the folder.
 
 A `medication` comes from a MedicationRequest (`source: request`), a
 MedicationStatement (`statement`) or a MedicationDispense (`dispense`, a

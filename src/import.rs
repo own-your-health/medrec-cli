@@ -731,6 +731,13 @@ fn file_streamed(
         claimed: HashSet::new(),
     };
     let mut prescribers = stream_prescribers(&resources);
+    let mut held = Held {
+        folder,
+        source_dir: &source_dir,
+        stream: stream_providers(&resources),
+        read: HashMap::new(),
+        listed: HashMap::new(),
+    };
     for r in &resources {
         let Ok(v) = r.value() else { continue };
         if let Some(o) = owner(&r.resource_type, &v) {
@@ -768,6 +775,7 @@ fn file_streamed(
                         .insert("prescriber".into(), serde_json::json!(name));
                 }
             }
+            rec.providers = crate::providers::of(&v, &rec.fields, &mut held)?;
             match merge(&mut index, rec, filing, &mut idless) {
                 Merge::Added => added += 1,
                 Merge::Updated => updated += 1,
@@ -1161,6 +1169,12 @@ fn raw_sub(r: &RawResource) -> String {
     } else {
         id_sub(&r.resource_type, &r.id)
     }
+}
+
+/// `Type/<file name>` of the raw file a resource is filed as, without
+/// `.json`.
+pub(crate) fn raw_sub_of(resource_type: &str, id: &str) -> String {
+    id_sub(resource_type, id)
 }
 
 fn id_sub(resource_type: &str, id: &str) -> String {
@@ -1703,6 +1717,65 @@ fn merge(
     }
 }
 
+/// The resources a provider reference can lead to, from this stream or the
+/// raw files earlier imports filed for the same source.
+struct Held<'a> {
+    folder: &'a Folder,
+    source_dir: &'a str,
+    stream: HashMap<(String, String), Value>,
+    read: HashMap<String, Option<Value>>,
+    /// The raw files each type's folder holds, listed once.
+    listed: HashMap<String, HashSet<String>>,
+}
+
+impl crate::providers::Resolve for Held<'_> {
+    fn resource(&mut self, resource_type: &str, id: &str) -> Result<Option<Value>, CliError> {
+        let key = (resource_type.to_string(), id.to_string());
+        if let Some(v) = self.stream.get(&key) {
+            return Ok(Some(v.clone()));
+        }
+        let sub = id_sub(resource_type, id);
+        if let Some(v) = self.read.get(&sub) {
+            return Ok(v.clone());
+        }
+        // A type's folder is listed once, so a source that never serves a
+        // Practitioner costs one call and not one per reference.
+        if !self.listed.contains_key(resource_type) {
+            let dir = format!("{}/{resource_type}", self.source_dir);
+            let names = self
+                .folder
+                .store
+                .list_here(&dir)?
+                .into_iter()
+                .filter_map(|e| e.rel.rsplit('/').next().map(str::to_string))
+                .collect();
+            self.listed.insert(resource_type.into(), names);
+        }
+        let v = if self.listed[resource_type].contains(&format!("{}.json", id_file(id))) {
+            self.folder
+                .store
+                .read_text(&format!("{}/{sub}.json", self.source_dir))?
+                .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        } else {
+            None
+        };
+        self.read.insert(sub, v.clone());
+        Ok(v)
+    }
+}
+
+/// The providers and prescriptions in the stream, by type and id.
+fn stream_providers(resources: &[RawResource]) -> HashMap<(String, String), Value> {
+    resources
+        .iter()
+        .filter(|r| {
+            crate::providers::TYPES.contains(&r.resource_type.as_str())
+                || r.resource_type == "MedicationRequest"
+        })
+        .filter_map(|r| Some(((r.resource_type.clone(), r.id.clone()), r.value().ok()?)))
+        .collect()
+}
+
 /// Each MedicationRequest's prescriber in the stream, by id. A fill names
 /// its prescription as `MedicationRequest/<id>` (medical-common DESIGN
 /// §2.1); one filed by an earlier import is read from its own raw file.
@@ -1774,6 +1847,7 @@ fn same_content(a: &Record, b: &Record) -> bool {
         && a.status == b.status
         && a.code == b.code
         && a.date == b.date
+        && a.providers == b.providers
 }
 
 /// Write `rec` over the record `existing`, whose provenance at `at` is this
@@ -1805,6 +1879,7 @@ fn rewrite(
         return Merge::Unchanged;
     }
     existing.fields = rec.fields;
+    existing.providers = rec.providers;
     existing.display = rec.display;
     existing.status = rec.status;
     existing.code = rec.code;

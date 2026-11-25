@@ -292,7 +292,7 @@ medrec meds --active
 medrec note add Robin "Ask about the recheck" --tag question --about <record id>
 
 medrec verify                                   # every indexed file against the index
-medrec reindex                                  # claims shaped again from their raw files, and bills and receipts read again, after an upgrade
+medrec reindex                                  # claims shaped again and providers read again from their raw files, and bills and receipts read again, after an upgrade
 medrec backup --to "/Volumes/Backup/Medical Records"
 ```
 

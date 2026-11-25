@@ -2484,6 +2484,119 @@ fn with_replaced_line() -> String {
         .collect()
 }
 
+/// What each record says of the providers it prints, by its kind and field.
+fn providers_of(index: &Value) -> Vec<String> {
+    let mut out: Vec<String> = index["records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|r| {
+            let kind = r["kind"].as_str().unwrap().to_string();
+            let date = r["date"].as_str().unwrap_or("").to_string();
+            r["providers"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+                .into_iter()
+                .map(move |p| {
+                    format!(
+                        "{kind} {date} {} {} {}",
+                        p["field"].as_str().unwrap(),
+                        p["npi"].as_str().unwrap_or("-"),
+                        p["state"].as_str().unwrap_or("-")
+                    )
+                })
+        })
+        .collect();
+    out.sort();
+    out
+}
+
+/// A record keeps the NPI and the state its source gives for each provider
+/// it prints, through a later import that no longer serves the practitioner,
+/// and `reindex` gives them to records that lack them.
+#[test]
+fn a_record_keeps_who_its_source_says_a_provider_is() {
+    let base = Env::new("provider-refs");
+    setup(&base);
+    let e = provider_env(&base, medrec::testdata::PROVIDERS_STREAM);
+    let import = |e: &Env| {
+        e.ok(&[
+            "import",
+            "--from",
+            "fakeprov",
+            "--from-profile",
+            "adult1",
+            "--patient",
+            "pat-0001",
+            "--person",
+            "Robin",
+        ])
+    };
+    import(&e);
+    let path = e.records().join("Robin Testperson/index.json");
+    let read =
+        || -> Value { serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap() };
+    let want = [
+        "claim 2026-02-10 facility - TX",
+        "claim 2026-02-10 provider 0000000022 -",
+        "encounter 2026-02-10 location - TX",
+        "encounter 2026-02-10 practitioner 0000000006 FL",
+        "encounter 2026-02-10 service_provider 0000000022 GA",
+        "encounter 2026-02-17 location - GA",
+        "immunization 2026-02-10 performer 0000000048 -",
+        "medication 2026-02-10 prescriber 0000000014 TX",
+        "medication 2026-02-11 pharmacy 0000000030 -",
+        "medication 2026-02-11 prescriber 0000000014 TX",
+        "procedure 2026-02-10 performer 0000000006 FL",
+    ];
+    assert_eq!(providers_of(&read()), want);
+
+    // Served again unchanged, nothing is written; and a later stream that
+    // serves the claim and the visits but not the practitioners reads them
+    // from their own raw files.
+    let again = import(&e);
+    assert_eq!(again["records_updated"], 0, "{again}");
+    let dropped = [
+        "Practitioner",
+        "PractitionerRole",
+        "Organization",
+        "Location",
+        "MedicationRequest",
+    ];
+    let later: String = medrec::testdata::PROVIDERS_STREAM
+        .lines()
+        .filter_map(|l| {
+            let mut v: Value = serde_json::from_str(l).unwrap();
+            if dropped.contains(&v["resourceType"].as_str().unwrap_or("")) {
+                return None;
+            }
+            if let Some(counts) = v.get_mut("counts").and_then(Value::as_object_mut) {
+                counts.retain(|k, _| !dropped.contains(&k.as_str()));
+            }
+            if v["id"] == "enc-a" {
+                v["meta"]["versionId"] = "2".into();
+            }
+            Some(format!("{}\n", serde_json::to_string(&v).unwrap()))
+        })
+        .collect();
+    let e2 = provider_env(&base, &later);
+    import(&e2);
+    assert_eq!(providers_of(&read()), want);
+
+    // An index without them, as an earlier medrec wrote it.
+    let mut old = read();
+    for r in old["records"].as_array_mut().unwrap() {
+        r.as_object_mut().unwrap().remove("providers");
+    }
+    std::fs::write(&path, serde_json::to_string(&old).unwrap()).unwrap();
+    assert!(providers_of(&read()).is_empty());
+    let r = e2.ok(&["reindex"]);
+    assert_eq!(r["providers"], 7, "{r}");
+    assert_eq!(providers_of(&read()), want);
+    assert_eq!(e2.ok(&["reindex"])["providers"], 0);
+}
+
 #[test]
 fn a_claim_line_its_totals_leave_out_is_marked_and_kept_through_reindex() {
     let base = Env::new("claim-lines");
