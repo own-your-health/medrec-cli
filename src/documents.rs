@@ -153,6 +153,7 @@ pub fn apply(folder: &Folder, plan: Plan) -> Result<Merged, CliError> {
             kept.renderings.push(r);
         }
     }
+    // Its own provenance is of the kept paper's Binary (`plan`).
     for p in dup.also_from {
         if !kept.provenances().any(|k| k.raw_path == p.raw_path) {
             kept.also_from.push(p);

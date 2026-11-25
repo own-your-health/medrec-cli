@@ -355,7 +355,9 @@ entered in error by its word's `status` or `verification`, whose code is
 `docStatus`, of what describes it: the DocumentReference, DiagnosticReport or
 Media that names its Binary or that it was filed by. Where several of one
 source's describe a paper there, it says so when each does, the ones earlier
-imports filed included. A paper's word is `{raw_path, status, verification,
+imports filed included. A resource with no id is known by the Binary it names
+alone and takes the place of no other, so a later one like it ends nothing an
+earlier one says. A paper's word is `{raw_path, status, verification,
 read}`, with `docStatus` as `verification` and `read` when it was last read. It
 has them where one says or said it is entered in error, or `also_from` is
 there.
@@ -365,7 +367,9 @@ there.
   only provenance, or of the one that wrote its fields, where none is kept). A
   source whose word is not kept does not say so, and a file of the household's
   has none, so it stands.
-- One that only some say so of stands, and differs. Its values are never those
+- One that only some say so of stands, and differs: its `words` say so, and no
+  other field does (a condition's, an allergy's or a medicine's `differs` is in
+  `standing.json`, below). Its values are never those
   of a source that says so: when the resource `fields_from` names does, medrec
   reads `date`, `code`, `display`, `status`, `fields` and `providers` again from
   the raw file of another that does not and that reads, and names it; a version
@@ -381,12 +385,19 @@ there.
   same bytes is in no `also_from`. The next import from that source adds it,
   and files nothing again. So does `medrec reindex`, and the import that first
   reads a source saying a paper is entered in error, for every source at once:
-  a raw Binary that no paper is of has the bytes. One whose raw Binary is gone
-  cannot be told, and until its next import the other's word alone ends the
-  paper.
+  a raw Binary that no paper is of has the bytes. Its times are those of its
+  source's latest import, and not known (no `fetched_at`, no `read`) where that
+  is none or imports of several patients went into one folder. One whose raw
+  Binary is gone cannot be told, and until its next import the other's word
+  alone ends the paper. Nor can a file of the household's taken in before
+  0.9.9: taking it in again notes it.
+- A raw file that does not read tells nothing, and an import and `reindex` count
+  it (`papers_unread`). While one of a resource that describes papers does not,
+  no paper of its source's is newly entered in error.
 - A medrec before 0.9.9 drops `also_from`, `words` and `errors` from an index
-  it saves. `medrec reindex` gives back the first two, and `errors` for what a
-  source says now; a time that ended is lost.
+  it saves. `medrec reindex` gives back what raw files tell: the sources in
+  `also_from`, `words`, and `errors` for what a source says now. A time that
+  ended is lost, and a file of the household's is until it is taken in again.
 
 **Providers.** A record's `providers` (0.9.6 and later) is what its sources
 say of the people and places its fields print, beyond their names: a list
@@ -441,8 +452,9 @@ gained fields), `providers_updated` (0.9.6 and later: records whose
 `providers` changed), `statuses_updated` (0.9.9 and later: records whose
 `words` or `errors` changed, or whose values another source's took the place
 of, and conditions, allergies and medicines whose `status` or `fields`
-changed) and `papers_updated` (0.9.9 and later: papers whose `also_from`,
-`words` or `errors` changed).
+changed), `papers_updated` (0.9.9 and later: papers whose `also_from`,
+`words` or `errors` changed) and `papers_unread` (0.9.9 and later: raw files of
+papers that do not read).
 
 A `claim` (an ExplanationOfBenefit) is shaped for costs (0.5.0 and later).
 An earlier import's claims take this shape when their source serves them
@@ -561,16 +573,16 @@ A claim's links are guesses by date and name, recomputed on every write of
 the person's index, so a visit imported after its claim is linked then:
 
 - `visit`: the record id of the one `encounter` dated on one of the
-  claim's dates of service, leaving out encounters whose `status` is
-  `planned`, `cancelled` or `entered-in-error` (each line's `serviced`, else the claim's date
-  for a line with none, or for a claim with no lines). Of several, it is
+  claim's dates of service (each line's `serviced`, else the claim's date
+  for a line with none, or for a claim with no lines), leaving out encounters
+  whose `status` is `planned` or `cancelled`, or that are entered in error (as
+  above: every source that has it says so). Of several, it is
   the one that shares a word of four or more letters between its
   `service_provider`, `location` or `practitioner` and the claim's
   `provider` or `facility`. When that leaves no single
   encounter, there is no `visit`.
 - `results`: the ids of the `result` and `report` records dated on a `lab`
-  line's date of service, leaving out those `cancelled` or
-  `entered-in-error`.
+  line's date of service, leaving out those `cancelled` or entered in error.
 - a line's `records`: the claim's `visit` for a `visit` line, its date's
   results and reports for a `lab` line.
 

@@ -82,6 +82,22 @@ impl Env {
         r["records_updated"].as_u64().unwrap()
     }
 
+    /// A raw file of the source `org`.
+    fn raw(&self, org: &str, sub: &str) -> PathBuf {
+        let records = self.folder().join("Records");
+        let mut dirs = std::fs::read_dir(records).unwrap();
+        let of = format!("-{org}");
+        let dir = dirs.find_map(|d| {
+            let d = d.unwrap().path();
+            d.to_string_lossy().ends_with(&of).then_some(d)
+        });
+        dir.unwrap().join(sub)
+    }
+
+    fn unread(&self) -> u64 {
+        self.ok(&["reindex"])["papers_unread"].as_u64().unwrap()
+    }
+
     /// What `reindex` changes of what sources say: records, papers.
     fn reindex(&self) -> (u64, u64) {
         let r = self.ok(&["reindex"]);
@@ -540,6 +556,10 @@ fn a_papers_lost_source_is_found_again() {
             assert_eq!(p.also_from[0].raw_path, kept[0].raw_path);
             assert_eq!(p.also_from[0].source, kept[0].source);
             assert_eq!(p.also_from[0].source_resource, kept[0].source_resource);
+            assert_eq!(p.also_from[0].fetched_at, kept[0].fetched_at);
+            assert_eq!(p.also_from[0].filed_at, kept[0].filed_at);
+            let read = |p: &Document| p.words[1].read.clone();
+            assert!(read(&p).is_some() && read(&p) == p.also_from[0].fetched_at);
             assert_eq!(e.reindex(), (0, 0));
         }
         e.import(&saying("one", "doc-0001", "entered-in-error", 2));
@@ -548,6 +568,120 @@ fn a_papers_lost_source_is_found_again() {
         assert_eq!(p.also_from.len(), 1);
         assert_eq!(e.reindex(), (0, 0));
     }
+}
+
+/// Where one folder holds the imports of several patients, whose a raw file
+/// is, and so when it was read, is not known.
+#[test]
+fn a_source_found_again_among_several_patients_has_no_time() {
+    let e = Env::new("patients");
+    e.import(&stream("one", |_, _| true));
+    e.import(&stream("two", |_, _| true));
+    e.edit(|v| {
+        for d in v["documents"].as_array_mut().unwrap() {
+            d.as_object_mut().unwrap().remove("also_from");
+            d.as_object_mut().unwrap().remove("words");
+        }
+        let mut other = v["imports"][1].clone();
+        other["id"] = "i_otheraaaaaaaaaaaaaaa".into();
+        other["patient_id"] = "pat-0002".into();
+        v["imports"].as_array_mut().unwrap().push(other);
+    });
+    assert_eq!(e.reindex(), (0, 2));
+    let p = e.paper();
+    assert_eq!(p.also_from[0].fetched_at, None);
+    assert_eq!(p.words[1].read, None);
+}
+
+/// While a resource that may describe a paper does not read, its source says
+/// of none that it is entered in error.
+#[test]
+fn a_raw_file_that_does_not_read_ends_no_paper() {
+    for by_import in [false, true] {
+        let e = Env::new(&format!("unread-{by_import}"));
+        e.import(&stream("one", |_, _| true));
+        let other = e.raw("one", "DocumentReference/doc-0002.json");
+        let was = std::fs::read(&other).unwrap();
+        std::fs::write(&other, "{").unwrap();
+        let only = |status: &str, version: u32| {
+            stream("one", |id, v| {
+                if id == "doc-0001" {
+                    say(v, status, version);
+                }
+                v["resourceType"] == "Patient" || id == "doc-0001"
+            })
+        };
+        if by_import {
+            e.import(&only("entered-in-error", 2));
+        } else {
+            let doc = e.raw("one", "DocumentReference/doc-0001.json");
+            let mut v: Value = serde_json::from_slice(&std::fs::read(&doc).unwrap()).unwrap();
+            say(&mut v, "entered-in-error", 2);
+            std::fs::write(&doc, v.to_string()).unwrap();
+        }
+        assert_eq!(e.unread(), 1);
+        let p = e.paper();
+        assert!(!document_in_error(&p) && p.errors.is_empty());
+        std::fs::write(&other, was).unwrap();
+        assert_eq!(e.unread(), 0);
+        assert!(document_in_error(&e.paper()));
+    }
+}
+
+/// One that does not read is counted, and those beside it are found.
+#[test]
+fn a_binary_that_does_not_read_is_counted() {
+    let e = Env::new("binary");
+    e.import(&stream("one", |_, _| true));
+    e.import(&stream("two", |_, _| true));
+    e.edit(|v| {
+        for d in v["documents"].as_array_mut().unwrap() {
+            d.as_object_mut().unwrap().remove("also_from");
+            d.as_object_mut().unwrap().remove("words");
+        }
+    });
+    let path = e.raw("two", "Binary/bin-0002.json");
+    let mut v: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    v["data"] = "not base64!".into();
+    std::fs::write(&path, v.to_string()).unwrap();
+    let r = e.ok(&["reindex"]);
+    assert_eq!(r["papers_unread"], 1);
+    assert_eq!(r["papers_updated"], 1);
+    assert_eq!(e.paper().also_from.len(), 1);
+}
+
+/// A resource with no id takes the place of none: a paper one describes
+/// stands, and an import adds nothing to its history.
+#[test]
+fn a_reference_with_no_id_ends_nothing_an_earlier_one_says() {
+    let e = Env::new("noid");
+    let with = |status: &str, version: u32| {
+        stream("one", |id, v| {
+            if id == "doc-0001" {
+                v.as_object_mut().unwrap().remove("id");
+                say(v, status, version);
+            }
+            true
+        })
+    };
+    e.import(&with("current", 1));
+    for _ in 0..2 {
+        e.import(&with("entered-in-error", 2));
+        let p = e.paper();
+        assert!(!document_in_error(&p) && p.errors.is_empty());
+        assert_eq!(e.reindex(), (0, 0));
+        assert!(e.paper().errors.is_empty());
+    }
+    // One whose only reference says so is in error, and no other paper is.
+    let e = Env::new("noid-error");
+    e.import(&with("entered-in-error", 1));
+    let errors = |e: &Env| -> Vec<bool> {
+        let papers = e.index().documents;
+        papers.iter().map(document_in_error).collect()
+    };
+    assert!(document_in_error(&e.paper()));
+    assert_eq!(errors(&e).iter().filter(|x| **x).count(), 1);
+    assert_eq!(e.reindex(), (0, 0));
 }
 
 /// `reindex` reads the raw files of what several sources state, and those of

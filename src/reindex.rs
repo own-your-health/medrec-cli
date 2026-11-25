@@ -43,6 +43,8 @@ pub struct Reindexed {
     pub statuses_updated: usize,
     /// Papers whose sources, or what one says of them, changed.
     pub papers_updated: usize,
+    /// Raw files of papers that do not read.
+    pub papers_unread: usize,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -56,6 +58,7 @@ pub struct PersonReindexed {
     pub providers_updated: usize,
     pub statuses_updated: usize,
     pub papers_updated: usize,
+    pub papers_unread: usize,
 }
 
 /// The claim's own content, links left out.
@@ -138,7 +141,9 @@ pub fn claims(
         }
         // After the fields they are of.
         row.providers_updated = providers(&mut idx, tmp.path())?;
-        row.papers_updated = import::papers_again(folder, h, p, &mut idx, tmp.path())?;
+        let papers = import::papers_again(folder, h, p, &mut idx, tmp.path())?;
+        row.papers_updated = papers.changed;
+        row.papers_unread = papers.unread;
         row.statements = crate::bill::backfill(&mut idx, &folder.text(p)?);
         let changed = [
             row.reshaped,
@@ -154,6 +159,7 @@ pub fn claims(
         out.providers_updated += row.providers_updated;
         out.statuses_updated += row.statuses_updated;
         out.papers_updated += row.papers_updated;
+        out.papers_unread += row.papers_unread;
         out.claims += row.claims;
         out.reshaped += row.reshaped;
         out.unchanged += row.unchanged;

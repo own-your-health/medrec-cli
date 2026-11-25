@@ -305,6 +305,8 @@ pub struct Report {
     /// Bills filed that are the same statement as a bill filed before (a
     /// scan the user filed, and the portal's PDF): each points at it.
     pub documents_same_statement: usize,
+    /// Raw files of papers that do not read ([`Papers::unread`]).
+    pub papers_unread: usize,
     pub stream_bytes: u64,
 }
 
@@ -843,10 +845,11 @@ fn file_streamed(
         &eob_docs,
         &written.paths,
     )?;
-    if paper_words(folder, &mut index, &owners, &base_prov, &source_dir)? {
+    let mut papers = paper_words(folder, &mut index, &owners, &base_prov, &source_dir)?;
+    if papers.changed > 0 {
         // Its other sources' words, and those an earlier medrec did not keep.
         let tmp = pk_cli_drive::private_temp_dir("medrec-papers")?;
-        papers_again(folder, &household, &person, &mut index, tmp.path())?;
+        papers = papers_again(folder, &household, &person, &mut index, tmp.path())?;
     }
 
     let counts = trailer.counts.clone();
@@ -906,6 +909,7 @@ fn file_streamed(
         documents_duplicate: filed.duplicate,
         documents_unchanged: filed.unchanged,
         documents_same_statement: filed.same_statement,
+        papers_unread: papers.unread,
         stream_bytes,
     })
 }
@@ -2690,7 +2694,10 @@ impl<'a> Describes<'a> {
             by_resource: HashMap::new(),
         };
         for o in owners {
-            out.by_resource.insert((o.kind.as_str(), &o.id), o);
+            // One with no id is known by the Binary it names only.
+            if !o.id.is_empty() {
+                out.by_resource.insert((o.kind.as_str(), &o.id), o);
+            }
             for id in o.urls.iter().filter_map(|u| reference_id(u, "Binary")) {
                 let file = binary_file(source_dir, id);
                 out.by_file.entry(file).or_default().push(o);
@@ -2727,22 +2734,32 @@ fn paper_said(d: &mut Document, word: &Word, at: &str) -> bool {
     InError::note(&mut d.errors, word, at) || said
 }
 
+/// What was read of papers.
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct Papers {
+    pub changed: usize,
+    /// Raw files that do not read: Binaries, and resources that describe
+    /// papers. While one of these does not, its source newly says of no paper
+    /// that it is entered in error.
+    pub unread: usize,
+}
+
 /// What the stream says of the papers of its source, those whose Binary it
 /// does not carry included. A source says a paper is entered in error, by one
 /// of its Binaries, when everything it has that describes it there does: what
-/// earlier imports filed counts where the stream does not carry it. Whether
-/// it says so of one it did not.
+/// earlier imports filed counts where the stream does not carry it. Counts
+/// those it says so of and did not.
 fn paper_words(
     folder: &Folder,
     index: &mut PersonIndex,
     owners: &[Owner],
     base: &Provenance,
     source_dir: &str,
-) -> Result<bool, CliError> {
+) -> Result<Papers, CliError> {
     let read = first_read(base);
     let carried = Describes::new(owners, source_dir);
-    let mut earlier: Option<Vec<Owner>> = None;
-    let mut newly = false;
+    let mut earlier: Option<FiledOwners> = None;
+    let mut out = Papers::default();
     for d in &mut index.documents {
         let ours: Vec<Provenance> = papers_of(d, source_dir).cloned().collect();
         for p in ours {
@@ -2750,21 +2767,33 @@ fn paper_words(
                 continue;
             };
             if first.in_error() {
-                if earlier.is_none() {
-                    earlier = Some(filed_owners(folder, source_dir, owners)?);
-                }
-                let filed = earlier.as_deref().unwrap_or_default();
-                let also = Describes::new(filed, source_dir).first(&p);
+                let filed = match &mut earlier {
+                    Some(filed) => filed,
+                    none => none.insert(filed_owners(folder, source_dir, owners)?),
+                };
+                out.unread = filed.unread;
+                let also = Describes::new(&filed.owners, source_dir).first(&p);
                 first = first_owner([first].into_iter().chain(also)).unwrap_or(first);
             }
             let path = p.raw_path.as_deref().unwrap_or_default();
             let word = first.word(path, Some(read.clone()));
-            let had = d.words.iter().find(|w| w.raw_path == path);
-            newly |= word.in_error() && !had.is_some_and(Word::in_error);
+            if newly_in_error(d, &word) {
+                if out.unread > 0 {
+                    continue;
+                }
+                out.changed += 1;
+            }
             paper_said(d, &word, &read);
         }
     }
-    Ok(newly)
+    Ok(out)
+}
+
+/// Whether a word says a paper is entered in error and the one it takes the
+/// place of does not.
+fn newly_in_error(d: &Document, word: &Word) -> bool {
+    let had = d.words.iter().find(|w| w.raw_path == word.raw_path);
+    word.in_error() && !had.is_some_and(Word::in_error)
 }
 
 /// The provenances of a paper that a source's raw Binaries are of.
@@ -2776,44 +2805,63 @@ fn papers_of<'a>(d: &'a Document, source_dir: &'a str) -> impl Iterator<Item = &
     })
 }
 
+/// What a source's raw files have that describes papers.
+#[derive(Default)]
+struct FiledOwners {
+    owners: Vec<Owner>,
+    /// Those that do not read.
+    unread: usize,
+}
+
 /// What earlier imports of a source filed that describes papers, but for what
-/// the stream carries.
+/// the stream carries. A resource with no id is never the same as another.
 fn filed_owners(
     folder: &Folder,
     source_dir: &str,
     carried: &[Owner],
-) -> Result<Vec<Owner>, CliError> {
+) -> Result<FiledOwners, CliError> {
     let tmp = pk_cli_drive::private_temp_dir("medrec-papers")?;
     let mut out = owners_in(folder, source_dir, tmp.path())?;
     let here: HashSet<(&str, &str)> = carried
         .iter()
+        .filter(|o| !o.id.is_empty())
         .map(|o| (o.kind.as_str(), o.id.as_str()))
         .collect();
-    out.retain(|o| !here.contains(&(o.kind.as_str(), o.id.as_str())));
+    out.owners
+        .retain(|o| !here.contains(&(o.kind.as_str(), o.id.as_str())));
     Ok(out)
 }
 
 /// The current versions of a source's resources that describe a paper, by
 /// their raw files, which `tmp` takes a copy of.
-fn owners_in(folder: &Folder, source_dir: &str, tmp: &Path) -> Result<Vec<Owner>, CliError> {
-    let mut out = Vec::new();
+fn owners_in(folder: &Folder, source_dir: &str, tmp: &Path) -> Result<FiledOwners, CliError> {
+    let copied = |e| CliError::Other(format!("reading a copy of the raw files: {e}"));
+    let mut out = FiledOwners::default();
     for kind in OwnerKind::ALL {
         let dir = format!("{source_dir}/{}", kind.as_str());
         let to = tmp.join(&dir);
         if !to.exists() && folder.store.exists(&dir)? {
             folder.store.fetch_tree(&dir, &to)?;
         }
-        let files = std::fs::read_dir(&to).into_iter().flatten();
-        let mut files: Vec<PathBuf> = files.filter_map(|f| Some(f.ok()?.path())).collect();
+        if !to.exists() {
+            continue;
+        }
+        let mut files = Vec::new();
+        for f in std::fs::read_dir(&to).map_err(copied)? {
+            files.push(f.map_err(copied)?.path());
+        }
         files.retain(|f| {
             f.file_name()
                 .is_some_and(|n| is_current(&n.to_string_lossy()))
         });
         files.sort();
-        out.extend(files.into_iter().filter_map(|f| {
-            let v: Value = serde_json::from_str(&std::fs::read_to_string(f).ok()?).ok()?;
-            owner(kind.as_str(), &v)
-        }));
+        for f in files {
+            let v: Option<Value> = serde_json::from_slice(&std::fs::read(f).map_err(copied)?).ok();
+            match v {
+                Some(v) => out.owners.extend(owner(kind.as_str(), &v)),
+                None => out.unread += 1,
+            }
+        }
     }
     Ok(out)
 }
@@ -2830,22 +2878,27 @@ fn is_current(name: &str) -> bool {
 
 /// What the raw files say of every paper of a person; and the Binaries with a
 /// paper's bytes that medrec before 0.9.9 did not keep, of its own source or
-/// another: the raw ones no paper is of. Papers changed, counted. `tmp` takes
-/// the copies.
+/// another: the raw ones no paper is of. `tmp` takes the copies.
 pub(crate) fn papers_again(
     folder: &Folder,
     household: &Household,
     person: &Person,
     index: &mut PersonIndex,
     tmp: &Path,
-) -> Result<usize, CliError> {
+) -> Result<Papers, CliError> {
     let now = now_rfc3339();
     let mut changed: BTreeSet<String> = BTreeSet::new();
-    let mut sources: Vec<(String, Vec<Owner>)> = Vec::new();
-    for (dir, of) in papers_sources(household, person, index) {
-        let owners = owners_in(folder, &dir, tmp)?;
-        let describes = Describes::new(&owners, &dir);
-        for (sha, mut p) in unknown_binaries(folder, index, &dir, &of, &now)? {
+    let mut unread = 0;
+    let mut sources: Vec<(String, FiledOwners)> = Vec::new();
+    for (dir, mut of) in papers_sources(household, person, index) {
+        if of.filed_at.is_empty() {
+            of.filed_at = now.clone();
+        }
+        let filed = owners_in(folder, &dir, tmp)?;
+        let describes = Describes::new(&filed.owners, &dir);
+        let binaries = unknown_binaries(folder, index, &dir, &of)?;
+        unread += filed.unread + binaries.unread;
+        for (sha, mut p) in binaries.found {
             let Some(d) = index.documents.iter_mut().find(|d| has_bytes(d, &sha)) else {
                 continue;
             };
@@ -2855,10 +2908,10 @@ pub(crate) fn papers_again(
             d.also_from.push(p);
             changed.insert(d.id.clone());
         }
-        sources.push((dir, owners));
+        sources.push((dir, filed));
     }
-    for (dir, owners) in sources {
-        let describes = Describes::new(&owners, &dir);
+    for (dir, filed) in sources {
+        let describes = Describes::new(&filed.owners, &dir);
         for d in &mut index.documents {
             let ours: Vec<Provenance> = papers_of(d, &dir).cloned().collect();
             for p in ours {
@@ -2867,17 +2920,30 @@ pub(crate) fn papers_again(
                 };
                 let path = p.raw_path.as_deref().unwrap_or_default();
                 let had = d.words.iter().find(|w| w.raw_path == path);
-                let word = o.word(path, had.and_then(|w| w.read.clone()));
-                if paper_said(d, &word, &now) {
+                // One found again was read when its source last was.
+                let read = match had {
+                    Some(w) => w.read.clone(),
+                    None => p.fetched_at.clone(),
+                };
+                let at = read.as_ref().filter(|_| had.is_none()).unwrap_or(&now);
+                let word = o.word(path, read.clone());
+                if filed.unread > 0 && newly_in_error(d, &word) {
+                    continue;
+                }
+                if paper_said(d, &word, at) {
                     changed.insert(d.id.clone());
                 }
             }
         }
     }
-    Ok(changed.len())
+    Ok(Papers {
+        changed: changed.len(),
+        unread,
+    })
 }
 
-/// Each source folder of a person, with the provenance of what it files.
+/// Each source folder of a person, with the provenance of what it filed: the
+/// times are those of its latest import, where all of them are one patient's.
 fn papers_sources(
     household: &Household,
     person: &Person,
@@ -2889,7 +2955,10 @@ fn papers_sources(
             continue;
         };
         let dir = folder::records_dir(person, &source_slug(cli, org));
-        let mut runs = index.imports.iter().rev().filter(|r| r.source_dir == dir);
+        let runs = index.imports.iter().filter(|r| r.source_dir == dir);
+        let patients: BTreeSet<&str> = runs.clone().map(|r| r.patient_id.as_str()).collect();
+        let latest = runs.last();
+        let read = latest.filter(|_| patients.len() == 1);
         let method = match s.kind.as_str() {
             "fhir" => "fhir-api",
             m => m,
@@ -2898,14 +2967,14 @@ fn papers_sources(
             source: ProvenanceSource {
                 kind: s.kind.clone(),
                 cli: Some(cli.clone()),
-                cli_version: runs.next().map(|r| r.cli_version.clone()),
+                cli_version: latest.map(|r| r.cli_version.clone()),
                 organization_id: Some(org.clone()),
                 fhir_base: s.fhir_base.clone(),
             },
             method: method.into(),
             source_resource: None,
-            fetched_at: None,
-            filed_at: String::new(),
+            fetched_at: read.map(|r| r.pulled_at.clone()),
+            filed_at: read.map(|r| r.imported_at.clone()).unwrap_or_default(),
             raw_path: None,
             classified_by: None,
             derived_from: None,
@@ -2915,14 +2984,21 @@ fn papers_sources(
     out
 }
 
-/// The raw Binaries of a source no paper is of, by their bytes' digest.
+/// The raw Binaries of a source no paper is of.
+#[derive(Default)]
+struct Unknown {
+    /// By their bytes' digest.
+    found: Vec<(String, Provenance)>,
+    /// Those that do not read.
+    unread: usize,
+}
+
 fn unknown_binaries(
     folder: &Folder,
     index: &PersonIndex,
     dir: &str,
     of: &Provenance,
-    now: &str,
-) -> Result<Vec<(String, Provenance)>, CliError> {
+) -> Result<Unknown, CliError> {
     let known: HashSet<&str> = index
         .documents
         .iter()
@@ -2930,21 +3006,25 @@ fn unknown_binaries(
         .filter_map(|p| p.raw_path.as_deref())
         .collect();
     let binaries = format!("{dir}/Binary");
+    let mut out = Unknown::default();
     if !folder.store.exists(&binaries)? {
-        return Ok(Vec::new());
+        return Ok(out);
     }
-    let mut out = Vec::new();
     for file in folder.store.list(&binaries)? {
         let rel = format!("{binaries}/{}", file.rel);
         let name = rel.rsplit('/').next().unwrap_or_default();
         if known.contains(rel.as_str()) || !is_current(name) {
             continue;
         }
-        let text = folder.store.read_text(&rel)?;
-        let Some((id, sha)) = text.as_deref().and_then(binary_bytes) else {
+        let Some(text) = folder.store.read_text(&rel)? else {
             continue;
         };
-        out.push((
+        let Some(read) = binary_bytes(&text) else {
+            out.unread += 1;
+            continue;
+        };
+        let Some((id, sha)) = read else { continue };
+        out.found.push((
             sha,
             Provenance {
                 source_resource: Some(SourceResource {
@@ -2953,7 +3033,6 @@ fn unknown_binaries(
                     version_id: None,
                     last_updated: None,
                 }),
-                filed_at: now.into(),
                 raw_path: Some(rel),
                 ..of.clone()
             },
@@ -2962,19 +3041,19 @@ fn unknown_binaries(
     Ok(out)
 }
 
-/// A raw Binary's id, and the digest of the bytes it holds.
-fn binary_bytes(text: &str) -> Option<(String, String)> {
-    let v: Value = serde_json::from_str(text).ok()?;
-    let data: Vec<u8> = v.get("data")?.as_str()?.bytes().collect();
-    let data: Vec<u8> = data
-        .into_iter()
-        .filter(|b| !b.is_ascii_whitespace())
-        .collect();
+/// A raw Binary's id, and the digest of the bytes it holds, if any; none when
+/// it does not read.
+fn binary_bytes(text: &str) -> Option<Option<(String, String)>> {
+    let mut v: Value = serde_json::from_str(text).ok()?;
+    let Some(Value::String(mut data)) = v.get_mut("data").map(Value::take) else {
+        return Some(None);
+    };
+    data.retain(|c| !c.is_ascii_whitespace());
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(data)
         .ok()?;
     let id = v.get("id").and_then(Value::as_str).unwrap_or_default();
-    (!bytes.is_empty()).then(|| (id.to_string(), hash::sha256_hex(&bytes)))
+    Some((!bytes.is_empty()).then(|| (id.to_string(), hash::sha256_hex(&bytes))))
 }
 
 /// Whether a paper has these bytes, as filed or as it was served since.
