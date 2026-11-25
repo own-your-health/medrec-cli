@@ -440,8 +440,9 @@ gone is exit 1.
 The next pass looks again, without a dialog, so it goes on once the key is
 allowed. A pass that cannot read the key cannot reach the folder, so it writes
 nothing there: `refresher.last_pass_at` stops moving, and the folder's readers
-see the refreshing machine as offline. A quiet read is macOS's: elsewhere a
-scheduled pass of a folder on Drive is exit 1.
+see the refreshing machine as offline. Where the system has no such quiet read
+(Linux), a scheduled pass of a folder on Drive is exit 1, since any read could
+ask someone; `medrec refresh` at a terminal works there.
 
 `refresh sign-in <id>` runs the provider's own sign-in command, built from
 the `login_hint` its `info` gives (`uhc auth login --browser --profile

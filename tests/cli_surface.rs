@@ -190,8 +190,13 @@ fn a_binary_says_what_it_was_built_from() {
         long.starts_with(&format!("medrec {version} (")) && long.contains(", built "),
         "{long}"
     );
-    if let Some(commit) = build["commit"].as_str() {
-        assert!(long.contains(&commit[..7]), "{long}: {commit}");
+    let git = std::process::Command::new("git")
+        .args(["-C", env!("CARGO_MANIFEST_DIR"), "rev-parse", "HEAD"])
+        .output();
+    if git.is_ok_and(|o| o.status.success()) {
+        let commit = build["commit"].as_str().unwrap_or_default();
+        assert_eq!(commit.len(), 40, "{v}");
+        assert!(long.contains(&commit[..12]), "{long}: {commit}");
     }
 }
 

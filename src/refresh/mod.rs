@@ -25,6 +25,7 @@ pub mod time;
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use pk_cli_auth::vault::QuietLoad;
 use pk_cli_config::profile::ProfileName;
 use pk_cli_core::CliError;
 use serde::Serialize;
@@ -700,8 +701,16 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
         // A key another process replaces while the pass runs is read again
         // within a bound.
         crate::store::bound_key_reads(signin::scheduled_wait());
-        if let Some(failure) = crate::store::shared_vault()?.load_key_quietly()?.failure() {
-            return Err(failure);
+        let key = crate::store::shared_vault()?.load_key_quietly()?;
+        if let Some(failure) = key.failure() {
+            return Err(match key {
+                QuietLoad::NeedsPerson => failure
+                    .with_remedy("run `medrec auth key` at the screen and choose Always Allow"),
+                QuietLoad::Unsupported => failure.with_remedy(
+                    "run `medrec refresh` at a terminal, where someone can answer the keychain",
+                ),
+                _ => failure,
+            });
         }
     }
     let store = Store::open(&location, Reads::Fresh, cfg.store_budget())?;

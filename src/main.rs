@@ -2491,7 +2491,12 @@ fn refresh_cmd(cli: &Cli, a: &RefreshArgs, store: &ConfigStore) -> Result<(), Cl
         } else {
             Mode::Manual
         };
-        let r = refresh::pass(&cfg, mode, pick.as_ref())?;
+        let r = refresh::pass(&cfg, mode, pick.as_ref()).inspect_err(|_| {
+            // The LaunchAgent's log has the time of every line but an error's.
+            if mode == Mode::Scheduled && !json {
+                println!("{} failed", medrec::model::now_rfc3339());
+            }
+        })?;
         let failed = r.attempts.iter().any(|x| x.outcome == "failed");
         let needs = r.attempts.iter().any(|x| x.outcome == "needs_person");
         if mode == Mode::Scheduled && r.status == "idle" && !json {

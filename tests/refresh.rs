@@ -1413,9 +1413,22 @@ fn a_scheduled_pass_raises_no_keychain_dialog() {
         let x = error(&out);
         assert_eq!(out.status.code(), Some(3), "{x}");
         assert_eq!(x["reason"], "credential_unreadable", "{x}");
-        assert!(x["remedy"].as_str().unwrap().contains("auth key"), "{x}");
+        assert!(
+            x["remedy"].as_str().unwrap().contains("medrec auth key"),
+            "{x}"
+        );
         assert_eq!(keychain_reads(&log), vec!["quiet"; passes]);
     }
+
+    // In the log, each such pass has its time.
+    let out = e.run_env(&["refresh", "--scheduled"], &asks);
+    let line = String::from_utf8_lossy(&out.stdout).to_string();
+    assert!(line.ends_with("Z failed\n"), "{line}");
+    let said = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(
+        said.contains("run `medrec auth key` at the screen"),
+        "{said}"
+    );
 
     // A vault whose key is gone is exit 1, which no one can allow.
     vault_entry(&e);
