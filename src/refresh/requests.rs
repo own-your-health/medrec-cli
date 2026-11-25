@@ -971,6 +971,7 @@ mod tests {
             outcome: "ok".into(),
             sources: Vec::new(),
             message: "0 sources imported".into(),
+            reason: None,
             by: "medrec 0.3.0".into(),
         };
         let d = done(&p, &h);

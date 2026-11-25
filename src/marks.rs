@@ -56,6 +56,11 @@ impl Marks {
     }
 }
 
+/// What a request that would open something the rules hold private is
+/// answered. It names no item: a shared screen shows it.
+pub const KEPT_PRIVATE: &str =
+    "something in it is kept off shared screens, and that can be changed at the Mac";
+
 /// How long what was taken back is kept: longer than any request is
 /// answered late.
 pub const UNDONE_KEEP_SECS: i64 = 90 * 86_400;
@@ -66,6 +71,7 @@ pub const WRITE: &str = "writing the person's marks.json";
 pub const READ_DECISIONS: &str = "reading the person's overrides.json";
 pub const WRITE_DECISIONS: &str = "writing the person's overrides.json";
 pub const RECORDS: &str = "reading the person's records";
+pub const LABELS: &str = "reading the person's provider labels";
 
 /// Why a decision of the household's was not written to a person's
 /// `marks.json` or `overrides.json`.
@@ -73,6 +79,9 @@ pub const RECORDS: &str = "reading the person's records";
 pub enum Failed {
     /// It names what is not the person's, or says what cannot be.
     Refused(CliError),
+    /// It is a request, and something the rules hold private would open
+    /// (`private::opens`).
+    KeptPrivate,
     /// The folder did not give or take a file, whatever the error's kind: a
     /// Drive file that is gone is a "not found" too. The error's message can
     /// quote the file.
@@ -91,6 +100,7 @@ impl From<Failed> for CliError {
     fn from(f: Failed) -> CliError {
         match f {
             Failed::Refused(error) | Failed::Folder { error, .. } => error,
+            Failed::KeptPrivate => CliError::Usage(KEPT_PRIVATE.into()),
         }
     }
 }

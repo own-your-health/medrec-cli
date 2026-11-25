@@ -20,7 +20,7 @@ use serde_json::{json, Value};
 
 use crate::events::Built;
 use crate::given;
-use crate::marks::{failed, Failed, READ, RECORDS, WRITE};
+use crate::marks::{failed, Failed, Marks, LABELS, READ, READ_DECISIONS, RECORDS, WRITE};
 use crate::model::{Document, Household, Person, PersonIndex, PersonText, Record};
 use crate::standing;
 
@@ -628,22 +628,9 @@ pub fn with_events(
     // As the last pass left it: what is private is the same on a machine
     // with the directory and on one without it.
     let state = crate::viewfiles::provider_state(folder, p)?;
-    let corrections = marks
-        .as_ref()
-        .map(|m| m.providers.as_slice())
-        .unwrap_or_default();
-    let labelled = crate::labels::areas(idx, &events, &state, corrections);
-    let mut v = build(
-        p,
-        idx,
-        &folder.text(p)?,
-        &events,
-        marks
-            .as_ref()
-            .map(|m| m.private.as_slice())
-            .unwrap_or_default(),
-        &labelled,
-    );
+    let none = Marks::new(&p.id);
+    let said = marks.as_ref().unwrap_or(&none);
+    let mut v = judged(p, idx, &folder.text(p)?, &events, said, &state);
     if state.lost() {
         v["labels_unreadable"] = Value::Bool(true);
     }
@@ -651,6 +638,87 @@ pub fn with_events(
         v["marks_unreadable"] = Value::Bool(true);
     }
     Ok((v, events))
+}
+
+/// [`build`], with the items a label makes private by what the marks say of
+/// providers.
+fn judged(
+    p: &Person,
+    idx: &PersonIndex,
+    texts: &PersonText,
+    events: &Built,
+    marks: &Marks,
+    state: &crate::labels::State,
+) -> Value {
+    let areas = crate::labels::areas(idx, events, state, &marks.providers);
+    build(p, idx, texts, events, &marks.private, &areas)
+}
+
+/// What a request would change of what the household decided.
+#[derive(Clone, Copy)]
+pub enum Change<'a> {
+    Events(&'a crate::events::Overrides),
+    Marks(&'a Marks),
+}
+
+/// A person's items that are private other than by a mark of the
+/// household's, and the members of each event.
+struct Ruled {
+    items: BTreeSet<String>,
+    events: Vec<(String, Vec<String>)>,
+}
+
+/// Whether a change would open something: whether what is private now, and
+/// not only by the household's own marks, would no longer be. What they
+/// marked private is judged by the rules alone, so that no request opens it
+/// in two steps; what they marked not private is open. Of an event that is
+/// private, each that would have a private member of it must be.
+pub fn opens(
+    folder: &crate::folder::Folder,
+    h: &Household,
+    p: &Person,
+    change: Change,
+) -> Result<bool, Failed> {
+    let idx = folder.index(p).map_err(failed(RECORDS))?;
+    let texts = folder.text(p).map_err(failed(RECORDS))?;
+    let overrides = folder.overrides(p).map_err(failed(READ_DECISIONS))?;
+    let marks = folder.marks(p).map_err(failed(READ))?;
+    let state = known_labels(folder, p)?;
+    let ruled = |overrides: &crate::events::Overrides, marks: &Marks| -> Result<Ruled, Failed> {
+        let built =
+            crate::events::both_by(folder, h, p, Some(overrides)).map_err(failed(RECORDS))?;
+        let mut marks = marks.clone();
+        marks.private.retain(|m| !m.private);
+        let v = judged(p, &idx, &texts, &built, &marks, &state);
+        let events = built.for_private();
+        let listed = events["events"].as_array().into_iter().flatten();
+        let id = |e: &Value| e["id"].as_str().unwrap_or_default().to_string();
+        Ok(Ruled {
+            items: Private::of(&v).items.into_keys().collect(),
+            events: listed.map(|e| (id(e), own_members(e))).collect(),
+        })
+    };
+    let now = ruled(&overrides, &marks)?;
+    let then = match change {
+        Change::Events(o) => ruled(o, &marks)?,
+        Change::Marks(m) => ruled(&overrides, m)?,
+    };
+    let is_event = |id: &str| id.starts_with("e_");
+    let mut items = now.items.iter().filter(|id| !is_event(id));
+    if items.any(|id| !then.items.contains(id)) {
+        return Ok(true);
+    }
+    let held = |(id, members): &(String, Vec<String>)| -> Vec<String> {
+        let private = members.iter().filter(|m| now.items.contains(*m));
+        match now.items.contains(id) {
+            true => private.cloned().collect(),
+            false => Vec::new(),
+        }
+    };
+    let held: BTreeSet<String> = now.events.iter().flat_map(held).collect();
+    let mut after = then.events.iter();
+    Ok(after
+        .any(|(id, members)| !then.items.contains(id) && members.iter().any(|m| held.contains(m))))
 }
 
 /// A person's private items by id, with their area.
@@ -721,7 +789,8 @@ pub fn holder<'a>(
 
 /// Mark an item of the person's private (`Some(true)`), not private
 /// (`Some(false)`), or back to the rules (`None`). The mark, and whether
-/// anything changed.
+/// anything changed. A `request` never marks an item not private: it drops
+/// the mark that it is, and is refused where the item is private without it.
 pub fn mark(
     folder: &crate::folder::Folder,
     h: &Household,
@@ -777,6 +846,20 @@ pub fn mark(
     let found: Vec<usize> = (0..m.private.len())
         .filter(|i| applies(&m.private[*i]))
         .collect();
+    let private = match (private, request) {
+        (Some(false), Some(_)) => {
+            let own = found.iter().rev().find(|i| m.private[**i].item == item);
+            let counts = own.or(found.last()).map(|i| &m.private[*i]);
+            if let Some(open) = counts.filter(|x| !x.private) {
+                return Ok((Some(open.clone()), false));
+            }
+            if private_without(folder, h, p, item, &m, &found)? {
+                return Err(Failed::KeptPrivate);
+            }
+            None
+        }
+        _ => private,
+    };
     match (private, found.as_slice()) {
         (None, []) => return Ok((None, false)),
         (Some(b), [i]) if m.private[*i].item == item && m.private[*i].private == b => {
@@ -807,6 +890,42 @@ pub fn mark(
     m.private.push(new.clone());
     folder.save_marks(p, &m).map_err(failed(WRITE))?;
     Ok((Some(new), true))
+}
+
+/// Whether an item is private without these of the person's marks.
+fn private_without(
+    folder: &crate::folder::Folder,
+    h: &Household,
+    p: &Person,
+    item: &str,
+    marks: &Marks,
+    without: &[usize],
+) -> Result<bool, Failed> {
+    let idx = folder.index(p).map_err(failed(RECORDS))?;
+    let texts = folder.text(p).map_err(failed(RECORDS))?;
+    let overrides = folder.overrides(p).map_err(failed(READ_DECISIONS))?;
+    let state = known_labels(folder, p)?;
+    let built = crate::events::both_by(folder, h, p, Some(&overrides)).map_err(failed(RECORDS))?;
+    let mut marks = marks.clone();
+    let mut i = 0..;
+    marks
+        .private
+        .retain(|_| i.next().is_none_or(|i| !without.contains(&i)));
+    let v = judged(p, &idx, &texts, &built, &marks, &state);
+    Ok(Private::of(&v).items.contains_key(item))
+}
+
+/// What the person's provider labels make private, where that is known.
+fn known_labels(
+    folder: &crate::folder::Folder,
+    p: &Person,
+) -> Result<crate::labels::State, Failed> {
+    let state = crate::viewfiles::provider_state(folder, p).map_err(failed(LABELS))?;
+    if state.lost() {
+        let lost = CliError::Other("the person's provider labels do not read".into());
+        return Err(failed(LABELS)(lost));
+    }
+    Ok(state)
 }
 
 /// Words that name no item on their own: forms, units, kinds of record and

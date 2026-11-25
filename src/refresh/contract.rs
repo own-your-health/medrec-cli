@@ -193,8 +193,15 @@ pub struct Handled {
     pub outcome: String,
     pub sources: Vec<HandledSource>,
     pub message: String,
+    /// [`KEPT_PRIVATE`] when that is why it was refused.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
     pub by: String,
 }
+
+/// [`Handled::reason`] of a request that would open something the rules hold
+/// private.
+pub const KEPT_PRIVATE: &str = "kept_private";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HandledSource {

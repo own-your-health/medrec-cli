@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::folder::Folder;
-use crate::marks::{READ, RECORDS, WRITE};
+use crate::marks::{Marks, READ, RECORDS, WRITE};
 use crate::model::{Household, Person};
 use crate::private;
 use crate::refresh::time;
@@ -212,6 +212,9 @@ pub enum Refusal {
     NotPrinted,
     NotItsItem,
     NotTheirs,
+    /// Of a request: something the rules hold private would open
+    /// (`private::opens`).
+    KeptPrivate,
 }
 
 impl Refusal {
@@ -222,6 +225,7 @@ impl Refusal {
                 "the item it names is not one of the person's that prints the name"
             }
             Refusal::NotTheirs => "the id to undo is not one of the person's corrections",
+            Refusal::KeptPrivate => crate::marks::KEPT_PRIVATE,
         }
     }
 }
@@ -441,7 +445,8 @@ fn phone(s: Option<String>) -> Result<Option<String>, &'static str> {
 /// Write what the household says of a provider to the person's marks, or
 /// undo it. From a terminal (no `request`) it is the last word. A request is
 /// its word as of when it was asked: it can be served late, and again, and
-/// then changes nothing that was said or taken back after it.
+/// then changes nothing that was said or taken back after it. It opens nothing
+/// (`private::opens`).
 pub fn decide(
     folder: &Folder,
     h: &Household,
@@ -450,6 +455,16 @@ pub fn decide(
     request: Option<&Request>,
 ) -> Result<Done, Failed> {
     let failed = |doing: &'static str| move |error: CliError| Failed::Folder { doing, error };
+    let opens = |m: &Marks| -> Result<bool, Failed> {
+        use crate::marks::Failed as Marked;
+        match request.map(|_| private::opens(folder, h, p, private::Change::Marks(m))) {
+            None => Ok(false),
+            Some(Ok(b)) => Ok(b),
+            Some(Err(Marked::Folder { doing, error })) => Err(Failed::Folder { doing, error }),
+            Some(Err(Marked::Refused(error))) => Err(failed(RECORDS)(error)),
+            Some(Err(Marked::KeptPrivate)) => Ok(true),
+        }
+    };
 
     let mut m = folder.marks(p).map_err(failed(READ))?;
     let now = time::now();
@@ -479,6 +494,9 @@ pub fn decide(
                     kind: kind.word().into(),
                     other: Map::new(),
                 });
+            }
+            if opens(&m)? {
+                return Err(Refusal::KeptPrivate.into());
             }
             folder.save_marks(p, &m).map_err(failed(WRITE))?;
             return Ok(Done::Undone);
@@ -557,6 +575,9 @@ pub fn decide(
             let mut c = m.providers.remove(i);
             c.at = new.at;
             m.providers.insert(place(&m.providers), c.clone());
+            if opens(&m)? {
+                return Err(Refusal::KeptPrivate.into());
+            }
             folder.save_marks(p, &m).map_err(failed(WRITE))?;
             return Ok(Done::Already(Box::new(c)));
         }
@@ -571,6 +592,9 @@ pub fn decide(
     m.providers_undone.retain(|u| !u.was_of_the_same(&new));
     m.providers.retain(|c| !c.of_the_same(&new));
     m.providers.insert(place(&m.providers), new.clone());
+    if opens(&m)? {
+        return Err(Refusal::KeptPrivate.into());
+    }
     folder.save_marks(p, &m).map_err(failed(WRITE))?;
     Ok(Done::Recorded(Box::new(new)))
 }

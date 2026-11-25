@@ -31,6 +31,7 @@ use serde_json::{json, Map, Value};
 use crate::given;
 use crate::marks::{failed, Failed, READ_DECISIONS, RECORDS, WRITE_DECISIONS};
 use crate::model::{Document, Person, PersonIndex, PersonText, Record};
+use crate::private::Change;
 use crate::sources::Sources;
 use crate::standing;
 
@@ -3243,26 +3244,40 @@ pub fn both(
     h: &crate::model::Household,
     p: &Person,
 ) -> Result<Built, pk_cli_core::CliError> {
-    let idx = folder.index(p)?;
-    let texts = folder.text(p)?;
     // As the views do: a decisions file that does not parse is left out;
     // one the store cannot reach fails the call.
     let overrides = match folder.overrides(p) {
-        Ok(o) => Ok(o),
-        Err(pk_cli_core::CliError::Other(_)) => Err(()),
+        Ok(o) => Some(o),
+        Err(pk_cli_core::CliError::Other(_)) => None,
         Err(e) => return Err(e),
     };
+    let mut v = both_by(folder, h, p, overrides.as_ref())?;
+    if overrides.is_none() {
+        v.events["overrides_unreadable"] = Value::Bool(true);
+    }
+    Ok(v)
+}
+
+/// [`both`], by these decisions.
+pub fn both_by(
+    folder: &crate::folder::Folder,
+    h: &crate::model::Household,
+    p: &Person,
+    overrides: Option<&Overrides>,
+) -> Result<Built, pk_cli_core::CliError> {
+    let idx = folder.index(p)?;
+    let texts = folder.text(p)?;
     let linked_people = linked_people(h, p);
     let mut linked = Vec::new();
     for q in &linked_people {
         linked.push((*q, folder.index(q)?, folder.text(q)?));
     }
-    let mut v = build_both(&Input {
+    Ok(build_both(&Input {
         person: p,
         index: &idx,
         texts: &texts,
         sources: &h.sources,
-        overrides: overrides.as_ref().ok(),
+        overrides,
         linked: linked
             .iter()
             .map(|(q, i, t)| Linked {
@@ -3272,18 +3287,17 @@ pub fn both(
             })
             .collect(),
         utc_offset: pk_cli_core::dates::local_utc_offset,
-    });
-    if overrides.is_err() {
-        v.events["overrides_unreadable"] = Value::Bool(true);
-    }
-    Ok(v)
+    }))
 }
 
 /// Record a decision: `apart` or `together`, naming two of the person's
 /// records or documents. The same decision again changes nothing; the
-/// other one for the same two members replaces it.
+/// other one for the same two members replaces it. One from a `request` opens
+/// nothing (`private::opens`).
+#[allow(clippy::too_many_arguments)]
 pub fn decide(
     folder: &crate::folder::Folder,
+    h: &crate::model::Household,
     p: &Person,
     kind: &str,
     a: &str,
@@ -3331,6 +3345,9 @@ pub fn decide(
         request: request.map(str::to_string),
     };
     o.events.push(d.clone());
+    if request.is_some() && crate::private::opens(folder, h, p, Change::Events(&o))? {
+        return Err(Failed::KeptPrivate);
+    }
     folder
         .save_overrides(p, &o)
         .map_err(failed(WRITE_DECISIONS))?;

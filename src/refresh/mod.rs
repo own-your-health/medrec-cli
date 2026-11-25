@@ -494,6 +494,7 @@ const PROVIDER_TRIES_SECS: i64 = 24 * 3600;
 struct Decided {
     outcome: &'static str,
     message: String,
+    reason: Option<&'static str>,
     /// For the refreshing machine's own output ([`RequestRow::cause`]).
     cause: Option<String>,
 }
@@ -503,7 +504,16 @@ impl Decided {
         Decided {
             outcome,
             message: message.into(),
+            reason: None,
             cause: None,
+        }
+    }
+
+    /// Refused: it would open something the rules hold private.
+    fn kept_private() -> Decided {
+        Decided {
+            reason: Some(contract::KEPT_PRIVATE),
+            ..Decided::new("invalid", crate::marks::KEPT_PRIVATE)
         }
     }
 
@@ -526,7 +536,7 @@ fn provider_request(
     ask: &crate::corrections::Ask,
     at: i64,
 ) -> Decided {
-    use crate::corrections::{decide, Done, Failed, Request};
+    use crate::corrections::{decide, Done, Failed, Refusal, Request};
     let by = v.requested_by_name();
     let request = Request {
         id: &v.id,
@@ -539,6 +549,7 @@ fn provider_request(
         Ok(Done::Undone) => Decided::new("ok", "undone"),
         Ok(Done::NothingToUndo) => Decided::new("ok", "there was nothing to undo"),
         Ok(Done::SaidLater) => Decided::new("skipped", "something said later stands"),
+        Err(Failed::Refused(Refusal::KeptPrivate)) => Decided::kept_private(),
         Err(Failed::Refused(r)) => Decided::new("invalid", r.words()),
         Err(Failed::Folder { doing, error }) => Decided::failed(doing, &error),
     }
@@ -548,7 +559,8 @@ fn provider_request(
 /// the pass's one write `folder`, whose views follow once, as it closes:
 /// `ok` once it is in the person's `overrides.json` or `marks.json`,
 /// `invalid` when what it names is not that person's (or, for `paid`, not a
-/// bill), `skipped` when what it asks was taken back since, `failed` when
+/// bill) or it would open something the rules hold private, `skipped` when
+/// what it asks was taken back since, `failed` when
 /// the folder could not be read or written. `at` is when a provider request
 /// was asked.
 fn decision_request(
@@ -587,6 +599,7 @@ fn decision_request(
                     Decided::new("ok", format!("the mark was already recorded as {}", m.id))
                 }
                 Ok((None, _)) => Decided::new("ok", "the item follows the rules"),
+                Err(Failed::KeptPrivate) => Decided::kept_private(),
                 Err(Failed::Refused(CliError::Usage(m))) => Decided::new("invalid", m),
                 Err(Failed::Refused(_)) => {
                     Decided::new("invalid", "the item it names is not one of the person's")
@@ -622,7 +635,7 @@ fn decision_request(
                 Err(Failed::Refused(CliError::Usage(_))) => {
                     Decided::new("invalid", "the document it names is not a bill")
                 }
-                Err(Failed::Refused(_)) => Decided::new(
+                Err(Failed::Refused(_) | Failed::KeptPrivate) => Decided::new(
                     "invalid",
                     "the document it names is not one of the person's",
                 ),
@@ -636,7 +649,9 @@ fn decision_request(
             match crate::bills::undo(folder, p, payment) {
                 Ok(pm) => Decided::new("ok", format!("undone {}", pm.id)),
                 // Served again, or asked by two people, it is undone.
-                Err(Failed::Refused(_)) => Decided::new("ok", "there was nothing to undo"),
+                Err(Failed::Refused(_) | Failed::KeptPrivate) => {
+                    Decided::new("ok", "there was nothing to undo")
+                }
                 Err(Failed::Folder { doing, error }) => Decided::failed(doing, &error),
             }
         }
@@ -648,11 +663,12 @@ fn decision_request(
             let Some(p) = person(p) else {
                 return no_person("event");
             };
-            match crate::events::decide(folder, p, kind, a, b, by, Some(&v.id)) {
+            match crate::events::decide(folder, h, p, kind, a, b, by, Some(&v.id)) {
                 Ok((d, true)) => Decided::new("ok", format!("recorded {kind} as {}", d.id)),
                 Ok((d, false)) => {
                     Decided::new("ok", format!("{kind} was already recorded as {}", d.id))
                 }
+                Err(Failed::KeptPrivate) => Decided::kept_private(),
                 Err(Failed::Refused(_)) => Decided::new(
                     "invalid",
                     "a member it names is not one of the person's records or documents",
@@ -1254,7 +1270,7 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
                 }
             }
         }
-        let mut cause = None;
+        let (mut cause, mut reason) = (None, None);
         let (sources, outcome, message): (Vec<HandledSource>, String, String) = match p {
             Parsed::Invalid(i) => (Vec::new(), "invalid".into(), clip(&i.why, MESSAGE_MAX)),
             Parsed::Valid(v) if v.scope.is_decision() => {
@@ -1297,6 +1313,7 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
                 }
                 local.failing.remove(&v.id);
                 cause = d.cause;
+                reason = d.reason.map(str::to_string);
                 (Vec::new(), d.outcome.into(), clip(&d.message, MESSAGE_MAX))
             }
             Parsed::Valid(v) => {
@@ -1330,6 +1347,7 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
             outcome: outcome.clone(),
             sources,
             message,
+            reason,
             by: crate::model::filed_by(),
         };
         let mut doc = requests::done(p, &handled);
