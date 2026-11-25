@@ -92,7 +92,13 @@ pub struct AttemptRow {
 #[derive(Debug, Serialize)]
 pub struct RequestRow {
     pub request: String,
+    /// `handled.outcome`; `retrying` or `waiting` for a provider request
+    /// that stays pending.
     pub outcome: String,
+    /// What kept a provider request from being written: which step, and the
+    /// kind of error. Never its message, which can quote a record.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cause: Option<String>,
     /// medrec could not remove the pending file; its `done/` file stands.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub file_left: bool,
@@ -498,6 +504,66 @@ const EVENT_LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(15);
 /// the first pass that could not.
 const PROVIDER_TRIES_SECS: i64 = 24 * 3600;
 
+/// What a decision request came to.
+struct Decided {
+    outcome: &'static str,
+    message: String,
+    /// For the refreshing machine's own output ([`RequestRow::cause`]).
+    cause: Option<String>,
+}
+
+impl Decided {
+    fn new(outcome: &'static str, message: impl Into<String>) -> Decided {
+        Decided {
+            outcome,
+            message: message.into(),
+            cause: None,
+        }
+    }
+
+    /// Failed at `doing`. Everyone's outcomes show together, so the message
+    /// is the caller's own words.
+    fn failed(message: &str, doing: &str, error: &CliError) -> Decided {
+        Decided {
+            cause: Some(format!("{doing}: {}", error.code())),
+            ..Decided::new("failed", message)
+        }
+    }
+}
+
+/// Apply what a request says of a provider, as [`decision_request`] does.
+fn provider_request(
+    folder: &Folder,
+    h: &crate::model::Household,
+    v: &requests::Valid,
+    person: &str,
+    ask: &crate::corrections::Ask,
+) -> Decided {
+    use crate::corrections::{decide, Done, Failed, Request};
+    let Some(p) = h.person(person) else {
+        return Decided::new("invalid", "its provider names no person in household.json");
+    };
+    let by = v.requested_by_name();
+    let request = Request {
+        id: &v.id,
+        by: by.as_deref(),
+        at: v.requested_at().unwrap_or_else(time::now),
+    };
+    match decide(folder, h, p, ask, Some(&request)) {
+        Ok(Done::Recorded(c)) => Decided::new("ok", format!("recorded it as {}", c.id)),
+        Ok(Done::Already(c)) => Decided::new("ok", format!("it was already recorded as {}", c.id)),
+        Ok(Done::Undone) => Decided::new("ok", "undone"),
+        Ok(Done::NothingToUndo) => Decided::new("ok", "there was nothing to undo"),
+        Ok(Done::SaidLater) => Decided::new("skipped", "something said later stands"),
+        Err(Failed::Refused(r)) => Decided::new("invalid", r.words()),
+        Err(Failed::Folder { doing, error }) => Decided::failed(
+            "the person's marks could not be read or written",
+            doing,
+            &error,
+        ),
+    }
+}
+
 /// Apply a request's decision (an event's, or one kept as a mark) through
 /// the pass's one write `folder`, whose views follow once, as it closes:
 /// `ok` once it is in the person's `overrides.json`, `invalid` when what it
@@ -508,33 +574,6 @@ fn decision_request(
     h: &crate::model::Household,
     v: &requests::Valid,
 ) -> (&'static str, String) {
-    if let Scope::Provider { person, ask } = &v.scope {
-        let Some(p) = h.person(person) else {
-            return (
-                "invalid",
-                "its provider names no person in household.json".into(),
-            );
-        };
-        let by = v.requested_by_name();
-        return match crate::corrections::decide(folder, h, p, ask, by.as_deref(), Some(&v.id)) {
-            Ok((Some(c), true)) => ("ok", format!("recorded it as {}", c.id)),
-            Ok((Some(c), false)) => ("ok", format!("it was already recorded as {}", c.id)),
-            Ok((None, true)) => ("ok", "undone".into()),
-            Ok((None, false)) => ("ok", "there was nothing to undo".into()),
-            Err(CliError::NotFound(m))
-                if m == crate::corrections::NOT_PRINTED
-                    || m == crate::corrections::NOT_ITS_ITEM =>
-            {
-                ("invalid", m)
-            }
-            // What went wrong can quote the marks, and everyone's outcomes
-            // show together.
-            Err(_) => (
-                "failed",
-                "the person's marks could not be read or written".into(),
-            ),
-        };
-    }
     if let Scope::Private {
         person,
         item,
@@ -1198,6 +1237,9 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
     // pending for the next pass.
     let picked = time::fmt(started);
     let mut events_folder: Option<Result<Folder, CliError>> = None;
+    // People with a provider request left pending: their later ones wait
+    // behind it, so that they are said in the order they were asked.
+    let mut behind: BTreeSet<&str> = BTreeSet::new();
     for p in &parsed {
         if let Parsed::Valid(v) = p {
             let waits = want
@@ -1220,25 +1262,51 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
                 }
             }
         }
+        let mut cause = None;
         let (sources, outcome, message): (Vec<HandledSource>, String, String) = match p {
             Parsed::Invalid(i) => (Vec::new(), "invalid".into(), clip(&i.why, MESSAGE_MAX)),
             Parsed::Valid(v) if v.scope.is_decision() => {
-                let (outcome, message) = match events_folder.as_ref() {
-                    Some(Ok(f)) => decision_request(f, &h, v),
-                    Some(Err(e)) => ("failed", e.message().to_string()),
-                    None => ("failed", "the folder was not opened to write".into()),
+                let row = |outcome: &str, cause: Option<String>| RequestRow {
+                    request: v.id.clone(),
+                    outcome: outcome.into(),
+                    cause,
+                    file_left: false,
+                };
+                let d = match (&v.scope, events_folder.as_ref()) {
+                    (Scope::Provider { person, .. }, _) if behind.contains(person.as_str()) => {
+                        let why = "behind an earlier one of the person's";
+                        report.requests.push(row("waiting", Some(why.into())));
+                        continue;
+                    }
+                    (Scope::Provider { person, ask }, Some(Ok(f))) => {
+                        provider_request(f, &h, v, person, ask)
+                    }
+                    (Scope::Provider { .. }, Some(Err(e))) => Decided::failed(
+                        "the folder could not be opened to write",
+                        "opening the folder to write",
+                        e,
+                    ),
+                    (_, Some(Ok(f))) => {
+                        let (outcome, message) = decision_request(f, &h, v);
+                        Decided::new(outcome, message)
+                    }
+                    (_, Some(Err(e))) => Decided::new("failed", e.message()),
+                    (_, None) => Decided::new("failed", "the folder was not opened to write"),
                 };
                 // Its `done/` file would keep nothing of what it says, so one
                 // that could not be written is tried again for a while.
-                if outcome == "failed" && matches!(v.scope, Scope::Provider { .. }) {
+                if let (Scope::Provider { person, .. }, "failed") = (&v.scope, d.outcome) {
                     let now = time::now();
                     let first = *local.failing.entry(v.id.clone()).or_insert(now);
                     if (0..PROVIDER_TRIES_SECS).contains(&(now - first)) {
+                        behind.insert(person);
+                        report.requests.push(row("retrying", d.cause));
                         continue;
                     }
                 }
                 local.failing.remove(&v.id);
-                (Vec::new(), outcome.into(), clip(&message, MESSAGE_MAX))
+                cause = d.cause;
+                (Vec::new(), d.outcome.into(), clip(&d.message, MESSAGE_MAX))
             }
             Parsed::Valid(v) => {
                 let ids: Vec<&String> = want
@@ -1301,6 +1369,7 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
                 Parsed::Invalid(i) => i.id.clone().unwrap_or_else(|| i.done_name.clone()),
             },
             outcome,
+            cause,
         });
     }
 

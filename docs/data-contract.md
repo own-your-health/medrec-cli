@@ -659,7 +659,12 @@ fields it knows, never drops a mark. It is absent until the first mark.
   `wrong`) holds it to that item. A correction of the same names and item
   replaces one of the same sort (`set` and `wrong` are one sort, `same` the
   other), and the same again changes nothing. `medrec labels undo` drops one.
-  `providers` is absent until the first.
+  `providers` is absent until the first. It is in the order things were said:
+  `at` is when, for a request its `requested_at` and never a time to come, and
+  from a terminal after all that is there.
+- `providers_undone` (`[{printed, item, kind, at}]`, absent when empty) is what
+  was taken back, until the same is said of again, and for 90 days at most. A
+  request asked before then and served after does not say it again.
 - A mark on an event, or a correction held to one, also lists the event's own
   `members` (record and document ids) when it was made. An event keeps its id
   only while its anchor member stays (Events, below); when the id changes, the
@@ -1018,14 +1023,21 @@ in place of `scope`:
   it gives, or the item is not theirs or does not print it. The same said
   again is `ok`, and so is an undo of what is not there: a request can be
   served twice, and two people can ask for the same.
+- What it says is as of its `requested_at`. `handled.outcome` is `skipped` when
+  something said of the same names and item after that stands, or was taken
+  back after that; what it says of some of the same names only is recorded
+  before what was said later.
 - Everyone's outcomes show together, so its `done/` file keeps only
   `provider: {person, kind}` (`set`, `same`, `different`, `wrong` or `undo`),
   and `handled.message` repeats no name or text: "recorded it as o_…".
 - As that file does not say what was asked, a request that could not be written
   (the folder does not answer, the person's marks do not read) stays pending,
   and each pass tries it again for 24 hours from the first that could not; then
-  it is `failed`, and what it said is gone from the folder. The app may show
-  what it asked while it is pending.
+  it is `failed`, and what it said is gone from the folder. The person's later
+  provider requests wait behind it. The app may show what it asked while it is
+  pending. The pass says which wait and why on its own machine (`medrec refresh`
+  `requests[]`: `retrying` with a `cause`, the step and the kind of error, or
+  `waiting`).
 
 ## views/ (`medrec-views/v2`, 0.8.0 and later)
 

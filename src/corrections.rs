@@ -13,10 +13,7 @@ use serde_json::{Map, Value};
 use crate::folder::Folder;
 use crate::model::{Household, Person};
 use crate::private;
-
-/// What a correction is refused for. Neither repeats a name.
-pub const NOT_PRINTED: &str = "a name it gives is not one the person's items print";
-pub const NOT_ITS_ITEM: &str = "the item it names is not one of the person's that prints the name";
+use crate::refresh::time;
 
 /// Printed names one correction may give.
 const MAX_PRINTED: usize = 10;
@@ -44,6 +41,8 @@ pub struct Correction {
     /// An event's own members when it was said, as a private mark's.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub members: Vec<String>,
+    /// When it was said: for a request, when it was asked. The list is in
+    /// this order.
     pub at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub by: Option<String>,
@@ -108,6 +107,128 @@ impl Correction {
 
     fn names(&self) -> BTreeSet<&str> {
         self.printed.iter().map(String::as_str).collect()
+    }
+
+    /// Whether it is of the same names and item, and of the same sort: the
+    /// later of two replaces the earlier whole.
+    fn of_the_same(&self, other: &Correction) -> bool {
+        self.kind().is_some()
+            && self.says_what() == other.says_what()
+            && self.names() == other.names()
+            && self.item == other.item
+    }
+
+    fn says_the_same(&self, other: &Correction) -> bool {
+        self.of_the_same(other) && self.kind() == other.kind() && self.set == other.set
+    }
+
+    fn said_at(&self) -> i64 {
+        secs(&self.at)
+    }
+}
+
+/// What the household took back (`marks.json` `providers_undone`): a request
+/// asked before then and served after does not say it again.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Undone {
+    pub printed: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item: Option<String>,
+    pub kind: Kind,
+    pub at: String,
+    /// What a later medrec writes here, kept as it is.
+    #[serde(flatten)]
+    pub other: Map<String, Value>,
+}
+
+impl Undone {
+    /// Whether what was taken back is of the same names and item as `c`,
+    /// and of the same sort.
+    fn was_of_the_same(&self, c: &Correction) -> bool {
+        matches!(self.kind, Kind::Set | Kind::Wrong) == c.says_what()
+            && self.item == c.item
+            && self
+                .printed
+                .iter()
+                .map(String::as_str)
+                .collect::<BTreeSet<_>>()
+                == c.names()
+    }
+}
+
+/// How long what was taken back is kept: longer than any request is
+/// answered late.
+const UNDONE_KEEP_SECS: i64 = 90 * 86_400;
+
+fn secs(at: &str) -> i64 {
+    time::parse(at).unwrap_or(0)
+}
+
+/// The request a correction came from, and when it was asked. No part of it
+/// is trusted.
+#[derive(Debug, Clone, Copy)]
+pub struct Request<'a> {
+    pub id: &'a str,
+    pub by: Option<&'a str>,
+    pub at: i64,
+}
+
+/// What became of what the household said.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Done {
+    Recorded(Box<Correction>),
+    /// The last word on it already.
+    Already(Box<Correction>),
+    Undone,
+    /// Of a request to undo what is not there: it is undone.
+    NothingToUndo,
+    /// Of a request: something said of the same after it was asked stands.
+    SaidLater,
+}
+
+/// Why it is refused. Nothing it says repeats what was asked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Refusal {
+    NotPrinted,
+    NotItsItem,
+    NotTheirs,
+}
+
+impl Refusal {
+    pub fn words(self) -> &'static str {
+        match self {
+            Refusal::NotPrinted => "a name it gives is not one the person's items print",
+            Refusal::NotItsItem => {
+                "the item it names is not one of the person's that prints the name"
+            }
+            Refusal::NotTheirs => "the id to undo is not one of the person's corrections",
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum Failed {
+    Refused(Refusal),
+    /// The folder did not give or take a file. The error's message can quote
+    /// the file.
+    Folder {
+        doing: &'static str,
+        error: CliError,
+    },
+}
+
+impl From<Refusal> for Failed {
+    fn from(r: Refusal) -> Failed {
+        Failed::Refused(r)
+    }
+}
+
+impl From<Failed> for CliError {
+    fn from(f: Failed) -> CliError {
+        match f {
+            Failed::Refused(r) => CliError::NotFound(r.words().into()),
+            Failed::Folder { error, .. } => error,
+        }
     }
 }
 
@@ -298,33 +419,52 @@ fn phone(s: Option<String>) -> Result<Option<String>, &'static str> {
 }
 
 /// Write what the household says of a provider to the person's marks, or
-/// undo it: the correction (none once undone), and whether anything changed.
-/// `by` is who asked, as shown, and `request` the request it came from: one
-/// may be served again, so the same again changes nothing, an undo too.
+/// undo it. From a terminal (no `request`) it is the last word. A request is
+/// its word as of when it was asked: it can be served late, and again, and
+/// then changes nothing that was said or taken back after it.
 pub fn decide(
     folder: &Folder,
     h: &Household,
     p: &Person,
     ask: &Ask,
-    by: Option<&str>,
-    request: Option<&str>,
-) -> Result<(Option<Correction>, bool), CliError> {
-    let mut m = folder.marks(p)?;
+    request: Option<&Request>,
+) -> Result<Done, Failed> {
+    let failed = |doing: &'static str| move |error: CliError| Failed::Folder { doing, error };
+    const READ: &str = "reading the person's marks.json";
+    const RECORDS: &str = "reading the person's records";
+    const WRITE: &str = "writing the person's marks.json";
+
+    let mut m = folder.marks(p).map_err(failed(READ))?;
+    let now = time::now();
+    let last = m.providers.iter().map(|c| c.said_at());
+    let last = last.chain(m.providers_undone.iter().map(|u| secs(&u.at)));
+    let said = match request {
+        Some(r) => r.at.clamp(0, now),
+        None => last.max().unwrap_or(now).max(now),
+    };
+    m.providers_undone
+        .retain(|u| now - secs(&u.at) < UNDONE_KEEP_SECS);
     let (printed, what, item) = match ask {
         Ask::Undo(id) => {
-            let had = m.providers.len();
-            m.providers.retain(|c| c.id != *id);
-            if m.providers.len() == had {
-                if request.is_some() {
-                    return Ok((None, false));
-                }
-                return Err(CliError::NotFound(format!(
-                    "{} is not one of the person's corrections",
-                    crate::printable(id)
-                )));
+            let Some(i) = m.providers.iter().position(|c| c.id == *id) else {
+                return match request {
+                    Some(_) => Ok(Done::NothingToUndo),
+                    None => Err(Refusal::NotTheirs.into()),
+                };
+            };
+            let c = m.providers.remove(i);
+            m.providers_undone.retain(|u| !u.was_of_the_same(&c));
+            if let Some(kind) = c.kind() {
+                m.providers_undone.push(Undone {
+                    at: time::fmt(said.max(c.said_at())),
+                    printed: c.printed,
+                    item: c.item,
+                    kind,
+                    other: Map::new(),
+                });
             }
-            folder.save_marks(p, &m)?;
-            return Ok((None, true));
+            folder.save_marks(p, &m).map_err(failed(WRITE))?;
+            return Ok(Done::Undone);
         }
         Ask::Say {
             printed,
@@ -332,14 +472,14 @@ pub fn decide(
             item,
         } => (printed, what, item),
     };
-    let idx = folder.index(p)?;
-    let events = crate::events::of_person(folder, h, p)?;
+    let idx = folder.index(p).map_err(failed(RECORDS))?;
+    let events = crate::events::of_person(folder, h, p).map_err(failed(RECORDS))?;
     let prints: BTreeMap<String, BTreeSet<String>> = crate::labels::printed_names(&idx, &events);
     let known = printed
         .iter()
         .all(|n| prints.values().any(|names| names.contains(n)));
     if !known {
-        return Err(CliError::NotFound(NOT_PRINTED.into()));
+        return Err(Refusal::NotPrinted.into());
     }
     let mut members = Vec::new();
     if let Some(i) = item {
@@ -347,7 +487,7 @@ pub fn decide(
             .get(i)
             .is_some_and(|names| names.contains(&printed[0]))
         {
-            return Err(CliError::NotFound(NOT_ITS_ITEM.into()));
+            return Err(Refusal::NotItsItem.into());
         }
         members = events["events"]
             .as_array()
@@ -371,35 +511,42 @@ pub fn decide(
         wrong: *what == What::Wrong,
         item: item.clone(),
         members,
-        at: crate::refresh::time::fmt(crate::refresh::time::now()),
-        by: by.map(str::to_string),
-        request: request.map(str::to_string),
+        at: time::fmt(said),
+        by: request.and_then(|r| r.by).map(str::to_string),
+        request: request.map(|r| r.id.to_string()),
         other: Map::new(),
     };
-    // Of the same names and item, and of the same sort: the new one
-    // replaces it whole.
-    let replaced = |c: &Correction| {
-        c.kind().is_some()
-            && c.says_what() == new.says_what()
-            && c.names() == new.names()
-            && c.item == new.item
-    };
-    let same = |c: &Correction| {
-        c.kind() == new.kind() && c.set == new.set && c.names() == new.names() && c.item == new.item
-    };
-    // The last word on the names already: nothing to write.
-    if let Some(at) = m.providers.iter().rposition(replaced) {
-        let after = m.providers[at + 1..].iter().any(|c| {
+    let later = |at: i64| request.is_some() && at > said;
+    if let Some(i) = m.providers.iter().rposition(|c| c.of_the_same(&new)) {
+        let held = &m.providers[i];
+        // Said since of some of the names: it is said again over that.
+        let since = m.providers[i + 1..].iter().any(|c| {
             c.says_what() == new.says_what()
                 && c.item == new.item
                 && !c.names().is_disjoint(&new.names())
+                && !later(c.said_at())
         });
-        if same(&m.providers[at]) && !after {
-            return Ok((Some(m.providers[at].clone()), false));
+        if held.says_the_same(&new) && !since {
+            return Ok(Done::Already(Box::new(held.clone())));
+        }
+        if later(held.said_at()) {
+            return Ok(Done::SaidLater);
         }
     }
-    m.providers.retain(|c| !replaced(c));
-    m.providers.push(new.clone());
-    folder.save_marks(p, &m)?;
-    Ok((Some(new), true))
+    let undone = |u: &Undone| u.was_of_the_same(&new) && secs(&u.at) >= said;
+    if request.is_some() && m.providers_undone.iter().any(undone) {
+        return Ok(Done::SaidLater);
+    }
+    m.providers_undone.retain(|u| !u.was_of_the_same(&new));
+    m.providers.retain(|c| !c.of_the_same(&new));
+    // In the order they were said: what was said later of some of the names
+    // still is.
+    let after = m
+        .providers
+        .iter()
+        .rposition(|c| !later(c.said_at()))
+        .map_or(0, |i| i + 1);
+    m.providers.insert(after, new.clone());
+    folder.save_marks(p, &m).map_err(failed(WRITE))?;
+    Ok(Done::Recorded(Box::new(new)))
 }

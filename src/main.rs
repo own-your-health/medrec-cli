@@ -1906,10 +1906,16 @@ fn labels_cmd(cli: &Cli, cmd: &LabelsCmd, store: &ConfigStore) -> Result<(), Cli
         }
         (None, _) => unreachable!("only an undo names no person"),
     };
-    let (c, changed) = medrec::corrections::decide(&f, &h, p, &ask, None, None)?;
+    use medrec::corrections::Done;
+    let (status, said) = match medrec::corrections::decide(&f, &h, p, &ask, None)? {
+        Done::Recorded(c) => ("recorded", Some(c)),
+        Done::Already(c) => ("unchanged", Some(c)),
+        Done::Undone => ("recorded", None),
+        Done::NothingToUndo | Done::SaidLater => ("unchanged", None),
+    };
     let v = serde_json::json!({
-        "person": p.id, "kind": ask.word(), "said": c.map(|c| to_value(&c)),
-        "status": if changed { "recorded" } else { "unchanged" },
+        "person": p.id, "kind": ask.word(), "said": said.map(|c| to_value(&c)),
+        "status": status,
     });
     output::emit(json, "label-said", v, |v| {
         println!(
@@ -2499,7 +2505,13 @@ fn refresh_cmd(cli: &Cli, a: &RefreshArgs, store: &ConfigStore) -> Result<(), Cl
                 println!("{line}");
             }
             for q in &r.requests {
-                println!("  request {} {}", q.request, q.outcome);
+                let why = q.cause.as_deref().map(|c| format!(" ({c})"));
+                println!(
+                    "  request {} {}{}",
+                    q.request,
+                    q.outcome,
+                    why.unwrap_or_default()
+                );
             }
             if let Some(c) = &r.command {
                 println!(

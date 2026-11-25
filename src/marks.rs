@@ -29,6 +29,9 @@ pub struct Marks {
     /// What the household says of the providers their items print.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub providers: Vec<crate::corrections::Correction>,
+    /// What they took back of it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub providers_undone: Vec<crate::corrections::Undone>,
     /// What a later medrec writes here, kept as it is.
     #[serde(flatten)]
     pub other: Map<String, Value>,
@@ -42,6 +45,7 @@ impl Marks {
             payments: Vec::new(),
             private: Vec::new(),
             providers: Vec::new(),
+            providers_undone: Vec::new(),
             other: Map::new(),
         }
     }
