@@ -1379,18 +1379,156 @@ fn a_test_its_source_says_is_of_another_person_is_in_no_list() {
         e.import(&test_about("one", Some(focus), 1));
         assert!(the_test(&e).1);
     }
-    // One an earlier medrec read in is, once it is imported again.
-    let e = Env::new("about-raw");
-    e.import(&test_about("one", Some(parent.clone()), 1));
-    let (id, _) = the_test(&e);
-    e.edit(|v| {
-        for r in v["records"].as_array_mut().unwrap() {
-            if let Some(f) = r["fields"].as_object_mut() {
-                f.remove("about");
+    // One an earlier medrec read in is, once it is imported again, or read
+    // again from its raw file.
+    for again in ["import", "reindex"] {
+        let e = Env::new(&format!("about-{again}"));
+        e.import(&test_about("one", Some(parent.clone()), 1));
+        let (id, _) = the_test(&e);
+        e.edit(|v| {
+            for r in v["records"].as_array_mut().unwrap() {
+                if let Some(f) = r["fields"]
+                    .as_object_mut()
+                    .filter(|f| f.contains_key("about"))
+                {
+                    f.remove("about");
+                    let key = r["key"].as_str().unwrap();
+                    r["key"] = key.split("|about").next().unwrap().into();
+                }
             }
+        });
+        assert!(the_test(&e).1);
+        match again {
+            "import" => drop(e.import(&test_about("one", Some(parent.clone()), 1))),
+            _ => assert_eq!(e.ok(&["reindex"])["given_updated"], 1),
         }
+        assert_eq!(the_test(&e), (id, false), "{again}");
+    }
+}
+
+/// The stream with a parent's test of the same code and day as the person's
+/// own, before it or after it.
+fn two_tests(parent_first: bool, ids: bool) -> String {
+    let own = |l: &&str| l.contains("\"obs-0001\"") && l.contains("\"Observation\"");
+    let line = medrec::testdata::STREAM.lines().find(own).unwrap();
+    let mut mine: Value = serde_json::from_str(line).unwrap();
+    let mut theirs = mine.clone();
+    theirs["id"] = "obs-0001-parent".into();
+    theirs["focus"] = json!([{"reference": "RelatedPerson/rp-0001", "display": "Mother"}]);
+    theirs["valueQuantity"]["value"] = json!(9.9);
+    if !ids {
+        for v in [&mut mine, &mut theirs] {
+            v.as_object_mut().unwrap().remove("id");
+        }
+    }
+    let both = match parent_first {
+        true => [theirs, mine],
+        false => [mine, theirs],
+    };
+    let both = both.map(|v| v.to_string()).join("\n");
+    let base = medrec::testdata::STREAM.replace(line, &both);
+    stream_of(&base, "one", |_, _| true)
+}
+
+/// A parent's test is in a record of its own, whichever comes first, so the
+/// person's is in their lists with its own value; and one an earlier medrec
+/// filed with theirs goes to its own.
+#[test]
+fn a_parents_test_never_hides_the_persons_own() {
+    for (n, (parent_first, ids)) in [(true, true), (false, true), (true, false), (false, false)]
+        .into_iter()
+        .enumerate()
+    {
+        let e = Env::new(&format!("about-two-{n}"));
+        let check = |how: &str| {
+            let of = format!("{how}, {parent_first}, {ids}");
+            let v = e.ok(&["results", "--person", "Robin"]);
+            let items = v["items"].as_array().unwrap().iter();
+            let items = items.filter(|i| i.to_string().contains("Hemoglobin"));
+            let items: Vec<String> = items.map(Value::to_string).collect();
+            assert_eq!(items.len(), 1, "{of}: {items:?}");
+            assert!(!items[0].contains("9.9"), "{of}: {items:?}");
+            let list = e.ok(&["records", "about-another"]);
+            let list = list["items"].as_array().unwrap();
+            assert_eq!(list.len(), 1, "{of}");
+            let shown = e.ok(&["records", "show", list[0]["id"].as_str().unwrap()]);
+            assert!(shown.to_string().contains("9.9"), "{of}: {shown}");
+            let records = e.index().records;
+            let mut held = records.iter().flat_map(|r| &r.provenance);
+            assert!(held.all(|p| p.raw_path.is_some()), "{of}");
+        };
+        // As an earlier medrec filed them: one record, with the first's value.
+        let fold = || {
+            e.edit(|v| {
+                let records = v["records"].as_array_mut().unwrap();
+                let at = records.iter().position(|r| !r["fields"]["about"].is_null());
+                let mut theirs = records.remove(at.unwrap());
+                let key = theirs["key"]
+                    .as_str()
+                    .unwrap()
+                    .split("|about")
+                    .next()
+                    .unwrap();
+                let mut all = records.iter_mut();
+                let mine = all.find(|r| r["key"] == key).unwrap();
+                let of = theirs["provenance"].as_array_mut().unwrap().remove(0);
+                let provenance = mine["provenance"].as_array_mut().unwrap();
+                provenance.insert(if parent_first { 0 } else { 1 }, of);
+                if parent_first {
+                    theirs["fields"].as_object_mut().unwrap().remove("about");
+                    mine["fields"] = theirs["fields"].clone();
+                }
+            });
+            let list = e.ok(&["records", "about-another"]);
+            assert_eq!(list["items"].as_array().unwrap().len(), 0);
+        };
+        e.import(&two_tests(parent_first, ids));
+        check("imported");
+        for own_first in [parent_first, !parent_first] {
+            fold();
+            e.import(&two_tests(own_first, ids));
+            check("imported again");
+        }
+        fold();
+        assert_eq!(e.ok(&["reindex", "--dry-run"])["results_split"], 1);
+        assert_eq!(e.ok(&["reindex"])["results_split"], 1);
+        check("read again");
+        assert_eq!(e.ok(&["reindex"])["results_split"], 0);
+        let kept = e.index().records.len();
+        e.import(&two_tests(parent_first, ids));
+        assert_eq!(e.index().records.len(), kept);
+        check("imported after");
+    }
+}
+
+/// A test that is about a parent is still about them where the only other
+/// resource of its record has no raw file.
+#[test]
+fn values_left_by_a_parents_test_are_never_the_persons() {
+    let e = Env::new("about-left");
+    e.import(&two_tests(true, true));
+    e.edit(|v| {
+        let records = v["records"].as_array_mut().unwrap();
+        let at = records.iter().position(|r| !r["fields"]["about"].is_null());
+        let mut theirs = records.remove(at.unwrap());
+        let key = theirs["key"]
+            .as_str()
+            .unwrap()
+            .split("|about")
+            .next()
+            .unwrap();
+        let mine = records.iter_mut().find(|r| r["key"] == key).unwrap();
+        let provenance = mine["provenance"].as_array_mut().unwrap();
+        provenance[0].as_object_mut().unwrap().remove("raw_path");
+        provenance.insert(0, theirs["provenance"].as_array_mut().unwrap().remove(0));
+        theirs["fields"].as_object_mut().unwrap().remove("about");
+        mine["fields"] = theirs["fields"].clone();
     });
-    assert!(the_test(&e).1);
-    e.import(&test_about("one", Some(parent), 1));
-    assert_eq!(the_test(&e), (id, false));
+    assert_eq!(e.ok(&["reindex"])["results_split"], 1);
+    let v = e.ok(&["results", "--person", "Robin"]);
+    assert!(!v.to_string().contains("Hemoglobin"), "{v}");
+    let list = e.ok(&["records", "about-another", "--limit", "1"]);
+    assert_eq!(list["items"].as_array().unwrap().len(), 1, "{list}");
+    let list = e.ok(&["records", "about-another"]);
+    assert_eq!(list["items"].as_array().unwrap().len(), 2, "{list}");
 }

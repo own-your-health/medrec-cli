@@ -10,6 +10,7 @@ use pk_cli_core::dates;
 use serde_json::Value;
 
 use crate::given;
+use crate::import;
 use crate::model::{Document, Person, PersonIndex, Record};
 use crate::questionnaires::{self, Answers};
 use crate::standing;
@@ -24,20 +25,33 @@ pub const PARENT: &str = "a parent";
 pub const ANOTHER: &str = "another person";
 
 /// Who an item in the person's chart is about, where that is not the person:
-/// as it is shown, else as any source gave it.
+/// as the source of its values says, by any version of its resource; else as
+/// it is shown, or as any source gave it.
 pub fn record(p: &Person, r: &Record) -> Option<&'static str> {
     if !matches!(r.kind.as_str(), "result" | "report") {
         return None;
     }
-    as_is(p, r).or_else(|| given::as_given(r).find_map(|x| as_is(p, &x)))
+    let said = of_resource(r, import::wrote(r));
+    let given = || given::as_given(r).find_map(|x| asked(p, &x));
+    said.or_else(|| asked(p, r)).or_else(given)
 }
 
-fn as_is(p: &Person, r: &Record) -> Option<&'static str> {
-    match r.fields.get(FIELD).and_then(Value::as_str) {
-        Some(PARENT) => return Some(PARENT),
-        Some(_) => return Some(ANOTHER),
-        None => {}
-    }
+/// Whom a resource of the record's says, or said, it is about, by its raw
+/// file: the one the values are of shows it too. What a source gave and no
+/// file is known of is every resource's.
+pub fn of_resource(r: &Record, path: Option<&str>) -> Option<&'static str> {
+    let who = |fields: &serde_json::Map<String, Value>| match fields.get(FIELD)?.as_str()? {
+        PARENT => Some(PARENT),
+        _ => Some(ANOTHER),
+    };
+    let of = |g: &&given::Given| g.raw_path.is_none() || g.raw_path.as_deref() == path;
+    let shown = || who(&r.fields).filter(|_| import::wrote(r) == path);
+    shown().or_else(|| r.given.iter().filter(of).find_map(|g| who(&g.fields)))
+}
+
+/// Whether the record is of a questionnaire that a grown person answers, and
+/// the person had not grown.
+fn asked(p: &Person, r: &Record) -> Option<&'static str> {
     let fetched = r.provenance.iter().filter_map(|p| p.fetched_at.as_deref());
     let day = r.date.as_deref().or(fetched.min());
     let code = r.code.as_ref();

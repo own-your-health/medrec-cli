@@ -806,8 +806,6 @@ impl PrivateItems {
         }
     }
 
-    /// Says on a page, starting at `offset`, how many items it left out,
-    /// and whose marks did not read.
     /// Which other people's parts a page's events are without, since what is
     /// private of theirs does not read.
     fn warn_of_parts<T>(&self, page: &mut Page<T>, people: &BTreeSet<String>) {
@@ -825,6 +823,8 @@ impl PrivateItems {
         }
     }
 
+    /// Says on a page, starting at `offset`, how many items it left out,
+    /// and whose marks did not read.
     fn warn<T>(&self, page: &mut Page<T>, offset: usize, left_out: &views::LeftOut) {
         let (returned, last) = (page.info.returned, page.info.next_cursor.is_none());
         let n = left_out.on_page(views::Why::Error, offset, returned, last);
@@ -1507,7 +1507,8 @@ impl MedrecTools {
         let mut out = page.page(items, "person, since/until or name")?;
         warn_labels(&mut out);
         private.warn(&mut out, page.offset(), &left_out);
-        if person.is_some() {
+        // A row without detail shows no member of it.
+        if person.is_some() && detailed {
             let of = |i: &Item| unknown.get(&i.id).into_iter().flatten();
             let of: BTreeSet<String> = out.items.iter().flat_map(of).cloned().collect();
             others.warn_of_parts(&mut out, &of);

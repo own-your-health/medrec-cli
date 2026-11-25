@@ -466,7 +466,9 @@ are:
 - a `result` whose `about` says so. An import sets it from an Observation's
   `focus`, where that names a RelatedPerson, or a Patient other than its
   `subject`: `a parent` where the reference's `display` or the relationship of
-  the RelatedPerson it contains says so, else `another person`.
+  the RelatedPerson it contains says so, else `another person`. Its `key` ends
+  with `|about ` and what the `focus` refers to, so it is never one record with
+  the person's own of that code and day.
 - a `result` or a `report` of a questionnaire that a grown person answers
   (Questionnaires, under Private, below), dated before the person's 11th
   birthday, or undated and first fetched before it. Not a laboratory's, whose
@@ -477,7 +479,10 @@ are:
   provenance of which is the household's own.
 
 An item is one by what it shows or by anything a source gave of it (`given`), so
-no later version brings it back, and the household marks none.
+no later version brings it back, and the household marks none. A result with an
+`about` in `given` is one where that is of the resource its values are of (the
+raw file of its only provenance, its `fields_from`, else that of the first
+resource an import lets write it), or of no known raw file.
 
 - No view or answer has it: no list, timeline, search, series of tests, latest
   result, current list, event, bill, total or sheet. A claim's `results` and its
@@ -495,9 +500,12 @@ no later version brings it back, and the household marks none.
   chart` or `about another person, in <name>'s chart`, and `medrec documents
   open <ID>` opens a paper and says the same.
 - An Observation that a medrec before 0.9.9 read in has its `about` once its
-  source serves it again: `medrec reindex` reads none again. A medrec before
-  0.9.9 shows all of it, so run 0.9.9 or later on every machine that reads the
-  folder.
+  source serves it again, or from `medrec reindex`, which reads the raw files.
+  One that was filed in one record with the person's own then goes to a record
+  of its own, and the person's has its own values again; where no raw file of
+  the person's own reads, what is left stays about another person. A medrec
+  before 0.9.9 shows all of it, so run 0.9.9 or later on every machine that
+  reads the folder.
 
 **Providers.** A record's `providers` (0.9.6 and later) is what its sources
 say of the people and places its fields print, beyond their names: a list
@@ -554,7 +562,8 @@ gained fields), `providers_updated` (0.9.6 and later: records whose
 `words` or `errors` changed, or whose values another source's took the place
 of, and conditions, allergies and medicines whose `status` or `fields`
 changed), `given_updated` (0.9.9 and later: records whose `given` gained
-something), `papers_updated` (0.9.9 and later: papers whose `also_from`,
+something), `results_split` (0.9.9 and later: results that were filed in one
+record with one about somebody else), `papers_updated` (0.9.9 and later: papers whose `also_from`,
 `words`, `errors` or `given` changed) and `papers_unread` (0.9.9 and later: raw files of
 papers that do not read).
 

@@ -3,9 +3,10 @@
 //! more take the current shape too; what the sources' raw files say of the
 //! providers each record prints ([`crate::providers`]); the fields of every
 //! condition, allergy and medicine; what each source says of every record and
-//! paper that keeps it; the other sources that served a paper's bytes; and
-//! every bill's and receipt's statement read again from its stored text for
-//! the fields it lacks. It reads only the folder.
+//! paper that keeps it; the results that are about somebody else; the other
+//! sources that served a paper's bytes; and every bill's and receipt's
+//! statement read again from its stored text for the fields it lacks. It reads
+//! only the folder.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
@@ -14,6 +15,7 @@ use pk_cli_core::CliError;
 use serde::Serialize;
 use serde_json::Value;
 
+use crate::about;
 use crate::claims::without_links;
 use crate::folder::Folder;
 use crate::given::{self, Given};
@@ -44,6 +46,8 @@ pub struct Reindexed {
     /// Records that keep something more that a source gave and they do not
     /// show.
     pub given_updated: usize,
+    /// Results that were filed with one about somebody else.
+    pub results_split: usize,
     /// Papers whose sources, or what one says or gave of them, changed.
     pub papers_updated: usize,
     /// Raw files of papers that do not read.
@@ -61,6 +65,7 @@ pub struct PersonReindexed {
     pub providers_updated: usize,
     pub statuses_updated: usize,
     pub given_updated: usize,
+    pub results_split: usize,
     pub papers_updated: usize,
     pub papers_unread: usize,
 }
@@ -116,6 +121,7 @@ pub fn claims(
         fetch(folder, &sources, tmp.path(), &dirs, RAW_TYPES)?;
         fetch_said(folder, &idx, tmp.path())?;
         let older = fetch_older(folder, &idx, &sources, tmp.path())?;
+        row.results_split = apart(&mut idx, tmp.path())?;
         let showed: Vec<Given> = idx.records.iter().map(import::showed).collect();
         row.statuses_updated = statuses(&mut idx, tmp.path())?;
         for r in idx.records.iter_mut().filter(|r| r.kind == "claim") {
@@ -159,6 +165,7 @@ pub fn claims(
             row.providers_updated,
             row.statuses_updated,
             row.given_updated,
+            row.results_split,
             row.papers_updated,
         ];
         if !dry_run && changed.iter().any(|n| *n > 0) {
@@ -168,6 +175,7 @@ pub fn claims(
         out.providers_updated += row.providers_updated;
         out.statuses_updated += row.statuses_updated;
         out.given_updated += row.given_updated;
+        out.results_split += row.results_split;
         out.papers_updated += row.papers_updated;
         out.papers_unread += row.papers_unread;
         out.claims += row.claims;
@@ -328,6 +336,60 @@ pub(crate) fn given_by(
     let older = fetch_older(folder, idx, &sources, tmp.path())?;
     let showed: Vec<Given> = idx.records.iter().map(import::showed).collect();
     given(idx, &showed, &older, tmp.path())
+}
+
+/// Each resource about somebody else that was filed with the person's own in
+/// one record, in a record of its own. How many records had one.
+fn apart(idx: &mut PersonIndex, tmp: &Path) -> Result<usize, CliError> {
+    let shape = |p: &Provenance| {
+        let v = read(tmp, p.raw_path.as_ref()?)?;
+        normalize::record(&v, p.clone())
+    };
+    let mut moved: Vec<Record> = Vec::new();
+    let mut split = 0;
+    for r in &mut idx.records {
+        if r.kind != "result" || r.provenance.len() < 2 {
+            continue;
+        }
+        let other = |p: &Provenance| shape(p).filter(|n| n.fields.contains_key(about::FIELD));
+        let others: Vec<Record> = r.provenance.iter().filter_map(other).collect();
+        if others.is_empty() || others.len() == r.provenance.len() {
+            continue;
+        }
+        split += 1;
+        let of = |path: &Option<String>| {
+            let mut others = others.iter();
+            path.is_some() && others.any(|n| n.provenance[0].raw_path == *path)
+        };
+        let wrote = of(&import::wrote(r).map(str::to_string));
+        r.provenance.retain(|p| !of(&p.raw_path));
+        for mut n in others {
+            let path = n.provenance[0].raw_path.clone();
+            let its = |p: &String| path.as_ref() == Some(p);
+            let kept = r.words.iter().filter(|w| w.in_error() && its(&w.raw_path));
+            n.words = kept.cloned().collect();
+            let kept = r.errors.iter().filter(|e| its(&e.raw_path));
+            n.errors = kept.cloned().collect();
+            moved.push(n);
+        }
+        let left: Vec<String> = r
+            .provenance
+            .iter()
+            .filter_map(|p| p.raw_path.clone())
+            .collect();
+        r.words.retain(|w| left.contains(&w.raw_path));
+        r.errors.retain(|e| left.contains(&e.raw_path));
+        if wrote {
+            import::values_again(r, &mut |p| Ok(shape(p)))?;
+        }
+    }
+    for n in moved {
+        match idx.records.iter_mut().find(|r| r.key == n.key) {
+            Some(r) => r.provenance.extend(n.provenance),
+            None => idx.records.push(n),
+        }
+    }
+    Ok(split)
 }
 
 /// What the sources gave of each record that it does not show: by every
@@ -508,6 +570,7 @@ fn read(tmp: &Path, rel: &str) -> Option<Value> {
 /// The raw files providers come from: the kinds that print one, and what
 /// they point at.
 const RAW_TYPES: &[&str] = &[
+    "Observation",
     "Encounter",
     "MedicationRequest",
     "MedicationDispense",

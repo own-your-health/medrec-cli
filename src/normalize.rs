@@ -534,6 +534,12 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
             identity(r, &provenance),
             date.as_deref().unwrap_or("")
         ),
+        // A test of somebody else is none of the person's own.
+        "Observation" if fields.contains_key(crate::about::FIELD) => format!(
+            "{}|about {}",
+            merge_key(kind, code.as_ref(), &display, date.as_deref()),
+            focus(r)
+        ),
         _ => merge_key(kind, code.as_ref(), &display, date.as_deref()),
     };
     debug_assert!(
@@ -667,6 +673,14 @@ fn age_text(q: &Value) -> Option<String> {
         code => s("unit").or(code).unwrap_or(""),
     };
     Some(format!("{value} {unit}").trim().to_string())
+}
+
+/// What an Observation's `focus` refers to, in order.
+fn focus(r: &Value) -> String {
+    let all = r.get("focus").and_then(Value::as_array);
+    let of = all.into_iter().flatten();
+    let of = of.filter_map(|f| f.get("reference")?.as_str());
+    of.collect::<Vec<_>>().join(" ")
 }
 
 /// The person an Observation's `focus` says it is about, where that is not its

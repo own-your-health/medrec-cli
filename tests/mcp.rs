@@ -2697,11 +2697,17 @@ const ANY_AGE: [&str; 4] = [
     "r_smokeaaaaaaaaaaaaaaa",
 ];
 /// The answers about substance use.
-const USE: [&str; 3] = [
+const USE: [&str; 5] = [
     "r_drinksaaaaaaaaaaaaaa",
     "r_drugsaaaaaaaaaaaaaaa",
     "r_smokeaaaaaaaaaaaaaaa",
+    LEAVES,
+    FORMERLY,
 ];
+/// Conditions with a code for tobacco use, and one with another.
+const LEAVES: &str = "r_leavesaaaaaaaaaaaaaa";
+const FORMERLY: &str = "r_formerlyaaaaaaaaaaaa";
+const ANKLE: &str = "r_ankleaaaaaaaaaaaaaaa";
 /// A pharmacy claim of a private medicine, and one of another.
 const CALM: &str = "r_calmfillaaaaaaaaaaaa";
 const NOSE: &str = "r_nosefillaaaaaaaaaaaa";
@@ -2818,6 +2824,18 @@ fn what_a_questionnaire_asks_is_private_everywhere() {
         assert!(v.to_string().contains("sunlight"), "{kind}: {v}");
     }
     assert!(shared["search, survey"].to_string().contains(SUNLIGHT));
+    for kind in ["conditions", "timeline"] {
+        let v = &shared[&format!("{kind}, concise")];
+        assert!(v.to_string().contains(ANKLE), "{kind}: {v}");
+    }
+    for id in [LEAVES, FORMERLY] {
+        assert_eq!(files["private"]["records"][id]["from"], "code", "{id}");
+    }
+    // The names of the records that list a paper, and whose they are.
+    let papers = files["documents"].as_array().unwrap();
+    let paper = papers.iter().find(|d| d["id"] == GROWN[7]).unwrap();
+    assert_eq!(paper["linked"], json!(["Depression screening"]));
+    assert_eq!(paper["linked_ids"], json!([GROWN[6]]));
     for v in shared.values() {
         for word in NAMED {
             assert!(!v.to_string().contains(word), "{word}: {v}");
@@ -3102,11 +3120,15 @@ fn what_an_event_shows_of_another_person_is_judged_as_theirs() {
     let marks = e.records().join("Robin Example/marks.json");
     let kept = std::fs::read(&marks).unwrap();
     std::fs::write(&marks, "{").unwrap();
-    let about = |person: &str| -> Value {
+    let as_form = |person: &str, form: &str| -> Value {
         let args = json!({"kind": "events", "person": person, "limit": 50,
-            "response_format": "detailed"});
+            "response_format": form});
         assert_fits(&t, RECORDS, &call(&t, RECORDS, args)).clone()
     };
+    let about = |person: &str| as_form(person, "detailed");
+    // A page that shows no member says nothing of those left out.
+    let v = as_form("Alex", "concise");
+    assert!(v.get("warnings").is_none(), "{v}");
     let v = about("Alex");
     for e in v["items"].as_array().unwrap() {
         assert!(e["fields"].get("links").is_none(), "{e}");

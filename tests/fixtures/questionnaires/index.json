@@ -307,6 +307,90 @@
    ]
   },
   {
+   "id": "r_leavesaaaaaaaaaaaaaa",
+   "kind": "condition",
+   "key": "condition|leaves|2024-05-28",
+   "date": "2024-05-28",
+   "display": "Example condition, leaves",
+   "status": "active",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-07-02T10:00:00Z",
+     "filed_at": "2024-07-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/Observation/leaves.json"
+    }
+   ],
+   "code": {
+    "system": "http://hl7.org/fhir/sid/icd-10-cm",
+    "code": "Z72.0"
+   }
+  },
+  {
+   "id": "r_formerlyaaaaaaaaaaaa",
+   "kind": "condition",
+   "key": "condition|formerly|2024-05-29",
+   "date": "2024-05-29",
+   "display": "Example condition, formerly",
+   "status": "active",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-07-02T10:00:00Z",
+     "filed_at": "2024-07-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/Observation/formerly.json"
+    }
+   ],
+   "code": {
+    "system": "http://hl7.org/fhir/sid/icd-10-cm",
+    "code": "Z87.891"
+   }
+  },
+  {
+   "id": "r_ankleaaaaaaaaaaaaaaa",
+   "kind": "condition",
+   "key": "condition|ankle|2024-05-30",
+   "date": "2024-05-30",
+   "display": "Example condition, ankle",
+   "status": "active",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-07-02T10:00:00Z",
+     "filed_at": "2024-07-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/Observation/ankle.json"
+    }
+   ],
+   "code": {
+    "system": "http://hl7.org/fhir/sid/icd-10-cm",
+    "code": "S93.401A"
+   }
+  },
+  {
    "id": "r_checkupaaaaaaaaaaaaa",
    "kind": "encounter",
    "key": "encounter|checkup|2024-03-04",

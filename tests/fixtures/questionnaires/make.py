@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Writes index.json: an invented person's results, one for each kind of
-questionnaire of "Private" in docs/data-contract.md and one that is none, a
-report of one with its paper, a paper named as one, a visit and claims of some
+questionnaire of "Private" in docs/data-contract.md and one that is none,
+conditions with a code for tobacco use and one without, a report of one with its
+paper, a paper named as one, a visit and claims of some
 of those days, and two pharmacy claims. The sources are those of
 ../standing/household.json."""
 
@@ -47,6 +48,14 @@ def record(kind, name, day, display, code=None, documents=(), **fields):
         r["code"] = {"system": LOINC, "code": code}
     if documents:
         r["documents"] = list(documents)
+    return r
+
+
+def condition(name, day, code):
+    """A diagnosis with a name that says nothing of what its code does."""
+    r = record("condition", name, day, f"Example condition, {name}")
+    r["status"] = "active"
+    r["code"] = {"system": "http://hl7.org/fhir/sid/icd-10-cm", "code": code}
     return r
 
 
@@ -127,6 +136,9 @@ with open(os.path.join(HERE, "index.json"), "w") as f:
                     record("result", n, day, display, code, value="4", category="Survey")
                     for n, day, display, code in RESULTS
                 ),
+                condition("leaves", "2024-05-28", "Z72.0"),
+                condition("formerly", "2024-05-29", "Z87.891"),
+                condition("ankle", "2024-05-30", "S93.401A"),
                 visit("checkup", "2024-03-04"),
                 claim("hearvisit", "2024-03-18", results=[oid("r_", "worry")]),
                 claim(

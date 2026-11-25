@@ -797,6 +797,8 @@ enum RecordsCmd {
     AboutAnother {
         #[arg(long)]
         person: Option<String>,
+        #[command(flatten)]
+        list: ListArgs,
     },
 }
 
@@ -3187,14 +3189,14 @@ fn one_record_cmd(cli: &Cli, cmd: &RecordsCmd, store: &ConfigStore) -> Result<()
                 output::kv(v, 0)
             });
         }
-        RecordsCmd::AboutAnother { person } => {
+        RecordsCmd::AboutAnother { person, list } => {
             let mut rows = Vec::new();
             for p in medrec::people::selected(&h, person.as_deref())? {
                 for id in f.index(p)?.about_another {
                     rows.push(json!({"person": p.id, "id": id}));
                 }
             }
-            let out = json!({ "items": rows });
+            let out = json!({ "items": list.take(&rows) });
             output::emit(json, "about-another-list", out, |v| {
                 table(v, &["person", "id"]);
             });
