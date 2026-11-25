@@ -1,0 +1,1997 @@
+{
+ "schema": "medrec-index/v1",
+ "person": "p_robinaaaaaaaaaaaaaaa",
+ "rev": 1,
+ "documents": [],
+ "records": [
+  {
+   "id": "r_resulterroraaaaaaaaa",
+   "kind": "result",
+   "key": "result|resulterror|2024-05-22",
+   "date": "2024-05-22",
+   "display": "Sample level",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "east",
+      "fhir_base": "https://east.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-03T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/east/resulterror-0.json"
+    }
+   ],
+   "status": "entered-in-error",
+   "code": {
+    "system": "http://example.org/codes",
+    "code": "L-1",
+    "display": "Sample level"
+   }
+  },
+  {
+   "id": "r_fillerroraaaaaaaaaaa",
+   "kind": "medication",
+   "key": "medication|fillerror|2024-05-21",
+   "date": "2024-05-21",
+   "display": "Sample capsule",
+   "fields": {
+    "source": "dispense"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "east",
+      "fhir_base": "https://east.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-03T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/east/fillerror-0.json"
+    }
+   ],
+   "status": "entered-in-error",
+   "code": {
+    "system": "http://example.org/codes",
+    "code": "M-2",
+    "display": "Sample capsule"
+   }
+  },
+  {
+   "id": "r_fillreturnedaaaaaaaa",
+   "kind": "medication",
+   "key": "medication|fillreturned|2024-05-20",
+   "date": "2024-05-20",
+   "display": "Sample capsule",
+   "fields": {
+    "source": "dispense"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "east",
+      "fhir_base": "https://east.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-03T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/east/fillreturned-0.json"
+    }
+   ],
+   "status": "cancelled",
+   "code": {
+    "system": "http://example.org/codes",
+    "code": "M-2",
+    "display": "Sample capsule"
+   }
+  },
+  {
+   "id": "r_fillafteraaaaaaaaaaa",
+   "kind": "medication",
+   "key": "medication|fillafter|2024-05-02",
+   "date": "2024-05-02",
+   "display": "Sample capsule",
+   "fields": {
+    "source": "dispense"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "east",
+      "fhir_base": "https://east.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-03T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/east/fillafter-0.json"
+    }
+   ],
+   "status": "completed",
+   "code": {
+    "system": "http://example.org/codes",
+    "code": "M-2",
+    "display": "Sample capsule"
+   }
+  },
+  {
+   "id": "r_plainaaaaaaaaaaaaaaa",
+   "kind": "condition",
+   "key": "condition|plain|2024-04-20",
+   "date": "2024-04-20",
+   "display": "Sample stiffness",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-02T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/plain-0.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/north/plain-0.json",
+     "status": "active",
+     "verification": "confirmed",
+     "categories": [
+      "problem-list-item"
+     ]
+    }
+   ],
+   "status": "active",
+   "code": {
+    "system": "http://example.org/codes",
+    "code": "C-1",
+    "display": "Sample stiffness"
+   }
+  },
+  {
+   "id": "r_bothsayaaaaaaaaaaaaa",
+   "kind": "condition",
+   "key": "condition|bothsay|2024-04-19",
+   "date": "2024-04-19",
+   "display": "Sample ache",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-02T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/bothsay-0.json"
+    },
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "east",
+      "fhir_base": "https://east.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-03T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/east/bothsay-1.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/north/bothsay-0.json",
+     "status": "active",
+     "verification": "confirmed",
+     "categories": [
+      "problem-list-item"
+     ]
+    },
+    {
+     "raw_path": "Robin Example/Records/east/bothsay-1.json",
+     "status": "resolved",
+     "verification": "confirmed",
+     "categories": [
+      "problem-list-item"
+     ]
+    }
+   ],
+   "fields_from": "Robin Example/Records/north/bothsay-0.json",
+   "status": "active",
+   "code": {
+    "system": "http://example.org/codes",
+    "code": "C-2",
+    "display": "Sample ache"
+   }
+  },
+  {
+   "id": "r_tworecordsaaaaaaaaaa",
+   "kind": "condition",
+   "key": "condition|tworecords|2024-04-18",
+   "date": "2024-04-18",
+   "display": "Sample rash",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-02T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/tworecords-0.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/north/tworecords-0.json",
+     "status": "active",
+     "categories": [
+      "problem-list-item"
+     ]
+    }
+   ],
+   "status": "active",
+   "code": {
+    "system": "http://example.org/codes",
+    "code": "C-3",
+    "display": "Sample rash"
+   }
+  },
+  {
+   "id": "r_tworecordsotheraaaaa",
+   "kind": "condition",
+   "key": "condition|tworecordsother|2024-04-17",
+   "date": "2024-04-17",
+   "display": "Sample rash",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "east",
+      "fhir_base": "https://east.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-03T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/east/tworecordsother-0.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/east/tworecordsother-0.json",
+     "status": "resolved",
+     "categories": [
+      "problem-list-item"
+     ]
+    }
+   ],
+   "status": "resolved",
+   "code": {
+    "system": "http://example.org/codes",
+    "code": "C-3",
+    "display": "Sample rash"
+   }
+  },
+  {
+   "id": "r_againaaaaaaaaaaaaaaa",
+   "kind": "condition",
+   "key": "condition|again|2024-04-16",
+   "date": "2024-04-16",
+   "display": "Sample cough",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-02T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/again-0.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/north/again-0.json",
+     "status": "active",
+     "categories": [
+      "problem-list-item"
+     ]
+    }
+   ],
+   "status": "active",
+   "code": {
+    "system": "http://example.org/codes",
+    "code": "C-4",
+    "display": "Sample cough"
+   }
+  },
+  {
+   "id": "r_visitonlyaaaaaaaaaaa",
+   "kind": "condition",
+   "key": "condition|visitonly|2024-04-15",
+   "date": "2024-04-15",
+   "display": "Sample sprain",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "walkin",
+      "fhir_base": "https://walkin.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-04T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/walkin/visitonly-0.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/walkin/visitonly-0.json",
+     "status": "active",
+     "categories": [
+      "encounter-diagnosis"
+     ]
+    }
+   ],
+   "status": "active",
+   "code": {
+    "system": "http://example.org/codes",
+    "code": "C-5",
+    "display": "Sample sprain"
+   }
+  },
+  {
+   "id": "r_onlistaaaaaaaaaaaaaa",
+   "kind": "condition",
+   "key": "condition|onlist|2024-04-14",
+   "date": "2024-04-14",
+   "display": "Sample itch",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-02T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/onlist-0.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/north/onlist-0.json",
+     "status": "active",
+     "categories": [
+      "problem-list-item"
+     ]
+    }
+   ],
+   "status": "active",
+   "code": {
+    "system": "http://example.org/codes",
+    "code": "C-6",
+    "display": "Sample itch"
+   }
+  },
+  {
+   "id": "r_onlistvisitaaaaaaaaa",
+   "kind": "condition",
+   "key": "condition|onlistvisit|2024-04-13",
+   "date": "2024-04-13",
+   "display": "Sample itch",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "walkin",
+      "fhir_base": "https://walkin.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-04T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/walkin/onlistvisit-0.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/walkin/onlistvisit-0.json",
+     "status": "active",
+     "categories": [
+      "encounter-diagnosis"
+     ]
+    }
+   ],
+   "status": "active",
+   "code": {
+    "system": "http://example.org/codes",
+    "code": "C-6",
+    "display": "Sample itch"
+   }
+  },
+  {
+   "id": "r_refutedaaaaaaaaaaaaa",
+   "kind": "condition",
+   "key": "condition|refuted|2024-04-12",
+   "date": "2024-04-12",
+   "display": "Sample fever",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-02T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/refuted-0.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/north/refuted-0.json",
+     "status": "active",
+     "verification": "refuted",
+     "categories": [
+      "problem-list-item"
+     ]
+    }
+   ],
+   "status": "active",
+   "code": {
+    "system": "http://example.org/codes",
+    "code": "C-7",
+    "display": "Sample fever"
+   }
+  },
+  {
+   "id": "r_refutedbyoneaaaaaaaa",
+   "kind": "condition",
+   "key": "condition|refutedbyone|2024-04-11",
+   "date": "2024-04-11",
+   "display": "Sample tremor",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-02T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/refutedbyone-0.json"
+    },
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "east",
+      "fhir_base": "https://east.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-03T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/east/refutedbyone-1.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/north/refutedbyone-0.json",
+     "verification": "refuted",
+     "categories": [
+      "problem-list-item"
+     ]
+    },
+    {
+     "raw_path": "Robin Example/Records/east/refutedbyone-1.json",
+     "status": "active",
+     "verification": "confirmed",
+     "categories": [
+      "problem-list-item"
+     ]
+    }
+   ],
+   "fields_from": "Robin Example/Records/north/refutedbyone-0.json",
+   "code": {
+    "system": "http://example.org/codes",
+    "code": "C-8",
+    "display": "Sample tremor"
+   }
+  },
+  {
+   "id": "r_erroraaaaaaaaaaaaaaa",
+   "kind": "condition",
+   "key": "condition|error|2024-04-10",
+   "date": "2024-04-10",
+   "display": "Sample burn",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-02T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/error-0.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/north/error-0.json",
+     "verification": "entered-in-error",
+     "categories": [
+      "problem-list-item"
+     ]
+    }
+   ],
+   "code": {
+    "system": "http://example.org/codes",
+    "code": "C-9",
+    "display": "Sample burn"
+   }
+  },
+  {
+   "id": "r_fillsoonaaaaaaaaaaaa",
+   "kind": "medication",
+   "key": "medication|fillsoon|2024-04-10",
+   "date": "2024-04-10",
+   "display": "Sample capsule",
+   "fields": {
+    "source": "dispense"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "east",
+      "fhir_base": "https://east.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-03T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/east/fillsoon-0.json"
+    }
+   ],
+   "status": "completed",
+   "code": {
+    "system": "http://example.org/codes",
+    "code": "M-2",
+    "display": "Sample capsule"
+   }
+  },
+  {
+   "id": "r_provisionalaaaaaaaaa",
+   "kind": "condition",
+   "key": "condition|provisional|2024-04-09",
+   "date": "2024-04-09",
+   "display": "Sample spasm",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-02T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/provisional-0.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/north/provisional-0.json",
+     "status": "active",
+     "verification": "provisional",
+     "categories": [
+      "problem-list-item"
+     ]
+    }
+   ],
+   "status": "active",
+   "code": {
+    "system": "http://example.org/codes",
+    "code": "C-10",
+    "display": "Sample spasm"
+   }
+  },
+  {
+   "id": "r_suretwiceaaaaaaaaaaa",
+   "kind": "condition",
+   "key": "condition|suretwice|2024-04-08",
+   "date": "2024-04-08",
+   "display": "Sample strain",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-02T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/suretwice-0.json"
+    },
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "east",
+      "fhir_base": "https://east.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-03T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/east/suretwice-1.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/north/suretwice-0.json",
+     "status": "active",
+     "verification": "unconfirmed",
+     "categories": [
+      "problem-list-item"
+     ]
+    },
+    {
+     "raw_path": "Robin Example/Records/east/suretwice-1.json",
+     "status": "active",
+     "verification": "confirmed",
+     "categories": [
+      "problem-list-item"
+     ]
+    }
+   ],
+   "fields_from": "Robin Example/Records/north/suretwice-0.json",
+   "status": "active",
+   "code": {
+    "system": "http://example.org/codes",
+    "code": "C-11",
+    "display": "Sample strain"
+   }
+  },
+  {
+   "id": "r_abatedaaaaaaaaaaaaaa",
+   "kind": "condition",
+   "key": "condition|abated|2024-04-07",
+   "date": "2024-04-07",
+   "display": "Sample chill",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-02T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/abated-0.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/north/abated-0.json",
+     "categories": [
+      "problem-list-item"
+     ],
+     "abatement": "2022-05"
+    }
+   ],
+   "code": {
+    "system": "http://example.org/codes",
+    "code": "C-12",
+    "display": "Sample chill"
+   }
+  },
+  {
+   "id": "r_errorbesideaaaaaaaaa",
+   "kind": "condition",
+   "key": "condition|errorbeside|2024-04-06",
+   "date": "2024-04-06",
+   "display": "Sample swelling",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-02T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/errorbeside-0.json"
+    },
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "east",
+      "fhir_base": "https://east.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-03T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/east/errorbeside-1.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/north/errorbeside-0.json",
+     "verification": "entered-in-error",
+     "categories": [
+      "problem-list-item"
+     ]
+    },
+    {
+     "raw_path": "Robin Example/Records/east/errorbeside-1.json",
+     "status": "active",
+     "categories": [
+      "problem-list-item"
+     ]
+    }
+   ],
+   "fields_from": "Robin Example/Records/north/errorbeside-0.json",
+   "code": {
+    "system": "http://example.org/codes",
+    "code": "C-13",
+    "display": "Sample swelling"
+   }
+  },
+  {
+   "id": "r_byhandaaaaaaaaaaaaaa",
+   "kind": "condition",
+   "key": "condition|byhand|2024-04-05",
+   "date": "2024-04-05",
+   "display": "Sample bruise",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-02T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9"
+    }
+   ]
+  },
+  {
+   "id": "r_bothendedaaaaaaaaaaa",
+   "kind": "condition",
+   "key": "condition|bothended|2024-04-04",
+   "date": "2024-04-04",
+   "display": "Sample knot",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-02T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/bothended-0.json"
+    },
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "east",
+      "fhir_base": "https://east.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-03T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/east/bothended-1.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/north/bothended-0.json",
+     "status": "resolved",
+     "categories": [
+      "problem-list-item"
+     ]
+    },
+    {
+     "raw_path": "Robin Example/Records/east/bothended-1.json",
+     "status": "inactive",
+     "categories": [
+      "problem-list-item"
+     ]
+    }
+   ],
+   "fields_from": "Robin Example/Records/north/bothended-0.json",
+   "status": "resolved",
+   "code": {
+    "system": "http://example.org/codes",
+    "code": "C-14",
+    "display": "Sample knot"
+   }
+  },
+  {
+   "id": "r_visitendedaaaaaaaaaa",
+   "kind": "condition",
+   "key": "condition|visitended|2024-04-03",
+   "date": "2024-04-03",
+   "display": "Sample blister",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "walkin",
+      "fhir_base": "https://walkin.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-04T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/walkin/visitended-0.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/walkin/visitended-0.json",
+     "status": "resolved",
+     "categories": [
+      "encounter-diagnosis"
+     ]
+    }
+   ],
+   "status": "resolved",
+   "code": {
+    "system": "http://example.org/codes",
+    "code": "C-15",
+    "display": "Sample blister"
+   }
+  },
+  {
+   "id": "r_wroteaaaaaaaaaaaaaaa",
+   "kind": "condition",
+   "key": "condition|wrote|2024-04-02",
+   "date": "2024-04-02",
+   "display": "Sample lump",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-02T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/wrote-0.json"
+    },
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "east",
+      "fhir_base": "https://east.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-03T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/east/wrote-1.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/east/wrote-1.json",
+     "status": "resolved",
+     "categories": [
+      "problem-list-item"
+     ]
+    }
+   ],
+   "fields_from": "Robin Example/Records/north/wrote-0.json",
+   "status": "resolved",
+   "code": {
+    "system": "http://example.org/codes",
+    "code": "C-16",
+    "display": "Sample lump"
+   }
+  },
+  {
+   "id": "r_mayhavelistaaaaaaaaa",
+   "kind": "condition",
+   "key": "condition|mayhavelist|2024-04-01",
+   "date": "2024-04-01",
+   "display": "Sample hiccup",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "dropin",
+      "fhir_base": "https://dropin.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-05T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/dropin/mayhavelist-0.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/dropin/mayhavelist-0.json",
+     "status": "active",
+     "categories": [
+      "encounter-diagnosis"
+     ]
+    }
+   ],
+   "status": "active",
+   "code": {
+    "system": "http://example.org/codes",
+    "code": "C-17",
+    "display": "Sample hiccup"
+   }
+  },
+  {
+   "id": "r_mayhavelisttooaaaaaa",
+   "kind": "condition",
+   "key": "condition|mayhavelisttoo|2024-03-31",
+   "date": "2024-03-31",
+   "display": "Sample graze",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-02T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/mayhavelisttoo-0.json"
+    },
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "dropin",
+      "fhir_base": "https://dropin.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-05T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/dropin/mayhavelisttoo-1.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/north/mayhavelisttoo-0.json",
+     "status": "resolved",
+     "categories": [
+      "problem-list-item"
+     ]
+    }
+   ],
+   "fields_from": "Robin Example/Records/north/mayhavelisttoo-0.json",
+   "status": "resolved",
+   "code": {
+    "system": "http://example.org/codes",
+    "code": "C-18",
+    "display": "Sample graze"
+   }
+  },
+  {
+   "id": "r_nutaaaaaaaaaaaaaaaaa",
+   "kind": "allergy",
+   "key": "allergy|nut|2024-03-20",
+   "date": "2024-03-20",
+   "display": "Sample nut",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-02T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/nut-0.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/north/nut-0.json",
+     "status": "active",
+     "verification": "confirmed"
+    }
+   ],
+   "status": "active"
+  },
+  {
+   "id": "r_nutagainaaaaaaaaaaaa",
+   "kind": "allergy",
+   "key": "allergy|nutagain|2024-03-19",
+   "date": "2024-03-19",
+   "display": "SAMPLE NUT",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "east",
+      "fhir_base": "https://east.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-03T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/east/nutagain-0.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/east/nutagain-0.json",
+     "status": "active",
+     "verification": "confirmed"
+    }
+   ],
+   "status": "active"
+  },
+  {
+   "id": "r_inactiveaaaaaaaaaaaa",
+   "kind": "allergy",
+   "key": "allergy|inactive|2024-03-17",
+   "date": "2024-03-17",
+   "display": "Sample dust",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-02T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/inactive-0.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/north/inactive-0.json",
+     "status": "inactive"
+    }
+   ],
+   "status": "inactive"
+  },
+  {
+   "id": "r_refutedallergyaaaaaa",
+   "kind": "allergy",
+   "key": "allergy|refutedallergy|2024-03-16",
+   "date": "2024-03-16",
+   "display": "Sample latex",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-02T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/refutedallergy-0.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/north/refutedallergy-0.json",
+     "status": "active",
+     "verification": "refuted"
+    }
+   ],
+   "status": "active"
+  },
+  {
+   "id": "r_errorallergyaaaaaaaa",
+   "kind": "allergy",
+   "key": "allergy|errorallergy|2024-03-15",
+   "date": "2024-03-15",
+   "display": "Sample dye",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-02T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/errorallergy-0.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/north/errorallergy-0.json",
+     "status": "active",
+     "verification": "entered-in-error"
+    }
+   ],
+   "status": "active"
+  },
+  {
+   "id": "r_oneheardaaaaaaaaaaaa",
+   "kind": "allergy",
+   "key": "allergy|oneheard|2024-03-14",
+   "date": "2024-03-14",
+   "display": "Sample glue",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-02T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/oneheard-0.json"
+    },
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "east",
+      "fhir_base": "https://east.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-03T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/east/oneheard-1.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/east/oneheard-1.json",
+     "status": "inactive"
+    }
+   ],
+   "status": "active"
+  },
+  {
+   "id": "r_errorunheardaaaaaaaa",
+   "kind": "allergy",
+   "key": "allergy|errorunheard|2024-03-13",
+   "date": "2024-03-13",
+   "display": "Sample resin",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-02T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/errorunheard-0.json"
+    },
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "east",
+      "fhir_base": "https://east.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-03T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/east/errorunheard-1.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/north/errorunheard-0.json",
+     "status": "entered-in-error"
+    }
+   ],
+   "status": "entered-in-error"
+  },
+  {
+   "id": "r_fillbeforeaaaaaaaaaa",
+   "kind": "medication",
+   "key": "medication|fillbefore|2024-03-05",
+   "date": "2024-03-05",
+   "display": "Sample capsule",
+   "fields": {
+    "source": "dispense"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "east",
+      "fhir_base": "https://east.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-03T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/east/fillbefore-0.json"
+    }
+   ],
+   "status": "completed",
+   "code": {
+    "system": "http://example.org/codes",
+    "code": "M-2",
+    "display": "Sample capsule"
+   }
+  },
+  {
+   "id": "r_noendaaaaaaaaaaaaaaa",
+   "kind": "medication",
+   "key": "medication|noend|2024-02-20",
+   "date": "2024-02-20",
+   "display": "Sample tablet",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-02T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/noend-0.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/north/noend-0.json",
+     "status": "active"
+    }
+   ],
+   "status": "active",
+   "code": {
+    "system": "http://example.org/codes",
+    "code": "M-1",
+    "display": "Sample tablet"
+   }
+  },
+  {
+   "id": "r_noendtwiceaaaaaaaaaa",
+   "kind": "medication",
+   "key": "medication|noendtwice|2024-02-19",
+   "date": "2024-02-19",
+   "display": "Sample tablet",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "east",
+      "fhir_base": "https://east.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-03T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/east/noendtwice-0.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/east/noendtwice-0.json",
+     "status": "active"
+    }
+   ],
+   "status": "active",
+   "code": {
+    "system": "http://example.org/codes",
+    "code": "M-1",
+    "display": "Sample tablet"
+   }
+  },
+  {
+   "id": "r_endsaaaaaaaaaaaaaaaa",
+   "kind": "medication",
+   "key": "medication|ends|2024-02-18",
+   "date": "2024-02-18",
+   "display": "Sample capsule",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-02T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/ends-0.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/north/ends-0.json",
+     "status": "active",
+     "end": "2024-03-31",
+     "end_of": "prescription"
+    }
+   ],
+   "status": "active",
+   "code": {
+    "system": "http://example.org/codes",
+    "code": "M-2",
+    "display": "Sample capsule"
+   }
+  },
+  {
+   "id": "r_endsmonthaaaaaaaaaaa",
+   "kind": "medication",
+   "key": "medication|endsmonth|2024-02-17",
+   "date": "2024-02-17",
+   "display": "Sample drops",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-02T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/endsmonth-0.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/north/endsmonth-0.json",
+     "status": "active",
+     "end": "2024-06",
+     "end_of": "dosage"
+    }
+   ],
+   "status": "active",
+   "code": {
+    "system": "http://example.org/codes",
+    "code": "M-3",
+    "display": "Sample drops"
+   }
+  },
+  {
+   "id": "r_endsatoneaaaaaaaaaaa",
+   "kind": "medication",
+   "key": "medication|endsatone|2024-02-16",
+   "date": "2024-02-16",
+   "display": "Sample syrup",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-02T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/endsatone-0.json"
+    },
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "east",
+      "fhir_base": "https://east.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-03T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/east/endsatone-1.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/north/endsatone-0.json",
+     "status": "active",
+     "end": "2024-03-31",
+     "end_of": "prescription"
+    },
+    {
+     "raw_path": "Robin Example/Records/east/endsatone-1.json",
+     "status": "active"
+    }
+   ],
+   "fields_from": "Robin Example/Records/north/endsatone-0.json",
+   "status": "active",
+   "code": {
+    "system": "http://example.org/codes",
+    "code": "M-4",
+    "display": "Sample syrup"
+   }
+  },
+  {
+   "id": "r_endstwiceaaaaaaaaaaa",
+   "kind": "medication",
+   "key": "medication|endstwice|2024-02-15",
+   "date": "2024-02-15",
+   "display": "Sample cream",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-02T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/endstwice-0.json"
+    },
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "east",
+      "fhir_base": "https://east.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-03T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/east/endstwice-1.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/north/endstwice-0.json",
+     "status": "active",
+     "end": "2024-03-31",
+     "end_of": "prescription"
+    },
+    {
+     "raw_path": "Robin Example/Records/east/endstwice-1.json",
+     "status": "active",
+     "end": "2024-06-30",
+     "end_of": "taking"
+    }
+   ],
+   "fields_from": "Robin Example/Records/north/endstwice-0.json",
+   "status": "active",
+   "code": {
+    "system": "http://example.org/codes",
+    "code": "M-5",
+    "display": "Sample cream"
+   }
+  },
+  {
+   "id": "r_onholdaaaaaaaaaaaaaa",
+   "kind": "medication",
+   "key": "medication|onhold|2024-02-14",
+   "date": "2024-02-14",
+   "display": "Sample patch",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-02T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/onhold-0.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/north/onhold-0.json",
+     "status": "on-hold"
+    }
+   ],
+   "status": "on-hold",
+   "code": {
+    "system": "http://example.org/codes",
+    "code": "M-6",
+    "display": "Sample patch"
+   }
+  },
+  {
+   "id": "r_draftaaaaaaaaaaaaaaa",
+   "kind": "medication",
+   "key": "medication|draft|2024-02-13",
+   "date": "2024-02-13",
+   "display": "Sample gel",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-02T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/draft-0.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/north/draft-0.json",
+     "status": "draft"
+    }
+   ],
+   "status": "draft",
+   "code": {
+    "system": "http://example.org/codes",
+    "code": "M-7",
+    "display": "Sample gel"
+   }
+  },
+  {
+   "id": "r_unknownaaaaaaaaaaaaa",
+   "kind": "medication",
+   "key": "medication|unknown|2024-02-12",
+   "date": "2024-02-12",
+   "display": "Sample spray",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-02T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/unknown-0.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/north/unknown-0.json",
+     "status": "unknown"
+    }
+   ],
+   "status": "unknown",
+   "code": {
+    "system": "http://example.org/codes",
+    "code": "M-8",
+    "display": "Sample spray"
+   }
+  },
+  {
+   "id": "r_nottakenaaaaaaaaaaaa",
+   "kind": "medication",
+   "key": "medication|nottaken|2024-02-11",
+   "date": "2024-02-11",
+   "display": "Sample lozenge",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-02T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/nottaken-0.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/north/nottaken-0.json",
+     "status": "not-taken"
+    }
+   ],
+   "status": "not-taken",
+   "code": {
+    "system": "http://example.org/codes",
+    "code": "M-9",
+    "display": "Sample lozenge"
+   }
+  },
+  {
+   "id": "r_stoppedatoneaaaaaaaa",
+   "kind": "medication",
+   "key": "medication|stoppedatone|2024-02-10",
+   "date": "2024-02-10",
+   "display": "Sample powder",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-02T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/stoppedatone-0.json"
+    },
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "east",
+      "fhir_base": "https://east.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-03T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/east/stoppedatone-1.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/north/stoppedatone-0.json",
+     "status": "active"
+    },
+    {
+     "raw_path": "Robin Example/Records/east/stoppedatone-1.json",
+     "status": "stopped"
+    }
+   ],
+   "fields_from": "Robin Example/Records/north/stoppedatone-0.json",
+   "status": "active",
+   "code": {
+    "system": "http://example.org/codes",
+    "code": "M-10",
+    "display": "Sample powder"
+   }
+  },
+  {
+   "id": "r_errormedicineaaaaaaa",
+   "kind": "medication",
+   "key": "medication|errormedicine|2024-02-08",
+   "date": "2024-02-08",
+   "display": "Sample wafer",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-02T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/errormedicine-0.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/north/errormedicine-0.json",
+     "status": "entered-in-error"
+    }
+   ],
+   "status": "entered-in-error",
+   "code": {
+    "system": "http://example.org/codes",
+    "code": "M-11",
+    "display": "Sample wafer"
+   }
+  },
+  {
+   "id": "r_noneheardaaaaaaaaaaa",
+   "kind": "medication",
+   "key": "medication|noneheard|2024-02-07",
+   "date": "2024-02-07",
+   "display": "Sample balm",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-02T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/noneheard-0.json"
+    },
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "east",
+      "fhir_base": "https://east.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-03T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/east/noneheard-1.json"
+    }
+   ],
+   "status": "stopped",
+   "code": {
+    "system": "http://example.org/codes",
+    "code": "M-12",
+    "display": "Sample balm"
+   }
+  },
+  {
+   "id": "r_endsunheardaaaaaaaaa",
+   "kind": "medication",
+   "key": "medication|endsunheard|2024-02-06",
+   "date": "2024-02-06",
+   "display": "Sample rinse",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-02T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/endsunheard-0.json"
+    },
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "east",
+      "fhir_base": "https://east.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-03T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/east/endsunheard-1.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/north/endsunheard-0.json",
+     "status": "active",
+     "end": "2024-03-31",
+     "end_of": "prescription"
+    }
+   ],
+   "fields_from": "Robin Example/Records/north/endsunheard-0.json",
+   "status": "active",
+   "code": {
+    "system": "http://example.org/codes",
+    "code": "M-13",
+    "display": "Sample rinse"
+   }
+  },
+  {
+   "id": "r_againbeforeaaaaaaaaa",
+   "kind": "condition",
+   "key": "condition|againbefore|2019-02-03",
+   "date": "2019-02-03",
+   "display": "Sample cough",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-02T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/againbefore-0.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/north/againbefore-0.json",
+     "status": "resolved",
+     "categories": [
+      "problem-list-item"
+     ],
+     "abatement": "2019-03-01"
+    }
+   ],
+   "status": "resolved",
+   "code": {
+    "system": "http://example.org/codes",
+    "code": "C-4",
+    "display": "Sample cough"
+   }
+  },
+  {
+   "id": "r_oldpollenaaaaaaaaaaa",
+   "kind": "allergy",
+   "key": "allergy|oldpollen|2001-03-18",
+   "date": "2001-03-18",
+   "display": "Sample pollen",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-05-02T10:00:00Z",
+     "filed_at": "2024-06-01T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/oldpollen-0.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/north/oldpollen-0.json",
+     "status": "active"
+    }
+   ],
+   "status": "active"
+  }
+ ]
+}

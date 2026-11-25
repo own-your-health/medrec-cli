@@ -48,6 +48,7 @@ const EVERY_PERSON: &[&str] = &[
     "events.json",
     "bills.json",
     "private.json",
+    crate::standing::FILE,
 ];
 
 /// A records or timeline shard closes once it holds this many bytes, never
@@ -125,6 +126,10 @@ pub struct PersonViews {
     /// before the views, and one cut short between them leaves these.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_state: Option<String>,
+    /// `standing.json`'s `in_error`: the ids of their records entered in
+    /// error, by kind (0.9.9 and later).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub in_error: BTreeMap<String, Vec<String>>,
     pub row: Row,
     pub records: BTreeMap<String, Run>,
     pub timeline: Run,
@@ -1062,6 +1067,8 @@ pub(crate) fn person(
     put("events.json", json(&from.events));
     put("bills.json", json(&from.bills));
     put("private.json", json(&from.private));
+    let st = crate::standing::Standings::of(&h.sources, p, idx);
+    put(crate::standing::FILE, json(&st));
     if let Some(v) = &from.code_names {
         put(crate::code_names::FILE, json(v));
     }
@@ -1364,6 +1371,7 @@ pub(crate) fn person(
         code_table: from.code_table,
         directory: from.directory,
         provider_state: from.provider_state,
+        in_error: st.in_error,
         row: Row {
             documents: row.documents,
             records: row.records,
@@ -1732,6 +1740,28 @@ pub(crate) mod tests {
                 result(i, &day)
             })
             .collect()
+    }
+
+    /// Of any kind, for a reader that opens no other view.
+    #[test]
+    fn an_entry_names_what_is_entered_in_error() {
+        let mut records = history(3);
+        let (_, v) = write(&index_of(records.clone()));
+        assert!(v.in_error.is_empty());
+        assert!(!serde_json::to_value(&v)
+            .unwrap()
+            .to_string()
+            .contains("in_error"));
+        records[1].status = Some("entered-in-error".into());
+        let (out, v) = write(&index_of(records.clone()));
+        assert_eq!(v.in_error["result"], [records[1].id.clone()]);
+        let st = out.values().zip(out.keys());
+        let st = st
+            .filter(|(_, name)| name.ends_with(crate::standing::FILE))
+            .map(|(b, _)| serde_json::from_slice::<Value>(b).unwrap())
+            .next()
+            .unwrap();
+        assert_eq!(st["in_error"], serde_json::json!(v.in_error));
     }
 
     #[test]

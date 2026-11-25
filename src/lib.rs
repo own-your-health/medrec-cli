@@ -39,6 +39,7 @@ pub mod reindex;
 pub mod review;
 pub mod roles;
 pub mod sources;
+pub mod standing;
 pub mod store;
 pub mod stream;
 pub mod summary;
