@@ -13,7 +13,7 @@ use crate::about;
 use crate::folder::Folder;
 use crate::intake::classify;
 use crate::model::{Document, Household, Note, Person, PersonIndex, PersonText, Record};
-use crate::parts::{Parts, Place};
+use crate::parts::{self, Parts, Place};
 use crate::people;
 use crate::sources::Sources;
 use crate::standing::{self, Standings};
@@ -825,20 +825,16 @@ pub(crate) struct OpenPart {
 
 impl OpenPart {
     /// The text searched: what is left of the item's, after its title where
-    /// that is another.
+    /// that is another. None where the cuts are not of its text.
     pub fn hay(&self, whole: &Searchable) -> String {
         let hay = whole.hay();
-        let mut out = match self.cuts.first() {
-            Some([0, _]) => format!("{}\n", self.title),
-            _ => String::new(),
+        let Some(left) = parts::around(&hay, &self.cuts) else {
+            return String::new();
         };
-        let mut at = 0;
-        for [start, len] in &self.cuts {
-            out.push_str(&hay[at..*start]);
-            at = start + len;
+        match self.cuts.first() {
+            Some([0, _]) => format!("{}\n{}", self.title, left.concat()),
+            _ => left.concat(),
         }
-        out.push_str(&hay[at..]);
-        out
     }
 }
 
@@ -1221,6 +1217,37 @@ pub fn notes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What is left of an item by cuts that are not of its text is nothing.
+    #[test]
+    fn cuts_of_another_text_leave_nothing_to_find() {
+        let of = |cuts: Vec<Place>| {
+            let open = OpenPart {
+                title: "Visit".into(),
+                cuts,
+                lab: None,
+            };
+            let item = Searchable {
+                kind: "claim".into(),
+                id: "r_example".into(),
+                date: None,
+                title: "Visit and look".into(),
+                body: "one two".into(),
+                lab: None,
+                open: None,
+            };
+            open.hay(&item)
+        };
+        assert_eq!(of(vec![[0, 15], [19, 3]]), "Visit\none ");
+        assert_eq!(of(vec![[19, 3]]), "Visit and look\none ");
+        for cuts in [
+            vec![[0, 15], [19, 30]],
+            vec![[40, 1]],
+            vec![[19, 3], [0, 15]],
+        ] {
+            assert_eq!(of(cuts), "");
+        }
+    }
 
     #[test]
     fn each_page_counts_what_was_left_out_between_it_and_the_last() {

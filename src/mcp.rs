@@ -445,7 +445,7 @@ pub struct Item {
 pub struct DocumentArgs {
     /// The document's id.
     pub id: String,
-    /// Whose it is: all its text.
+    /// Its owner, for its private lines too.
     #[serde(default)]
     pub person: Option<String>,
     /// First page.
@@ -1587,7 +1587,8 @@ impl MedrecTools {
         if let Some(q) = given(&a.person) {
             if people::resolve(&h, q).map_err(person_error)?.id != p.id {
                 return Err(ToolError::usage(format!(
-                    "{id} is not a document of theirs"
+                    "{id} is a document of {}",
+                    p.name
                 )));
             }
             private.parts = Parts::default();
@@ -1632,7 +1633,7 @@ impl MedrecTools {
         };
         let note = views::paper_note(&f, &h, &p, &d)?;
         let left_out = private.parts.says(&d.id);
-        let left_out = left_out.map(|n| format!("{n}: pass person for all of it."));
+        let left_out = left_out.map(|n| format!("{n}: pass {} as person for all of it.", p.name));
         let hint = |text: Option<String>| {
             let both = [note.clone(), left_out.clone(), text];
             let both: Vec<String> = both.into_iter().flatten().collect();

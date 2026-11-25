@@ -50,7 +50,11 @@ const EVERY_PERSON: &[&str] = &[
     "bills.json",
     "private.json",
     crate::standing::FILE,
+    SEARCH_PARTS,
 ];
+
+/// What a search finds of each open item without its private parts.
+const SEARCH_PARTS: &str = "search-parts.json";
 
 /// A records or timeline shard closes once it holds this many bytes, never
 /// inside a day.
@@ -101,12 +105,13 @@ pub struct PersonViews {
     /// The MD5 of the person's `overrides.json`, null when there is none;
     /// and those of the index and text of each guardian or child whose
     /// records their events read, by person id. Both make only
-    /// `events.json`, `bills.json` and `private.json` stale.
+    /// `events.json`, `bills.json`, `private.json`, `search-parts.json`,
+    /// `code-names.json` and `providers.json` stale.
     #[serde(default)]
     pub overrides: Option<String>,
     /// The MD5 of the person's `marks.json`, null when there is none
-    /// (0.9.1 and later); it makes only `bills.json` and `private.json`
-    /// stale.
+    /// (0.9.1 and later); it makes only `bills.json`, `private.json`,
+    /// `search-parts.json`, `code-names.json` and `providers.json` stale.
     #[serde(default)]
     pub marks: Option<String>,
     #[serde(default)]
@@ -122,9 +127,10 @@ pub struct PersonViews {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub directory: Option<String>,
     /// The MD5 of the person's `provider-state.json`, absent when there is
-    /// none (0.9.7 and later). `private.json`, `code-names.json` and
-    /// `providers.json` are stale when it differs: a pass writes the file
-    /// before the views, and one cut short between them leaves these.
+    /// none (0.9.7 and later). `private.json`, `search-parts.json`,
+    /// `code-names.json` and `providers.json` are stale when it differs: a
+    /// pass writes the file before the views, and one cut short between them
+    /// leaves these.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_state: Option<String>,
     /// `standing.json`'s `in_error`: the ids of their records entered in
@@ -1409,9 +1415,7 @@ pub(crate) fn person(
     for (k, rows) in labs.chunks(LAB_ROWS).enumerate() {
         put(&format!("search-labs-{k}.json"), json(rows));
     }
-    if !parts.is_empty() {
-        put("search-parts.json", json(&parts));
-    }
+    put(SEARCH_PARTS, json(&parts));
 
     let mine = format!("{dir}/");
     let files = out
@@ -1521,7 +1525,8 @@ fn search_part(it: &views::Searchable, open: &views::OpenPart) -> Value {
     };
     let (hay, left) = (it.hay(), open.hay(it));
     let now = count(&left);
-    let cut = open.cuts.iter().map(|[at, len]| &hay[*at..at + len]);
+    let cut = open.cuts.iter();
+    let cut = cut.filter_map(|[at, len]| hay.get(*at..at.checked_add(*len)?));
     let named = std::iter::once(open.title.as_str());
     let touched = cut.chain(named).flat_map(|text| count(text).into_keys());
     let words: BTreeMap<String, Vec<usize>> = touched

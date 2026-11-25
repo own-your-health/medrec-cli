@@ -3197,7 +3197,8 @@ fn a_bills_private_lines_are_read_only_where_its_person_is_named() {
     ] {
         let v = read(json!({"id": id}));
         assert_eq!(v["text"], text);
-        assert_eq!(v["hint"], "3 lines not shown: pass person for all of it.");
+        let hint = "3 lines not shown: pass Alex Testperson as person for all of it.";
+        assert_eq!(v["hint"], hint);
         let whole = read(json!({"id": id, "person": "Alex"}));
         assert!(whole.get("hint").is_none(), "{whole}");
         for word in words {
@@ -3467,7 +3468,7 @@ fn a_search_of_the_views_leaves_out_the_same_parts() {
         hits += told.len();
     }
     assert!(hits > 100, "{hits}");
-    // Nothing open, nothing left out: there is no such view.
+    // Nothing with a part, nothing left out.
     e.ok(&["private", "unmark", PARTS[0].0]);
     let fewer: Value = serde_json::from_slice(&view_bytes(&e, &alex)["search-parts.json"]).unwrap();
     assert_eq!(fewer.as_object().unwrap().len(), shapes.len() - 1);
@@ -3477,7 +3478,24 @@ fn a_search_of_the_views_leaves_out_the_same_parts() {
     for id in LABS {
         e.ok(&["private", "unmark", id]);
     }
-    assert!(!view_bytes(&e, &alex).contains_key("search-parts.json"));
+    let parts = |pid: &str| view_bytes(&e, pid).remove("search-parts.json").unwrap();
+    assert_eq!(parts(&alex), b"{}");
+    // So says the view of a person with none, and so do their private items'
+    // `parts`: none, and not that nothing judged them.
+    let robin = h_id(&e, "Robin Testperson");
+    assert_eq!(parts(&robin), b"{}");
+    let (files, _) = views_of(&e, &robin);
+    assert_eq!(files["private"]["parts"], json!({}));
+    // Views of this version that lack it are made again.
+    let views = e.records().join("views");
+    let mut all: Value =
+        serde_json::from_slice(&std::fs::read(views.join("views.json")).unwrap()).unwrap();
+    let files = all["people"][&alex]["files"].as_object_mut().unwrap();
+    let md5 = files.remove("search-parts.json").unwrap();
+    let stored = format!("search-parts.{}.json", &md5.as_str().unwrap()[..12]);
+    std::fs::remove_file(views.join(&alex).join(stored)).unwrap();
+    std::fs::write(views.join("views.json"), serde_json::to_vec(&all).unwrap()).unwrap();
+    assert_eq!(parts(&alex), b"{}");
     let _ = std::fs::remove_dir_all(&e.root);
 }
 
@@ -3506,6 +3524,14 @@ fn the_private_list_says_which_open_items_have_a_private_part() {
     let v = e.ok(&["private", "list", "--person", "Alex", "--limit", "50"]);
     let parts = v["parts"].as_array().unwrap();
     assert!(parts.iter().all(|r| r["id"] != PARTS[0].0), "{parts:?}");
+    // The limit is of each of the two lists, newest first.
+    let few = e.ok(&["private", "list", "--person", "Alex", "--limit", "2"]);
+    for k in ["items", "parts"] {
+        let (few, all) = (few[k].as_array().unwrap(), v[k].as_array().unwrap());
+        assert_eq!(few[..], all[..2], "{k}");
+    }
+    let none = e.ok(&["private", "list", "--person", "Robin"]);
+    assert_eq!(none["parts"], json!([]), "{none}");
     let _ = std::fs::remove_dir_all(&e.root);
 }
 

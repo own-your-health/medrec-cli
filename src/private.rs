@@ -517,9 +517,7 @@ pub fn build(
         out["unreported_studies"] = unreported.into();
     }
     let parts = parts_of(p, idx, &now_index, texts, built, marks, &out);
-    if !parts.is_empty() {
-        out["parts"] = Value::Object(parts);
-    }
+    out["parts"] = Value::Object(parts);
     let clear = clear_events(built, &out);
     if !clear.is_empty() {
         out["clear_events"] = clear.into();

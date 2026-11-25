@@ -1387,7 +1387,7 @@ views/<person id>/search-1-<hex>.json
 views/<person id>/search-items.bin
 views/<person id>/search-hay-<n>.bin
 views/<person id>/search-labs-<n>.json
-views/<person id>/search-parts.json      0.9.9 and later, when there are any
+views/<person id>/search-parts.json      0.9.9 and later
 views/<person id>/events.json            0.9.0 and later
 views/<person id>/bills.json             0.9.1 and later
 views/<person id>/private.json           0.9.1 and later
@@ -1621,7 +1621,8 @@ removes and no reader reads. It never writes over a later
   stored names are uploaded. An unchanged view keeps its name and is not
   written again. A person whose views lack one every person has
   (`summary.json`, `tests.json`, `documents.json`, `events.json`,
-  `bills.json`, `private.json`, `standing.json`) gets them made again: a build
+  `bills.json`, `private.json`, `standing.json`, `search-parts.json`) gets them
+  made again: a build
   of the same version wrote them before that view existed.
 - **`views.json` last.** It records the MD5 of every view, so a reader
   checks each view it reads and never mixes two passes, whatever order an
@@ -1653,16 +1654,16 @@ A reader decides freshness by MD5, as Drive reports it (`md5Checksum`):
 
   | Differs from `views.json` | Stale |
   |---|---|
-  | `overrides.json`'s MD5 from `overrides` | `events.json`, `bills.json`, `private.json`, `code-names.json`, `providers.json` |
-  | a linked person's `index.json` or `text.json` MD5 from `linked` | `events.json`, `bills.json`, `private.json`, `code-names.json`, `providers.json` |
-  | `marks.json`'s MD5 from `marks` (0.9.1 and later) | `bills.json`, `private.json`, `code-names.json`, `providers.json` |
-  | `provider-state.json`'s MD5 from `provider_state` (0.9.7 and later) | `private.json`, `code-names.json`, `providers.json` |
+  | `overrides.json`'s MD5 from `overrides` | `events.json`, `bills.json`, `private.json`, `search-parts.json`, `code-names.json`, `providers.json` |
+  | a linked person's `index.json` or `text.json` MD5 from `linked` | `events.json`, `bills.json`, `private.json`, `search-parts.json`, `code-names.json`, `providers.json` |
+  | `marks.json`'s MD5 from `marks` (0.9.1 and later) | `bills.json`, `private.json`, `search-parts.json`, `code-names.json`, `providers.json` |
+  | `provider-state.json`'s MD5 from `provider_state` (0.9.7 and later) | `private.json`, `search-parts.json`, `code-names.json`, `providers.json` |
 
   No other view reads those files: `summary.json` and `documents.json`
   say nothing of payments or privacy, and a reader applies `bills.json`
   and `private.json` to them as it answers (Readers, below). A pass writes
   `provider-state.json` before the views, so one cut short between them
-  leaves these three stale. A reader compares its MD5 and does not read it,
+  leaves these four stale. A reader compares its MD5 and does not read it,
   so it cannot judge from the files what a label makes private: while the
   person's `private.json` is missing or stale, one whose own rules judge the
   files counts as having none for a person who has a `provider-state.json`,
@@ -1695,7 +1696,7 @@ A reader decides freshness by MD5, as Drive reports it (`md5Checksum`):
 | `people.<id>.linked` | For each person linked to this one (Events, below), the MD5s of their `index.json` and `text.json` as read, as `{"index", "text"}`, each `null` when the file is absent; `{}` when no one is linked (0.9.0 and later). |
 | `people.<id>.code_table` | The code table the person's names were made with (`icd10cm FY2027`); absent when the pass that made the views had none, whatever names it carried over (0.9.4 and later). A pass on a machine with another table makes the person's views again, which fills in the names; one on a machine with none leaves them. |
 | `people.<id>.directory` | Which provider directory the pass that made the views had: the last day it covers and when it was fetched, so that a newer one sorts after (0.9.7 and later). Absent when it had none. A pass on a machine with a newer one makes the person's views again; one with an older one or none leaves them. |
-| `people.<id>.provider_state` | The MD5 of the person's `provider-state.json`, absent when there is none (0.9.7 and later). Another one makes three of the person's views stale (above). |
+| `people.<id>.provider_state` | The MD5 of the person's `provider-state.json`, absent when there is none (0.9.7 and later). Another one makes four of the person's views stale (above). |
 | `people.<id>.in_error` | `standing.json`'s `in_error`, as it is there: the ids of the person's records entered in error, by kind, and of their papers, `{"condition": ["r_…"], "document": ["d_…"]}`; absent when there is none (0.9.9 and later). |
 | `people.<id>.about_another` | The ids of what is in the person's chart and about somebody else (About another person, above), records and documents, in order: `["d_…", "r_…"]`; absent when there is none (0.9.9 and later). |
 | `row` | `documents`, `records`, `studies`, and `newest` and `last_import` when there are any: the person's line in `medrec_summary`'s people list, without `notes`. |
@@ -1877,7 +1878,7 @@ newest, takes a new number.
 - **`search-parts.json`** (0.9.9 and later): what a search finds of each open
   item with a private part (Private parts, below), by item number:
   `{"12": {"cuts": [[offset, length], …], "words": {"word": [occurrences,
-  offset], "gone": [0]}, "lab": false}}`. Absent when there are none. The text
+  offset], "gone": [0]}, "lab": false}}`, and `{}` when there are none. The text
   that is left is the item's without its `cuts` (bytes of its text, in order),
   after the part's `display` and a line break where the first cut starts at 0.
   `words` is each word that is there another number of times, or first
@@ -1885,7 +1886,10 @@ newest, takes a new number.
   in the text that is left; a word of the `display` that the postings do not
   have is there too. Any other word is there as often, its first occurrence
   moved by what is cut before it and by the `display`. `lab: false` is an item
-  no lab query finds without its parts.
+  no lab query finds without its parts. A reader that leaves private items out,
+  and whose `private.json` of the person is current while this view is missing,
+  finds no item that `parts` names, and counts each it would have found in
+  `private-left-out`.
 
 ### Events (`events.json`, `medrec-events/v1`, 0.9.0 and later)
 
@@ -2357,8 +2361,16 @@ nothing is private.
   private in each open item, by its id, and how the item is shown without it.
   Where a reader leaves private items out (a shared screen, an answer that names
   no person), it leaves these out of open ones, so no title, search, count or
-  event is made of them. Amounts stay, whatever they are for. Absent when there
-  are none.
+  event is made of them. Amounts stay, whatever they are for.
+
+  Every `private.json` of 0.9.9 and later has `parts`, `{}` when there are none.
+  One without it is of a medrec that judged none, as it judged by none of the
+  other rules marked 0.9.9, and is current for those it has: it never says that
+  nothing in an open item is private. A reader with rules of its own judges the
+  parts from the files. One without shows what that medrec's rules show, until
+  the next medrec that writes makes the views again. The places are those of the
+  `index.json` and `text.json` the view was made from, so a reader applies them
+  to no other, and shows nothing of a list or a text they are not places of.
 
   ```json
   {"parts": {
@@ -2393,8 +2405,11 @@ nothing is private.
     event has one whether or not the household marked it so, for its mark opens
     the event and not what is private in it.
   - A private part is no reason to leave its item out, and is counted in no
-    `private-left-out`. `medrec private list` lists the items with one as
-    `parts`, each with `not_shown`, its `says`.
+    `private-left-out`. `medrec private list --json` has the items with one as
+    `parts`, `[]` when there are none, newest first: `id`, `kind` (`record`,
+    `document` or `event`), `not_shown` (its `says`), `date`, `title`, `person`
+    and `person_name`. Its `items` are the private ones, which have `area` and
+    `from` in place of `not_shown`. `--limit` is of each of the two.
 - An event's own members are those without `person`. A paper an event shows
   from another person (X2) is judged as that person's, and so is an event of
   theirs it links (X1): where theirs is private, or what is private of theirs is
@@ -2564,8 +2579,8 @@ readers ship with medrec:
     row has none. `medrec_search` counts a hit that only a private part has the
     words of in `private-left-out`. `medrec_document` gives a text with
     `(1 line not shown)` or `(2 lines not shown)` in place of the private lines
-    that follow one another, and the hint "1 line not shown: pass person for all
-    of it."; `text_chars` and the pages are those of what it gives. With
+    that follow one another, and the hint "1 line not shown: pass <name> as person
+    for all of it.", with its person's name; `text_chars` and the pages are those of what it gives. With
     `person` (a usage error where the document is not that person's) it gives all
     of it, with its records and labels as an answer about them has them.
   - private items (`private.json`, 0.9.1 and later) are left out of an

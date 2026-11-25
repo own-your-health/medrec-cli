@@ -16,6 +16,8 @@
 //!   Records/<source>/<ResourceType>/<id>.json                 raw FHIR, verbatim
 //! ```
 
+use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -59,7 +61,17 @@ pub struct Folder {
     /// `household.json`, an `index.json` or a `text.json` was written, so
     /// the views are brought up to date as this closes.
     written: std::cell::Cell<bool>,
+    /// What one that only reads has read of each person, so that all of an
+    /// answer is of the same files: what is private in an item is told by
+    /// places in it ([`crate::parts`]).
+    held: Option<Held>,
     _lock: Option<FolderLock>,
+}
+
+#[derive(Default)]
+struct Held {
+    indexes: RefCell<BTreeMap<String, PersonIndex>>,
+    texts: RefCell<BTreeMap<String, PersonText>>,
 }
 
 impl Drop for Folder {
@@ -132,6 +144,7 @@ impl Folder {
             store,
             folder_id: h.folder_id,
             written: std::cell::Cell::new(false),
+            held: (access == Access::Read).then(Held::default),
             _lock: lock,
         })
     }
@@ -180,12 +193,19 @@ impl Folder {
     /// opens one item by its id at the Mac. An empty one when none was written
     /// yet.
     pub fn whole_index(&self, p: &Person) -> Result<PersonIndex, CliError> {
+        let held = self.held.as_ref().map(|h| &h.indexes);
+        if let Some(idx) = held.and_then(|h| h.borrow().get(&p.id).cloned()) {
+            return Ok(idx);
+        }
         let rel = index_rel(p);
         let idx: PersonIndex = self
             .read_json(&rel)?
             .unwrap_or_else(|| PersonIndex::new(&p.id));
         if idx.person != p.id {
             return Err(CliError::Other(format!("{rel} names another person")));
+        }
+        if let Some(h) = held {
+            h.borrow_mut().insert(p.id.clone(), idx.clone());
         }
         Ok(idx)
     }
@@ -221,9 +241,17 @@ impl Folder {
     }
 
     pub fn text(&self, p: &Person) -> Result<PersonText, CliError> {
-        Ok(self
+        let held = self.held.as_ref().map(|h| &h.texts);
+        if let Some(t) = held.and_then(|h| h.borrow().get(&p.id).cloned()) {
+            return Ok(t);
+        }
+        let t: PersonText = self
             .read_json(&text_rel(p))?
-            .unwrap_or_else(|| PersonText::new(&p.id)))
+            .unwrap_or_else(|| PersonText::new(&p.id));
+        if let Some(h) = held {
+            h.borrow_mut().insert(p.id.clone(), t.clone());
+        }
+        Ok(t)
     }
 
     pub fn save_text(&self, p: &Person, t: &PersonText) -> Result<(), CliError> {
@@ -872,6 +900,43 @@ mod tests {
         let mut b = f.household().unwrap();
         f.save_household(&mut a).unwrap();
         assert!(f.save_household(&mut b).is_err(), "a stale rev is refused");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Another command that writes while one reads changes nothing of what it
+    /// has read of a person.
+    #[test]
+    fn a_reader_has_one_reading_of_each_person() {
+        let root = crate::testutil::temp_dir("folder-held");
+        let loc = Location::Dir(root.clone());
+        let store = Store::open(&loc, Reads::Fresh, crate::store::DEFAULT_BUDGET).unwrap();
+        create(&store).unwrap();
+        let open = |access| Folder::open_at(&loc, access, crate::store::DEFAULT_BUDGET).unwrap();
+        let p: Person = serde_json::from_value(serde_json::json!({
+            "id": "p_exampleaaaaaaaaaaaaa", "name": "Robin Example", "folder": "Robin Example",
+            "adult": true, "created_at": "2024-01-02T00:00:00Z"
+        }))
+        .unwrap();
+        let write = |rev: u64, text: &str| {
+            let mut idx = PersonIndex::new(&p.id);
+            idx.rev = rev;
+            let mut t = PersonText::new(&p.id);
+            t.texts.insert("d_example".into(), text.into());
+            write_json(&store, &index_rel(&p), &idx).unwrap();
+            write_json(&store, &text_rel(&p), &t).unwrap();
+        };
+        let read = |f: &Folder| {
+            let text = f.text(&p).unwrap().texts["d_example"].clone();
+            (f.index(&p).unwrap().rev, text)
+        };
+        write(1, "one");
+        let (reads, writes) = (open(Access::Read), open(Access::Fresh));
+        let one = (1, "one".to_string());
+        assert_eq!((read(&reads), read(&writes)), (one.clone(), one.clone()));
+        write(2, "two");
+        let two = (2, "two".to_string());
+        assert_eq!((read(&reads), read(&writes)), (one, two.clone()));
+        assert_eq!(read(&open(Access::Read)), two);
         std::fs::remove_dir_all(root).unwrap();
     }
 }

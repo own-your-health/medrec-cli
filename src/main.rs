@@ -705,7 +705,8 @@ enum BillsCmd {
 
 #[derive(Subcommand, Debug)]
 enum PrivateCmd {
-    /// A person's private records, documents, events and imaging studies, with why.
+    /// A person's private records, documents, events and imaging studies, with
+    /// why, and the open items with a private part. `--limit` is of each.
     List {
         #[arg(long)]
         person: Option<String>,
@@ -714,7 +715,8 @@ enum PrivateCmd {
     },
     /// Mark a record, document or event private, whatever the rules say.
     Mark { id: String },
-    /// Mark a record, document or event not private, whatever the rules say.
+    /// Mark a record, document or event not private, whatever the rules say: of
+    /// a claim or a paper with a private part, all of it.
     Unmark { id: String },
     /// Drop the household's mark on an item: the rules decide again.
     Reset { id: String },
@@ -1871,10 +1873,7 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
                 });
             }
             let shown = list.take(&items);
-            let mut doc = serde_json::json!({ "items": shown });
-            if !parts.is_empty() {
-                doc["parts"] = list.take(&parts).into();
-            }
+            let mut doc = serde_json::json!({ "items": shown, "parts": list.take(&parts) });
             if in_error > 0 {
                 let n = medrec::standing::in_error(in_error);
                 note(cli, &n);

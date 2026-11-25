@@ -215,28 +215,37 @@ pub fn text_json(places: &[Place]) -> Value {
     json!({"text": places, "says": lines_not_shown(places.len())})
 }
 
+/// What is before, between and after some places of a text. None where they are
+/// not its own.
+pub fn around<'a>(text: &'a str, places: &[Place]) -> Option<Vec<&'a str>> {
+    let mut out = Vec::with_capacity(places.len() + 1);
+    let mut at = 0;
+    for [start, len] in places {
+        out.push(text.get(at..*start)?);
+        at = start.checked_add(*len)?;
+    }
+    out.push(text.get(at..)?);
+    Some(out)
+}
+
 /// A text without some places of it. Those on lines one after the other are
 /// one line that says how many there were. Nothing where they are none of
 /// its own.
 pub fn text_without(text: &str, places: &[Place]) -> String {
+    let around = around(text, places).unwrap_or_default();
     let mut out = String::with_capacity(text.len());
-    let (mut at, mut run) = (0, 0);
-    for (i, [start, len]) in places.iter().enumerate() {
-        let Some(before) = text.get(at..*start) else {
-            return String::new();
-        };
-        if run == 0 {
-            out.push_str(before);
+    let mut run = 0;
+    for (i, between) in around.iter().enumerate() {
+        let place = i < places.len();
+        if run == 0 || *between != "\n" || !place {
+            if run > 0 {
+                out.push_str(&format!("({})", lines_not_shown(run)));
+                run = 0;
+            }
+            out.push_str(between);
         }
-        run += 1;
-        at = start + len;
-        let next = places.get(i + 1).is_some_and(|[s, _]| *s == at + 1);
-        if !next || text.as_bytes().get(at) != Some(&b'\n') {
-            out.push_str(&format!("({})", lines_not_shown(run)));
-            run = 0;
-        }
+        run += usize::from(place);
     }
-    out.push_str(text.get(at..).unwrap_or_default());
     out
 }
 
@@ -435,6 +444,18 @@ mod tests {
         );
         assert_eq!(text_json(&places)["says"], "3 lines not shown");
         assert_eq!(text_without(text, &[]), text);
+        // Places that are not the text's own leave none of it: past its end, in
+        // the middle of a letter, or one before the other.
+        for (text, places) in [
+            ("Visit", vec![[0, 6]]),
+            ("Visit", vec![[7, 0]]),
+            ("Visit", vec![[1, usize::MAX]]),
+            ("Caf\u{e9} visit", vec![[0, 4]]),
+            ("Visit, visit", vec![[7, 2], [0, 2]]),
+        ] {
+            assert_eq!(around(text, &places), None, "{places:?}");
+            assert_eq!(text_without(text, &places), "", "{places:?}");
+        }
         assert_eq!(of_text("Total due\nThanks"), Vec::<[usize; 2]>::new());
     }
 }
