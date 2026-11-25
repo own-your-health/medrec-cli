@@ -556,8 +556,8 @@ pub fn build(
     }
 
     // A study is private when its report is. One with no report, or a
-    // report the person does not have, cannot be judged, nor one whose only
-    // report is entered in error.
+    // report the person does not have, cannot be judged, with what is entered
+    // in error or without it.
     let mut unreported = Vec::new();
     for (s, now) in idx.studies.iter().zip(&now_index.studies) {
         let report = |of: &PersonIndex, report: &Option<String>| -> Option<String> {
@@ -567,7 +567,7 @@ pub fn build(
             report.as_ref().filter(has).cloned()
         };
         let (was, is) = (report(idx, &s.report), report(&now_index, &now.report));
-        if is.is_none() {
+        if was.is_none() || is.is_none() {
             unreported.push(s.id.clone());
         }
         let mut why = [was, is].into_iter().flatten();
@@ -1297,6 +1297,49 @@ mod tests {
         d.provenance.raw_path = Some(raw.clone());
         d.words = serde_json::from_value(json!([{"raw_path": raw, "status": "entered-in-error"}]))
             .unwrap();
+    }
+
+    /// A study no report judges stays so whatever is entered in error: one of
+    /// its day's two reports, or a paper of another day.
+    #[test]
+    fn what_is_entered_in_error_opens_no_study_without_a_report() {
+        let (one, two, other) = (
+            "d_reportoneaaaaaaaaaaa",
+            "d_reporttwoaaaaaaaaaaa",
+            "d_letteraaaaaaaaaaaaaa",
+        );
+        let report = |id: &str| {
+            let mut d = document(id);
+            d["doc_type"] = "imaging_report".into();
+            d["date"] = "2026-10-30".into();
+            d
+        };
+        let mut idx: PersonIndex = serde_json::from_value(json!({
+            "schema": "medrec-index/v1", "person": "p_testaaaaaaaaaaaaaaaa", "rev": 1, "imports": [],
+            "documents": [report(one), report(two), document(other)],
+            "studies": [study("m_studyaaaaaaaaaaaaaaa", None)], "records": []
+        }))
+        .unwrap();
+        // Two reports of its day: none is its own.
+        assert_eq!(crate::imaging::link_reports(&mut idx), 0);
+        let unreported = |idx: &PersonIndex| {
+            let v = built(&person(), idx, &no_text(), &json!({"events": []}), &[]);
+            v["unreported_studies"].clone()
+        };
+        let none = json!(["m_studyaaaaaaaaaaaaaaa"]);
+        assert_eq!(unreported(&idx), none);
+        for i in 0..3 {
+            let mut gone = idx.clone();
+            in_error(&mut gone.documents[i]);
+            assert_eq!(unreported(&gone), none, "{}", idx.documents[i].id);
+            // Nor does a link made while it is.
+            assert_eq!(crate::imaging::link_reports(&mut gone), 0);
+        }
+        // One of one report not linked yet is not linked by another's.
+        idx.documents.remove(1);
+        in_error(&mut idx.documents[1]);
+        assert_eq!(unreported(&idx), none);
+        assert_eq!(crate::standing::index(&idx).studies[0].report, None);
     }
 
     /// What a source takes back still tells: each paper stays private, as do

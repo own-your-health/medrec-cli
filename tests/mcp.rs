@@ -1224,7 +1224,7 @@ fn the_commands_count_what_is_entered_in_error_and_keep_what_was_decided() {
     let kept = |args: &[&str], id: &str| {
         let v = e.ok(args);
         let mut items = v["items"].as_array().unwrap().iter();
-        items.find(|i| i["id"] == id).unwrap()["not_applied"] == true
+        items.find(|i| i["id"] == id).unwrap()["applied"] == false
     };
     for (args, id) in [
         (
@@ -1245,9 +1245,9 @@ fn the_commands_count_what_is_entered_in_error_and_keep_what_was_decided() {
     // So is what it decides now.
     let paid = ["bills", "paid", SKIN_BILL, "--on", "2024-05-07"];
     let v = e.ok(&[&paid[..], &["--amount", "5.00"]].concat());
-    assert_eq!(v["not_applied"], true);
+    assert_eq!(v["applied"], false);
     let v = e.ok(&["events", "apart", SKIN_VISIT, SKIN_BILL]);
-    assert_eq!(v["not_applied"], true);
+    assert_eq!(v["applied"], false);
     let v = e.ok(&[
         "bills",
         "paid",
@@ -1257,7 +1257,7 @@ fn the_commands_count_what_is_entered_in_error_and_keep_what_was_decided() {
         "--amount",
         "5.00",
     ]);
-    assert!(v.get("not_applied").is_none());
+    assert!(v.get("applied").is_none());
 
     let path = dir.join("index.json");
     let text = std::fs::read_to_string(&path).unwrap();

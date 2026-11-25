@@ -201,9 +201,9 @@ struct Override {
     printed: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     item: Option<String>,
-    /// The item is entered in error.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    not_applied: bool,
+    /// False while the item is entered in error, else absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    applied: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     by: Option<String>,
     at: String,
@@ -1622,9 +1622,10 @@ fn overrides(inp: &Input, uses: &[Use]) -> [Vec<Override>; 2] {
             kind,
             printed: c.printed.clone(),
             item: about.as_ref().map(|a| a.item.clone()),
-            not_applied: about
+            applied: about
                 .as_ref()
-                .is_some_and(|a| inp.in_error.contains(&a.item)),
+                .filter(|a| inp.in_error.contains(&a.item))
+                .map(|_| false),
             by: c.by.clone(),
             at: c.at.clone(),
         });
@@ -2837,11 +2838,11 @@ mod tests {
         let said = v["private"]["overrides"].as_array().unwrap();
         let items: Vec<&Value> = said.iter().map(|o| &o["item"]).collect();
         assert_eq!(items, [SAMPLE, TALK]);
-        assert!(said.iter().all(|o| o["not_applied"] == true), "{v}");
+        assert!(said.iter().all(|o| o["applied"] == false), "{v}");
         c.index = standing;
         c.sync(true);
         assert_eq!(c.labels(), before);
-        assert!(!before.to_string().contains("not_applied"));
+        assert!(!before.to_string().contains("\"applied\""));
     }
 
     #[test]

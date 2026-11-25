@@ -739,11 +739,14 @@ fn a_decision_on_what_is_entered_in_error_is_kept() {
         kind: "together".into(),
         members: [ear.into(), foot.into()],
         at: "2026-05-04T12:00:00Z".into(),
-        by: None,
-        request: None,
+        by: Some("Example Asker".into()),
+        request: Some("q_aaaaaaaaaaaaaaaaaaaa".into()),
     };
     let mut o = Overrides::new("p_test");
     o.events.push(decision.clone());
+    // As it is shown: without who asked.
+    let decision = json!({"id": decision.id, "kind": "together",
+        "members": [ear, foot], "at": decision.at});
     let together = events_of(&world(), 0, Some(&o));
     assert!(ids(holding(&together, ear)).contains(&foot));
     assert_eq!(together["overrides"], 1);

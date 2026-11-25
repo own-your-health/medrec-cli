@@ -554,8 +554,8 @@ no source's word wins:
   has it says so, and comes back by itself when one no longer does. One that a
   source still states shows that one's values and says `sources differ`. Where
   you marked a payment on a bill entered in error, the bills list says so:
-  money may be owed back. What you decided of it is kept, shown as
-  `not_applied`, and applies again when it comes back. Nothing private opens
+  money may be owed back. What you decided of it is kept, shown as not
+  applied, and applies again when it comes back. Nothing private opens
   because a source takes an item back.
 - A source's word that medrec does not keep yet never lets the others end a
   record: its line says `not every source heard`. After upgrading to 0.9.9 run

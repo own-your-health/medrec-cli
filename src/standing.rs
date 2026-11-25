@@ -231,7 +231,7 @@ pub fn record_differs(r: &Record) -> bool {
 
 /// The index without what is entered in error, as events, bills and labels
 /// are made of it. A statement whose first paper is entered in error is its
-/// next copy's, and a study's report is found again.
+/// next copy's, and a study whose report is has its report found again.
 pub fn index(idx: &PersonIndex) -> Cow<'_, PersonIndex> {
     let gone: BTreeSet<String> = errors(idx).map(str::to_string).collect();
     if gone.is_empty() {
@@ -258,10 +258,15 @@ pub fn index(idx: &PersonIndex) -> Cow<'_, PersonIndex> {
             of => of,
         };
     }
+    let mut lost: BTreeSet<String> = BTreeSet::new();
     for s in &mut out.studies {
-        s.report = s.report.take().filter(|r| !gone.contains(r));
+        if s.report.as_ref().is_some_and(|r| gone.contains(r)) {
+            s.report = None;
+            lost.insert(s.id.clone());
+        }
     }
-    crate::imaging::link_reports(&mut out);
+    // No other: what is entered in error links no study that had no report.
+    crate::imaging::link(&mut out, |s| lost.contains(&s.id));
     Cow::Owned(out)
 }
 

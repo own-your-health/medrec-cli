@@ -1409,7 +1409,7 @@ provider, of whom the household said nothing, has no `providers.json`.
     the order they said it, `item` the event's id now when it followed the
     event's members. It is in `private` unless items that are not private print
     every name it gives, and when its `item` or what it sets is private.
-    `not_applied` is `true` while its `item` is entered in error (0.9.9 and
+    `applied` is `false` while its `item` is entered in error (0.9.9 and
     later), and absent otherwise.
 - **The id** comes from the label's confidence, name (the printed one when it
   has none), practice, role and phone, with the folder's random `label_salt`
@@ -1800,8 +1800,8 @@ matching rules), then the household's decisions (`overrides.json`).
 | `aliases` | Clinicians learned to belong to a practice, with the paper that says so. |
 | `undated` | Claims with no date, in no event. |
 | `overrides` | How many of the household's decisions applied. |
-| `events[].in_error` | The ids of the person's own items entered in error that the event would have (0.9.9 and later). Absent when there are none. |
-| `events[].not_applied` | The household's decisions naming one of those, as `overrides.json` has them (0.9.9 and later). Absent when there are none. |
+| `events[].in_error` | The ids of the person's own items entered in error that the event would have (0.9.9 and later): a list, where the document's own `in_error` is an object by id. Absent when there are none. |
+| `events[].not_applied` | The household's decisions naming one of those, each with the `id`, `kind`, `members` and `at` it has in `overrides.json`, which alone says who asked for it (0.9.9 and later). Absent when there are none. |
 | `events_in_error` | The events that are none without what is entered in error, as they would be, newest first (0.9.9 and later). A reader lists none, counts them ("N entered in error, not shown"), and shows one only when asked for it by its id, as entered in error. Absent when there are none. |
 | `in_error` | Every item of the person's entered in error that an event would have or a decision names, by id (0.9.9 and later): `event`, the event that has the rest of it, else the one in `events_in_error`, absent when it would be in none; and `not_applied`, the decisions naming it, absent when there are none. Absent when there are none. |
 | `overrides_unreadable` | `true` when the person's `overrides.json` does not read as `medrec-overrides/v1`: the events are the rules' alone, and medrec writes no decision over the file until it is fixed or removed. Absent otherwise. |
@@ -2169,9 +2169,9 @@ nothing is private.
 - **What a source takes back still tells** (0.9.9 and later). Nothing opens
   because a record or a paper is entered in error: each rule is judged with
   what is and with what is not, events as they would be with it included, so an
-  event in `events_in_error` can be here. A study whose only report is entered
-  in error is in `unreported_studies`, and in `studies` when that report was
-  private.
+  event in `events_in_error` can be here. A study with no report, with what is
+  entered in error or without it, is in `unreported_studies`; so one whose only
+  report is, which is in `studies` too when that report was private.
 - An event's own members are those without `person`. A paper an event shows
   from another person (X2) is judged as that person's.
 - **The household has the last word** (`marks.json` `private`, above). A
@@ -2276,9 +2276,9 @@ readers ship with medrec:
       `notes`, with what they say of those not shown. So do `documents list`,
       `events list`, `bills list` and `private list`, and `documents open` with
       what it says of the paper. What was decided of an item entered in error
-      has `not_applied: true` where `events decisions`, `bills payments` and
-      `labels list` list it, and where `events apart`, `events together` and
-      `bills paid` record it.
+      has `applied: false`, absent otherwise, where `events decisions`, `bills
+      payments` and `labels list` list it, and where `events apart`, `events
+      together` and `bills paid` record it.
   - the latest result of each test is one per code (with its system), or per
     name with case and accents folded when uncoded: the newest. A test's
     series is every `result` record whose code is the one asked for, or

@@ -583,17 +583,22 @@ pub fn study_folder_name(
 }
 
 /// Link each study without a report to the one radiology report filed for
-/// the same person on the same date, when there is exactly one.
+/// the same person on the same date, when there is exactly one. One entered
+/// in error counts, so that what links a study is the same when it comes back.
 pub fn link_reports(idx: &mut PersonIndex) -> usize {
+    link(idx, |s| s.report.is_none())
+}
+
+/// The same for these studies.
+pub(crate) fn link(idx: &mut PersonIndex, which: impl Fn(&ImagingStudy) -> bool) -> usize {
     let mut linked = 0;
     let reports: Vec<(String, Option<String>)> = idx
         .documents
         .iter()
         .filter(|d| d.doc_type.as_deref() == Some("imaging_report"))
-        .filter(|d| !standing::document_in_error(d))
         .map(|d| (d.id.clone(), d.date.clone()))
         .collect();
-    for s in idx.studies.iter_mut().filter(|s| s.report.is_none()) {
+    for s in idx.studies.iter_mut().filter(|s| which(s)) {
         let same_day: Vec<&String> = reports
             .iter()
             .filter(|(_, d)| d.is_some() && *d == s.date)

@@ -1646,7 +1646,7 @@ fn bills_cmd(cli: &Cli, cmd: &BillsCmd, store: &ConfigStore) -> Result<(), CliEr
             let mut v = to_value(&pm);
             let bills = medrec::bills::of_person(&f, &h, p)?;
             if medrec::bills::not_applied(&bills).contains(pm.id.as_str()) {
-                v["not_applied"] = true.into();
+                v["applied"] = false.into();
                 note(
                     cli,
                     "The bill is entered in error: the payment is kept and not applied.",
@@ -1673,7 +1673,7 @@ fn bills_cmd(cli: &Cli, cmd: &BillsCmd, store: &ConfigStore) -> Result<(), CliEr
                 for pm in f.marks(p)?.payments {
                     let mut v = to_value(&pm);
                     if kept.contains(pm.id.as_str()) {
-                        v["not_applied"] = true.into();
+                        v["applied"] = false.into();
                     }
                     v["person"] = p.id.clone().into();
                     v["person_name"] = p.name.clone().into();
@@ -1910,7 +1910,7 @@ fn labels_cmd(cli: &Cli, cmd: &LabelsCmd, store: &ConfigStore) -> Result<(), Cli
                     let Some(kind) = c.kind() else { continue };
                     let mut v = to_value(&c);
                     if c.item.as_deref().is_some_and(|i| gone.contains(i)) {
-                        v["not_applied"] = true.into();
+                        v["applied"] = false.into();
                     }
                     v["kind"] = to_value(&kind);
                     v["person"] = p.id.clone().into();
@@ -2094,7 +2094,7 @@ fn events_cmd(cli: &Cli, cmd: &EventsCmd, store: &ConfigStore) -> Result<(), Cli
             let mut v = to_value(&d);
             let idx = f.index(p)?;
             if medrec::standing::errors(&idx).any(|id| id == a || id == b) {
-                v["not_applied"] = true.into();
+                v["applied"] = false.into();
                 note(
                     cli,
                     "One of them is entered in error: the decision is kept and not applied.",
@@ -2121,7 +2121,7 @@ fn events_cmd(cli: &Cli, cmd: &EventsCmd, store: &ConfigStore) -> Result<(), Cli
                 for d in f.overrides(p)?.events {
                     let mut v = to_value(&d);
                     if d.members.iter().any(|m| gone.contains(m.as_str())) {
-                        v["not_applied"] = true.into();
+                        v["applied"] = false.into();
                     }
                     v["person"] = p.id.clone().into();
                     v["person_name"] = p.name.clone().into();

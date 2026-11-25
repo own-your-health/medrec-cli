@@ -2952,7 +2952,27 @@ struct Gone {
     #[serde(skip_serializing_if = "Option::is_none")]
     event: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    not_applied: Vec<Decision>,
+    not_applied: Vec<Kept>,
+}
+
+/// A decision that is not applied: not who asked for it.
+#[derive(Clone, PartialEq, Serialize)]
+struct Kept {
+    id: String,
+    kind: String,
+    members: [String; 2],
+    at: String,
+}
+
+impl From<&Decision> for Kept {
+    fn from(d: &Decision) -> Kept {
+        Kept {
+            id: d.id.clone(),
+            kind: d.kind.clone(),
+            members: d.members.clone(),
+            at: d.at.clone(),
+        }
+    }
 }
 
 /// A person's events document.
@@ -3048,7 +3068,7 @@ pub fn build_both(inp: &Input) -> Built {
         .unwrap_or_default()
     {
         for id in d.members.iter().filter_map(|id| gone.get(id.as_str())) {
-            in_error.entry(id).or_default().not_applied.push(d.clone());
+            in_error.entry(id).or_default().not_applied.push(d.into());
         }
     }
     for (_, _, id, e) in out.iter_mut().chain(&mut lost) {
@@ -3061,7 +3081,7 @@ pub fn build_both(inp: &Input) -> Built {
         if !ids.is_empty() {
             e["in_error"] = json!(ids);
         }
-        let mut not_applied: Vec<&Decision> = Vec::new();
+        let mut not_applied: Vec<&Kept> = Vec::new();
         for d in of().flat_map(|(_, g)| &g.not_applied) {
             if !not_applied.contains(&d) {
                 not_applied.push(d);
