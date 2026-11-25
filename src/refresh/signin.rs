@@ -127,24 +127,6 @@ pub fn read(provider: &Provider, profile: Option<&str>, wait: Duration) -> Read 
     }
 }
 
-/// The medrec binary running: its path, size and modification time, which
-/// change when it is rebuilt or updated, as its Keychain approval does.
-/// `MEDREC_TEST_EXE` (debug builds only) stands in for it.
-pub fn exe_id() -> Option<String> {
-    let exe = match crate::store::test_hook("MEDREC_TEST_EXE") {
-        Some(p) => std::path::PathBuf::from(p),
-        None => std::env::current_exe().ok()?,
-    };
-    let meta = std::fs::metadata(&exe).ok()?;
-    let mtime = meta
-        .modified()
-        .ok()?
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()?
-        .as_nanos();
-    Some(format!("{}:{}:{mtime}", exe.display(), meta.len()))
-}
-
 /// medrec's own read of the Drive sign-in for `profile`, in this process.
 /// The Keychain read is bounded by `wait` (`Vault::load_key` on the
 /// process's one vault, [`crate::store::shared_vault`]), so a dialog nobody

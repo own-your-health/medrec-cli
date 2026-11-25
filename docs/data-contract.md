@@ -520,26 +520,29 @@ stream's `method` otherwise), `method` (`fhir-api`, `portal`, `scan`, `file`, `m
 (`medrec`, `organize-scans`, `hand`), `derived_from` (`{document_id, rule_id}`, on a fact a rule read out of a
 document), `filed_by` (`medrec <version>`).
 
-**Which source a record or document came from** (0.9.6 and later). One CLI,
-organization and FHIR base can be several practices' and several people's: a
-records connection is. So a source in `household.json` is told apart by its
-person and its `patient_id` as well:
+**Which source a record or document came from** (0.9.6 and later). A
+provenance's `cli`, `organization_id` and `fhir_base` do not name a source:
+sources in `household.json` can have all three alike and differ in `person`,
+in `patient_id`, or in both. What tells them apart is each one's `person` and
+`patient_id`:
 
-1. The patient. The entry of the index's `imports` with the provenance's
-   `cli` and `organization_id` (its `organization`) whose `imported_at` is the
-   provenance's `filed_at` gives its `patient_id`. Entries of more than one
-   patient that match: the one of them whose `pulled_at` is the provenance's
-   `fetched_at`. No entry that matches: the one whose `pulled_at` is its
-   `fetched_at`. Otherwise the patient is not known.
+1. The patient. Of the index's `imports` with the provenance's `cli` and
+   `organization_id` (its `organization`), *filed* is the `patient_id`s of those
+   whose `imported_at` is the provenance's `filed_at`, and *read* the
+   `patient_id`s of those whose `pulled_at` is its `fetched_at`. One in filed:
+   the patient is that. Several in filed: the only one of them that is in read
+   too. None in filed: the only one in read. Otherwise it is not known.
 2. Its sources: those of the index's **own person** with the provenance's
-   `cli`, `organization_id` (a source's `organization`) and `fhir_base` (a
-   final `/` aside; any, where the provenance has none), and with that
-   `patient_id`, when the patient is known.
-3. Its name: the `organization_name` they all have. Where they differ, or one
-   has none, there is **no name**: never the first or the last of them. A
-   connection's own name ("… (all practices)") differs from a practice's.
-4. Its label, what a reader shows as its source: that name, else the `cli`.
-   No other person's source and no entry of `organizations` names it.
+   `cli`, `organization_id` (a source's `organization`) and `fhir_base` (every
+   trailing `/` aside; any, where the provenance has none), and with that
+   `patient_id`, when the patient is known. A provenance with no `cli` or no
+   `organization_id` has none.
+3. Its name: the `organization_name` they all have, trimmed; a blank one is
+   none. Where they differ, or one has none, there is **no name**: never the
+   first or the last of them.
+4. A record's label, what a reader shows as its source: that name, else the
+   `cli`. No other person's source and no entry of `organizations` names it. A
+   document's row shows its own `organization`.
 
 Two came from one source when their `cli`, `organization_id`, `fhir_base` and
 patient are the same, the patient being step 1's, else the `patient_id` of the
@@ -788,7 +791,7 @@ and a field or count that is missing as unknown, not as zero or false.
 | `sign_in.checked_at` | When auth status was last read. |
 | `sign_in.renews` | `true`: the provider CLI keeps its sign-in going unattended (a refresh token, a portal key). `false`: a member-site session that ends within hours and nothing renews, so the source loads only soon after someone signs in on the refreshing machine, and a `sign_in` `needs_person` is its normal state between sign-ins. Missing: unknown. It comes from the provider's auth status when that gives `renews` (0.7.0 and later read it; none does yet), else from medrec's table: `false` for `uhc`, `fertemr`, `caremark`, `oneblood`, `flywire` and `peryourhealth`; `true` for `mychart`, `athena`, `kp`, `modmed` and `icanotes`. |
 | `sign_in.lasts_secs` | About how long a fresh sign-in lasts, where measured: from the provider's auth status when it gives `lasts_secs`, else medrec's table (`uhc` 2400). Missing: unknown. |
-| `sign_in.needs_person` | `null` unless the source cannot be refreshed without a person: `{"reason": "sign_in" \| "keychain", "since": "…", "command": "medrec refresh sign-in <source>"}`. `sign_in`: the state is `signed_out` or `expired`, or the import itself answered that the provider needs a sign-in (exit 3). `keychain`: a scheduled pass's auth status read timed out waiting on an approval nobody gave, as a rebuilt provider CLI's first Keychain read does; the state is then `unknown`. medrec's own Drive sign-in never appears here: a pass that cannot read it without an approval cannot reach the folder either, so it writes nothing, and `refresher.last_pass_at` goes stale. `command` is what to run in a terminal on the refreshing machine. Until it has run, neither the schedule nor a request tries the source again. An `expiring` sign-in is still refreshed. |
+| `sign_in.needs_person` | `null` unless the source cannot be refreshed without a person: `{"reason": "sign_in" \| "keychain", "since": "…", "command": "medrec refresh sign-in <source>"}`. `sign_in`: the state is `signed_out` or `expired`, or the import itself answered that the provider needs a sign-in (exit 3). `keychain`: a scheduled pass's auth status read timed out waiting on an approval nobody gave, as a rebuilt provider CLI's first Keychain read does; the state is then `unknown`. medrec's own Drive sign-in never appears here: a scheduled pass raises no dialog for its key (0.9.7 and later), and one that cannot read it without an approval cannot reach the folder either, so it writes nothing, and `refresher.last_pass_at` goes stale. `command` is what to run in a terminal on the refreshing machine. Until it has run, neither the schedule nor a request tries the source again. An `expiring` sign-in is still refreshed. |
 | `last_attempt` | The latest attempt: an `attempts/` line without `source`, `person`, `cli`, `organization` and `counts`. While it runs, `outcome` is `running` and `finished_at` is `null`. A pass that finds `running` left by an earlier pass (no refresh of the folder runs on this machine) records that attempt as `failed` with the error code `interrupted`, counts it in `failures`, and waits from its `started_at`, before it considers the source due. |
 | `last_success` | The latest attempt whose outcome was `ok`: its attempt, when it finished, its `ImportRun`, and the import report's counts and `withheld_types`. |
 

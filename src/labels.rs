@@ -2071,9 +2071,10 @@ mod tests {
 
     /// Every kind of label, where each is kept, and what is not labelled:
     /// two providers it can be (`D SPECIMEN`), papers of two practices
-    /// (`P DUMMY`), a private paper for an open item (`L FILLER`), a service
-    /// two fit (`r_therapy…`), and an item the household marked not private
-    /// whose label is in a private area (`r_marked…`).
+    /// (`P DUMMY`), a private paper for an open item (`L FILLER`) and for a
+    /// private one (`B SPECIMEN`), a service two fit (`r_therapy…`), and an
+    /// item the household marked not private whose label is in a private area
+    /// (`r_marked…`).
     #[test]
     fn the_file_is_as_the_contract_has_it() {
         let c = Case::new();
@@ -3024,7 +3025,13 @@ mod tests {
                 "evidence": [{"from": "paper", "document": "d_summaryaaaaaaaaaaaaa"}]})
         );
         assert_eq!(l("R PLACEHOLDER")["phone"], "555-010-0150");
-        assert_eq!(v["private"]["labels"], json!({}));
+        // A private paper's is in the private part alone.
+        let id = v["private"]["by_name"]["B SPECIMEN"].as_str().unwrap();
+        assert_eq!(
+            v["private"]["labels"],
+            json!({id: {"practice": "Example Counseling Center", "confidence": "likely",
+                "evidence": [{"from": "paper", "document": "d_counselingtwoaaaaaaa"}]}})
+        );
 
         // A person none of whose items has a label has no file.
         c.index.documents.clear();

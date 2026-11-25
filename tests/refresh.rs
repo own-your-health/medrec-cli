@@ -1371,15 +1371,16 @@ fn vault_entry(e: &Env) {
     std::fs::write(dir.join("another-entry.pkv"), b"sealed").unwrap();
 }
 
-/// How many times medrec read its Drive sign-in (`MEDREC_TEST_KEYCHAIN_LOG`).
-fn keychain_reads(log: &std::path::Path) -> usize {
+/// The reads medrec made of its Keychain item (`MEDREC_TEST_KEYCHAIN_LOG`):
+/// `read` for one that may ask a person, `quiet` for one that may not.
+fn keychain_reads(log: &std::path::Path) -> Vec<String> {
     std::fs::read_to_string(log)
-        .map(|s| s.lines().count())
-        .unwrap_or(0)
+        .map(|s| s.lines().map(str::to_string).collect())
+        .unwrap_or_default()
 }
 
 #[test]
-fn a_scheduled_pass_never_waits_on_the_drive_sign_ins_keychain_approval() {
+fn a_scheduled_pass_raises_no_keychain_dialog() {
     let e = Env::new("drive-gate");
     e.ok(&[
         "config",
@@ -1387,56 +1388,122 @@ fn a_scheduled_pass_never_waits_on_the_drive_sign_ins_keychain_approval() {
         "folder",
         "gdrive:home-drive/1Synthetic_folder",
     ]);
-    vault_entry(&e);
     let log = e.root.join("keychain-reads");
     let log_s = log.to_str().unwrap();
-    // Two binaries, as a build and its update are.
-    let first = e.root.join("medrec-first");
-    let second = e.root.join("medrec-second");
-    std::fs::write(&first, "1").unwrap();
-    std::fs::write(&second, "22").unwrap();
-    let env = [
-        ("MEDREC_TEST_EXE", first.to_str().unwrap()),
+    let asks = [
         ("MEDREC_TEST_KEYCHAIN_DELAY_SECS", "30"),
         ("MEDREC_TEST_KEYCHAIN_LOG", log_s),
         ("MEDREC_TEST_AUTH_WAIT_SECS", "1"),
     ];
-    let started = std::time::Instant::now();
-    let out = e.run_env(&["--json", "refresh", "--scheduled"], &env);
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    assert!(started.elapsed() < std::time::Duration::from_secs(10));
-    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(v["status"], "needs_person", "{v}");
-    assert_eq!(v["command"], "medrec --profile home refresh");
-    // The same binary is not asked again: no second dialog.
-    let out = e.run_env(&["--json", "refresh", "--scheduled"], &env);
-    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(v["status"], "needs_person");
-    assert_eq!(keychain_reads(&log), 1);
-    // Another binary asks; a read that answers lets the pass go on to the
-    // folder, which here has no sign-in on this machine.
-    let env = [
-        ("MEDREC_TEST_EXE", second.to_str().unwrap()),
-        ("MEDREC_TEST_KEYCHAIN_LOG", log_s),
-        ("MEDREC_TEST_AUTH_WAIT_SECS", "1"),
-    ];
-    for reads in [2, 3] {
-        let out = e.run_env(&["--json", "refresh", "--scheduled"], &env);
-        assert_eq!(
-            out.status.code(),
-            Some(2),
-            "{}",
-            String::from_utf8_lossy(&out.stdout)
+    let answers = [("MEDREC_TEST_KEYCHAIN_LOG", log_s)];
+    let scheduled = ["--json", "refresh", "--scheduled"];
+    let error = |out: &std::process::Output| -> Value {
+        let v: Value = serde_json::from_slice(&out.stdout)
+            .unwrap_or_else(|x| panic!("{x}: {}", String::from_utf8_lossy(&out.stderr)));
+        v["error"].clone()
+    };
+
+    // A key that a person has to allow: every pass stops at once, saying
+    // what to run, and asks nobody. Each looks again, so a key allowed
+    // since is read.
+    for passes in [1, 2] {
+        let started = std::time::Instant::now();
+        let out = e.run_env(&scheduled, &asks);
+        assert!(started.elapsed() < std::time::Duration::from_secs(10));
+        let x = error(&out);
+        assert_eq!(out.status.code(), Some(3), "{x}");
+        assert_eq!(x["reason"], "credential_unreadable", "{x}");
+        assert!(
+            x["remedy"].as_str().unwrap().contains("medrec auth key"),
+            "{x}"
         );
-        assert!(String::from_utf8_lossy(&out.stderr)
-            .contains("medrec drive login --drive-profile home-drive"));
-        // Every scheduled pass reads it first, bounded.
-        assert_eq!(keychain_reads(&log), reads);
+        assert_eq!(keychain_reads(&log), vec!["quiet"; passes]);
     }
+
+    // In the log, each such pass has its time.
+    let out = e.run_env(&["refresh", "--scheduled"], &asks);
+    let line = String::from_utf8_lossy(&out.stdout).to_string();
+    assert!(line.ends_with("Z failed\n"), "{line}");
+    let said = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(
+        said.contains("run `medrec auth key` at the screen"),
+        "{said}"
+    );
+
+    // A vault whose key is gone is exit 1, which no one can allow.
+    vault_entry(&e);
+    let out = e.run_env(&scheduled, &answers);
+    assert_eq!(out.status.code(), Some(1), "{}", error(&out));
+
+    // With nothing sealed, the pass goes on to the folder, which here has no
+    // sign-in on this machine.
+    std::fs::remove_dir_all(e.root.join(".config/medrec/vault")).unwrap();
+    let out = e.run_env(&scheduled, &answers);
+    let x = error(&out);
+    assert_eq!(out.status.code(), Some(2), "{x}");
+    assert!(
+        x.to_string()
+            .contains("medrec drive login --drive-profile home-drive"),
+        "{x}"
+    );
+    assert!(
+        keychain_reads(&log).iter().all(|r| r == "quiet"),
+        "{:?}",
+        keychain_reads(&log)
+    );
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
+/// `auth key` reads the key and nothing else, and says what the Keychain did.
+#[test]
+fn auth_key_says_what_the_keychain_did() {
+    let e = Env::new("auth-key");
+    let log = e.root.join("keychain-reads");
+    let log_s = log.to_str().unwrap();
+    let asks = [
+        ("MEDREC_TEST_KEYCHAIN_DELAY_SECS", "30"),
+        ("MEDREC_TEST_KEYCHAIN_LOG", log_s),
+    ];
+    let key = |args: &[&str], env: &[(&str, &str)]| -> (Option<i32>, Value) {
+        let args: Vec<&str> = ["--json", "auth", "key"]
+            .iter()
+            .chain(args)
+            .copied()
+            .collect();
+        let out = e.run_env(&args, env);
+        let v = serde_json::from_slice(&out.stdout)
+            .unwrap_or_else(|x| panic!("{x}: {}", String::from_utf8_lossy(&out.stderr)));
+        (out.status.code(), v)
+    };
+    // Nothing stored, and nothing that needs a key.
+    let (code, v) = key(&[], &asks[1..]);
+    assert_eq!(
+        (code, &v["schema"], &v["outcome"], &v["read"]),
+        (
+            Some(0),
+            &json!("auth-key/v1"),
+            &json!("absent"),
+            &json!(false)
+        ),
+        "{v}"
+    );
+    // A dialog that would be needed is said, and none is raised.
+    let (code, v) = key(&["--no-dialog"], &asks);
+    assert_eq!(
+        (code, &v["outcome"], &v["dialog_needed"]),
+        (Some(3), &json!("needs_dialog"), &json!(true)),
+        "{v}"
+    );
+    assert_eq!(v["error"]["reason"], "credential_unreadable", "{v}");
+    assert_eq!(keychain_reads(&log), ["quiet", "quiet"]);
+    // One that nobody answers, raised once and waited for as long as said.
+    let (code, v) = key(&["--wait", "1"], &asks);
+    assert_eq!((code, &v["outcome"]), (Some(3), &json!("no_answer")), "{v}");
+    assert_eq!(keychain_reads(&log)[2..], ["quiet", "read"]);
+    // A key that sealed files need is gone.
+    vault_entry(&e);
+    let (code, v) = key(&[], &asks[1..]);
+    assert_eq!((code, &v["outcome"]), (Some(1), &json!("absent")), "{v}");
     let _ = std::fs::remove_dir_all(&e.root);
 }
 

@@ -11,8 +11,9 @@
 //! <DIR>/dicom/cd2/    the same study with a second series
 //! <DIR>/dicom/ct.zip  a CT study for the adult, zipped (needs bsdtar)
 //! <DIR>/provider/     a fake provider CLI (`fakeprov`) and its streams: the
-//!                     one it prints, and four patients' of one connection
-//!                     (`--patient eye-1`, `studio-1`, `hearing-1`, `sports-1`)
+//!                     one it prints, and four alike in all but the person
+//!                     and the patient (`--patient north`, `south`, `east`,
+//!                     `west`)
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -26,9 +27,9 @@ pub const STREAM: &str = include_str!("../tests/fixtures/stream/synthetic.ndjson
 /// A stream whose records refer to practitioners, organizations and places
 /// in each way a source does.
 pub const PROVIDERS_STREAM: &str = include_str!("../tests/fixtures/stream/providers.ndjson");
-/// One patient's stream of a records connection that serves every practice
-/// under one organization id and FHIR base ([`connection_streams`]).
-const CONNECTION_STREAM: &str = include_str!("../tests/fixtures/stream/connection.ndjson");
+/// One patient's stream, of several with one CLI, organization and FHIR base
+/// ([`shared_key_streams`]).
+const SHARED_KEY_STREAM: &str = include_str!("../tests/fixtures/stream/shared-key.ndjson");
 /// The fake provider's `info --json`.
 pub const PROVIDER_INFO: &str = include_str!("../tests/fixtures/stream/fakeprov-info.json");
 /// The same from before login profiles: it signs in, but lists no
@@ -77,52 +78,35 @@ pub fn stream_with_summary(rendering: &str, finding: &str, version: &str) -> Str
     out
 }
 
-/// What one connection serves, as `(patient, person, stream)`: Alex at three
-/// practices, with a visit and a result at each on one day, and Robin at a
-/// fourth that holds no records.
-pub fn connection_streams() -> [(&'static str, &'static str, String); 4] {
-    let stream = |patient: &str, practice: &str, robin: bool, visit: &str, hour: &str| {
-        let (given, born, relationship) = match robin {
-            true => ("Robin", "2020-02-02", "proxy"),
-            false => ("Alex", "1990-01-01", "self"),
-        };
-        CONNECTION_STREAM
+/// Sources alike in CLI, organization and FHIR base, as `(patient, person,
+/// name, stream)`: each of two people as each of two patients.
+pub fn shared_key_streams() -> Vec<(&'static str, &'static str, &'static str, String)> {
+    let people = [("Alex", "1990-01-01"), ("Robin", "2020-02-02")];
+    [
+        ("north", 0, "Sample Clinic North", "09"),
+        ("east", 1, "Sample Clinic East", "11"),
+        ("south", 0, "Sample Clinic South", "13"),
+        ("west", 1, "Sample Clinic West", "15"),
+    ]
+    .map(|(patient, person, name, hour)| {
+        let (given, born) = people[person];
+        let stream = SHARED_KEY_STREAM
             .replace("{{PATIENT}}", patient)
-            .replace("{{PRACTICE}}", practice)
-            .replace("{{LABEL}}", &format!("{given} Testperson at {practice}"))
+            .replace("{{NAME}}", name)
+            .replace("{{LABEL}}", &format!("{given} Testperson, {patient}"))
             .replace("{{GIVEN}}", given)
             .replace("{{BORN}}", born)
-            .replace("{{RELATIONSHIP}}", relationship)
-            .replace("{{VISIT}}", visit)
+            .replace("{{VISIT}}", &format!("Check at {patient}"))
             .replace("{{HOUR}}", hour)
-            .replace("{{PULLED}}", &format!("2026-03-05T{hour}:00:00Z"))
-    };
-    let eye = stream("eye-1", "Example Eye Center", false, "Eye check", "14");
-    let studio = stream("studio-1", "Sample Skin Studio", false, "Skin check", "16");
-    let hearing = stream(
-        "hearing-1",
-        "Placeholder Hearing Clinic",
-        false,
-        "Hearing check",
-        "18",
-    );
-    let sports: String = stream("sports-1", "Example Sports Clinic", true, "", "20")
-        .replace(r#","Encounter":1,"Observation":1"#, "")
-        .lines()
-        .filter(|l| !l.contains(r#""sports-1-"#))
-        .map(|l| format!("{l}\n"))
-        .collect();
-    [
-        ("eye-1", "Alex", eye),
-        ("studio-1", "Alex", studio),
-        ("hearing-1", "Alex", hearing),
-        ("sports-1", "Robin", sports),
-    ]
+            .replace("{{PULLED}}", &format!("2024-06-19T{hour}:00:00Z"));
+        (patient, given, name, stream)
+    })
+    .into()
 }
 
-/// Write [`connection_streams`] where `fakeprov` in `provider` finds them.
-pub fn write_connection(provider: &Path) {
-    for (patient, _, stream) in connection_streams() {
+/// Write [`shared_key_streams`] where `fakeprov` in `provider` finds them.
+pub fn write_shared_key(provider: &Path) {
+    for (patient, _, _, stream) in shared_key_streams() {
         write(
             &provider.join(format!("synthetic-{patient}.ndjson")),
             stream.as_bytes(),
@@ -140,7 +124,7 @@ pub fn write_all(out: &Path) {
     write_scans(&out.join("scans"));
     write_dicom(&out.join("dicom"));
     write_provider(&out.join("provider"), STREAM);
-    write_connection(&out.join("provider"));
+    write_shared_key(&out.join("provider"));
 }
 
 pub fn write_scans(scans: &Path) {

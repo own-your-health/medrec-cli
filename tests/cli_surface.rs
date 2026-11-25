@@ -132,6 +132,7 @@ fn every_command_renders_its_help() {
         &["config", "set"],
         &["config", "unset"],
         &["auth", "status"],
+        &["auth", "key"],
         &["self-update"],
         &["completions"],
         &["info"],
@@ -168,6 +169,35 @@ fn info_names_the_drive_sign_in() {
         .unwrap();
     assert!(out.status.success());
     assert_eq!(json_of(&out)["schema"], "auth-status/v1");
+}
+
+/// `info` and `--version` say what the binary was built from; `-V` is the
+/// version alone.
+#[test]
+fn a_binary_says_what_it_was_built_from() {
+    let version = env!("CARGO_PKG_VERSION");
+    let v = json_of(&medrec().args(["info", "--json"]).output().unwrap());
+    assert_eq!(v["version"], version);
+    let build = &v["build"];
+    assert!(build["built_at"].is_string(), "{v}");
+    let text = |flag: &str| -> String {
+        let out = medrec().arg(flag).output().unwrap();
+        String::from_utf8(out.stdout).unwrap().trim().to_string()
+    };
+    assert_eq!(text("-V"), format!("medrec {version}"));
+    let long = text("--version");
+    assert!(
+        long.starts_with(&format!("medrec {version} (")) && long.contains(", built "),
+        "{long}"
+    );
+    let git = std::process::Command::new("git")
+        .args(["-C", env!("CARGO_MANIFEST_DIR"), "rev-parse", "HEAD"])
+        .output();
+    if git.is_ok_and(|o| o.status.success()) {
+        let commit = build["commit"].as_str().unwrap_or_default();
+        assert_eq!(commit.len(), 40, "{v}");
+        assert!(long.contains(&commit[..12]), "{long}: {commit}");
+    }
 }
 
 #[test]
