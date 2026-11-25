@@ -1,0 +1,11 @@
+{
+ "schema": "medrec-text/v1",
+ "person": "p_robinaaaaaaaaaaaaaaa",
+ "texts": {
+  "d_billaaaaaaaaaaaaaaaa": "Example Family Practice\nSeen by Riley Placeholder NP\nQuestions? Call 555-010-0150\n",
+  "d_summaryaaaaaaaaaaaaa": "Sample Health Partners\nVisit with Morgan Template, MD\n",
+  "d_firstaaaaaaaaaaaaaaa": "Sample Health Partners\nVisit with Pat Dummy, MD\n",
+  "d_secondaaaaaaaaaaaaaa": "Placeholder Walk-In\nPat Dummy, MD\n",
+  "d_counselingaaaaaaaaaa": "Example Counseling Center\nVisit with Lee Filler\n"
+ }
+}

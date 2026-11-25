@@ -12,6 +12,7 @@
 
 use std::collections::BTreeSet;
 use std::io::{BufRead, BufReader, Read};
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -54,6 +55,7 @@ const FIRST: usize = 6;
 const MIDDLE: usize = 7;
 const CREDENTIAL: usize = 10;
 const OTHER_ORGANIZATION: usize = 11;
+const OTHER_TYPE: usize = 12;
 const OTHER_LAST: usize = 13;
 const OTHER_FIRST: usize = 14;
 const CITY: usize = 30;
@@ -77,6 +79,7 @@ const COLUMNS: &[(usize, &str)] = &[
     (MIDDLE, "Provider Middle Name"),
     (CREDENTIAL, "Provider Credential Text"),
     (OTHER_ORGANIZATION, "Provider Other Organization Name"),
+    (OTHER_TYPE, "Provider Other Organization Name Type Code"),
     (OTHER_LAST, "Provider Other Last Name"),
     (OTHER_FIRST, "Provider Other First Name"),
     (
@@ -102,6 +105,9 @@ const COLUMNS: &[(usize, &str)] = &[
         "Healthcare Provider Primary Taxonomy Switch_15",
     ),
 ];
+
+/// The type code of the name an organization does business as.
+const BUSINESS_NAME: &[u8] = b"3";
 
 /// How long one read of the server may take, and the whole download.
 const READ: Duration = Duration::from_secs(60);
@@ -136,8 +142,9 @@ pub struct Provider {
     /// An organization's name; empty for a person.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub organization: String,
+    /// The name it does business as.
     #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub other_organization: String,
+    pub business_name: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub last: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -174,6 +181,10 @@ pub struct Kept {
     pub rows: u64,
     pub fetched_at: String,
     pub wanted_sha256: String,
+    /// The states every organization was kept of, and with the people below
+    /// every person of those names.
+    pub states: BTreeSet<String>,
+    pub people: BTreeSet<(String, char)>,
     pub kept: u64,
     /// Of the lines below this one.
     pub kept_sha256: String,
@@ -279,7 +290,8 @@ pub fn fold(s: &str) -> String {
         .collect()
 }
 
-fn person(last: &str, first: &str) -> Option<(String, char)> {
+/// A person's surname and first initial, as [`people`] gives them.
+pub fn person(last: &str, first: &str) -> Option<(String, char)> {
     let last = fold(last);
     let initial = fold(first).chars().next()?;
     (last.len() > 1).then_some((last, initial))
@@ -294,19 +306,22 @@ const AROUND_A_NAME: &[&str] = &[
     "PSYD", "PT", "RD", "RN", "RPH", "SLP", "SR", "WHNP",
 ];
 
+/// The words of a name in capitals, without what is around a name.
+pub fn name_words(printed: &str) -> Vec<String> {
+    printed
+        .split(|c: char| c.is_whitespace() || c == ',')
+        .map(fold)
+        .filter(|t| !t.is_empty() && !AROUND_A_NAME.contains(&t.as_str()))
+        .collect()
+}
+
 /// The surname and first initial a printed name can be of: `Jordan A.
 /// Sample, MD`, `SAMPLE, JORDAN A` and `SAMPLE JORDAN A`. More than one when
 /// the name can be read in more than one way.
 pub fn people(printed: &str) -> BTreeSet<(String, char)> {
     let pieces: Vec<Vec<String>> = printed
         .split(',')
-        .map(|piece| {
-            piece
-                .split_whitespace()
-                .map(fold)
-                .filter(|t| !t.is_empty() && !AROUND_A_NAME.contains(&t.as_str()))
-                .collect::<Vec<_>>()
-        })
+        .map(name_words)
         .filter(|p| !p.is_empty())
         .collect();
     let mut out = BTreeSet::new();
@@ -451,6 +466,8 @@ pub fn fetch(
         month: offer.month.clone(),
         fetched_at: crate::model::now_rfc3339(),
         wanted_sha256: wanted.sha256(),
+        states: wanted.states.clone(),
+        people: wanted.people.clone(),
         ..about
     };
     let mut file =
@@ -514,22 +531,61 @@ pub fn list(dir: &Path) -> Vec<(String, Option<Kept>)> {
     found
 }
 
-impl Directory {
+/// A kept file as it was written, its rows not read yet.
+pub struct Stored {
+    pub about: Kept,
+    file: Vec<u8>,
+    at: usize,
+}
+
+impl Stored {
     /// None when nothing is kept, or the file is not as it was written.
-    pub fn load(path: &Path) -> Option<Directory> {
+    pub fn open(path: &Path) -> Option<Stored> {
         let file = std::fs::read(path).ok()?;
         let at = file.iter().position(|b| *b == b'\n')? + 1;
         let about: Kept = serde_json::from_slice(&file[..at]).ok()?;
-        if about.schema != SCHEMA || sha256_hex(&file[at..]) != about.kept_sha256 {
-            return None;
-        }
-        let providers = file[at..]
+        (about.schema == SCHEMA && sha256_hex(&file[at..]) == about.kept_sha256).then_some(Stored {
+            about,
+            file,
+            at,
+        })
+    }
+
+    /// Where each row is, with its NPI and whether it is a person's: as
+    /// [`Provider`] is written, the NPI first and an organization's name
+    /// after it.
+    pub fn lines(&self) -> impl Iterator<Item = (Range<usize>, String, bool)> + '_ {
+        const BEFORE: &[u8] = b"{\"npi\":\"";
+        let mut at = self.at;
+        self.file[self.at..]
             .split(|b| *b == b'\n')
-            .filter(|l| !l.is_empty())
-            .map(serde_json::from_slice)
-            .collect::<Result<Vec<Provider>, _>>()
-            .ok()?;
-        (providers.len() as u64 == about.kept).then_some(Directory { about, providers })
+            .filter_map(move |line| {
+                let here = at..at + line.len();
+                at = here.end + 1;
+                let rest = line.strip_prefix(BEFORE)?;
+                let npi = std::str::from_utf8(rest.get(..10)?).ok()?.to_string();
+                let person = !rest[10..].starts_with(b"\",\"organization\":");
+                Some((here, npi, person))
+            })
+    }
+
+    pub fn provider(&self, at: Range<usize>) -> Option<Provider> {
+        serde_json::from_slice(self.file.get(at)?).ok()
+    }
+}
+
+impl Directory {
+    /// None when nothing is kept, or the file is not as it was written.
+    pub fn load(path: &Path) -> Option<Directory> {
+        let s = Stored::open(path)?;
+        let providers: Vec<Provider> = s
+            .lines()
+            .map(|(at, _, _)| s.provider(at))
+            .collect::<Option<_>>()?;
+        (providers.len() as u64 == s.about.kept).then_some(Directory {
+            about: s.about,
+            providers,
+        })
     }
 }
 
@@ -672,6 +728,8 @@ fn read_zip(
         rows,
         fetched_at: String::new(),
         wanted_sha256: String::new(),
+        states: BTreeSet::new(),
+        people: BTreeSet::new(),
         kept,
         kept_sha256: sha256_hex(&lines),
     };
@@ -808,7 +866,10 @@ impl Row {
         Provider {
             npi: self.text(NPI),
             organization: of(organization, ORGANIZATION),
-            other_organization: of(organization, OTHER_ORGANIZATION),
+            business_name: of(
+                organization && self.raw(OTHER_TYPE) == BUSINESS_NAME,
+                OTHER_ORGANIZATION,
+            ),
             last: of(!organization, LAST),
             first: of(!organization, FIRST),
             middle: of(!organization, MIDDLE),
@@ -854,6 +915,29 @@ fn read_rows(r: impl Read, wanted: &Wanted) -> Result<(u64, u64, Vec<u8>), Strin
         }
     }
     Ok((rows, kept, lines))
+}
+
+/// A kept file of these rows, as [`fetch`] writes one.
+#[cfg(test)]
+pub(crate) fn keep_rows(path: &Path, wanted: &Wanted, rows: &str) {
+    let about = Kept {
+        schema: SCHEMA.into(),
+        url: "https://download.cms.gov/nppes/NPPES_Data_Dissemination_March_2026_V2.zip".into(),
+        month: "2026-03".into(),
+        date: "2026-03-08".into(),
+        bytes: 1,
+        sha256: sha256_hex(b""),
+        rows: 1,
+        fetched_at: "2026-03-10T00:00:00Z".into(),
+        wanted_sha256: wanted.sha256(),
+        states: wanted.states.clone(),
+        people: wanted.people.clone(),
+        kept: rows.lines().count() as u64,
+        kept_sha256: sha256_hex(rows.as_bytes()),
+    };
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let first = serde_json::to_string(&about).unwrap();
+    std::fs::write(path, format!("{first}\n{rows}")).unwrap();
 }
 
 #[cfg(test)]

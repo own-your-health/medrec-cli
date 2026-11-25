@@ -193,6 +193,11 @@ fn first_area(list: &[(Regex, &'static str)], text: &str) -> Option<&'static str
         .map(|(_, a)| *a)
 }
 
+/// The area a place's or clinician's name, or a role, says.
+pub(crate) fn place_area(text: &str) -> Option<&'static str> {
+    first_area(&PLACES, text)
+}
+
 /// The portals whose records are all of one area: a behavioral health
 /// record system, a fertility clinic's.
 fn source_area(r: &Record) -> Option<&'static str> {
@@ -288,11 +293,24 @@ fn document_why(d: &Document) -> Option<Why> {
 // ---------------------------------------------------------------- the view
 
 /// The person's `private.json` as `medrec views write` writes it: from
-/// their index, their `events.json` and their marks.
-pub fn build(p: &Person, idx: &PersonIndex, events: &Value, marks: &[Mark]) -> Value {
+/// their index, their `events.json`, their marks, and the records a provider
+/// label makes private, with their area (`labels::Sure::areas`).
+pub fn build(
+    p: &Person,
+    idx: &PersonIndex,
+    events: &Value,
+    marks: &[Mark],
+    labelled: &BTreeMap<String, &'static str>,
+) -> Value {
     let mut items: BTreeMap<String, Why> = BTreeMap::new();
     for r in &idx.records {
-        if let Some(w) = record_why(r) {
+        let why = record_why(r).or_else(|| {
+            labelled.get(&r.id).map(|area| Why {
+                area,
+                from: "provider",
+            })
+        });
+        if let Some(w) = why {
             items.insert(r.id.clone(), w);
         }
     }
@@ -484,6 +502,12 @@ pub fn with_events(
 ) -> Result<(Value, Value), CliError> {
     let events = crate::events::of_person(folder, h, p)?;
     let marks = folder.marks_if_readable(p)?;
+    // Labels as the last pass wrote them: what is private is the same on a
+    // machine with the directory and on one without it.
+    let before = crate::viewfiles::last_labels(folder, p)?;
+    let source = before
+        .as_ref()
+        .map_or(crate::labels::Source::None, crate::labels::Source::Previous);
     let mut v = build(
         p,
         idx,
@@ -492,6 +516,7 @@ pub fn with_events(
             .as_ref()
             .map(|m| m.private.as_slice())
             .unwrap_or_default(),
+        &crate::labels::Sure::of(idx, &source).areas(),
     );
     if marks.is_none() {
         v["marks_unreadable"] = Value::Bool(true);
@@ -809,6 +834,11 @@ mod tests {
         }
     }
 
+    /// The view with no provider labels.
+    fn built(p: &Person, idx: &PersonIndex, events: &Value, marks: &[Mark]) -> Value {
+        build(p, idx, events, marks, &BTreeMap::new())
+    }
+
     #[test]
     fn names_medicines_and_tests_say_their_area() {
         assert_eq!(
@@ -920,7 +950,7 @@ mod tests {
                 "records": [therapy.clone(), checkup.clone()]
             }))
             .unwrap();
-            build(&person(), &idx, &json!({"events": []}), marks)
+            built(&person(), &idx, &json!({"events": []}), marks)
         };
         let v = v_of(&[]);
         // Any record that links it is enough, and an unlinked one is not.
@@ -1014,7 +1044,7 @@ mod tests {
         let events = json!({"events": [{"id": "e_therapyaaaaaaaaaaaaa", "members": [
             {"record": "r_therapyclaimaaaaaaaa", "kind": "claim", "role": "office"},
             {"record": "r_therapyvisitaaaaaaaa", "kind": "encounter", "role": "portal"}]}]});
-        let v = build(&person(), &idx, &events, &[]);
+        let v = built(&person(), &idx, &events, &[]);
         assert_eq!(v["documents"]["d_summaryaaaaaaaaaaaa"]["from"], "record");
     }
 
@@ -1051,7 +1081,7 @@ mod tests {
             {"id": "e_vitaminfillaaaaaaaaa", "members": [
                 {"record": "r_vitaminaaaaaaaaaaaaa", "kind": "medication", "role": "fill"}]}
         ]});
-        let v = build(&person(), &idx, &events, &[]);
+        let v = built(&person(), &idx, &events, &[]);
         assert_eq!(v["schema"], SCHEMA);
         // The therapy claim by its principal diagnosis, and its visit with
         // it; the sertraline fill by its medicine; the checkup's screening
@@ -1090,7 +1120,7 @@ mod tests {
             request: None,
             members: Vec::new(),
         };
-        let v = build(
+        let v = built(
             &person(),
             &idx,
             &events,
@@ -1123,7 +1153,7 @@ mod tests {
             members: vec!["r_vitaminaaaaaaaaaaaaa".into()],
             ..mark("e_oldvitaminfillaaaaa", false)
         };
-        let w = build(
+        let w = built(
             &person(),
             &idx,
             &events,
@@ -1137,7 +1167,7 @@ mod tests {
             members: vec!["r_vitaminaaaaaaaaaaaaa".into()],
             ..mark("e_oldvitaminfillaaaaa", false)
         };
-        let w = build(&person(), &idx, &events, &[own, followed]);
+        let w = built(&person(), &idx, &events, &[own, followed]);
         assert_eq!(
             w["events"]["e_vitaminfillaaaaaaaaa"],
             json!({"area": HOUSEHOLD, "from": "household"})

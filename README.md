@@ -653,6 +653,12 @@ medrec tables list                                  # what is kept, and of which
   here: its link, month, size, SHA-256 and row count are kept with the rows.
 - Records need their providers' NPI and state: those filed before 0.9.6 get
   them from `medrec reindex`.
+- **What it is for**: a name, role and phone beside a provider a record
+  prints, sure or likely and with the reason, in `views/` as
+  `providers.json` (docs/data-contract.md, "Provider labels"). The record's
+  own text stays as it is. After fetching the directory, run `medrec views
+  write`, or let the next write do it. A machine with no directory keeps the
+  labels another wrote, and adds none.
 - The kept rows are public ones, but which people are among them follows from
   the records. `medrec cache clear` removes them.
 - `tables list --json` has one row for each records folder it was read for,

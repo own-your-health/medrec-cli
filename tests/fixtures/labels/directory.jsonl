@@ -1,0 +1,9 @@
+{"npi":"0000000006","last":"SAMPLE","first":"JORDAN","credential":"M.D.","city":"EXAMPLETON","state":"FL","phone":"5550100101","taxonomy":"207Q00000X","middle":"A"}
+{"npi":"0000000014","last":"EXAMPLE","first":"CASEY","credential":"PH.D.","city":"EXAMPLETON","state":"FL","phone":"5550100102","taxonomy":"103TC0700X"}
+{"npi":"0000000022","organization":"EXAMPLE PRIMARY CARE GROUP LLC","business_name":"EXAMPLE PRIMARY CARE","city":"EXAMPLETON","state":"FL","phone":"5550100103","taxonomy":"261QP2300X"}
+{"npi":"0000000030","organization":"EXAMPLE PRIMARY CARE GROUP OF TEXAS, INC.","city":"EXAMPLETON","state":"TX","phone":"5550100104","taxonomy":"261QP2300X"}
+{"npi":"0000000055","last":"PLACEHOLDER","first":"RILEY","credential":"FNP-BC","city":"EXAMPLETON","state":"FL","taxonomy":"363LF0000X"}
+{"npi":"0000000063","last":"TESTPERSON","first":"AVERY","credential":"MD","city":"EXAMPLETON","state":"FL","phone":"5550100107","taxonomy":"2085R0202X"}
+{"npi":"0000000071","last":"TESTPERSON","first":"ALEX","credential":"RBT","city":"EXAMPLETON","state":"FL","phone":"5550100108","taxonomy":"106S00000X"}
+{"npi":"0000000089","last":"SPECIMEN","first":"DREW","credential":"MD","city":"EXAMPLETON","state":"FL","phone":"5550100109","taxonomy":"207N00000X"}
+{"npi":"0000000097","last":"SPECIMEN","first":"DANA","credential":"DO","city":"EXAMPLETON","state":"FL","phone":"5550100110","taxonomy":"207R00000X"}

@@ -1,0 +1,16 @@
+{
+ "schema": "medrec-household/v1",
+ "format": 1,
+ "folder_id": "f_exampleaaaaaaaaaaaaa",
+ "rev": 1,
+ "created_at": "2026-01-01T00:00:00Z",
+ "people": [
+  {
+   "id": "p_robinaaaaaaaaaaaaaaa",
+   "name": "Robin Example",
+   "folder": "Robin Example",
+   "created_at": "2026-01-01T00:00:00Z"
+  }
+ ],
+ "sources": []
+}

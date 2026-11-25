@@ -1,0 +1,14 @@
+{
+ "schema": "medrec-marks/v1",
+ "person": "p_robinaaaaaaaaaaaaaaa",
+ "rev": 1,
+ "payments": [],
+ "private": [
+  {
+   "id": "o_markaaaaaaaaaaaaaaaa",
+   "item": "r_markedaaaaaaaaaaaaaa",
+   "private": false,
+   "at": "2026-01-02T00:00:00Z"
+  }
+ ]
+}

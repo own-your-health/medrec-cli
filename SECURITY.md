@@ -77,8 +77,9 @@ client's secret as not confidential, and PKCE protects each sign-in.
   one. `medrec tables fetch nppes` asks download.cms.gov for the page that
   lists its provider file, and for that file, whole. No other command contacts
   either, and no request carries a code, a name, an NPI or anything else from
-  the records. The titles a person's codes have are in
-  `views/` (`code-names.json`), inside the records folder.
+  the records. The titles a person's codes have and the labels of their
+  providers are in `views/` (`code-names.json`, `providers.json`), inside the
+  records folder.
 - It never edits a filed document, a DICOM file or a raw record. A record a
   source changed is written beside the previous version, which is kept.
 - It deletes a source file only when it was moved (the inbox, `~/Downloads`,
