@@ -9,6 +9,7 @@ use pk_med_records::Timestamp;
 use serde::Serialize;
 use serde_json::Value;
 
+use crate::about;
 use crate::folder::Folder;
 use crate::import;
 use crate::model::{Household, Person, Record};
@@ -109,12 +110,17 @@ struct Versions {
     ordered: bool,
 }
 
-/// A record by id, with whose it is.
-pub fn record(folder: &Folder, h: &Household, id: &str) -> Result<(Person, Record), CliError> {
+/// A record by id, with whose it is, and whom it is about where that is
+/// somebody else.
+pub fn record(
+    folder: &Folder,
+    h: &Household,
+    id: &str,
+) -> Result<(Person, Record, Option<&'static str>), CliError> {
     for p in &h.people {
         let idx = folder.whole_index(p).map_err(unnamed)?;
-        if let Some(r) = idx.records.into_iter().find(|r| r.id == id) {
-            return Ok((p.clone(), r));
+        if let Some(r) = idx.records.iter().find(|r| r.id == id) {
+            return Ok((p.clone(), r.clone(), about::who(p, &idx, r)));
         }
     }
     Err(CliError::NotFound(format!("no record `{id}`")))

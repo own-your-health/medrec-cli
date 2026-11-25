@@ -1097,6 +1097,9 @@ fn slim(r: &Record, from: crate::sources::Sources) -> Value {
     if !r.fields.is_empty() {
         m.insert("fields".into(), Value::Object(r.fields.clone()));
     }
+    if crate::panels::heads(r) {
+        m.insert("heading".into(), true.into());
+    }
     let says = crate::standing::record_says(from, r);
     if !says.is_empty() {
         m.insert("says".into(), serde_json::json!(says));
@@ -1359,12 +1362,13 @@ pub(crate) fn person(
     }
 
     // Each test's results, newest first, the series in the order of their
-    // newest result, without those entered in error.
+    // newest result, without headings and those entered in error.
     let errors: BTreeSet<&String> = st.errors().collect();
     let mut results: Vec<&Record> = idx
         .records
         .iter()
         .filter(|r| r.kind == "result" && !errors.contains(&r.id))
+        .filter(|r| !crate::panels::heads(r))
         .collect();
     results.sort_by(|a, b| b.date.cmp(&a.date).then_with(|| a.display.cmp(&b.display)));
     let mut series: Vec<Series> = Vec::new();

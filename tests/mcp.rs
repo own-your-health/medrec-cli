@@ -4,7 +4,7 @@
 //! Claude Desktop runs it, which must leave every file of the folder as it
 //! was. Offline, on a local folder; the Keychain service is an empty one.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Output, Stdio};
@@ -2712,7 +2712,7 @@ const ANKLE: &str = "r_ankleaaaaaaaaaaaaaaa";
 const CALM: &str = "r_calmfillaaaaaaaaaaaa";
 const NOSE: &str = "r_nosefillaaaaaaaaaaaa";
 /// What a grown person does, and the papers of it.
-const GROWN: [&str; 10] = [
+const GROWN: [&str; 12] = [
     "r_lowmoodaaaaaaaaaaaaa",
     "r_codedaaaaaaaaaaaaaaa",
     "r_worryaaaaaaaaaaaaaaa",
@@ -2723,12 +2723,18 @@ const GROWN: [&str; 10] = [
     "d_answersaaaaaaaaaaaaa",
     "d_sheetaaaaaaaaaaaaaaa",
     "r_piecesaaaaaaaaaaaaaa",
+    "r_inneraaaaaaaaaaaaaaa",
+    "r_pairaaaaaaaaaaaaaaaa",
 ];
+/// A panel of one of them and of one that is none.
+const MIXED: &str = "r_mixpanelaaaaaaaaaaaa";
 /// The words each is named by, and some a search would find it by.
-const NAMED: [&str; 12] = [
+const NAMED: [&str; 14] = [
     "Patient health",
     "Example check-in",
     "First piece",
+    "Second answer",
+    "Example pair",
     "Total score",
     "GAD-7",
     "Postnatal",
@@ -2780,6 +2786,112 @@ fn views_of(e: &Env, pid: &str) -> (BTreeMap<String, Value>, Value) {
     let all = std::fs::read(e.records().join("views/views.json")).unwrap();
     let all: Value = serde_json::from_slice(&all).unwrap();
     (out, all["people"][pid].clone())
+}
+
+/// A panel with no value is a heading, by what its source lists: no test and no
+/// latest result, under another's name or with a flag too. It names no result
+/// that is entered in error.
+#[test]
+fn a_heading_is_no_test_and_names_nothing_in_error() {
+    let e = Env::new("headings");
+    fixture_household(&e, "questionnaires", &["index.json"]);
+    let alex = h_id(&e, "Alex Testperson");
+    let path = e.records().join("Alex Testperson/index.json");
+    let mut v: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let records = v["records"].as_array_mut().unwrap();
+    let one = records.iter().find(|r| r["id"] == SUNLIGHT).unwrap();
+    let like = |name: &str, display: &str, day: &str| -> Value {
+        let mut r = one.clone();
+        r["id"] = format!("{:a<22}", format!("r_{name}")).into();
+        (r["key"], r["date"], r["display"]) = (name.into(), day.into(), display.into());
+        let path = format!("Robin Example/Records/north/Observation/{name}.json");
+        r["provenance"][0]["raw_path"] = path.into();
+        r
+    };
+    let panel = |name: &str, display: &str, day: &str, of: &[&str]| -> Value {
+        let mut r = like(name, display, day);
+        r["fields"].as_object_mut().unwrap().remove("value");
+        let files: Vec<String> = of.iter().map(|n| format!("Observation/{n}.json")).collect();
+        let path = r["provenance"][0]["raw_path"].as_str().unwrap();
+        r["lists"] = json!({ path: files });
+        r
+    };
+    let mut wrong = like("wrong", "Example wrong level", "2024-08-01");
+    wrong["status"] = "entered-in-error".into();
+    let mut flagged = panel(
+        "levels",
+        "Example levels",
+        "2024-08-02",
+        &["sunlight", "wrong"],
+    );
+    flagged["fields"]["interpretation"] = "H".into();
+    let sum = like("levelsum", "Example levels", "2024-08-01");
+    let emptied = panel("emptied", "Example emptied", "2024-08-03", &["wrong"]);
+    let ids = [&wrong, &flagged, &sum, &emptied].map(|r| r["id"].as_str().unwrap().to_string());
+    let [wrong_id, flagged_id, sum_id, emptied_id] = ids;
+    records.extend([wrong, flagged, sum, emptied]);
+    std::fs::write(&path, serde_json::to_vec(&v).unwrap()).unwrap();
+    let raw = e.records().join("Robin Example/Records/north/Observation");
+    std::fs::create_dir_all(raw).unwrap();
+    assert_eq!(e.ok(&["reindex"])["links_updated"], 1);
+
+    let t = e.tools();
+    let own = every_answer(&t, Some("Alex"));
+    let rows = |answer: &str| own[answer]["items"].as_array().unwrap().clone();
+    let of = |rows: &[Value], id: &str| rows.iter().find(|r| r["id"] == id).cloned();
+    let listed = rows("results, detailed");
+    let row = of(&listed, &flagged_id).unwrap();
+    assert_eq!(
+        (&row["detail"], &row["flag"]),
+        (&json!("panel"), &json!("H"))
+    );
+    assert_eq!(row["fields"]["members"], json!([SUNLIGHT]), "{row}");
+    let row = of(&listed, &emptied_id).unwrap();
+    assert_eq!(row["detail"], "panel", "{row}");
+    assert!(row["fields"].get("members").is_none(), "{row}");
+    let tests = rows("tests, detailed");
+    let row = of(&tests, &sum_id).unwrap();
+    assert_eq!(row["results"], 1, "{row}");
+    assert!(of(&tests, &flagged_id).is_none() && of(&tests, &emptied_id).is_none());
+    let listed = e.ok(&["timeline", "--person", "Alex"]);
+    let listed = listed["items"].as_array().unwrap();
+    let detail = |id: &str| of(listed, id).unwrap()["detail"].clone();
+    assert_eq!(
+        (detail(&flagged_id), detail(&emptied_id)),
+        (json!("panel (H)"), json!("panel"))
+    );
+    let listed = e.ok(&["results", "--person", "Alex"]);
+    let row = of(listed["items"].as_array().unwrap(), &flagged_id).unwrap();
+    assert_eq!(row["detail"], "panel (H)", "{row}");
+    let row = of(&rows("timeline, detailed"), &flagged_id).unwrap();
+    assert_eq!(row["detail"], "panel (H)", "{row}");
+    for id in [&flagged_id, &emptied_id] {
+        let shown = e.ok(&["records", "show", id]).to_string();
+        assert!(!shown.contains(&wrong_id), "{shown}");
+    }
+
+    // The views: the records say what is a heading, and no test is one.
+    let (files, _) = views_of(&e, &alex);
+    let shards: Vec<&Value> = (files.iter())
+        .filter(|(name, _)| name.starts_with("records-result"))
+        .flat_map(|(_, v)| v.as_array().unwrap())
+        .collect();
+    let heads = shards.iter().filter(|r| r["heading"] == true);
+    let heads: BTreeSet<&str> = heads.map(|r| r["id"].as_str().unwrap()).collect();
+    let want = [flagged_id.as_str(), &emptied_id, GROWN[11], MIXED];
+    assert_eq!(heads, BTreeSet::from(want));
+    assert!(!shards
+        .iter()
+        .any(|r| r["fields"]["members"].to_string().contains(&wrong_id)));
+    let entries = files["tests"].as_array().unwrap().iter();
+    let entries: usize = entries
+        .map(|s| s["entries"].as_array().unwrap().len())
+        .sum();
+    assert_eq!(entries, shards.len() - want.len() - 1);
+    assert!(!files["summary"]["latest_results"]
+        .to_string()
+        .contains("Example emptied"));
+    let _ = std::fs::remove_dir_all(&e.root);
 }
 
 /// The answers of a questionnaire are private, one test for each area: in the
@@ -2847,6 +2959,21 @@ fn what_a_questionnaire_asks_is_private_everywhere() {
     for id in [LEAVES, FORMERLY] {
         assert_eq!(files["private"]["records"][id]["from"], "code", "{id}");
     }
+    // A panel of both is there, without the private one, and is no test.
+    assert_eq!(files["private"]["records"][GROWN[11]]["from"], "members");
+    for (v, all, members) in [
+        (&shared, &shared, json!([SUNLIGHT])),
+        (&own, &own, json!([SUNLIGHT, USE[1]])),
+    ] {
+        let listed = v["results, detailed"]["items"].as_array().unwrap();
+        let row = listed.iter().find(|i| i["id"] == MIXED).unwrap();
+        assert_eq!(row["detail"], "panel", "{row}");
+        assert_eq!(row["fields"]["members"], members, "{row}");
+        for kind in ["tests, concise", "summary"] {
+            assert!(!all[kind].to_string().contains("Example mixed"), "{kind}");
+        }
+    }
+    assert!(!files["summary"].to_string().contains("Example mixed"));
     // The names of the records that list a paper, and whose they are.
     let papers = files["documents"].as_array().unwrap();
     let paper = papers.iter().find(|d| d["id"] == GROWN[7]).unwrap();
@@ -3965,7 +4092,8 @@ fn a_dry_run_counts_what_would_be_private() {
     view_before(&e, &alex, "private.json", |v| {
         for list in ["records", "documents"] {
             let map = v[list].as_object_mut().unwrap();
-            map.retain(|_, why| why["from"] != "test" && why["from"] != "words");
+            let by = ["test", "words", "members"];
+            map.retain(|_, why| by.iter().all(|from| why["from"] != *from));
         }
         let why = json!({"area": "household", "from": "household"});
         v["records"]["r_sunlightaaaaaaaaaaaa"] = why.clone();
@@ -3976,9 +4104,9 @@ fn a_dry_run_counts_what_would_be_private() {
     let v = changes_of(&e, &alex);
     assert_eq!(v["against"], "0.9.5");
     let want = json!({
-        "added": {"document": 1, "report": 1, "result": 11},
-        "added_by": {"test": 12, "words": 1},
-        "questionnaires": {"anxiety": 2, "depression": 5},
+        "added": {"document": 1, "report": 1, "result": 13},
+        "added_by": {"members": 1, "test": 13, "words": 1},
+        "questionnaires": {"anxiety": 2, "depression": 6},
         "questionnaires_one_of_a_kind": 6,
         "opened": {"result": 1},
         "gone": {"event": 1, "record": 1},
@@ -4019,9 +4147,9 @@ fn a_dry_run_counts_what_would_be_private() {
     let text = String::from_utf8(out.stdout).unwrap();
     for line in [
         "in the views (against medrec 0.9.5's)",
-        "private, more: 1 document, 1 report, 11 result",
+        "private, more: 1 document, 1 report, 13 result",
         "private before, open now: 1 result",
-        "their questionnaires: 2 anxiety, 5 depression, 6 of a kind there is one of",
+        "their questionnaires: 2 anxiety, 6 depression, 6 of a kind there is one of",
     ] {
         assert!(text.contains(line), "{line}: {text}");
     }
@@ -4035,7 +4163,11 @@ fn a_dry_run_counts_what_would_be_private() {
         assert!(files["private"]["records"].get(id).is_none(), "{id}");
     }
     let private = ["records", "documents"].map(|k| files["private"][k].as_object().unwrap());
-    let by = |m: &&Value| ["test", "words"].iter().any(|from| m["from"] == *from);
+    let by = |m: &&Value| {
+        ["test", "words", "members"]
+            .iter()
+            .any(|from| m["from"] == *from)
+    };
     let asked: usize = private.iter().map(|m| m.values().filter(by).count()).sum();
     let counted = then["private"]["added"].as_object().unwrap().values();
     let counted: u64 = counted.map(|n| n.as_u64().unwrap()).sum();
@@ -4067,7 +4199,8 @@ fn a_dry_run_counts_what_would_be_private() {
     std::fs::write(&marks, serde_json::to_vec(&m).unwrap()).unwrap();
     let v = changes_of(&e, &alex);
     assert_eq!(v["stale"], true, "{v}");
-    assert_eq!(v["private"]["opened"], json!({"result": 1}), "{v}");
+    // It, and the panel whose other result is private.
+    assert_eq!(v["private"]["opened"], json!({"result": 2}), "{v}");
     // Views that are named and not there are no views to count against.
     let views = e.records().join("views");
     let all: Value =
@@ -4132,7 +4265,7 @@ fn a_dry_run_counts_what_would_be_private() {
     let v = changes_of(&e, &alex);
     assert!(v["against"].is_null() && v["stale"] == false, "{v}");
     let want = json!({
-        "claim": 1, "condition": 2, "document": 2, "event": 1, "report": 1, "result": 11,
+        "claim": 1, "condition": 2, "document": 2, "event": 1, "report": 1, "result": 13,
     });
     assert_eq!(v["private"]["added"], want, "{v}");
     assert_eq!(v["private"]["opened"], json!({}), "{v}");
@@ -4186,9 +4319,10 @@ fn a_dry_run_counts_what_would_be_current_and_about_another() {
     };
     born("2023-12-04");
     let v = changes_of(&e, &alex);
-    let want = json!({"said": 0, "by_age": 8, "documents": 2});
+    // A panel of two such is one too.
+    let want = json!({"said": 0, "by_age": 9, "listing": 1, "documents": 2});
     assert_eq!(v["about_another"], want);
-    let want = json!({"document": 2, "report": 1, "result": 7});
+    let want = json!({"document": 2, "report": 1, "result": 9});
     assert_eq!(v["private"]["gone"], want);
     assert_eq!(v["private"]["opened"], json!({}));
     let _ = std::fs::remove_dir_all(&e.root);

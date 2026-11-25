@@ -247,6 +247,7 @@ pub(crate) fn without<'a>(idx: &'a PersonIndex, gone: &BTreeSet<String>) -> Cow<
     out.documents.retain(|d| !gone.contains(&d.id));
     for r in &mut out.records {
         r.documents.retain(|d| !gone.contains(d));
+        crate::panels::without(&mut r.fields, gone);
     }
     let mut first: BTreeMap<String, String> = BTreeMap::new();
     for d in &mut out.documents {

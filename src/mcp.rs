@@ -21,6 +21,7 @@ use crate::config::Config;
 use crate::folder::{Access, Folder};
 use crate::intake::classify;
 use crate::model::{today, Household, Record};
+use crate::panels;
 use crate::parts::Parts;
 use crate::people;
 use crate::provider_labels::{Asked, Labels, Printed};
@@ -1184,7 +1185,7 @@ impl MedrecTools {
                         .records
                         .iter()
                         .filter(|x| x.kind == "result" && r.holds(x.date.as_deref()))
-                        .filter(|x| !private.errors.contains(&x.id))
+                        .filter(|x| !private.errors.contains(&x.id) && !panels::heads(x))
                         .filter(|x| name.is_none_or(|n| views::matches_code(x, n)))
                         .collect();
                     results.sort_by(|a, b| b.date.cmp(&a.date).then(a.display.cmp(&b.display)));
@@ -1921,8 +1922,8 @@ fn record_item(from: Sources, person: &str, r: Record, detailed: bool) -> Item {
             item.unit = row.unit;
             item.range = row.range;
             item.flag = row.flag;
-            // The value is in its own fields.
-            item.detail = None;
+            // The value and the flag are in their own fields.
+            item.detail = panels::heads(&r).then(|| panels::HEADING.to_string());
         }
         "claim" => {
             if let Some(owes) = member_owes(&r.fields) {

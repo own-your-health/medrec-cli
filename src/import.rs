@@ -45,11 +45,12 @@ use crate::hash;
 use crate::ids;
 use crate::intake::{self, classify, filetype, text};
 use crate::model::{
-    filed_by, now_rfc3339, Document, Household, Identifier, ImportRun, InError, Organization,
-    Origin, Person, PersonIndex, PersonText, Provenance, ProvenanceSource, ProviderRef, Record,
-    Rendering, Source, SourceResource, Word,
+    filed_by, now_rfc3339, Document, Household, Identifier, ImportRun, InError, Listed,
+    Organization, Origin, Person, PersonIndex, PersonText, Provenance, ProvenanceSource,
+    ProviderRef, Record, Rendering, Source, SourceResource, Word,
 };
 use crate::normalize;
+use crate::panels;
 use crate::people;
 use crate::proc::{which, Bounded};
 use crate::providers::Found;
@@ -1731,11 +1732,18 @@ fn merge(
     }
     let mut came = Came::of(index, &rec, &found, word.as_ref());
     came.about = who;
+    let lists = std::mem::take(&mut rec.lists);
+    let path = rec.provenance[0].raw_path.clone();
     let merged = merge_fields(index, rec, word.as_ref(), found, filing, idless);
+    // Before what it gives is kept with what it shows.
+    let older = matches!(merged, Merge::Older);
+    let path = path.filter(|_| !older);
+    let lists = path.is_some_and(|path| panels::said(&mut index.records, &path, lists));
     let mut changed = came.keep(index);
-    if matches!(merged, Merge::Older) {
+    if older {
         return merged;
     }
+    changed |= lists;
     changed |= word.is_some_and(|w| said(index, &w));
     match merged {
         Merge::Unchanged if changed => Merge::Updated,
@@ -1791,6 +1799,10 @@ impl Came {
             key: rec.key.clone(),
             gives: Given {
                 raw_path: raw.clone(),
+                // An older one's is of the same raw file.
+                lists: (gives.lists.into_iter())
+                    .map(|(path, files)| (raw.clone().unwrap_or(path), files))
+                    .collect(),
                 ..gives
             },
             raw,
@@ -1824,9 +1836,11 @@ impl Came {
                 ..Given::default()
             }
         }));
+        let mut listed: Vec<Listed> = Vec::new();
         for (i, was, had) in self.was {
             let r = &mut index.records[i];
             if had && i != now {
+                listed.extend(r.listed_by.iter().cloned());
                 let shown = was.clone().unwrap_or_else(|| showed(r));
                 let all = r.given.iter().cloned().chain([shown]);
                 moved.extend(all.map(|mut g| {
@@ -1846,11 +1860,22 @@ impl Came {
                     changed |= given::keep(r, left);
                 }
             }
-            if let Some(was) = was {
+            if let Some(mut was) = was {
+                // What one that has another raw file now listed is of that.
+                if let Some(path) = self.of.raw_path.as_ref().filter(|_| i == now) {
+                    let of =
+                        |f: &String| r.provenance.iter().any(|p| p.raw_path.as_ref() == Some(f));
+                    let had: Vec<String> = was.lists.keys().filter(|f| !of(f)).cloned().collect();
+                    for f in had {
+                        let files = was.lists.remove(&f).unwrap_or_default();
+                        was.lists.entry(path.clone()).or_insert(files);
+                    }
+                }
                 changed |= given::keep(r, was);
             }
         }
         let r = &mut index.records[now];
+        changed |= panels::keep(r, listed);
         for g in moved {
             changed |= given::keep(r, g);
         }
@@ -2583,16 +2608,25 @@ fn replace(existing: &mut Record, i: usize, incoming: Provenance) {
             path.clone_from(&now);
         }
     }
+    if had == now {
+        return;
+    }
+    existing.lists.remove(&had);
+    for g in &mut existing.given {
+        if let Some(files) = g.lists.remove(&had) {
+            g.lists.insert(now.clone(), files);
+        }
+    }
 }
 
 /// Whether two records say the same thing.
-/// A claim's links (`claims::link`) follow from other records and are left
-/// out.
+/// A claim's links (`claims::link`) and a panel's (`panels::link`) follow from
+/// other records and are left out.
 fn same_content(a: &Record, b: &Record) -> bool {
     let fields = if a.kind == "claim" {
         crate::claims::without_links(&a.fields) == crate::claims::without_links(&b.fields)
     } else {
-        a.fields == b.fields
+        panels::without_links(&a.fields) == panels::without_links(&b.fields)
     };
     a.key == b.key
         && fields
