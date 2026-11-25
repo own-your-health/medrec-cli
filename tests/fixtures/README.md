@@ -53,6 +53,12 @@ real record, document, study or provider response.
   invented providers below it: their NPIs start with 0, their phones with 555,
   and one name holds a quote and one a line break. `nppes/page.html` is a
   listing page in CMS's shape, with links that must not be taken.
+  `nppes/kept-v1.jsonl` is a kept directory as 0.9.6 writes one
+  (`medrec-nppes/v1`), of two invented providers.
+- `labels/` is an invented person's folder for the provider labels: claims, a
+  portal visit and papers of invented practices, a mark, and `directory.jsonl`,
+  the directory rows kept for it, with NPIs that start with 0. `providers.json`
+  is the view they give.
 - `bills/` holds invented text in the shapes `pdftotext -layout` gives a
   provider's patient statement and a payment receipt:
   `statement-columns.txt` puts the statement's fields in a header row over a

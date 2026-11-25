@@ -9,8 +9,10 @@
 //! are nearly always the newest, so a pass that adds a few changes the
 //! newest shard and the search shards of their words, and little else.
 
+use std::cell::OnceCell;
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
@@ -80,6 +82,10 @@ pub struct ViewsIndex {
     pub medrec: String,
     /// The MD5 (hex) of `household.json` as the views were made from it.
     pub household: String,
+    /// What the ids of provider labels are salted with: random, made once
+    /// with the folder's first label (0.9.7 and later).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label_salt: Option<String>,
     pub people: BTreeMap<String, PersonViews>,
 }
 
@@ -109,6 +115,16 @@ pub struct PersonViews {
     /// another table makes the views again.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code_table: Option<String>,
+    /// The provider directory these views' labels were made with, absent as
+    /// `code_table` is (0.9.7 and later). A reader need not check it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub directory: Option<String>,
+    /// The MD5 of the person's `provider-state.json`, absent when there is
+    /// none (0.9.7 and later). `private.json`, `code-names.json` and
+    /// `providers.json` are stale when it differs: a pass writes the file
+    /// before the views, and one cut short between them leaves these.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_state: Option<String>,
     pub row: Row,
     pub records: BTreeMap<String, Run>,
     pub timeline: Run,
@@ -211,14 +227,21 @@ fn is_stored_name(name: &str) -> bool {
 /// `views.json`, then the views it no longer names are deleted. Nothing is
 /// deleted but files of a stored view's shape in a person's directory.
 pub fn sync(f: &Folder, all: bool) -> Result<Synced, CliError> {
-    sync_with(f, all, crate::code_names::titles())
+    sync_with(
+        f,
+        all,
+        crate::code_names::titles(),
+        crate::nppes::dir().as_deref(),
+    )
 }
 
-/// [`sync`] on a machine with these code titles, or none.
-fn sync_with(
+/// [`sync`] on a machine with these code titles, or none, and the provider
+/// directories in `directories`.
+pub(crate) fn sync_with(
     f: &Folder,
     all: bool,
     titles: Option<crate::tables::Titles>,
+    directories: Option<&Path>,
 ) -> Result<Synced, CliError> {
     let store = &f.store;
     let household_text = store.read_text(folder::HOUSEHOLD)?.ok_or_else(|| {
@@ -242,14 +265,40 @@ fn sync_with(
     let current = old
         .as_ref()
         .filter(|o| !all && o.schema == SCHEMA && o.medrec == VERSION && o.household == household);
+    // The folder's, for as long as its views are.
+    let salt: OnceCell<String> = OnceCell::new();
+    if let Some(s) = old
+        .as_ref()
+        .filter(|o| o.schema == SCHEMA)
+        .and_then(|o| o.label_salt.clone())
+    {
+        let _ = salt.set(s);
+    }
     let fresh = |people: BTreeMap<String, PersonViews>| ViewsIndex {
         schema: SCHEMA.into(),
         medrec: VERSION.into(),
         household: household.clone(),
+        label_salt: salt.get().cloned(),
         people,
     };
 
     let code_table = titles.as_ref().map(|_| crate::tables::Titles::identity());
+    let directory = match directories
+        .map(|d| crate::labels::Directory::open(&crate::nppes::path(d, &h.folder_id)))
+    {
+        Some(Err(crate::nppes::Unused::OtherVersion)) => {
+            if !QUIET.load(Ordering::SeqCst) {
+                eprintln!(
+                    "note: the provider directory on this machine was kept by another version \
+                     of medrec, so this one does without it: `medrec tables fetch nppes` \
+                     replaces it"
+                );
+            }
+            None
+        }
+        d => d.and_then(Result::ok),
+    };
+    let directory_made = directory.as_ref().map(|d| d.made());
 
     // Whose views stand: their files have the MD5s the views were made from.
     let mut kept: BTreeMap<String, PersonViews> = BTreeMap::new();
@@ -274,6 +323,9 @@ fn sync_with(
                 && store.md5(&crate::marks::rel(p))? == was.marks
                 && linked_md5s(p)? == was.linked
                 && (code_table.is_none() || was.code_table == code_table)
+                // An older directory's pass leaves what a newer one's made.
+                && was.directory >= directory_made
+                && store.md5(&crate::labels::state_rel(p))? == was.provider_state
                 && EVERY_PERSON.iter().all(|f| was.files.contains_key(*f))
             {
                 kept.insert(p.id.clone(), was.clone());
@@ -294,15 +346,20 @@ fn sync_with(
         .into_iter()
         .map(|x| (x.rel, x.md5))
         .collect();
-    // A person missing one of their views has them made again.
+    // A person missing one of their views, or with one that is not as it was
+    // written, has them made again.
     kept.retain(|pid, v| {
-        v.files
-            .iter()
-            .all(|(name, md5)| held.contains_key(&stored_rel(pid, name, md5)))
+        v.files.iter().all(|(name, md5)| {
+            held.get(&stored_rel(pid, name, md5))
+                .is_some_and(|m| m.as_ref().is_none_or(|m| m == md5))
+        })
     });
 
     let mut people = BTreeMap::new();
     let mut files = BTreeMap::new();
+    let mut states: Vec<NewState> = Vec::new();
+    // The state each person's views are made from.
+    let mut made_from: Vec<(String, Option<String>)> = Vec::new();
     // Each person's files read once, whoever's events need them.
     let mut loaded: BTreeMap<String, Loaded> = BTreeMap::new();
     fn load(
@@ -399,16 +456,50 @@ fn sync_with(
             .and_then(|m| m.as_ref().ok())
             .map(|m| m.private.as_slice())
             .unwrap_or_default();
-        let mut private = crate::private::build(p, &me.idx, &me.texts, &events, private_marks);
-        if matches!(marks, Some(Err(()))) {
-            bills["marks_unreadable"] = Value::Bool(true);
-            private["marks_unreadable"] = Value::Bool(true);
-        }
-        // A machine without the table keeps the names another wrote.
         let last = old
             .as_ref()
             .filter(|o| o.schema == SCHEMA)
             .and_then(|o| o.people.get(&p.id));
+        // A machine without the directory keeps what another's gave.
+        let had = last.is_some_and(|v| v.provider_state.is_some());
+        let (before, held) = last_state(store, p, had)?;
+        let state = crate::labels::State::of(&me.idx, directory.as_ref(), before);
+        let was = held.as_deref().map(|t| md5_hex(t.as_bytes()));
+        let write = state.replaces(held.as_deref());
+        let provider_state = match &write {
+            Some(t) => Some(md5_hex(t.as_bytes())),
+            None => was.clone(),
+        };
+        if let Some(text) = write {
+            states.push(NewState {
+                rel: crate::labels::state_rel(p),
+                unread: held.filter(|t| {
+                    !matches!(
+                        crate::labels::State::parse(t, &p.id),
+                        crate::labels::Last::State(_)
+                    )
+                }),
+                was,
+                text,
+            });
+        }
+        let mut private = crate::private::build(
+            p,
+            &me.idx,
+            &me.texts,
+            &events,
+            private_marks,
+            &state.areas(&me.idx),
+        );
+        if state.lost() {
+            private["labels_unreadable"] = Value::Bool(true);
+            private["marks_unreadable"] = Value::Bool(true);
+        }
+        if matches!(marks, Some(Err(()))) {
+            bills["marks_unreadable"] = Value::Bool(true);
+            private["marks_unreadable"] = Value::Bool(true);
+        }
+        // So does one without the table the names.
         let before = match (&titles, last) {
             (None, Some(v)) => last_code_names(store, p, v)?,
             _ => None,
@@ -420,11 +511,23 @@ fn sync_with(
         };
         let code_names =
             source.and_then(|s| crate::code_names::build(p, &me.idx, &private, private_marks, &s));
+        let providers = crate::labels::build(&crate::labels::Input {
+            person: p,
+            index: &me.idx,
+            texts: &me.texts,
+            events: &events,
+            private: &private,
+            state: &state,
+            salt: &|| salt.get_or_init(|| crate::ids::new("s")).clone(),
+        });
         let from = EventsFrom {
             bills,
             private,
             events,
             code_names,
+            providers,
+            provider_state,
+            directory: directory_made.clone(),
             // Absent without the table: the names carried are not all a
             // table would give, so a machine with one makes them again.
             code_table: code_table.clone(),
@@ -454,6 +557,7 @@ fn sync_with(
             from,
             &mut files,
         )?;
+        made_from.push((crate::labels::state_rel(p), v.provider_state.clone()));
         people.insert(p.id.clone(), v);
     }
     let index = fresh(people);
@@ -483,9 +587,23 @@ fn sync_with(
             store.display_path(DIR)
         );
     }
+    #[cfg(test)]
+    tests::before_writing();
+    // Before the views made with them: a pass cut short here leaves views
+    // the next one makes again.
+    for s in &states {
+        s.write(store)?;
+    }
     out.files_written = upload(store, &uploads)?;
     let index_bytes = json(&index);
     if old_text.as_deref().map(str::as_bytes) != Some(index_bytes.as_slice()) {
+        // No reader takes a view of what was private by another machine's
+        // state for current.
+        for (rel, md5) in &made_from {
+            if store.md5(rel)? != *md5 {
+                return Err(folder::changed_elsewhere(rel));
+            }
+        }
         store.write_bytes(INDEX, &index_bytes)?;
     }
 
@@ -573,6 +691,7 @@ pub fn current_view(
         || md5(&folder::text_rel(p))? != v.text
         || md5(&crate::events::overrides_rel(p))? != v.overrides
         || md5(&crate::marks::rel(p))? != v.marks
+        || md5(&crate::labels::state_rel(p))? != v.provider_state
     {
         return Ok(None);
     }
@@ -593,20 +712,97 @@ pub fn current_view(
     Ok(text.map(String::into_bytes).filter(|b| md5_hex(b) == *want))
 }
 
+/// One of the person's views as the last pass wrote it, whatever changed
+/// since.
+fn last_view(
+    store: &crate::store::Store,
+    p: &Person,
+    v: &PersonViews,
+    name: &str,
+) -> Result<Option<String>, CliError> {
+    let Some(want) = v.files.get(name) else {
+        return Ok(None);
+    };
+    Ok(store
+        .read_text(&stored_rel(&p.id, name, want))?
+        .filter(|t| md5_hex(t.as_bytes()) == *want))
+}
+
 /// The person's `code-names.json` as the last pass wrote it.
 fn last_code_names(
     store: &crate::store::Store,
     p: &Person,
     v: &PersonViews,
 ) -> Result<Option<Value>, CliError> {
-    let name = crate::code_names::FILE;
-    let Some(want) = v.files.get(name) else {
-        return Ok(None);
-    };
-    Ok(store
-        .read_text(&stored_rel(&p.id, name, want))?
-        .filter(|t| md5_hex(t.as_bytes()) == *want)
+    Ok(last_view(store, p, v, crate::code_names::FILE)?
         .and_then(|t| crate::code_names::previous(&t, &p.id)))
+}
+
+/// A person's `provider-state.json` to write.
+struct NewState {
+    rel: String,
+    /// The MD5 of the file it is made from, none when there is none.
+    was: Option<String>,
+    /// What that says, when it does not read.
+    unread: Option<String>,
+    text: String,
+}
+
+impl NewState {
+    /// Nothing else says what the file does: one another machine wrote since
+    /// it was read stays, and the pass ends. One that did not read stays
+    /// beside it.
+    fn write(&self, store: &crate::store::Store) -> Result<(), CliError> {
+        if store.md5(&self.rel)? != self.was {
+            return Err(folder::changed_elsewhere(&self.rel));
+        }
+        if let Some(text) = &self.unread {
+            let aside = self.rel.trim_end_matches(".json");
+            let n = &md5_hex(text.as_bytes())[..8];
+            folder::write_back(store, &format!("{aside}~unread-{n}.json"), text)?;
+        }
+        folder::write_back(store, &self.rel, &self.text)
+    }
+}
+
+/// What the last pass kept of the directory for the person, and the file's
+/// text. `had` is whether its views were made with any: a file gone since is
+/// not one that never was.
+fn last_state(
+    store: &crate::store::Store,
+    p: &Person,
+    had: bool,
+) -> Result<(crate::labels::Last, Option<String>), CliError> {
+    use crate::labels::{Last, State};
+    let rel = crate::labels::state_rel(p);
+    let text = match store.read_text(&rel)? {
+        // The cache may be from before it was first written.
+        None if had => store.read_text_fresh(&rel)?,
+        t => t,
+    };
+    let last = match &text {
+        Some(t) => State::parse(t, &p.id),
+        None if had => Last::Gone,
+        None => Last::None,
+    };
+    Ok((last, text))
+}
+
+/// What is kept of the directory for the person, as the last pass wrote it.
+pub fn provider_state(f: &Folder, p: &Person) -> Result<crate::labels::State, CliError> {
+    let had = || -> Result<bool, CliError> {
+        Ok(f.store
+            .read_text(INDEX)?
+            .and_then(|t| serde_json::from_str::<ViewsIndex>(&t).ok())
+            .filter(|i| i.schema == SCHEMA)
+            .and_then(|i| Some(i.people.get(&p.id)?.provider_state.is_some()))
+            .unwrap_or(false))
+    };
+    let last = match last_state(&f.store, p, false)?.0 {
+        crate::labels::Last::None if had()? => last_state(&f.store, p, true)?.0,
+        last => last,
+    };
+    Ok(crate::labels::State::last(last, &p.id))
 }
 
 /// Upload every view, stopping at the first error; the caller writes
@@ -834,6 +1030,12 @@ pub(crate) struct EventsFrom {
     /// on this machine it was made with.
     pub code_names: Option<Value>,
     pub code_table: Option<String>,
+    /// `providers.json`, when any provider of theirs has a label, and the
+    /// provider directory on this machine it was made with.
+    pub providers: Option<Value>,
+    /// The MD5 of the person's `provider-state.json`.
+    pub provider_state: Option<String>,
+    pub directory: Option<String>,
     pub overrides: Option<String>,
     pub marks: Option<String>,
     pub linked: BTreeMap<String, LinkedFiles>,
@@ -861,6 +1063,9 @@ pub(crate) fn person(
     put("private.json", json(&from.private));
     if let Some(v) = &from.code_names {
         put(crate::code_names::FILE, json(v));
+    }
+    if let Some(v) = &from.providers {
+        put(crate::labels::FILE, json(v));
     }
 
     let s = summary::of_index(
@@ -1156,6 +1361,8 @@ pub(crate) fn person(
         marks: from.marks,
         linked: from.linked,
         code_table: from.code_table,
+        directory: from.directory,
+        provider_state: from.provider_state,
         row: Row {
             documents: row.documents,
             records: row.records,
@@ -1234,11 +1441,65 @@ fn report(r: Result<Synced, CliError>) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    thread_local! {
+        static BEFORE_WRITING: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+            const { std::cell::RefCell::new(None) };
+    }
+
+    /// What another machine does before this thread's next pass writes.
+    pub(crate) fn meanwhile(f: impl FnOnce() + 'static) {
+        BEFORE_WRITING.with(|b| *b.borrow_mut() = Some(Box::new(f)));
+    }
+
+    pub(super) fn before_writing() {
+        if let Some(f) = BEFORE_WRITING.with(|b| b.borrow_mut().take()) {
+            f();
+        }
+    }
 
     fn days(d: &[Option<&str>]) -> Vec<Option<String>> {
         d.iter().map(|x| x.map(str::to_string)).collect()
+    }
+
+    /// Another machine wrote it since it was read: it stays.
+    #[test]
+    fn a_state_another_machine_wrote_is_not_written_over() {
+        use crate::store::{Location, Reads, Store};
+        let dir = std::env::temp_dir().join(format!("medrec-state-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let loc = Location::Dir(dir.clone());
+        let st = Store::open(&loc, Reads::Fresh, Duration::from_secs(60)).unwrap();
+        let path = dir.join("provider-state.json");
+        let new = |was: Option<&str>, unread: Option<&str>| NewState {
+            rel: "provider-state.json".into(),
+            was: was.map(|t| md5_hex(t.as_bytes())),
+            unread: unread.map(str::to_string),
+            text: "ours\n".into(),
+        };
+        for (held, state, after) in [
+            (Some("theirs"), new(None, None), "theirs"),
+            (Some("theirs"), new(Some("read"), None), "theirs"),
+            (Some("theirs"), new(Some("read"), Some("read")), "theirs"),
+            (Some("read"), new(Some("read"), None), "ours\n"),
+            (None, new(None, None), "ours\n"),
+        ] {
+            let _ = std::fs::remove_file(&path);
+            if let Some(t) = held {
+                std::fs::write(&path, t).unwrap();
+            }
+            assert_eq!(state.write(&st).is_ok(), after != "theirs");
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), after);
+        }
+        // One that is gone since is another machine's to have removed.
+        std::fs::remove_file(&path).unwrap();
+        assert!(new(Some("read"), None).write(&st).is_err());
+        assert!(!path.exists());
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -1357,7 +1618,11 @@ mod tests {
                 serde_json::from_str(&std::fs::read_to_string(root.join(rel)).unwrap()).unwrap();
             v["codes"].as_object().unwrap().keys().cloned().collect()
         };
-        let rebuilt = |titles| sync_with(&folder(), false, titles).unwrap().people_rebuilt;
+        let rebuilt = |titles| {
+            sync_with(&folder(), false, titles, None)
+                .unwrap()
+                .people_rebuilt
+        };
 
         records(vec![condition("r_a", "J30.9")]);
         assert_eq!(rebuilt(titles()), 1);
@@ -1387,7 +1652,7 @@ mod tests {
             b"{}",
         )
         .unwrap();
-        sync_with(&folder(), true, None).unwrap();
+        sync_with(&folder(), true, None, None).unwrap();
         assert!(names().is_empty());
         assert_eq!(rebuilt(titles()), 1);
         assert_eq!(names(), ["icd10cm|J30.9", "icd10cm|R51"]);
@@ -1442,6 +1707,9 @@ mod tests {
                 linked: BTreeMap::new(),
                 code_names: None,
                 code_table: None,
+                providers: None,
+                provider_state: None,
+                directory: None,
             },
             &mut out,
         )

@@ -24,6 +24,9 @@ views/                        each person's records cut into small files, for re
   index.json                  the person's index (documents, records, studies, imports)
   text.json                   extracted text per document
   overrides.json              the household's decisions on events (0.9.0 and later)
+  marks.json                  the household's payments and private marks (0.9.1 and later)
+  provider-state.json         what a provider directory gave (0.9.7 and later)
+  provider-state~unread-<8 hex>.json   one that did not read, kept (0.9.7 and later)
   Documents/<YYYY>/<YYYY-MM-DD>_<type>_<org>_<details>_<original name>
   Claims/<YYYY>/              EOBs, bills and receipts, named the same way
   Imaging/<YYYY-MM-DD>_<modality>_<body part>_<facility>/
@@ -295,7 +298,9 @@ stands. A provider whose reference leads to something the source does not
 give keeps what the record had where nothing is read in its place. `medrec
 reindex` reads them all again from the raw files, every source of a record in
 turn, and so takes a correction that import, for a record two sources state,
-leaves as it was; it also gives records filed before 0.9.6 theirs. No answer or view shows it. An earlier medrec drops it
+leaves as it was; it also gives records filed before 0.9.6 theirs. No answer
+or view shows it; `providers.json` is made with it (Provider labels, below).
+An earlier medrec drops it
 from an index it saves, so run 0.9.6 or later on every machine that writes
 the folder.
 
@@ -1005,6 +1010,8 @@ views/<person id>/search-labs-<n>.json
 views/<person id>/events.json            0.9.0 and later
 views/<person id>/bills.json             0.9.1 and later
 views/<person id>/private.json           0.9.1 and later
+views/<person id>/code-names.json        0.9.4 and later, when there are any
+views/<person id>/providers.json         0.9.7 and later, when there are any
 ```
 
 A person's directory is named by their id in `household.json`, not their
@@ -1059,11 +1066,118 @@ what is private now, and adds none.
   source's words when they are plain, and gives the name second (in Details,
   or as `plain_name` beside `name`). The name leads only where the source
   gives no words, a bare code, or wording in capitals or billing
-  abbreviations. Filters, search, sorting, cursors and the check of whether a
+  abbreviations. One word in capitals is an abbreviation when it has 5
+  letters or fewer, and the name leads with the source's beside it; a longer
+  one is the source's own word, which leads, and may be shown in sentence
+  case. Filters, search, sorting, cursors and the check of whether a
   question names a private item use the source's words alone.
 - **Stale** as `private.json` is. Missing or stale, the source's words stand,
   with no warning. A reader need not check which table made it
   (`code_table` in `views.json`, below).
+
+### Provider labels (`providers.json`, `medrec-providers/v1`, 0.9.7 and later)
+
+A name, practice, role and phone for a provider the person's items print,
+with how sure medrec is and why. **A label changes nothing from a source.**
+It stands beside the source's own text, which every reader still has. It
+labels items a reader already shows: there is no list of providers, and no
+reader searches, sorts or filters by a label. A person with no labelled
+provider has no `providers.json`.
+
+```json
+{"schema": "medrec-providers/v1", "person": "p_…",
+ "directory": {"id": "nppes", "version": "2026-11", "date": "2026-11-08"},
+ "labels": {"v_…": {"name": "Jordan Sample, MD", "practice": "Sample Health Partners",
+   "role": "radiologist", "phone": "555-010-0123",
+   "phone_from": {"from": "paper", "document": "d_…"}, "confidence": "likely",
+   "evidence": [{"from": "only_match", "state": "FL"}, {"from": "paper", "document": "d_…"}]}},
+ "by_name": {"J SAMPLE": "v_…"},
+ "by_item": {"r_…": {"J SAMPLE": "v_…"}},
+ "private": {"labels": {…}, "by_name": {…}, "by_item": {…}}}
+```
+
+- **Looking one up.** An item is a record, a document or an event, and a
+  printed name is the exact text it prints, not folded or trimmed: a record's
+  `facility`, `location`, `performer`, `pharmacy`, `practitioner`,
+  `prescriber`, `provider` and `service_provider`, a document's
+  `organization`, an event's `place` and `clinicians`. For an item that is
+  not private the label's id is `by_item[item]?.[printed] ??
+  by_name[printed]`, in `labels`. For a private one it is the same two looked
+  up in `private`, and the label is in `private.labels`, else in `labels`.
+  No id, no label. An event member's `provider` is looked up by the member's
+  `record`. A member of another person's (`person`) is looked up in that
+  person's file. A bill or a receipt is looked up by its paper, and a
+  `not_billed` row by its claim.
+- **`by_name`** has a printed name only when every item that prints it has a
+  label. **`by_item`** has the items whose label is not the one `by_name`
+  gives, and always a claim's `provider`.
+- **`confidence`**: `sure`, or `likely`. A reader treats one it does not know
+  as likely. A likely label is marked as likely, with its evidence, and never
+  leads the source's words.
+- **`evidence`**, why:
+
+  | `from` | |
+  |---|---|
+  | `npi` | The record carries the provider's National Provider Identifier, and the directory has it. Every sure label is this one. |
+  | `only_match` | The directory has one person of the printed surname and first initial, in the state the record's source gives (`state`; or, when it gives none, in any state the directory was read for), whose role gives the service, and no given name the text spells out is another. A person whose role medrec has no words for counts as one it can be, and is never the label. |
+  | `paper` | A paper of the same event with a practice's own heading (a bill, receipt, visit or discharge summary, prescription or immunization record, and not a laboratory's, pharmacy's or imaging center's) prints the name, and every such paper that does is of one practice. `document` is the paper. |
+
+  A reader has no words for one it does not know, and still shows the label.
+- **`name`, `practice`, `role`, `phone`** are each absent when nothing gives
+  one. `role` is medrec's own plain words for the directory's code.
+  `phone_from` says where the phone is from: `directory` (as of its `date`,
+  which is an earlier one than the file's when a newer directory no longer has
+  the provider) or `paper` (the `document`, a bill or receipt that gives a
+  number to call). A phone is shown with where it came from, and never as
+  verified.
+- **The id** comes from the label's confidence, name, practice, role and
+  phone, with the folder's random `label_salt` (`views.json`), never from the
+  NPI. One provider's sure label has one id in every person's file. No NPI is
+  in the file.
+- **Private, per person.** `private` holds what only private items say
+  (`private.json`): their labels, and the evidence and phone a private paper
+  gives. A label whose name, practice or role is in a private area is only
+  there, whatever item prints it. A sure one makes the item that prints it
+  private (`provider`, Private, below), unless the household marked it not
+  private, and then the item has no label. A likely one makes nothing private,
+  and an item that is not private does without it. When the person's
+  `marks.json` does not read, everything is in `private`. A reader uses
+  `private` only for a private item it is showing, in an answer or on a page
+  about that person, and never in one about the whole household.
+- **Machines** (README, "Provider directory"). What a directory gave is kept
+  in `provider-state.json` (below), so what is labelled and what is private do
+  not depend on which machine wrote last. Every machine that writes the folder
+  needs 0.9.7 or later, as for `providers` in an index. One with no directory, or an older
+  one than the last, keeps what is there for the NPIs and names still printed,
+  and splits it by what is private now; the older one adds providers whose NPI
+  nothing is known of. A newer one replaces what it has, and takes away only
+  a match it no longer makes. `directory` is the newest one read, and absent
+  when none gave any label.
+- **Stale** as `private.json` is. Missing or stale, there is no label, with
+  no warning. Nothing of it is in `events.json`, `bills.json` or
+  `documents.json`.
+
+**`provider-state.json`** (`medrec-provider-state/v1`), in the person's folder
+rather than in `views/`, is medrec's own: the label of each NPI the person's
+records carry or carried (`by_npi`), shown or not, and those of the printed
+names only one provider can be (`matched`, by record and text), with the newest
+directory's `directory`. It is not split: it holds private providers' names
+and roles with the rest. medrec judges what is private by it, in its own
+answers too. No other reader reads it or serves it: one compares its MD5
+(When they are written, below). Nothing else in the folder
+says it again, so it stays when the views are removed, and an earlier medrec
+leaves it alone. `people.<id>.provider_state` in `views.json` is its MD5. A
+write is read back. When another machine wrote the file since it was read, the
+pass leaves it, ends with an error and publishes no views.
+When it does not read, or is gone and the views were made with one (a pass
+then writes one that says `lost`), what labels make private is not known:
+`private.json` and medrec's own answers say `labels_unreadable` (Private,
+below), until a pass has a directory that was asked of every NPI the records
+carry (`medrec tables fetch nppes`, then `medrec views write`). Until then
+medrec writes nothing over a file that does not read, and then keeps its bytes
+beside the new one as `provider-state~unread-<8 hex>.json`, which no pass
+removes and no reader reads. It never writes over a later
+`medrec-provider-state/`.
 
 ### When they are written
 
@@ -1075,8 +1189,9 @@ what is private now, and adds none.
 - **Only what changed.** A person keeps their views when their `index.json`,
   `text.json`, `overrides.json` and `marks.json` and their linked people's
   `index.json` and `text.json` have the MD5s `views.json` recorded, under the same `household.json` and
-  medrec version, and the code table on this machine, when there is one, is
-  the one they were made with (`code_table`). Otherwise their views are made
+  medrec version, the code table on this machine, when there is one, is the
+  one they were made with (`code_table`), and the provider directory on it,
+  when there is one, is not newer (`directory`). Otherwise their views are made
   again, and only views the folder does not already hold under their
   stored names are uploaded. An unchanged view keeps its name and is not
   written again. A person whose views lack one every person has
@@ -1113,13 +1228,21 @@ A reader decides freshness by MD5, as Drive reports it (`md5Checksum`):
 
   | Differs from `views.json` | Stale |
   |---|---|
-  | `overrides.json`'s MD5 from `overrides` | `events.json`, `bills.json`, `private.json`, `code-names.json` |
-  | a linked person's `index.json` or `text.json` MD5 from `linked` | `events.json`, `bills.json`, `private.json`, `code-names.json` |
-  | `marks.json`'s MD5 from `marks` (0.9.1 and later) | `bills.json`, `private.json`, `code-names.json` |
+  | `overrides.json`'s MD5 from `overrides` | `events.json`, `bills.json`, `private.json`, `code-names.json`, `providers.json` |
+  | a linked person's `index.json` or `text.json` MD5 from `linked` | `events.json`, `bills.json`, `private.json`, `code-names.json`, `providers.json` |
+  | `marks.json`'s MD5 from `marks` (0.9.1 and later) | `bills.json`, `private.json`, `code-names.json`, `providers.json` |
+  | `provider-state.json`'s MD5 from `provider_state` (0.9.7 and later) | `private.json`, `code-names.json`, `providers.json` |
 
   No other view reads those files: `summary.json` and `documents.json`
   say nothing of payments or privacy, and a reader applies `bills.json`
-  and `private.json` to them as it answers (Readers, below).
+  and `private.json` to them as it answers (Readers, below). A pass writes
+  `provider-state.json` before the views, so one cut short between them
+  leaves these three stale. A reader compares its MD5 and does not read it,
+  so it cannot judge from the files what a label makes private: while the
+  person's `private.json` is missing or stale, one whose own rules judge the
+  files counts as having none for a person who has a `provider-state.json`,
+  or whose `provider_state` in `views.json` names one that is gone
+  (`private-not-prepared`, Readers, below).
 - `events.json`'s dates are those of the zone of the machine that wrote
   it (Events, below). That zone is no input `views.json` records: a
   change of it makes nothing stale, and the dates change with the next
@@ -1140,11 +1263,14 @@ A reader decides freshness by MD5, as Drive reports it (`md5Checksum`):
 |---|---|
 | `medrec` | The version that wrote them. Another version makes every view again. |
 | `household` | The MD5 (hex) of `household.json` as the views were made from it. |
+| `label_salt` | What the ids of provider labels are salted with: random, made with the folder's first label and kept (0.9.7 and later). Absent before that. A reader does not use it. |
 | `people.<id>.index`, `.text` | The MD5s of the person's `index.json` and `text.json` as read; `null` when the file is absent. |
 | `people.<id>.overrides` | The MD5 of the person's `overrides.json` as read; `null` when there is none (0.9.0 and later). |
 | `people.<id>.marks` | The MD5 of the person's `marks.json` as read; `null` when there is none (0.9.1 and later). |
 | `people.<id>.linked` | For each person linked to this one (Events, below), the MD5s of their `index.json` and `text.json` as read, as `{"index", "text"}`, each `null` when the file is absent; `{}` when no one is linked (0.9.0 and later). |
 | `people.<id>.code_table` | The code table the person's names were made with (`icd10cm FY2027`); absent when the pass that made the views had none, whatever names it carried over (0.9.4 and later). A pass on a machine with another table makes the person's views again, which fills in the names; one on a machine with none leaves them. |
+| `people.<id>.directory` | Which provider directory the pass that made the views had: the last day it covers and when it was fetched, so that a newer one sorts after (0.9.7 and later). Absent when it had none. A pass on a machine with a newer one makes the person's views again; one with an older one or none leaves them. |
+| `people.<id>.provider_state` | The MD5 of the person's `provider-state.json`, absent when there is none (0.9.7 and later). Another one makes three of the person's views stale (above). |
 | `row` | `documents`, `records`, `studies`, and `newest` and `last_import` when there are any: the person's line in `medrec_summary`'s people list, without `notes`. |
 | `records` | For each record kind, `{"shards": [[newest day, oldest day, count], …], "undated": count}`: its dated shards by number, and how many records its undated file holds. |
 | `timeline` | The timeline's shards, the same way. |
@@ -1524,7 +1650,7 @@ nothing is private.
   |---|---|
   | `source` | came from a portal whose records are all of one area: a behavioral health or a fertility clinic's record system |
   | `code` | is a condition whose ICD-10 code is in an area, or a claim whose principal diagnosis (the lowest `sequence`) is: F10–F19 and Z71.4–Z71.5 substance use; the other F codes mental health; Z30–Z32, Z33.2, O00–O08, N46 and N96–N98 reproductive; A50–A64, B20, Z21, Z11.3–Z11.4, Z20.2, Z20.6 and Z72.5 sexual health |
-  | `provider` | was made by a practice or clinician whose name or credential says its area: a claim's provider or facility, a visit's place, location or clinician, a medicine's prescriber, a result's performer, a document's organization |
+  | `provider` | was made by a practice or clinician whose name or credential says its area: a claim's provider or facility, a visit's place, location or clinician, a medicine's prescriber, a result's performer, a document's organization; or is a record that prints a provider with a sure label (Provider labels, above) whose name, practice or role does (0.9.7 and later) |
   | `medicine` | is a medicine of an area by its name or code: antidepressants, antipsychotics, anxiolytics, stimulants and lithium; fertility drugs and contraceptives; HIV medicines and those for erectile dysfunction; medicines for substance use and smoking |
   | `test` | is a result or report of a test of an area: sexually transmitted infections, pregnancy and fertility, drug screens |
   | `members` | is an event with a private claim or portal visit, or whose own members are all private |
@@ -1559,6 +1685,11 @@ nothing is private.
   person's items may then be one the household marked private, so a
   reader holds all of them back from shared screens and household-wide
   answers until it reads.
+- **`labels_unreadable`** (0.9.7 and later): `true` when what a provider label
+  makes private is not known (`provider-state.json`, above). Absent otherwise.
+  `marks_unreadable` is `true` with it, so a reader that does not know it
+  holds everything back too. It ends when a pass has a provider directory that
+  was asked of every NPI the person's records carry.
 
 ## Readers
 
@@ -1617,8 +1748,10 @@ readers ship with medrec:
     for by `id`. Each private item an answer includes carries `private`,
     its area. A person whose `marks.json` does not read has all their
     items held back from answers about the whole household, with a
-    `private-marks-unreadable` warning naming them. The commands are the
-    household's own terminal and leave nothing out.
+    `private-marks-unreadable` warning naming them. So has one whose provider
+    labels do not read (`labels_unreadable`, 0.9.7 and later), with a
+    `private-labels-unreadable` warning. The commands are the household's own
+    terminal and leave nothing out.
   - `kind: "conditions"` rows and the summary's condition lines carry
     `plain_name`, the code's name in the person's current
     `code-names.json` (0.9.4 and later). `title` and `name` stay the
@@ -1628,7 +1761,9 @@ readers ship with medrec:
   - a reader that answers from the views without a current `private.json`
     for a person cannot tell which of their items are private: theirs is
     stale or absent (views from 0.9.0 or earlier), or the reader falls
-    back to the files and has no rules of its own. It holds back all of
+    back to the files and has no rules of its own, or rules that cannot
+    judge the person's provider labels (a `provider-state.json` is there,
+    or `views.json` names one). It holds back all of
     that person's items from answers about the whole household, with a
     `private-not-prepared` warning naming them, and includes them
     unmarked, with the same warning, in an answer about that person.

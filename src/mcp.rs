@@ -538,15 +538,23 @@ fn person_error(e: CliError) -> ToolError {
     ToolError::from(e).with_fix("Call medrec_summary with no arguments for the household's people")
 }
 
+/// What of a person's that decides what is private does not read.
+#[derive(Debug, Clone, Copy)]
+enum Unreadable {
+    Marks,
+    Labels,
+}
+
 /// The private items of the people an answer covers (`private.json`).
 #[derive(Debug, Default)]
 struct PrivateItems {
     /// By id, with their area.
     areas: std::collections::BTreeMap<String, String>,
-    /// The people whose `marks.json` does not read, by name as shown. Any
-    /// of their items may be one the household marked private, so an
-    /// answer about the whole household holds all of them back (`held`).
-    unreadable: Vec<String>,
+    /// The people whose `marks.json` or `provider-state.json` does not read,
+    /// by name as shown. Any of their items may be one the household marked
+    /// private or a label makes private, so an answer about the whole
+    /// household holds all of them back (`held`).
+    unreadable: Vec<(String, Unreadable)>,
     /// The record, document, event and study ids of those people, and
     /// every study with no report, which nothing judges.
     held: std::collections::BTreeSet<String>,
@@ -559,7 +567,11 @@ impl PrivateItems {
             let idx = f.index(p)?;
             let (v, events) = crate::private::with_events(f, h, p, &idx)?;
             if v.get("marks_unreadable").is_some() {
-                out.unreadable.push(crate::printable(&p.name));
+                let what = match v.get("labels_unreadable") {
+                    Some(_) => Unreadable::Labels,
+                    None => Unreadable::Marks,
+                };
+                out.unreadable.push((crate::printable(&p.name), what));
                 out.held.extend(
                     idx.records
                         .iter()
@@ -624,13 +636,22 @@ impl PrivateItems {
                 ),
             );
         }
-        for name in &self.unreadable {
-            page.warn(
-                "private-marks-unreadable",
-                format!(
-                    "{name}'s marks.json does not read, so the household's private marks are not applied: {name}'s items are left out of household-wide answers until it is fixed"
+        for (name, what) in &self.unreadable {
+            let (code, message) = match what {
+                Unreadable::Marks => (
+                    "private-marks-unreadable",
+                    format!(
+                        "{name}'s marks.json does not read, so the household's private marks are not applied: {name}'s items are left out of household-wide answers until it is fixed"
+                    ),
                 ),
-            );
+                Unreadable::Labels => (
+                    "private-labels-unreadable",
+                    format!(
+                        "{name}'s provider-state.json does not read, so which items provider labels make private is not known: {name}'s items are left out of household-wide answers until medrec tables fetch nppes, then medrec views write, run on one machine (a newer medrec's file needs this one updated)"
+                    ),
+                ),
+            };
+            page.warn(code, message);
         }
     }
 }

@@ -65,6 +65,9 @@ pub enum State {
     /// A file is there, and it is not the recorded one or does not read: it
     /// is not used.
     Changed,
+    /// The provider directory, as another version of medrec keeps it: it is
+    /// not used, and `tables fetch nppes` replaces it.
+    OtherVersion,
 }
 
 #[derive(Debug, Serialize)]
@@ -162,10 +165,11 @@ pub fn list() -> Vec<Row> {
     }
     for (folder, k) in kept {
         let state = match k {
-            Some(_) => State::Ready,
-            None => State::Changed,
+            Ok(_) => State::Ready,
+            Err(nppes::Unused::OtherVersion) => State::OtherVersion,
+            Err(_) => State::Changed,
         };
-        rows.push(directory_row(Some(folder), k, state));
+        rows.push(directory_row(Some(folder), k.ok(), state));
     }
     rows
 }

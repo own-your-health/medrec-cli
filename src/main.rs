@@ -1038,7 +1038,7 @@ fn fetch_directory(
     }
     let offer = nppes::offer(&nppes::CMS)?;
     let path = nppes::path(dir, &h.folder_id);
-    if let Some(have) = nppes::Directory::load(&path) {
+    if let Ok(have) = nppes::Directory::load(&path) {
         if have.about.is_current(&offer, &wanted) {
             return Ok(have.about.fetched("unchanged"));
         }
@@ -1589,10 +1589,13 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
             let (f, h) = read(store, cli)?;
             let mut items = Vec::new();
             let mut unreadable: Vec<String> = Vec::new();
+            let mut labels: Vec<String> = Vec::new();
             for p in medrec::people::selected(&h, person.as_deref())? {
                 let idx = f.index(p)?;
                 let (v, events) = medrec::private::with_events(&f, &h, p, &idx)?;
-                if v.get("marks_unreadable").is_some() {
+                if v.get("labels_unreadable").is_some() {
+                    labels.push(p.id.clone());
+                } else if v.get("marks_unreadable").is_some() {
                     unreadable.push(p.id.clone());
                 }
                 let event_of = |id: &str| {
@@ -1674,6 +1677,18 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
                     );
                 }
                 doc["marks_unreadable"] = unreadable.into();
+            }
+            if !labels.is_empty() {
+                for p in h.people.iter().filter(|p| labels.contains(&p.id)) {
+                    note(
+                        cli,
+                        &format!(
+                            "{}'s provider-state.json does not read: what provider labels make private is left out until `medrec tables fetch nppes`, then `medrec views write`, on one machine, or until this medrec is updated when a newer one wrote it",
+                            medrec::printable(&p.name)
+                        ),
+                    );
+                }
+                doc["labels_unreadable"] = labels.into();
             }
             output::emit(json, "private-list", doc, |v| {
                 table(

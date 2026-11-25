@@ -953,14 +953,83 @@ fn private_items_stay_out_of_household_wide_answers_unless_asked_about() {
 /// Puts `code-names.json` in a person's views, as a medrec with the tables
 /// writes it.
 fn put_code_names(e: &Env, pid: &str, v: &Value) {
+    put_view(e, pid, "code-names.json", v);
+}
+
+/// Puts one of a person's views there.
+fn put_view(e: &Env, pid: &str, name: &str, v: &Value) {
     let bytes = serde_json::to_vec(v).unwrap();
     let md5 = medrec::hash::md5_hex(&bytes);
-    let stored = medrec::viewfiles::stored_name("code-names.json", &md5);
-    std::fs::write(e.records().join("views").join(pid).join(stored), &bytes).unwrap();
+    let stored = medrec::viewfiles::stored_name(name, &md5);
+    let at = e.records().join("views").join(pid).join(stored);
+    std::fs::write(at, &bytes).unwrap();
     let path = e.records().join("views/views.json");
     let mut index: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-    index["people"][pid]["files"]["code-names.json"] = json!(md5);
+    index["people"][pid]["files"][name] = json!(md5);
     std::fs::write(path, serde_json::to_vec(&index).unwrap()).unwrap();
+}
+
+/// A label decides what is private: while a person's do not read, an answer
+/// about the whole household holds all of theirs back, and says why.
+#[test]
+fn labels_that_do_not_read_hold_a_person_back() {
+    let e = Env::new("labelslost");
+    household(&e);
+    let h: Value =
+        serde_json::from_slice(&std::fs::read(e.records().join("household.json")).unwrap())
+            .unwrap();
+    let alex = h["people"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["name"] == "Alex Testperson")
+        .unwrap()
+        .clone();
+    let folder = e.records().join(alex["folder"].as_str().unwrap());
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/labels");
+    let mut idx: Value =
+        serde_json::from_slice(&std::fs::read(fixtures.join("index.json")).unwrap()).unwrap();
+    idx["person"] = alex["id"].clone();
+    std::fs::write(folder.join("index.json"), serde_json::to_vec(&idx).unwrap()).unwrap();
+    e.ok(&["views", "write"]);
+    let t = e.tools();
+    let ask = |args: Value| {
+        let r = call(&t, RECORDS, args);
+        assert!(!r.is_error(), "{}", r.text());
+        assert_fits(&t, RECORDS, &r).clone()
+    };
+    let shown = |v: &Value, id: &str| v["items"].as_array().unwrap().iter().any(|i| i["id"] == id);
+    let claims = json!({"kind": "claims", "limit": 50});
+
+    // The label makes its claim private.
+    let talk = "r_talkaaaaaaaaaaaaaaaa";
+    assert!(shown(&ask(claims.clone()), talk));
+    let mut state: Value =
+        serde_json::from_slice(&std::fs::read(fixtures.join("provider-state.json")).unwrap())
+            .unwrap();
+    state["person"] = alex["id"].clone();
+    let at = folder.join("provider-state.json");
+    std::fs::write(&at, serde_json::to_vec(&state).unwrap()).unwrap();
+    let v = ask(claims.clone());
+    assert!(!shown(&v, talk), "{v}");
+    assert!(shown(&v, "r_officevisitaaaaaaaaa"), "{v}");
+
+    std::fs::write(&at, "{").unwrap();
+    let v = ask(claims);
+    for r in ["r_talkaaaaaaaaaaaaaaaa", "r_officevisitaaaaaaaaa"] {
+        assert!(!shown(&v, r), "{v}");
+    }
+    let codes: Vec<&str> = v["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|w| w["code"].as_str())
+        .collect();
+    assert!(codes.contains(&"private-labels-unreadable"), "{v}");
+    assert!(!codes.contains(&"private-marks-unreadable"), "{v}");
+    // About Alex, everything is there.
+    let v = ask(json!({"kind": "claims", "person": "Alex", "limit": 50}));
+    assert!(shown(&v, talk), "{v}");
 }
 
 #[test]

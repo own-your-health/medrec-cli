@@ -19,7 +19,9 @@ use serde::Serialize;
 
 use pk_cli_core::CliError;
 use pk_cli_drive::google::{self as gdrive, Drive, DriveCli, DriveSpec, Scope};
-use pk_cli_drive::{cache, Backend, CachePolicy, CachedRemote, FileEntry, LocalCopy, RemoteStore};
+use pk_cli_drive::{
+    cache, Backend, CachePolicy, CachedRemote, FileEntry, LocalCopy, RemoteRead, RemoteStore,
+};
 
 pub const BIN: &str = "medrec";
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -296,6 +298,14 @@ impl Store {
 
     pub fn read_text(&self, rel: &str) -> Result<Option<String>, CliError> {
         self.backend.read_file(rel)
+    }
+
+    /// The same, never from the read cache.
+    pub fn read_text_fresh(&self, rel: &str) -> Result<Option<String>, CliError> {
+        match &self.location {
+            Location::Dir(_) => self.read_text(rel),
+            Location::Drive(_) => self.remote().cat(rel),
+        }
     }
 
     pub fn write_text(&self, rel: &str, content: &str) -> Result<(), CliError> {

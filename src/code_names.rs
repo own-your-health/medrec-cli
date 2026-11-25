@@ -265,6 +265,7 @@ mod tests {
             &crate::model::PersonText::new("p_test"),
             &events,
             marks,
+            &BTreeMap::new(),
         );
         if unreadable {
             private["marks_unreadable"] = Value::Bool(true);

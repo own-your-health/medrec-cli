@@ -1,0 +1,429 @@
+{
+ "schema": "medrec-index/v1",
+ "person": "p_robinaaaaaaaaaaaaaaa",
+ "rev": 1,
+ "documents": [
+  {
+   "id": "d_billaaaaaaaaaaaaaaaa",
+   "path": "Robin Example/Documents/2025/bill.pdf",
+   "sha256": "623210167553939c87ed8c5f2bfe0b3e0684e12c3a3dd2513613c4e67263b5a1",
+   "md5": "e8375d7cd983efcbf956da5937050ffc",
+   "size": 100,
+   "media_type": "application/pdf",
+   "doc_type": "bill",
+   "date": "2025-07-01",
+   "organization": "Example Family Practice",
+   "filed_at": "2025-07-01T00:00:00Z",
+   "origin": {
+    "kind": "file",
+    "action": "copied"
+   },
+   "text": {
+    "chars": 82
+   },
+   "provenance": {
+    "source": {
+     "kind": "scan"
+    },
+    "method": "file",
+    "filed_at": "2025-07-01T00:00:00Z",
+    "filed_by": "medrec 0.9.6"
+   },
+   "statement": {
+    "phone": "555-010-0150"
+   }
+  },
+  {
+   "id": "d_summaryaaaaaaaaaaaaa",
+   "path": "Robin Example/Documents/2025/summary.pdf",
+   "sha256": "761b7ad8ad439b2855fcbb611331c646ef0870b0631247bba3f3025cb6df5a53",
+   "md5": "a80da1282f2c775bbc5f2c92c836968b",
+   "size": 100,
+   "media_type": "application/pdf",
+   "doc_type": "visit_summary",
+   "date": "2025-08-05",
+   "organization": "Sample Health Partners",
+   "filed_at": "2025-08-05T00:00:00Z",
+   "origin": {
+    "kind": "file",
+    "action": "copied"
+   },
+   "text": {
+    "chars": 54
+   },
+   "provenance": {
+    "source": {
+     "kind": "scan"
+    },
+    "method": "file",
+    "filed_at": "2025-08-05T00:00:00Z",
+    "filed_by": "medrec 0.9.6"
+   }
+  },
+  {
+   "id": "d_firstaaaaaaaaaaaaaaa",
+   "path": "Robin Example/Documents/2025/first.pdf",
+   "sha256": "a7937b64b8caa58f03721bb6bacf5c78cb235febe0e70b1b84cd99541461a08e",
+   "md5": "8b04d5e3775d298e78455efc5ca404d5",
+   "size": 100,
+   "media_type": "application/pdf",
+   "doc_type": "visit_summary",
+   "date": "2025-09-02",
+   "organization": "Sample Health Partners",
+   "filed_at": "2025-09-02T00:00:00Z",
+   "origin": {
+    "kind": "file",
+    "action": "copied"
+   },
+   "text": {
+    "chars": 48
+   },
+   "provenance": {
+    "source": {
+     "kind": "scan"
+    },
+    "method": "file",
+    "filed_at": "2025-09-02T00:00:00Z",
+    "filed_by": "medrec 0.9.6"
+   }
+  },
+  {
+   "id": "d_secondaaaaaaaaaaaaaa",
+   "path": "Robin Example/Documents/2025/second.pdf",
+   "sha256": "16367aacb67a4a017c8da8ab95682ccb390863780f7114dda0a0e0c55644c7c4",
+   "md5": "a9f0e61a137d86aa9db53465e0801612",
+   "size": 100,
+   "media_type": "application/pdf",
+   "doc_type": "receipt",
+   "date": "2025-09-02",
+   "organization": "Placeholder Walk-In",
+   "filed_at": "2025-09-02T00:00:00Z",
+   "origin": {
+    "kind": "file",
+    "action": "copied"
+   },
+   "text": {
+    "chars": 34
+   },
+   "provenance": {
+    "source": {
+     "kind": "scan"
+    },
+    "method": "file",
+    "filed_at": "2025-09-02T00:00:00Z",
+    "filed_by": "medrec 0.9.6"
+   }
+  },
+  {
+   "id": "d_counselingaaaaaaaaaa",
+   "path": "Robin Example/Documents/2025/counseling.pdf",
+   "sha256": "b2657e4783926a081307af5e1cf87737b849726ce9af32a4000d2bf55664574e",
+   "md5": "5e88b87a5cc012e016bdbcba3bec51ea",
+   "size": 100,
+   "media_type": "application/pdf",
+   "doc_type": "visit_summary",
+   "date": "2025-11-04",
+   "organization": "Example Counseling Center",
+   "filed_at": "2025-11-04T00:00:00Z",
+   "origin": {
+    "kind": "file",
+    "action": "copied"
+   },
+   "text": {
+    "chars": 48
+   },
+   "provenance": {
+    "source": {
+     "kind": "scan"
+    },
+    "method": "file",
+    "filed_at": "2025-11-04T00:00:00Z",
+    "filed_by": "medrec 0.9.6"
+   }
+  }
+ ],
+ "records": [
+  {
+   "id": "r_officevisitaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|officevisit",
+   "date": "2025-01-07",
+   "display": "Sample service",
+   "fields": {
+    "type": "professional",
+    "category": "visit",
+    "provider": "EXAMPLE PRIMARY CARE GROUP LLC"
+   },
+   "provenance": [],
+   "providers": [
+    {
+     "field": "provider",
+     "npi": "0000000022",
+     "state": "FL"
+    }
+   ]
+  },
+  {
+   "id": "r_samplevisitaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|samplevisit",
+   "date": "2025-02-04",
+   "display": "Sample service",
+   "fields": {
+    "type": "professional",
+    "category": "visit",
+    "provider": "J SAMPLE"
+   },
+   "provenance": [],
+   "providers": [
+    {
+     "field": "provider",
+     "npi": "0000000006",
+     "state": "FL"
+    }
+   ]
+  },
+  {
+   "id": "r_sampleportalaaaaaaaa",
+   "kind": "encounter",
+   "key": "encounter|sampleportal",
+   "date": "2025-02-04",
+   "display": "Sample visit",
+   "status": "finished",
+   "fields": {
+    "class": "ambulatory",
+    "practitioner": "Jordan Sample, MD",
+    "service_provider": "Example Primary Care"
+   },
+   "providers": [
+    {
+     "field": "service_provider",
+     "npi": "0000000022",
+     "state": "FL"
+    }
+   ],
+   "provenance": []
+  },
+  {
+   "id": "r_talkaaaaaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|talk",
+   "date": "2025-03-04",
+   "display": "Sample service",
+   "fields": {
+    "type": "professional",
+    "category": "visit",
+    "provider": "C EXAMPLE"
+   },
+   "provenance": [],
+   "providers": [
+    {
+     "field": "provider",
+     "npi": "0000000014",
+     "state": "FL"
+    }
+   ]
+  },
+  {
+   "id": "r_imagingaaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|imaging",
+   "date": "2025-04-01",
+   "display": "Sample service",
+   "fields": {
+    "type": "professional",
+    "category": "imaging",
+    "provider": "A TESTPERSON"
+   },
+   "provenance": [],
+   "providers": [
+    {
+     "field": "provider",
+     "state": "FL"
+    }
+   ]
+  },
+  {
+   "id": "r_therapyaaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|therapy",
+   "date": "2025-05-06",
+   "display": "Sample service",
+   "fields": {
+    "type": "professional",
+    "category": "medicine",
+    "provider": "A TESTPERSON"
+   },
+   "provenance": [],
+   "providers": [
+    {
+     "field": "provider",
+     "state": "FL"
+    }
+   ]
+  },
+  {
+   "id": "r_twomatchesaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|twomatches",
+   "date": "2025-06-03",
+   "display": "Sample service",
+   "fields": {
+    "type": "professional",
+    "category": "visit",
+    "provider": "D SPECIMEN"
+   },
+   "provenance": [],
+   "providers": [
+    {
+     "field": "provider",
+     "state": "FL"
+    }
+   ]
+  },
+  {
+   "id": "r_onepaperaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|onepaper",
+   "date": "2025-07-01",
+   "display": "Sample service",
+   "fields": {
+    "type": "professional",
+    "category": "visit",
+    "provider": "R PLACEHOLDER"
+   },
+   "provenance": [],
+   "providers": [
+    {
+     "field": "provider",
+     "state": "FL"
+    }
+   ]
+  },
+  {
+   "id": "r_paperaloneaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|paperalone",
+   "date": "2025-08-05",
+   "display": "Sample service",
+   "fields": {
+    "type": "professional",
+    "category": "visit",
+    "provider": "M TEMPLATE"
+   },
+   "provenance": [],
+   "providers": [
+    {
+     "field": "provider",
+     "state": "FL"
+    }
+   ]
+  },
+  {
+   "id": "r_twopracticesaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|twopractices",
+   "date": "2025-09-02",
+   "display": "Sample service",
+   "fields": {
+    "type": "professional",
+    "category": "visit",
+    "provider": "P DUMMY"
+   },
+   "provenance": [],
+   "providers": [
+    {
+     "field": "provider",
+     "state": "FL"
+    }
+   ]
+  },
+  {
+   "id": "r_markedaaaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|marked",
+   "date": "2025-10-07",
+   "display": "Sample service",
+   "fields": {
+    "type": "professional",
+    "category": "visit",
+    "provider": "C EXAMPLE"
+   },
+   "provenance": [],
+   "providers": [
+    {
+     "field": "provider",
+     "npi": "0000000014",
+     "state": "FL"
+    }
+   ]
+  },
+  {
+   "id": "r_privatepaperaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|privatepaper",
+   "date": "2025-11-04",
+   "display": "Sample service",
+   "fields": {
+    "type": "professional",
+    "category": "visit",
+    "provider": "L FILLER"
+   },
+   "provenance": [],
+   "providers": [
+    {
+     "field": "provider",
+     "state": "FL"
+    }
+   ]
+  },
+  {
+   "id": "r_privatevisitaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|privatevisit",
+   "date": "2025-12-02",
+   "display": "Sample service",
+   "fields": {
+    "type": "professional",
+    "category": "visit",
+    "provider": "R PLACEHOLDER",
+    "diagnoses": [
+     {
+      "sequence": 1,
+      "code": {
+       "system": "http://hl7.org/fhir/sid/icd-10-cm",
+       "code": "F32.1"
+      }
+     }
+    ]
+   },
+   "provenance": [],
+   "providers": [
+    {
+     "field": "provider",
+     "state": "FL"
+    }
+   ]
+  },
+  {
+   "id": "r_namesakeaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|namesake",
+   "date": "2026-01-06",
+   "display": "Sample service",
+   "fields": {
+    "type": "professional",
+    "category": "visit",
+    "provider": "EXAMPLE PRIMARY CARE GROUP LLC"
+   },
+   "provenance": [],
+   "providers": [
+    {
+     "field": "provider",
+     "npi": "0000000030",
+     "state": "TX"
+    }
+   ]
+  }
+ ]
+}

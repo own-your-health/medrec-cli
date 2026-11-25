@@ -1,0 +1,195 @@
+{
+ "schema": "medrec-providers/v1",
+ "person": "p_robinaaaaaaaaaaaaaaa",
+ "directory": {
+  "id": "nppes",
+  "version": "2026-03",
+  "date": "2026-03-08"
+ },
+ "labels": {
+  "v_dfc2rhprf4wcyfngq4i2": {
+   "practice": "Sample Health Partners",
+   "confidence": "likely",
+   "evidence": [
+    {
+     "from": "paper",
+     "document": "d_summaryaaaaaaaaaaaaa"
+    }
+   ]
+  },
+  "v_dkuvnq2cxpiepdpemguk": {
+   "name": "Example Primary Care Group of Texas",
+   "role": "primary care clinic",
+   "phone": "555-010-0104",
+   "phone_from": {
+    "from": "directory",
+    "date": "2026-03-08"
+   },
+   "confidence": "sure",
+   "evidence": [
+    {
+     "from": "npi"
+    }
+   ]
+  },
+  "v_fmdwr5pyo4gcvi6yoszh": {
+   "name": "Jordan Sample, MD",
+   "role": "family doctor",
+   "phone": "555-010-0101",
+   "phone_from": {
+    "from": "directory",
+    "date": "2026-03-08"
+   },
+   "confidence": "sure",
+   "evidence": [
+    {
+     "from": "npi"
+    }
+   ]
+  },
+  "v_hefx2hw7lnrlbexer5sw": {
+   "name": "Avery Testperson, MD",
+   "role": "radiologist",
+   "phone": "555-010-0107",
+   "phone_from": {
+    "from": "directory",
+    "date": "2026-03-08"
+   },
+   "confidence": "likely",
+   "evidence": [
+    {
+     "from": "only_match",
+     "state": "FL"
+    }
+   ]
+  },
+  "v_jqqys54esdin4fmkdaqe": {
+   "name": "Example Primary Care",
+   "role": "primary care clinic",
+   "phone": "555-010-0103",
+   "phone_from": {
+    "from": "directory",
+    "date": "2026-03-08"
+   },
+   "confidence": "sure",
+   "evidence": [
+    {
+     "from": "npi"
+    }
+   ]
+  },
+  "v_oraklnoqfvzv2vuwya5u": {
+   "name": "Riley Placeholder, FNP",
+   "practice": "Example Family Practice",
+   "role": "nurse practitioner",
+   "phone": "555-010-0150",
+   "phone_from": {
+    "from": "paper",
+    "document": "d_billaaaaaaaaaaaaaaaa"
+   },
+   "confidence": "likely",
+   "evidence": [
+    {
+     "from": "only_match",
+     "state": "FL"
+    },
+    {
+     "from": "paper",
+     "document": "d_billaaaaaaaaaaaaaaaa"
+    }
+   ]
+  },
+  "v_rdblgrqthfa2eb2aegdl": {
+   "name": "Jordan Sample, MD",
+   "role": "family doctor",
+   "phone": "555-010-0101",
+   "phone_from": {
+    "from": "directory",
+    "date": "2026-03-08"
+   },
+   "confidence": "likely",
+   "evidence": [
+    {
+     "from": "only_match",
+     "state": "FL"
+    }
+   ]
+  }
+ },
+ "by_name": {
+  "EXAMPLE PRIMARY CARE GROUP LLC": "v_dkuvnq2cxpiepdpemguk",
+  "Example Primary Care": "v_jqqys54esdin4fmkdaqe",
+  "J SAMPLE": "v_fmdwr5pyo4gcvi6yoszh",
+  "Jordan Sample, MD": "v_rdblgrqthfa2eb2aegdl",
+  "M TEMPLATE": "v_dfc2rhprf4wcyfngq4i2",
+  "R PLACEHOLDER": "v_oraklnoqfvzv2vuwya5u"
+ },
+ "by_item": {
+  "e_htj3bwwwzg3rteblhio7": {
+   "A TESTPERSON": "v_hefx2hw7lnrlbexer5sw"
+  },
+  "e_u6ggmseopzl65hgfugr7": {
+   "EXAMPLE PRIMARY CARE GROUP LLC": "v_jqqys54esdin4fmkdaqe"
+  },
+  "r_imagingaaaaaaaaaaaaa": {
+   "A TESTPERSON": "v_hefx2hw7lnrlbexer5sw"
+  },
+  "r_namesakeaaaaaaaaaaaa": {
+   "EXAMPLE PRIMARY CARE GROUP LLC": "v_dkuvnq2cxpiepdpemguk"
+  },
+  "r_officevisitaaaaaaaaa": {
+   "EXAMPLE PRIMARY CARE GROUP LLC": "v_jqqys54esdin4fmkdaqe"
+  },
+  "r_onepaperaaaaaaaaaaaa": {
+   "R PLACEHOLDER": "v_oraklnoqfvzv2vuwya5u"
+  },
+  "r_paperaloneaaaaaaaaaa": {
+   "M TEMPLATE": "v_dfc2rhprf4wcyfngq4i2"
+  },
+  "r_samplevisitaaaaaaaaa": {
+   "J SAMPLE": "v_fmdwr5pyo4gcvi6yoszh"
+  }
+ },
+ "private": {
+  "labels": {
+   "v_vybukuxxbglvl3r47eh7": {
+    "name": "Casey Example, PhD",
+    "role": "psychologist",
+    "phone": "555-010-0102",
+    "phone_from": {
+     "from": "directory",
+     "date": "2026-03-08"
+    },
+    "confidence": "sure",
+    "evidence": [
+     {
+      "from": "npi"
+     }
+    ]
+   },
+   "v_zt6t2lijjdjxppflmlwv": {
+    "name": "Riley Placeholder, FNP",
+    "role": "nurse practitioner",
+    "confidence": "likely",
+    "evidence": [
+     {
+      "from": "only_match",
+      "state": "FL"
+     }
+    ]
+   }
+  },
+  "by_name": {
+   "C EXAMPLE": "v_vybukuxxbglvl3r47eh7",
+   "R PLACEHOLDER": "v_zt6t2lijjdjxppflmlwv"
+  },
+  "by_item": {
+   "r_privatevisitaaaaaaaa": {
+    "R PLACEHOLDER": "v_zt6t2lijjdjxppflmlwv"
+   },
+   "r_talkaaaaaaaaaaaaaaaa": {
+    "C EXAMPLE": "v_vybukuxxbglvl3r47eh7"
+   }
+  }
+ }
+}

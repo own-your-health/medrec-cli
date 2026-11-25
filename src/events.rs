@@ -386,10 +386,15 @@ static ORG_WORDS: LazyLock<Regex> = LazyLock::new(|| {
 /// organization.
 pub fn is_clinician(provider: &str) -> bool {
     let p = provider.trim();
-    if p.contains('&') || ORG_WORDS.is_match(p) {
+    if says_organization(p) {
         return false;
     }
     CLINICIAN.is_match(p) || p.to_uppercase().ends_with(" MD")
+}
+
+/// Whether a name has a word of an organization's.
+pub(crate) fn says_organization(name: &str) -> bool {
+    name.contains('&') || ORG_WORDS.is_match(name)
 }
 
 const TITLES: &[&str] = &[
@@ -461,7 +466,7 @@ pub fn same_clinician(a: &str, b: &str) -> Same {
 
 /// D2b: a clinician's surname in a text, with the first initial on the word
 /// before it unless `strict` is off.
-fn clinician_in_text(provider: &str, text: &str, strict: bool) -> bool {
+pub(crate) fn clinician_in_text(provider: &str, text: &str, strict: bool) -> bool {
     let (surname, initial) = clinician_key(provider);
     if surname.len() < 4 {
         return false;
