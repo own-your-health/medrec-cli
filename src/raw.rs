@@ -183,8 +183,9 @@ fn kept(r: &Record) -> Result<Vec<(String, String)>, CliError> {
 fn unnamed(e: CliError) -> CliError {
     let says = match e.base() {
         CliError::Usage(_) | CliError::NotFound(_) | CliError::Other(_) => {
-            "the raw files could not be read; `medrec verify` reports raw files that are missing, \
-             and `medrec records raw <record id>` shows the error of one record"
+            "the raw files could not be read; `medrec verify` reports an index that does not read \
+             and raw files that are missing, and `medrec records raw <record id>` shows the error \
+             of one raw file"
         }
         CliError::Auth(_) => "the raw files could not be read: the records folder needs a sign-in",
         CliError::Keychain(_) => {
@@ -231,9 +232,13 @@ pub fn fields(
     let tmp = pk_cli_drive::private_temp_dir("medrec-fields")?;
     let mut count = Count::default();
     // One that matches no one person names the people it can be.
-    let of = people::selected(h, person).map_err(|_| {
-        let says = "`--person` is no one person of the household; pass a person's id";
-        CliError::Usage(says.into())
+    let of = people::selected(h, person).map_err(|e| {
+        let says = "`--person` is no one person of the household; pass a person's id \
+                    (`medrec people list`)";
+        match e.base() {
+            CliError::Usage(_) => CliError::Usage(says.into()),
+            _ => CliError::NotFound(says.into()),
+        }
     })?;
     for p in of {
         let idx = folder.index(p).map_err(unnamed)?;
@@ -271,11 +276,7 @@ type Read = Result<Option<Vec<u8>>, CliError>;
 
 /// A raw file, never of the read cache.
 fn bytes(folder: &Folder, rel: &str) -> Read {
-    match folder.store.read_bytes(rel) {
-        Ok(b) => Ok(Some(b)),
-        Err(e) if matches!(e.base(), CliError::NotFound(_)) => Ok(None),
-        Err(e) => Err(e),
-    }
+    folder.store.read_bytes_fresh(rel)
 }
 
 /// The current raw files of a record, and the CLI each came by.

@@ -416,6 +416,26 @@ impl Store {
             .map_err(|e| CliError::Other(format!("reading {}: {e}", self.display_path(rel))))
     }
 
+    /// The same, never from the read cache; `None` where the file is not there.
+    pub fn read_bytes_fresh(&self, rel: &str) -> Result<Option<Vec<u8>>, CliError> {
+        let read = match &self.location {
+            Location::Dir(root) => std::fs::read(root.join(rel)).map_err(|e| {
+                let says = format!("reading {}: {e}", self.display_path(rel));
+                match e.kind() {
+                    std::io::ErrorKind::NotFound => CliError::NotFound(says),
+                    _ => CliError::Other(says),
+                }
+            }),
+            // A download, which the cache has no part in.
+            Location::Drive(_) => self.read_bytes(rel),
+        };
+        match read {
+            Ok(b) => Ok(Some(b)),
+            Err(e) if matches!(e.base(), CliError::NotFound(_)) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
     pub fn exists(&self, rel: &str) -> Result<bool, CliError> {
         self.backend.exists(rel)
     }

@@ -2789,6 +2789,49 @@ fn the_raw_files_of_a_record_are_counted_by_the_names_of_their_elements() {
         no_value(&text);
     }
 
+    // An earlier one that does not say when it was made: each is compared with
+    // the current one.
+    let undated = base.records().join(files[0]["path"].as_str().unwrap());
+    let undated = undated.with_file_name(format!(
+        "{}~0undated.json",
+        files[2]["path"]
+            .as_str()
+            .unwrap()
+            .rsplit('/')
+            .next()
+            .unwrap()
+            .trim_end_matches(".json")
+    ));
+    let mut of = files[0]["resource"].clone();
+    of.as_object_mut().unwrap().remove("meta");
+    std::fs::write(&undated, of.to_string()).unwrap();
+    let changes = base.ok(&["records", "raw", &id, "--changes"]);
+    let of = &changes["files"][0];
+    assert_eq!(
+        (&of["versions"], &of["ordered"]),
+        (&4.into(), &false.into()),
+        "{of}"
+    );
+    let steps = of["steps"].as_array().unwrap();
+    assert_eq!(steps.len(), 3);
+    assert!(steps.iter().all(|s| s["to"] == "current"), "{of}");
+    let says = "their order is not known";
+    let text =
+        || String::from_utf8(base.run(&["records", "raw", &id, "--changes"]).stdout).unwrap();
+    assert!(text().contains(says), "{}", text());
+    let path = base.records().join(files[2]["path"].as_str().unwrap());
+    let current = std::fs::read(&path).unwrap();
+    std::fs::write(&path, "{").unwrap();
+    let changes = base.ok(&["records", "raw", &id, "--changes"]);
+    let of = &changes["files"][0];
+    assert_eq!(
+        (&of["ordered"], &of["steps"]),
+        (&false.into(), &serde_json::json!([]))
+    );
+    assert!(!text().contains(says), "{}", text());
+    std::fs::write(&path, current).unwrap();
+    std::fs::remove_file(&undated).unwrap();
+
     // One file that does not read, or is not there, is counted, and named when
     // it is asked for.
     let rel = files[2]["path"].as_str().unwrap();
@@ -2848,9 +2891,10 @@ fn the_raw_files_of_a_record_are_counted_by_the_names_of_their_elements() {
     std::fs::rename(dir, &aside).unwrap();
     std::fs::write(dir, "not a folder").unwrap();
     no_name("--changes");
+    no_name("--fields");
     // Nor who can be meant.
     let out = base.run(&["records", "fields", "--person", "Testperson"]);
-    assert_eq!(out.status.code(), Some(2));
+    assert_eq!(out.status.code(), Some(4));
     let says = String::from_utf8(out.stderr).unwrap();
     assert!(!says.contains("Robin") && !says.contains("Alex"), "{says}");
 
