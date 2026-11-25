@@ -2955,9 +2955,9 @@ fn papers_sources(
             continue;
         };
         let dir = folder::records_dir(person, &source_slug(cli, org));
-        let runs = index.imports.iter().filter(|r| r.source_dir == dir);
+        let mut runs = index.imports.iter().filter(|r| r.source_dir == dir);
         let patients: BTreeSet<&str> = runs.clone().map(|r| r.patient_id.as_str()).collect();
-        let latest = runs.last();
+        let latest = runs.next_back();
         let read = latest.filter(|_| patients.len() == 1);
         let method = match s.kind.as_str() {
             "fhir" => "fhir-api",
