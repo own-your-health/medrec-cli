@@ -2793,9 +2793,9 @@ fn the_raw_files_of_a_record_are_counted_by_the_names_of_their_elements() {
     // it is asked for.
     let rel = files[2]["path"].as_str().unwrap();
     let path = base.records().join(rel);
-    for left in [Some("{"), None] {
+    for left in [Some(b"{".as_slice()), Some(b"{\"id\": \"\xff\"}"), None] {
         match left {
-            Some(text) => std::fs::write(&path, text).unwrap(),
+            Some(bytes) => std::fs::write(&path, bytes).unwrap(),
             None => std::fs::remove_file(&path).unwrap(),
         }
         let all = base.ok(&["records", "fields", "--kind", "claim"]);
@@ -2809,9 +2809,12 @@ fn the_raw_files_of_a_record_are_counted_by_the_names_of_their_elements() {
             (&2.into(), &1.into()),
             "{of}"
         );
+        // The earlier ones are in their order all the same.
+        let steps = of["steps"].as_array().unwrap();
+        let ends: Vec<(&Value, &Value)> = steps.iter().map(|s| (&s["from"], &s["to"])).collect();
         assert_eq!(
-            (&of["ordered"], &of["steps"]),
-            (&false.into(), &serde_json::json!([]))
+            (&of["ordered"], ends),
+            (&true.into(), vec![(named(0), named(1))])
         );
         let out = base.run(&["records", "raw", &id]);
         assert_eq!(out.status.code(), Some(1));
@@ -2822,16 +2825,57 @@ fn the_raw_files_of_a_record_are_counted_by_the_names_of_their_elements() {
         );
     }
     // The answers with no value name no file in an error either.
+    let no_name = |how: &str| {
+        let out = base.run(&["records", "raw", &id, how]);
+        assert_eq!(out.status.code(), Some(1), "{how}");
+        let says = String::from_utf8(out.stderr).unwrap();
+        assert!(says.contains("could not be read"), "{how}: {says}");
+        for text in [String::from_utf8(out.stdout).unwrap(), says] {
+            no_value(&text);
+        }
+    };
+    std::fs::write(&path, "{}").unwrap();
+    let may = |mode: u32| {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
+    };
+    may(0o000);
+    no_name("--changes");
+    no_name("--fields");
+    may(0o600);
     let dir = path.parent().unwrap();
     let aside = dir.with_extension("aside");
     std::fs::rename(dir, &aside).unwrap();
     std::fs::write(dir, "not a folder").unwrap();
-    for how in ["--changes", "--fields"] {
-        let out = base.run(&["records", "raw", &id, how]);
-        for text in [out.stdout, out.stderr] {
-            no_value(&String::from_utf8(text).unwrap());
-        }
+    no_name("--changes");
+    // Nor who can be meant.
+    let out = base.run(&["records", "fields", "--person", "Testperson"]);
+    assert_eq!(out.status.code(), Some(2));
+    let says = String::from_utf8(out.stderr).unwrap();
+    assert!(!says.contains("Robin") && !says.contains("Alex"), "{says}");
+
+    // A record that no raw file is kept of.
+    let mut index = index.clone();
+    let mut without = claims[0].clone();
+    without["id"] = "r_withoutaaaaaaaaaaaaa".into();
+    without["key"] = "without".into();
+    for p in without["provenance"].as_array_mut().unwrap() {
+        p.as_object_mut().unwrap().remove("raw_path");
     }
+    index["records"].as_array_mut().unwrap().push(without);
+    let file = base.records().join("Robin Testperson/index.json");
+    std::fs::write(file, index.to_string()).unwrap();
+    for how in [None, Some("--fields"), Some("--changes")] {
+        let args = ["records", "raw", "r_withoutaaaaaaaaaaaaa"];
+        let args: Vec<&str> = args.into_iter().chain(how).collect();
+        assert_eq!(base.run(&args).status.code(), Some(4), "{how:?}");
+    }
+    std::fs::remove_file(dir).unwrap();
+    let many = base.ok(&["records", "fields", "--kind", "claim"]);
+    assert_eq!(
+        (&many["records"], &many["without_raw"]),
+        (&2.into(), &1.into())
+    );
     let none = base.run(&["records", "raw", "r_aaaaaaaaaaaaaaaaaaaa"]);
     assert_eq!(none.status.code(), Some(4));
 }

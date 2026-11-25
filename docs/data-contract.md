@@ -502,7 +502,10 @@ resource an import lets write it), or of no known raw file.
 - At the Mac, `medrec records about-another` lists the ids. `medrec records show
   <ID>` shows a record by its id, with `notes` `about a parent, in <name>'s
   chart` or `about another person, in <name>'s chart`, and `medrec documents
-  open <ID>` opens a paper and says the same.
+  open <ID>` opens a paper and says the same. `medrec records raw <ID>` (0.9.10
+  and later) says the same; with `--fields` or `--changes` it says `about a
+  parent` or `about another person`, with no name. `medrec records fields` does
+  not count them.
 - An Observation that a medrec before 0.9.9 read in has its `about` once its
   source serves it again, or from `medrec reindex`, which reads the raw files.
   One that was filed as the person's own then has that key, and one that was

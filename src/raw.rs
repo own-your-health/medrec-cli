@@ -92,9 +92,9 @@ pub struct Changes {
     pub versions: usize,
     /// Versions that do not, and the current one where it is not there.
     pub unread: usize,
-    /// Whether the order of the earlier ones is known, by when their source
-    /// says each was made: each is then compared with the one after it. Where
-    /// it is not, each is compared with the current one.
+    /// Whether the order of the earlier ones that read is known, by when their
+    /// source says each was made: each is then compared with the one after it.
+    /// Where it is not, each is compared with the current one, if that reads.
     pub ordered: bool,
     pub steps: Vec<Step>,
 }
@@ -178,21 +178,36 @@ fn kept(r: &Record) -> Result<Vec<(String, String)>, CliError> {
     Ok(all)
 }
 
-/// An error of reading, with the path it can name left out.
+/// An error of reading, with what it says left out, since that can name a file.
+/// Its kind, its reason and its remedy stay, but a remedy that can name one.
 fn unnamed(e: CliError) -> CliError {
-    const SAYS: &str = "the raw files could not be read; `medrec verify` names what is wrong";
-    let says = SAYS.to_string();
-    match e.base() {
+    let says = match e.base() {
+        CliError::Usage(_) | CliError::NotFound(_) | CliError::Other(_) => {
+            "the raw files could not be read; `medrec verify` reports raw files that are missing, \
+             and `medrec records raw <record id>` shows the error of one record"
+        }
+        CliError::Auth(_) => "the raw files could not be read: the records folder needs a sign-in",
+        CliError::Keychain(_) => {
+            "the raw files could not be read: the Keychain did not give the sign-in"
+        }
+        _ => "the raw files could not be read: the records folder did not answer",
+    };
+    let says = says.to_string();
+    let mut now = match e.base() {
         CliError::Usage(_) => CliError::Usage(says),
-        CliError::Auth(_) => CliError::Auth(
-            "the raw files could not be read; sign in to the records folder again \
-             (`medrec drive login`)"
-                .into(),
-        ),
+        CliError::Auth(_) => CliError::Auth(says),
         CliError::NotFound(_) => CliError::NotFound(says),
         CliError::Upstream(_) => CliError::Upstream(says),
+        CliError::ConfirmationRequired(_) => CliError::ConfirmationRequired(says),
         CliError::Keychain(_) => CliError::Keychain(says),
         _ => CliError::Other(says),
+    };
+    if let Some(reason) = e.reason() {
+        now = now.because(reason);
+    }
+    match e.remedy().filter(|r| !r.contains('/')) {
+        Some(remedy) => now.with_remedy(remedy),
+        None => now,
     }
 }
 
@@ -200,8 +215,7 @@ fn unnamed(e: CliError) -> CliError {
 pub fn fields_of(folder: &Folder, r: &Record) -> Result<Fields, CliError> {
     kept(r)?;
     let mut count = Count::default();
-    let mut read = |rel: &str| folder.store.read_text_fresh(rel).map_err(unnamed);
-    count.record(r, &mut read)?;
+    count.record(r, &mut |rel| bytes(folder, rel).map_err(unnamed))?;
     Ok(count.done())
 }
 
@@ -216,7 +230,12 @@ pub fn fields(
 ) -> Result<Fields, CliError> {
     let tmp = pk_cli_drive::private_temp_dir("medrec-fields")?;
     let mut count = Count::default();
-    for p in people::selected(h, person)? {
+    // One that matches no one person names the people it can be.
+    let of = people::selected(h, person).map_err(|_| {
+        let says = "`--person` is no one person of the household; pass a person's id";
+        CliError::Usage(says.into())
+    })?;
+    for p in of {
         let idx = folder.index(p).map_err(unnamed)?;
         let of = |r: &&Record| kinds.is_empty() || kinds.contains(&r.kind);
         let chosen: Vec<&Record> = idx.records.iter().filter(of).collect();
@@ -243,8 +262,20 @@ pub fn kinds() -> impl Iterator<Item = &'static str> {
     normalize::FIELDS.iter().map(|(kind, _)| *kind)
 }
 
-fn copy(tmp: &Path, rel: &str) -> Option<String> {
-    std::fs::read_to_string(tmp.join(rel)).ok()
+fn copy(tmp: &Path, rel: &str) -> Option<Vec<u8>> {
+    std::fs::read(tmp.join(rel)).ok()
+}
+
+/// A raw file's bytes; `None` where it is not there.
+type Read = Result<Option<Vec<u8>>, CliError>;
+
+/// A raw file, never of the read cache.
+fn bytes(folder: &Folder, rel: &str) -> Read {
+    match folder.store.read_bytes(rel) {
+        Ok(b) => Ok(Some(b)),
+        Err(e) if matches!(e.base(), CliError::NotFound(_)) => Ok(None),
+        Err(e) => Err(e),
+    }
 }
 
 /// The current raw files of a record, and the CLI each came by.
@@ -278,8 +309,8 @@ fn versions(folder: &Folder, current: &str) -> Result<Versions, CliError> {
         };
         there |= version == CURRENT;
         let path = format!("{dir}/{}", f.rel);
-        let text = folder.store.read_text_fresh(&path)?;
-        let resource = text.and_then(|t| serde_json::from_str::<Value>(&t).ok());
+        let bytes = bytes(folder, &path)?;
+        let resource = bytes.and_then(|b| serde_json::from_slice::<Value>(&b).ok());
         match resource.filter(Value::is_object) {
             Some(resource) => out.files.push(RawFile {
                 path,
@@ -292,7 +323,7 @@ fn versions(folder: &Folder, current: &str) -> Result<Versions, CliError> {
     if !there {
         out.unread.push(current.to_string());
     }
-    out.ordered = in_order(&mut out.files) && out.unread.is_empty();
+    out.ordered = in_order(&mut out.files);
     Ok(out)
 }
 
@@ -427,11 +458,7 @@ struct Count {
 }
 
 impl Count {
-    fn record(
-        &mut self,
-        r: &Record,
-        read: &mut dyn FnMut(&str) -> Result<Option<String>, CliError>,
-    ) -> Result<(), CliError> {
+    fn record(&mut self, r: &Record, read: &mut dyn FnMut(&str) -> Read) -> Result<(), CliError> {
         self.records += 1;
         let of = currents(r);
         self.without_raw += usize::from(of.is_empty());
@@ -440,8 +467,8 @@ impl Count {
             if !self.seen.insert(rel.clone()) {
                 continue;
             }
-            let text = read(&rel)?;
-            let v: Option<Value> = text.and_then(|t| serde_json::from_str(&t).ok());
+            let bytes = read(&rel)?;
+            let v: Option<Value> = bytes.and_then(|b| serde_json::from_slice(&b).ok());
             match v.filter(Value::is_object) {
                 Some(v) => self.file(cli, &v),
                 None => self.unread += 1,
@@ -501,6 +528,7 @@ impl Count {
 
 #[cfg(test)]
 mod tests {
+    use pk_cli_core::error::Reason;
     use serde_json::json;
 
     use super::*;
@@ -622,6 +650,15 @@ mod tests {
         let early = Some("2024-03-01T23:30:00-05:00");
         let late = Some("2024-03-02T05:00:00.5Z");
         let later = Some("2024-03-02T05:00:01Z");
+        let (west, east) = (
+            Some("2024-03-01T20:00:00-05:00"),
+            Some("2024-03-02T01:00:00+02:00"),
+        );
+        let (whole, half) = (Some("2024-03-01T08:00:00Z"), Some("2024-03-01T08:00:00.5Z"));
+        let (noon, noon_there) = (
+            Some("2024-03-01T12:00:00Z"),
+            Some("2024-03-01T14:00:00+02:00"),
+        );
         for (all, want) in [
             (
                 vec![("b", late), (CURRENT, later), ("c", early)],
@@ -641,6 +678,24 @@ mod tests {
                 vec![("b", late), ("a", late), (CURRENT, later)],
                 ("a b current", false),
             ),
+            // As text these would be the other way round.
+            (
+                vec![("a", west), ("b", east), (CURRENT, later)],
+                ("b a current", true),
+            ),
+            (
+                vec![("a", half), ("b", whole), (CURRENT, later)],
+                ("b a current", true),
+            ),
+            // One instant, and none.
+            (
+                vec![("b", noon), ("a", noon_there), (CURRENT, later)],
+                ("a b current", false),
+            ),
+            (
+                vec![("a", early), ("b", Some("last week")), (CURRENT, later)],
+                ("b a current", false),
+            ),
         ] {
             assert_eq!(order(&all), (want.0.to_string(), want.1), "{all:?}");
         }
@@ -657,11 +712,7 @@ mod tests {
             .unwrap()
         };
         let mut c = Count::default();
-        let mut read = |_: &str| {
-            Ok(Some(
-                r#"{"resourceType": "Claim", "id": "one"}"#.to_string(),
-            ))
-        };
+        let mut read = |_: &str| Ok(Some(br#"{"resourceType": "Claim", "id": "one"}"#.to_vec()));
         for id in ["r_one", "r_two"] {
             c.record(&record(id), &mut read).unwrap();
         }
@@ -675,13 +726,21 @@ mod tests {
         for e in [
             CliError::Other("SECRET".into()),
             CliError::Auth("SECRET".into()),
-            CliError::Upstream("SECRET".into()).with_remedy("SECRET"),
+            CliError::Upstream("SECRET".into()),
             CliError::NotFound("SECRET".into()),
+            CliError::Other("x".into()).with_remedy("open a/SECRET.json"),
         ] {
             let exit = e.exit_code();
             let now = unnamed(e);
             assert_eq!(now.exit_code(), exit);
             assert!(!now.to_json().to_string().contains("SECRET"));
         }
+        let refused = CliError::Auth("SECRET".into())
+            .because(Reason::CredentialRefused)
+            .with_remedy("medrec drive login --drive-profile one");
+        let now = unnamed(refused);
+        assert_eq!(now.reason(), Some(Reason::CredentialRefused));
+        assert_eq!(now.remedy(), Some("medrec drive login --drive-profile one"));
+        assert!(!now.to_json().to_string().contains("SECRET"));
     }
 }

@@ -3364,7 +3364,7 @@ fn changes_lines(all: &[raw::Changes]) -> Vec<String> {
             c.resource_type,
             c.versions,
             c.unread,
-            match c.ordered {
+            match c.ordered || c.steps.is_empty() {
                 true => "",
                 false => "; their order is not known, so each is compared with the current one",
             }
