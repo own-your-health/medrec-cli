@@ -984,6 +984,7 @@ views/<person id>/bills.json             0.9.1 and later
 views/<person id>/private.json           0.9.1 and later
 views/<person id>/code-names.json        0.9.4 and later, when there are any
 views/<person id>/providers.json         0.9.6 and later, when there are any
+views/<person id>/provider-state.json    0.9.6 and later, when there are any
 ```
 
 A person's directory is named by their id in `household.json`, not their
@@ -1097,8 +1098,9 @@ provider has no `providers.json`.
   A reader has no words for one it does not know, and still shows the label.
 - **`name`, `practice`, `role`, `phone`** are each absent when nothing gives
   one. `role` is medrec's own plain words for the directory's code.
-  `phone_from` says where the phone is from: `directory` (as of
-  `directory.date`) or `paper` (the `document`, a bill or receipt that gives a
+  `phone_from` says where the phone is from: `directory` (as of its `date`,
+  which is an earlier one than the file's when a newer directory no longer has
+  the provider) or `paper` (the `document`, a bill or receipt that gives a
   number to call). A phone is shown with where it came from, and never as
   verified.
 - **The id** comes from the label's confidence, name, practice, role and
@@ -1115,14 +1117,28 @@ provider has no `providers.json`.
   `marks.json` does not read, everything is in `private`. A reader uses
   `private` only for a private item it is showing, in an answer or on a page
   about that person, and never in one about the whole household.
-- **A pass on a machine without the directory** (README, "Provider
-  directory") keeps the last pass's labels for the NPIs and names still
-  printed, splits them by what is private now, adds none from the directory,
-  and reads the papers again. `directory` is absent when no directory gave
-  any label.
+- **Machines** (README, "Provider directory"). What a directory gave is kept
+  in `provider-state.json` (below), so what is labelled and what is private do
+  not depend on which machine wrote last. One with no directory, or an older
+  one than the last, keeps what is there for the NPIs and names still printed,
+  and splits it by what is private now; the older one adds providers whose NPI
+  nothing is known of. A newer one replaces what it has, and takes away only
+  a match it no longer makes. `directory` is the newest one read, and absent
+  when none gave any label.
 - **Stale** as `private.json` is. Missing or stale, there is no label, with
   no warning. Nothing of it is in `events.json`, `bills.json` or
   `documents.json`.
+
+**`provider-state.json`** (`medrec-provider-state/v1`) is medrec's own: the
+label of each NPI the person's records carry (`by_npi`), shown or not, and
+those of the printed names only one provider can be (`matched`, by record and
+text), with the newest directory's `directory`. medrec judges what is private
+by it, in its own answers too. No other reader uses it. When `files` has it
+and it does not read, a pass with no directory says so
+(`labels_unreadable`, Private, below) and keeps a state that says it is
+`lost`, until a machine with a directory writes. Removing `views/` removes it:
+fetch the directory before the next pass, or what labels made private is open
+until a machine with one writes.
 
 ### When they are written
 
@@ -1134,9 +1150,9 @@ provider has no `providers.json`.
 - **Only what changed.** A person keeps their views when their `index.json`,
   `text.json`, `overrides.json` and `marks.json` and their linked people's
   `index.json` and `text.json` have the MD5s `views.json` recorded, under the same `household.json` and
-  medrec version, and the code table and the provider directory on this
-  machine, when there are any, are those they were made with (`code_table`,
-  `directory`). Otherwise their views are made
+  medrec version, the code table on this machine, when there is one, is the
+  one they were made with (`code_table`), and the provider directory on it,
+  when there is one, is not newer (`directory`). Otherwise their views are made
   again, and only views the folder does not already hold under their
   stored names are uploaded. An unchanged view keeps its name and is not
   written again. A person whose views lack one every person has
@@ -1206,7 +1222,7 @@ A reader decides freshness by MD5, as Drive reports it (`md5Checksum`):
 | `people.<id>.marks` | The MD5 of the person's `marks.json` as read; `null` when there is none (0.9.1 and later). |
 | `people.<id>.linked` | For each person linked to this one (Events, below), the MD5s of their `index.json` and `text.json` as read, as `{"index", "text"}`, each `null` when the file is absent; `{}` when no one is linked (0.9.0 and later). |
 | `people.<id>.code_table` | The code table the person's names were made with (`icd10cm FY2027`); absent when the pass that made the views had none, whatever names it carried over (0.9.4 and later). A pass on a machine with another table makes the person's views again, which fills in the names; one on a machine with none leaves them. |
-| `people.<id>.directory` | Which provider directory the person's labels were made with; absent, and filled in by a pass on a machine that has one, as `code_table` is (0.9.6 and later). |
+| `people.<id>.directory` | Which provider directory the pass that made the views had: the last day it covers and when it was fetched, so that a newer one sorts after (0.9.6 and later). Absent when it had none. A pass on a machine with a newer one makes the person's views again; one with an older one or none leaves them. |
 | `row` | `documents`, `records`, `studies`, and `newest` and `last_import` when there are any: the person's line in `medrec_summary`'s people list, without `notes`. |
 | `records` | For each record kind, `{"shards": [[newest day, oldest day, count], …], "undated": count}`: its dated shards by number, and how many records its undated file holds. |
 | `timeline` | The timeline's shards, the same way. |
@@ -1611,6 +1627,11 @@ nothing is private.
   person's items may then be one the household marked private, so a
   reader holds all of them back from shared screens and household-wide
   answers until it reads.
+- **`labels_unreadable`** (0.9.6 and later): `true` when what a provider label
+  makes private is not known (`provider-state.json`, above). Absent otherwise.
+  `marks_unreadable` is `true` with it, so a reader that does not know it
+  holds everything back too. It ends with the next pass on a machine with the
+  provider directory.
 
 ## Readers
 
@@ -1669,8 +1690,10 @@ readers ship with medrec:
     for by `id`. Each private item an answer includes carries `private`,
     its area. A person whose `marks.json` does not read has all their
     items held back from answers about the whole household, with a
-    `private-marks-unreadable` warning naming them. The commands are the
-    household's own terminal and leave nothing out.
+    `private-marks-unreadable` warning naming them. So has one whose provider
+    labels do not read (`labels_unreadable`, 0.9.6 and later), with a
+    `private-labels-unreadable` warning. The commands are the household's own
+    terminal and leave nothing out.
   - `kind: "conditions"` rows and the summary's condition lines carry
     `plain_name`, the code's name in the person's current
     `code-names.json` (0.9.4 and later). `title` and `name` stay the

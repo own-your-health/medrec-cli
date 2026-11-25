@@ -1,0 +1,135 @@
+{
+ "schema": "medrec-provider-state/v1",
+ "person": "p_robinaaaaaaaaaaaaaaa",
+ "directory": {
+  "id": "nppes",
+  "version": "2026-03",
+  "date": "2026-03-08"
+ },
+ "by_npi": {
+  "0000000006": {
+   "name": "Jordan Sample, MD",
+   "role": "family doctor",
+   "phone": "555-010-0101",
+   "phone_from": {
+    "from": "directory",
+    "date": "2026-03-08"
+   },
+   "confidence": "sure",
+   "evidence": [
+    {
+     "from": "npi"
+    }
+   ]
+  },
+  "0000000014": {
+   "name": "Casey Example, PhD",
+   "role": "psychologist",
+   "phone": "555-010-0102",
+   "phone_from": {
+    "from": "directory",
+    "date": "2026-03-08"
+   },
+   "confidence": "sure",
+   "evidence": [
+    {
+     "from": "npi"
+    }
+   ]
+  },
+  "0000000022": {
+   "name": "Example Primary Care",
+   "role": "primary care clinic",
+   "phone": "555-010-0103",
+   "phone_from": {
+    "from": "directory",
+    "date": "2026-03-08"
+   },
+   "confidence": "sure",
+   "evidence": [
+    {
+     "from": "npi"
+    }
+   ]
+  },
+  "0000000030": {
+   "name": "Example Primary Care Group of Texas",
+   "role": "primary care clinic",
+   "phone": "555-010-0104",
+   "phone_from": {
+    "from": "directory",
+    "date": "2026-03-08"
+   },
+   "confidence": "sure",
+   "evidence": [
+    {
+     "from": "npi"
+    }
+   ]
+  }
+ },
+ "matched": {
+  "r_imagingaaaaaaaaaaaaa": {
+   "A TESTPERSON": {
+    "name": "Avery Testperson, MD",
+    "role": "radiologist",
+    "phone": "555-010-0107",
+    "phone_from": {
+     "from": "directory",
+     "date": "2026-03-08"
+    },
+    "confidence": "likely",
+    "evidence": [
+     {
+      "from": "only_match",
+      "state": "FL"
+     }
+    ]
+   }
+  },
+  "r_onepaperaaaaaaaaaaaa": {
+   "R PLACEHOLDER": {
+    "name": "Riley Placeholder, FNP",
+    "role": "nurse practitioner",
+    "confidence": "likely",
+    "evidence": [
+     {
+      "from": "only_match",
+      "state": "FL"
+     }
+    ]
+   }
+  },
+  "r_privatevisitaaaaaaaa": {
+   "R PLACEHOLDER": {
+    "name": "Riley Placeholder, FNP",
+    "role": "nurse practitioner",
+    "confidence": "likely",
+    "evidence": [
+     {
+      "from": "only_match",
+      "state": "FL"
+     }
+    ]
+   }
+  },
+  "r_sampleportalaaaaaaaa": {
+   "Jordan Sample, MD": {
+    "name": "Jordan Sample, MD",
+    "role": "family doctor",
+    "phone": "555-010-0101",
+    "phone_from": {
+     "from": "directory",
+     "date": "2026-03-08"
+    },
+    "confidence": "likely",
+    "evidence": [
+     {
+      "from": "only_match",
+      "state": "FL"
+     }
+    ]
+   }
+  }
+ }
+}

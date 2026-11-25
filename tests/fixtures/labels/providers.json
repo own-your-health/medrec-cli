@@ -22,7 +22,8 @@
    "role": "primary care clinic",
    "phone": "555-010-0104",
    "phone_from": {
-    "from": "directory"
+    "from": "directory",
+    "date": "2026-03-08"
    },
    "confidence": "sure",
    "evidence": [
@@ -36,7 +37,8 @@
    "role": "family doctor",
    "phone": "555-010-0101",
    "phone_from": {
-    "from": "directory"
+    "from": "directory",
+    "date": "2026-03-08"
    },
    "confidence": "sure",
    "evidence": [
@@ -50,7 +52,8 @@
    "role": "radiologist",
    "phone": "555-010-0107",
    "phone_from": {
-    "from": "directory"
+    "from": "directory",
+    "date": "2026-03-08"
    },
    "confidence": "likely",
    "evidence": [
@@ -65,7 +68,8 @@
    "role": "primary care clinic",
    "phone": "555-010-0103",
    "phone_from": {
-    "from": "directory"
+    "from": "directory",
+    "date": "2026-03-08"
    },
    "confidence": "sure",
    "evidence": [
@@ -100,7 +104,8 @@
    "role": "family doctor",
    "phone": "555-010-0101",
    "phone_from": {
-    "from": "directory"
+    "from": "directory",
+    "date": "2026-03-08"
    },
    "confidence": "likely",
    "evidence": [
@@ -152,7 +157,8 @@
     "role": "psychologist",
     "phone": "555-010-0102",
     "phone_from": {
-     "from": "directory"
+     "from": "directory",
+     "date": "2026-03-08"
     },
     "confidence": "sure",
     "evidence": [

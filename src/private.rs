@@ -294,7 +294,7 @@ fn document_why(d: &Document) -> Option<Why> {
 
 /// The person's `private.json` as `medrec views write` writes it: from
 /// their index, their `events.json`, their marks, and the records a provider
-/// label makes private, with their area (`labels::Sure::areas`).
+/// label makes private, with their area (`labels::State::areas`).
 pub fn build(
     p: &Person,
     idx: &PersonIndex,
@@ -502,12 +502,9 @@ pub fn with_events(
 ) -> Result<(Value, Value), CliError> {
     let events = crate::events::of_person(folder, h, p)?;
     let marks = folder.marks_if_readable(p)?;
-    // Labels as the last pass wrote them: what is private is the same on a
-    // machine with the directory and on one without it.
-    let before = crate::viewfiles::last_labels(folder, p)?;
-    let source = before
-        .as_ref()
-        .map_or(crate::labels::Source::None, crate::labels::Source::Previous);
+    // As the last pass left it: what is private is the same on a machine
+    // with the directory and on one without it.
+    let state = crate::viewfiles::provider_state(folder, p)?;
     let mut v = build(
         p,
         idx,
@@ -516,9 +513,12 @@ pub fn with_events(
             .as_ref()
             .map(|m| m.private.as_slice())
             .unwrap_or_default(),
-        &crate::labels::Sure::of(idx, &source).areas(),
+        &state.areas(idx),
     );
-    if marks.is_none() {
+    if state.lost() {
+        v["labels_unreadable"] = Value::Bool(true);
+    }
+    if marks.is_none() || state.lost() {
         v["marks_unreadable"] = Value::Bool(true);
     }
     Ok((v, events))

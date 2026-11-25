@@ -1589,10 +1589,13 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
             let (f, h) = read(store, cli)?;
             let mut items = Vec::new();
             let mut unreadable: Vec<String> = Vec::new();
+            let mut labels: Vec<String> = Vec::new();
             for p in medrec::people::selected(&h, person.as_deref())? {
                 let idx = f.index(p)?;
                 let (v, events) = medrec::private::with_events(&f, &h, p, &idx)?;
-                if v.get("marks_unreadable").is_some() {
+                if v.get("labels_unreadable").is_some() {
+                    labels.push(p.id.clone());
+                } else if v.get("marks_unreadable").is_some() {
                     unreadable.push(p.id.clone());
                 }
                 let event_of = |id: &str| {
@@ -1674,6 +1677,18 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
                     );
                 }
                 doc["marks_unreadable"] = unreadable.into();
+            }
+            if !labels.is_empty() {
+                for p in h.people.iter().filter(|p| labels.contains(&p.id)) {
+                    note(
+                        cli,
+                        &format!(
+                            "{}'s provider labels do not read: what they make private is left out until `medrec views write --all` on a machine with the provider directory (`medrec tables fetch nppes`)",
+                            medrec::printable(&p.name)
+                        ),
+                    );
+                }
+                doc["labels_unreadable"] = labels.into();
             }
             output::emit(json, "private-list", doc, |v| {
                 table(

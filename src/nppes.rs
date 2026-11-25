@@ -919,16 +919,16 @@ fn read_rows(r: impl Read, wanted: &Wanted) -> Result<(u64, u64, Vec<u8>), Strin
 
 /// A kept file of these rows, as [`fetch`] writes one.
 #[cfg(test)]
-pub(crate) fn keep_rows(path: &Path, wanted: &Wanted, rows: &str) {
+pub(crate) fn keep_rows(path: &Path, date: &str, wanted: &Wanted, rows: &str) {
     let about = Kept {
         schema: SCHEMA.into(),
         url: "https://download.cms.gov/nppes/NPPES_Data_Dissemination_March_2026_V2.zip".into(),
-        month: "2026-03".into(),
-        date: "2026-03-08".into(),
+        month: date[..7].into(),
+        date: date.into(),
         bytes: 1,
         sha256: sha256_hex(b""),
         rows: 1,
-        fetched_at: "2026-03-10T00:00:00Z".into(),
+        fetched_at: format!("{date}T12:00:00Z"),
         wanted_sha256: wanted.sha256(),
         states: wanted.states.clone(),
         people: wanted.people.clone(),

@@ -8,6 +8,10 @@
 //!
 //! What private items say stays with them: a label in a private area, and
 //! what only private items give, are in the file's `private` part.
+//!
+//! What the directory gave is kept beside it (`provider-state.json`), so a
+//! machine with no directory, or an older one, judges and labels as the one
+//! that has it.
 
 use std::cell::OnceCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -18,14 +22,15 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use crate::events;
-use crate::hash::sha256_hex;
 use crate::model::{Document, Person, PersonIndex, PersonText, Record};
 use crate::nppes::{self, Provider, Stored};
-use crate::private::{self, Private};
+use crate::private;
 use crate::roles::{self, Service};
 
 pub const FILE: &str = "providers.json";
 pub const SCHEMA: &str = "medrec-providers/v1";
+pub const STATE: &str = "provider-state.json";
+pub const STATE_SCHEMA: &str = "medrec-provider-state/v1";
 
 /// The papers a label gives as its evidence, at most.
 const MAX_PAPERS: usize = 5;
@@ -63,8 +68,13 @@ pub enum Evidence {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "from", rename_all = "snake_case")]
 pub enum PhoneFrom {
-    Directory,
-    Paper { document: String },
+    /// As of the last day the directory's file covers.
+    Directory {
+        date: String,
+    },
+    Paper {
+        document: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -187,10 +197,11 @@ impl Directory {
         })
     }
 
-    /// What tells one kept file from another.
-    pub fn id(&self) -> String {
+    /// Which kept file it is, so that a newer one sorts after: the last day
+    /// its providers are of, then when they were fetched.
+    pub fn made(&self) -> String {
         let a = &self.stored.about;
-        sha256_hex(format!("{} {}", a.kept_sha256, a.wanted_sha256).as_bytes())[..12].to_string()
+        format!("{} {}", a.date, a.fetched_at)
     }
 
     fn rows(&self) -> &Rows {
@@ -229,112 +240,186 @@ impl Directory {
     }
 }
 
-/// A person's `providers.json` as the last pass wrote it, and what was
-/// private then.
+// ---------------------------------------------------------------- what the directory gave
+
+/// What a directory said of the providers a person's records name, as the
+/// last pass to write it had it: the labels of their NPIs, and those of the
+/// printed names only one provider can be. medrec's own; no reader uses it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct State {
+    schema: String,
+    person: String,
+    /// The newest directory that gave any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    directory: Option<Table>,
+    #[serde(default)]
+    by_npi: BTreeMap<String, Label>,
+    /// By record, then by the text it prints.
+    #[serde(default)]
+    matched: BTreeMap<String, BTreeMap<String, Label>>,
+    /// The state before this one did not read and no directory replaced it:
+    /// which of the records a label makes private is not known.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    lost: bool,
+}
+
+/// The state the last pass left.
 #[derive(Debug, Clone)]
-pub struct Previous {
-    file: File,
-    private: Private,
-    hidden: bool,
-}
-
-impl Previous {
-    pub fn of(providers: &str, private: &str, person: &str) -> Option<Previous> {
-        let file: File = serde_json::from_str(providers).ok()?;
-        let private: Value = serde_json::from_str(private).ok()?;
-        let ours = file.schema == SCHEMA
-            && file.person == person
-            && private["schema"] == private::SCHEMA
-            && private["person"] == person;
-        ours.then(|| Previous {
-            file,
-            hidden: private.get("marks_unreadable").is_some(),
-            private: Private::of(&private),
-        })
-    }
-
-    fn part(&self, item: &str) -> &Part {
-        if self.hidden || self.private.area(item).is_some() {
-            &self.file.private
-        } else {
-            &self.file.open
-        }
-    }
-
-    /// The label `item` had for `printed`: its own, else the printed name's.
-    fn label(&self, item: &str, printed: &str, by_name: bool) -> Option<&Label> {
-        let part = self.part(item);
-        let id = part
-            .by_item
-            .get(item)
-            .and_then(|m| m.get(printed))
-            .or_else(|| part.by_name.get(printed).filter(|_| by_name))?;
-        part.labels
-            .get(id)
-            .or_else(|| self.file.open.labels.get(id))
-    }
-}
-
-/// Where a pass's labels come from.
-#[derive(Clone, Copy)]
-pub enum Source<'a> {
-    /// The directory on this machine.
-    Directory(&'a Directory),
-    /// The last file: a machine without the directory keeps its labels.
-    Previous(&'a Previous),
+pub enum Last {
+    /// None, and there never was one.
     None,
+    State(State),
+    /// There is one, and it does not read.
+    Unreadable,
 }
 
-impl Source<'_> {
-    fn table(&self) -> Option<Table> {
-        match self {
-            Source::Directory(d) => Some(d.table()),
-            Source::Previous(p) => p.file.directory.clone(),
-            Source::None => None,
+impl State {
+    fn new(person: &str) -> State {
+        State {
+            schema: STATE_SCHEMA.into(),
+            person: person.into(),
+            directory: None,
+            by_npi: BTreeMap::new(),
+            matched: BTreeMap::new(),
+            lost: false,
         }
     }
-}
 
-// ---------------------------------------------------------------- what is sure
+    pub fn parse(text: &str, person: &str) -> Option<State> {
+        serde_json::from_str::<State>(text)
+            .ok()
+            .filter(|s| s.schema == STATE_SCHEMA && s.person == person)
+    }
 
-/// The labels the records' own NPIs give, by record and field.
-#[derive(Debug, Clone, Default)]
-pub struct Sure(BTreeMap<(String, String), Label>);
-
-impl Sure {
-    pub fn of(idx: &PersonIndex, source: &Source) -> Sure {
-        let mut by_npi: HashMap<&str, Option<Label>> = HashMap::new();
-        if let Source::Previous(before) = source {
-            by_npi = carried(idx, before);
+    /// The last pass's, as it is: none when there never was one.
+    pub fn last(last: Last, person: &str) -> State {
+        match last {
+            Last::State(s) => s,
+            Last::None => State::new(person),
+            Last::Unreadable => State {
+                lost: true,
+                ..State::new(person)
+            },
         }
-        let mut out = BTreeMap::new();
+    }
+
+    /// The state now: the newer of the directory on this machine and the
+    /// last state first, then the other. What either says of an NPI stays
+    /// for as long as a record carries it.
+    pub fn of(idx: &PersonIndex, directory: Option<&Directory>, last: Last) -> State {
+        let before = State::last(last, &idx.person);
+        let Some(d) = directory else {
+            return before.still(idx);
+        };
+        let table = d.table();
+        let older = before
+            .directory
+            .as_ref()
+            .is_some_and(|b| b.date > table.date);
+        let mut now = before.still(idx);
+        now.lost = false;
+        if !older {
+            now.directory = Some(table);
+        }
         for r in &idx.records {
             for p in &r.providers {
                 let (Some(npi), Some(_)) = (p.npi.as_deref(), printed(r, &p.field)) else {
                     continue;
                 };
-                let label = by_npi.entry(npi).or_insert_with(|| match source {
-                    Source::Directory(d) => d.provider(npi).and_then(|p| sure(&p)),
-                    _ => None,
-                });
-                if let Some(l) = label {
-                    out.insert((r.id.clone(), p.field.clone()), l.clone());
+                if older && now.by_npi.contains_key(npi) {
+                    continue;
+                }
+                if let Some(l) = d.provider(npi).and_then(|p| sure(&p, &d.stored.about.date)) {
+                    now.by_npi.insert(npi.to_string(), l);
                 }
             }
+            if older {
+                continue;
+            }
+            for (field, text) in people_printed(r) {
+                // Only of names and states the kept file is whole in; of
+                // others what the last state says stays.
+                let Some(found) = only_match(d, r, field, text) else {
+                    continue;
+                };
+                let of_record = now.matched.entry(r.id.clone()).or_default();
+                match found {
+                    Some(l) => of_record.insert(text.to_string(), l),
+                    None => of_record.remove(text),
+                };
+            }
         }
-        Sure(out)
+        now.matched.retain(|_, m| !m.is_empty());
+        if now.by_npi.is_empty() && now.matched.is_empty() {
+            now.directory = None;
+        }
+        now
     }
 
-    /// The records a label makes private, with their area.
-    pub fn areas(&self) -> BTreeMap<String, &'static str> {
-        self.0
+    /// What of it the records still print.
+    fn still(mut self, idx: &PersonIndex) -> State {
+        let npis: BTreeSet<&str> = idx
+            .records
             .iter()
-            .filter_map(|((record, _), l)| Some((record.clone(), l.area()?)))
+            .flat_map(|r| r.providers.iter().map(move |p| (r, p)))
+            .filter(|(r, p)| printed(r, &p.field).is_some())
+            .filter_map(|(_, p)| p.npi.as_deref())
+            .collect();
+        self.by_npi.retain(|npi, _| npis.contains(npi.as_str()));
+        let records: HashMap<&str, &Record> =
+            idx.records.iter().map(|r| (r.id.as_str(), r)).collect();
+        self.matched.retain(|id, texts| {
+            let Some(r) = records.get(id.as_str()) else {
+                return false;
+            };
+            texts.retain(|text, l| {
+                people_printed(r).any(|(field, t)| t == text && still_matches(r, field, l))
+            });
+            !texts.is_empty()
+        });
+        self
+    }
+
+    fn is_empty(&self) -> bool {
+        self.by_npi.is_empty() && self.matched.is_empty() && !self.lost
+    }
+
+    /// Its view, none when there is nothing to keep.
+    pub fn view(&self) -> Option<Value> {
+        (!self.is_empty()).then(|| serde_json::to_value(self).expect("labels are plain JSON"))
+    }
+
+    /// Whether which records a label makes private is not known.
+    pub fn lost(&self) -> bool {
+        self.lost
+    }
+
+    /// The records a sure label makes private, with their area.
+    pub fn areas(&self, idx: &PersonIndex) -> BTreeMap<String, &'static str> {
+        idx.records
+            .iter()
+            .filter_map(|r| {
+                let area = r
+                    .providers
+                    .iter()
+                    .find_map(|p| self.sure(r, &p.field)?.area())?;
+                Some((r.id.clone(), area))
+            })
             .collect()
     }
 
-    fn get(&self, r: &Record, field: &str) -> Option<&Label> {
-        self.0.get(&(r.id.clone(), field.to_string()))
+    /// The label the NPI of what `field` prints gives.
+    fn sure(&self, r: &Record, field: &str) -> Option<&Label> {
+        printed(r, field)?;
+        r.providers
+            .iter()
+            .filter(|p| p.field == field)
+            .filter_map(|p| p.npi.as_deref())
+            .find_map(|npi| self.by_npi.get(npi))
+    }
+
+    fn matched(&self, r: &Record, text: &str) -> Option<&Label> {
+        self.matched.get(&r.id)?.get(text)
     }
 }
 
@@ -342,48 +427,32 @@ fn printed<'a>(r: &'a Record, field: &str) -> Option<&'a str> {
     r.fields.get(field).and_then(Value::as_str)
 }
 
-/// The labels of the last file's providers, by NPI: those of a record and
-/// the text it printed. A printed name's label is taken only when every
-/// record that prints it now carries one NPI there.
-fn carried<'a>(idx: &'a PersonIndex, before: &Previous) -> HashMap<&'a str, Option<Label>> {
-    let named = || {
-        idx.records.iter().flat_map(|r| {
-            r.providers.iter().filter_map(move |p| {
-                Some((
-                    r,
-                    p.field.as_str(),
-                    p.npi.as_deref()?,
-                    printed(r, &p.field)?,
-                ))
-            })
-        })
-    };
-    let mut npis: HashMap<&str, BTreeSet<&str>> = HashMap::new();
-    for (_, _, npi, text) in named() {
-        npis.entry(text).or_default().insert(npi);
-    }
-    let mut out: HashMap<&str, Option<Label>> = HashMap::new();
-    for (r, field, npi, text) in named() {
-        let claim = r.kind == "claim" && field == "provider";
-        let label = before
-            .label(&r.id, text, !claim && npis[text].len() == 1)
-            .filter(|l| l.confidence == Confidence::Sure);
-        if let Some(l) = label {
-            out.entry(npi).or_insert_with(|| Some(l.clone()));
-        }
-    }
-    out
+/// The texts of a record that print a person, each with the first field that
+/// does. One with an NPI is that NPI's, whether a directory has it or not.
+fn people_printed(r: &Record) -> impl Iterator<Item = (&'static str, &str)> {
+    let with_npi: BTreeSet<&str> = r
+        .providers
+        .iter()
+        .filter(|p| p.npi.is_some())
+        .filter_map(|p| printed(r, &p.field))
+        .collect();
+    let mut seen = BTreeSet::new();
+    FIELDS
+        .iter()
+        .filter_map(|f| Some((*f, printed(r, f)?)))
+        .filter(|(f, text)| a_person(f, text))
+        .filter(move |(_, text)| !with_npi.contains(text) && seen.insert(*text))
 }
 
 /// What a directory row says of the provider whose NPI a record carries.
-fn sure(p: &Provider) -> Option<Label> {
-    let mut l = of_row(p)?;
+fn sure(p: &Provider, date: &str) -> Option<Label> {
+    let mut l = of_row(p, date)?;
     l.confidence = Confidence::Sure;
     l.evidence = vec![Evidence::Npi];
     Some(l)
 }
 
-fn of_row(p: &Provider) -> Option<Label> {
+fn of_row(p: &Provider, date: &str) -> Option<Label> {
     let organization = !p.organization.is_empty();
     let name = if organization {
         organization_name(p)
@@ -395,7 +464,9 @@ fn of_row(p: &Provider) -> Option<Label> {
         name: Some(name),
         practice: None,
         role: roles::words(&p.taxonomy, organization),
-        phone_from: phone.as_ref().map(|_| PhoneFrom::Directory),
+        phone_from: phone
+            .as_ref()
+            .map(|_| PhoneFrom::Directory { date: date.into() }),
         phone,
         confidence: Confidence::Likely,
         evidence: Vec::new(),
@@ -663,73 +734,58 @@ fn states(r: &Record, field: &str) -> BTreeSet<String> {
 /// The one provider of the directory a printed name can be: of the surname
 /// and first initial, in the record's state, and with a role that gives the
 /// service. A provider whose role medrec has no words for counts as one it
-/// can be, and is never the label.
-fn only_match(source: &Source, r: &Record, field: &str, text: &str) -> Option<Label> {
+/// can be, and is never the label. None when the kept file is not whole in
+/// the name or the state.
+fn only_match(d: &Directory, r: &Record, field: &str, text: &str) -> Option<Option<Label>> {
     let service = service(r, field);
-    let states = states(r, field);
-    match source {
-        Source::None => None,
-        Source::Previous(before) => {
-            let l = before
-                .label(&r.id, text, true)
-                .filter(|l| l.confidence == Confidence::Likely && l.name.is_some())?;
-            let seen = l.evidence.iter().find(|e| match e {
-                Evidence::OnlyMatch { state } => states.is_empty() || states.contains(state),
-                _ => false,
-            })?;
-            let fits = l
-                .role
-                .as_deref()
-                .and_then(roles::named)
-                .is_some_and(|role| service.fits(role.group));
-            let of_directory = l.phone_from == Some(PhoneFrom::Directory);
-            fits.then(|| Label {
-                practice: None,
-                phone: l.phone.clone().filter(|_| of_directory),
-                phone_from: l.phone_from.clone().filter(|_| of_directory),
-                evidence: vec![seen.clone()],
-                ..l.clone()
-            })
-        }
-        Source::Directory(d) => {
-            let about = &d.stored.about;
-            let readings = nppes::people(text);
-            let states = if states.is_empty() {
-                about.states.clone()
-            } else {
-                states
-            };
-            // Only of names and states the kept file is whole in.
-            if readings.is_empty()
-                || states.is_empty()
-                || !readings.is_subset(&about.people)
-                || !states.is_subset(&about.states)
-            {
-                return None;
-            }
-            let found: BTreeMap<&str, &Provider> = readings
-                .iter()
-                .filter_map(|k| d.rows().people.get(k))
-                .flatten()
-                .filter(|p| states.contains(&p.state))
-                .filter(|p| roles::of(&p.taxonomy).is_none_or(|x| service.fits(x.group)))
-                .map(|p| (p.npi.as_str(), p))
-                .collect();
-            let [p] = found.into_values().collect::<Vec<_>>()[..] else {
-                return None;
-            };
-            roles::of(&p.taxonomy)?;
-            if !given_names_agree(p, text) {
-                return None;
-            }
-            Some(Label {
-                evidence: vec![Evidence::OnlyMatch {
-                    state: p.state.clone(),
-                }],
-                ..of_row(p)?
-            })
-        }
+    let about = &d.stored.about;
+    let readings = nppes::people(text);
+    let mut states = states(r, field);
+    if states.is_empty() {
+        states = about.states.clone();
     }
+    if readings.is_empty()
+        || states.is_empty()
+        || !readings.is_subset(&about.people)
+        || !states.is_subset(&about.states)
+    {
+        return None;
+    }
+    let found: BTreeMap<&str, &Provider> = readings
+        .iter()
+        .filter_map(|k| d.rows().people.get(k))
+        .flatten()
+        .filter(|p| states.contains(&p.state))
+        .filter(|p| roles::of(&p.taxonomy).is_none_or(|x| service.fits(x.group)))
+        .map(|p| (p.npi.as_str(), p))
+        .collect();
+    let [p] = found.into_values().collect::<Vec<_>>()[..] else {
+        return Some(None);
+    };
+    if roles::of(&p.taxonomy).is_none() || !given_names_agree(p, text) {
+        return Some(None);
+    }
+    Some(of_row(p, &about.date).map(|l| Label {
+        evidence: vec![Evidence::OnlyMatch {
+            state: p.state.clone(),
+        }],
+        ..l
+    }))
+}
+
+/// Whether a match an earlier pass made still stands for the record: its
+/// state and its service may have changed.
+fn still_matches(r: &Record, field: &str, l: &Label) -> bool {
+    let states = states(r, field);
+    let in_state = l.evidence.iter().any(|e| match e {
+        Evidence::OnlyMatch { state } => states.is_empty() || states.contains(state),
+        _ => false,
+    });
+    in_state
+        && l.role
+            .as_deref()
+            .and_then(roles::named)
+            .is_some_and(|role| service(r, field).fits(role.group))
 }
 
 /// Whether each given name the text spells out is one of the provider's.
@@ -904,10 +960,9 @@ pub struct Input<'a> {
     pub index: &'a PersonIndex,
     pub texts: &'a PersonText,
     pub events: &'a Value,
-    /// The person's `private.json`, made with [`Sure::areas`].
+    /// The person's `private.json`, made with [`State::areas`].
     pub private: &'a Value,
-    pub sure: &'a Sure,
-    pub source: Source<'a>,
+    pub state: &'a State,
     /// The folder's salt, made when it is first needed.
     pub salt: &'a dyn Fn() -> String,
 }
@@ -944,7 +999,7 @@ pub fn build(inp: &Input) -> Option<Value> {
     let file = File {
         schema: SCHEMA.into(),
         person: inp.person.id.clone(),
-        directory: inp.source.table(),
+        directory: inp.state.directory.clone(),
         open,
         private,
     };
@@ -1058,11 +1113,11 @@ fn uses(inp: &Input) -> Vec<Use> {
             // The first field with a sure label decides for its text.
             let same = || FIELDS.iter().filter(|f| printed(r, f) == Some(text));
             let label = same()
-                .find_map(|f| inp.sure.get(r, f))
+                .find_map(|f| inp.state.sure(r, f))
                 .cloned()
                 .or_else(|| {
-                    let field = same().find(|f| a_person(f, text))?;
-                    let only = only_match(&inp.source, r, field, text);
+                    same().find(|f| a_person(f, text))?;
+                    let only = inp.state.matched(r, text).cloned();
                     let here: Vec<(&Document, &str, &str)> = papers
                         .get(&r.id)
                         .into_iter()
@@ -1213,11 +1268,13 @@ mod tests {
         }
 
         fn keep(&self, w: &Wanted, rows: &str) {
-            nppes::keep_rows(
-                &nppes::path(&self.directories(), "f_exampleaaaaaaaaaaaaa"),
-                w,
-                rows,
-            );
+            self.keep_of("2026-03-08", w, rows);
+        }
+
+        /// The kept file of the month whose last day is `date`.
+        fn keep_of(&self, date: &str, w: &Wanted, rows: &str) {
+            let path = nppes::path(&self.directories(), "f_exampleaaaaaaaaaaaaa");
+            nppes::keep_rows(&path, date, w, rows);
         }
 
         fn put(&self, rel: &str, text: &str) {
@@ -1255,14 +1312,63 @@ mod tests {
                 &std::fs::read_to_string(self.root.join("views/views.json")).unwrap(),
             )
             .unwrap();
-            let Some(md5) = v.people[PERSON].files.get(name) else {
-                return Value::Null;
-            };
-            let rel = format!(
+            match v.people[PERSON].files.get(name) {
+                Some(md5) => {
+                    let rel = format!(
+                        "views/{PERSON}/{}",
+                        crate::viewfiles::stored_name(name, md5)
+                    );
+                    serde_json::from_str(&std::fs::read_to_string(self.root.join(rel)).unwrap())
+                        .unwrap()
+                }
+                None => Value::Null,
+            }
+        }
+
+        /// Where a view is, as the last pass stored it.
+        fn stored(&self, name: &str) -> PathBuf {
+            let v: crate::viewfiles::ViewsIndex = serde_json::from_str(
+                &std::fs::read_to_string(self.root.join("views/views.json")).unwrap(),
+            )
+            .unwrap();
+            self.root.join(format!(
                 "views/{PERSON}/{}",
-                crate::viewfiles::stored_name(name, md5)
-            );
-            serde_json::from_str(&std::fs::read_to_string(self.root.join(rel)).unwrap()).unwrap()
+                crate::viewfiles::stored_name(name, &v.people[PERSON].files[name])
+            ))
+        }
+
+        /// What an answer judges private now.
+        fn judged(&self) -> Value {
+            let f = self.folder();
+            let h: Household = serde_json::from_str(fixture!("household.json")).unwrap();
+            let idx = f.index(&h.people[0]).unwrap();
+            private::with_events(&f, &h, &h.people[0], &idx).unwrap().0
+        }
+
+        /// Whether a record is private, in the view and in an answer.
+        fn private(&self, record: &str) -> bool {
+            let (view, answer) = (self.view("private.json"), self.judged());
+            assert_eq!(view, answer);
+            view["records"].get(record).is_some()
+        }
+
+        fn add(&mut self, id: &str, provider: &str, npi: &str) {
+            let mut r = self.index.records[0].clone();
+            r.id = id.into();
+            r.key = format!("claim|{id}");
+            r.date = Some("2026-02-03".into());
+            r.fields["provider"] = json!(provider);
+            r.providers[0].npi = Some(npi.into());
+            self.index.records.push(r);
+        }
+
+        fn mark(&mut self, item: &str, private: Option<bool>) {
+            let marks = self.marks["private"].as_array_mut().unwrap();
+            marks.retain(|m| m["item"] != item);
+            if let Some(b) = private {
+                marks.push(json!({"id": "o_markbaaaaaaaaaaaaaaa", "item": item,
+                    "private": b, "at": "2026-01-03T00:00:00Z"}));
+            }
         }
 
         fn labels(&self) -> Value {
@@ -1305,25 +1411,27 @@ mod tests {
         ] {
             assert!(!open.contains(s), "{s}");
         }
-        // No NPI is anywhere in it.
+        // No NPI is anywhere in it. medrec keeps those beside it.
         assert!(!got.to_string().contains("00000000"));
+        let want: Value = serde_json::from_str(fixture!("provider-state.json")).unwrap();
+        let state = c.view(STATE);
+        assert_eq!(
+            state,
+            want,
+            "{}",
+            serde_json::to_string_pretty(&state).unwrap()
+        );
         assert_eq!(c.sync(true), 0);
     }
 
     /// What is private is the same for an answer as for the view, on any
     /// machine.
     #[test]
-    fn an_answer_judges_by_the_labels_the_views_have() {
+    fn an_answer_judges_as_the_views_do() {
         let c = Case::new();
         for directory in [true, false] {
             c.sync(directory);
-            let f = c.folder();
-            let h: Household = serde_json::from_str(fixture!("household.json")).unwrap();
-            let p = &h.people[0];
-            let idx = f.index(p).unwrap();
-            let (v, _) = private::with_events(&f, &h, p, &idx).unwrap();
-            assert_eq!(v, c.view("private.json"));
-            assert!(v["records"].get("r_talkaaaaaaaaaaaaaaaa").is_some());
+            assert!(c.private("r_talkaaaaaaaaaaaaaaaa"));
         }
     }
 
@@ -1336,31 +1444,18 @@ mod tests {
 
         // Nothing is lost by a pass of its own, and what the papers say is
         // read again.
-        let mut more = c.index.records[0].clone();
-        more.id = "r_newclaimaaaaaaaaaaaa".into();
-        more.date = Some("2026-02-03".into());
-        more.fields["provider"] = json!("SOMETHING NEW LLC");
-        more.providers[0].npi = Some("0000000097".into());
-        c.index.records.push(more.clone());
+        c.add("r_newclaimaaaaaaaaaaaa", "SOMETHING NEW LLC", "0000000097");
         assert_eq!(c.sync(false), 1);
-        let mut now = c.labels();
-        assert_eq!(now, before);
-        assert!(c.view("private.json")["records"]
-            .get("r_talkaaaaaaaaaaaaaaaa")
-            .is_some());
+        assert_eq!(c.labels(), before);
+        assert!(c.private("r_talkaaaaaaaaaaaaaaaa"));
 
         // A new record with a known NPI has its label, whatever it prints;
         // one with another NPI has none, even under a printed name that has.
-        more.id = "r_knownaaaaaaaaaaaaaaa".into();
-        more.providers[0].npi = Some("0000000022".into());
-        more.fields["provider"] = json!("SOMETHING ELSE LLC");
-        c.index.records.push(more.clone());
-        more.id = "r_otheraaaaaaaaaaaaaaa".into();
-        more.providers[0].npi = Some("0000000048".into());
-        more.fields["provider"] = json!("J SAMPLE");
-        c.index.records.push(more);
+        c.add("r_knownaaaaaaaaaaaaaaa", "SOMETHING ELSE LLC", "0000000022");
+        c.add("r_otheraaaaaaaaaaaaaaa", "J SAMPLE", "0000000048");
+        c.add("r_alsoaaaaaaaaaaaaaaaa", "SOMEONE NEW", "0000000014");
         c.sync(false);
-        now = c.labels();
+        let now = c.labels();
         assert_eq!(
             now["by_item"]["r_knownaaaaaaaaaaaaaaa"]["SOMETHING ELSE LLC"],
             before["by_item"]["r_officevisitaaaaaaaaa"]["EXAMPLE PRIMARY CARE GROUP LLC"]
@@ -1372,26 +1467,120 @@ mod tests {
             before["by_item"]["r_samplevisitaaaaaaaaa"]
         );
         assert_eq!(now["directory"], before["directory"]);
+        assert!(c.private("r_alsoaaaaaaaaaaaaaaaa"));
+
+        // So does one whose source prints another name now.
+        c.index.records[3].fields["provider"] = json!("CASEY E");
+        c.sync(false);
+        assert!(c.private("r_talkaaaaaaaaaaaaaaaa"));
 
         // What is private now decides again where each goes.
-        c.marks["private"] = json!([{"id": "o_markbaaaaaaaaaaaaaaa",
-            "item": "r_imagingaaaaaaaaaaaaa", "private": true, "at": "2026-01-03T00:00:00Z"}]);
+        c.mark("r_imagingaaaaaaaaaaaaa", Some(true));
         c.sync(false);
-        now = c.labels();
+        let now = c.labels();
         assert!(now["by_item"].get("r_imagingaaaaaaaaaaaaa").is_none());
         assert_eq!(
-            now["private"]["by_name"]["A TESTPERSON"],
+            now["private"]["by_item"]["r_imagingaaaaaaaaaaaaa"]["A TESTPERSON"],
             before["by_item"]["r_imagingaaaaaaaaaaaaa"]["A TESTPERSON"]
         );
-        assert!(now["private"]["by_item"]
-            .get("r_markedaaaaaaaaaaaaaa")
-            .is_some());
+        c.mark("r_imagingaaaaaaaaaaaaa", None);
+        c.sync(false);
+        assert_eq!(
+            c.labels()["by_item"]["r_imagingaaaaaaaaaaaaa"],
+            before["by_item"]["r_imagingaaaaaaaaaaaaa"]
+        );
 
-        // The machine with the directory makes them again.
+        // The machine with the directory makes them again, once. An NPI it
+        // does not have is still not another provider of that name.
         assert_eq!(c.sync(true), 1);
         assert_eq!(c.labels()["directory"], before["directory"]);
+        assert!(c.labels()["by_item"]
+            .get("r_otheraaaaaaaaaaaaaaa")
+            .is_none());
         assert_eq!(c.sync(true), 0);
         assert_eq!(c.sync(false), 0);
+    }
+
+    /// A label nothing shows is still kept: an item marked not private, then
+    /// left to the rules, is private by it again.
+    #[test]
+    fn a_label_withheld_from_an_open_item_is_not_lost() {
+        let mut c = Case::new();
+        c.index.records.retain(|r| r.id != "r_markedaaaaaaaaaaaaaa");
+        c.sync(true);
+        assert!(c.private("r_talkaaaaaaaaaaaaaaaa"));
+        c.mark("r_talkaaaaaaaaaaaaaaaa", Some(false));
+        c.sync(true);
+        assert!(!c.private("r_talkaaaaaaaaaaaaaaaa"));
+        assert!(!c.labels().to_string().contains("Casey"));
+        c.sync(false);
+        c.mark("r_talkaaaaaaaaaaaaaaaa", None);
+        c.sync(false);
+        assert!(c.private("r_talkaaaaaaaaaaaaaaaa"));
+        assert!(c.labels()["private"].to_string().contains("Casey"));
+    }
+
+    /// The state is all that says which records a label made private. When
+    /// it is there and does not read, nothing of the person's is open.
+    #[test]
+    fn a_state_that_does_not_read_holds_the_person_back() {
+        type Damage = fn(&Case);
+        let remove: Damage = |c| std::fs::remove_file(c.stored(STATE)).unwrap();
+        let alter: Damage = |c| {
+            let p = c.stored(STATE);
+            let text = std::fs::read_to_string(&p).unwrap();
+            std::fs::write(p, text.replace("psychologist", "family doctor")).unwrap();
+        };
+        let index: Damage = |c| c.put("views/views.json", "{");
+        for (n, damage) in [remove, alter, index].into_iter().enumerate() {
+            let mut c = Case::new();
+            c.sync(true);
+            assert!(c.judged().get("labels_unreadable").is_none());
+            damage(&c);
+            for flag in ["labels_unreadable", "marks_unreadable"] {
+                assert_eq!(c.judged()[flag], true, "{n}");
+            }
+            // A pass without the directory says so too, and the next.
+            for day in ["2026-04-01", "2026-04-02"] {
+                c.index.records[0].date = Some(day.into());
+                c.sync(false);
+                let v = c.view("private.json");
+                assert_eq!(v["labels_unreadable"], true, "{n}");
+                assert_eq!(v["marks_unreadable"], true, "{n}");
+                assert_eq!(c.judged(), v, "{n}");
+                let l = c.labels();
+                assert_eq!(l["labels"], json!({}), "{n}");
+                assert!(!l.to_string().contains("sure"), "{n}");
+            }
+            // One with it knows again.
+            assert_eq!(c.sync(true), 1);
+            assert!(c.view("private.json").get("labels_unreadable").is_none());
+            assert!(c.private("r_talkaaaaaaaaaaaaaaaa"));
+            assert_eq!(c.sync(true), 0);
+        }
+        // A folder whose views never had one is not held back.
+        let c = Case::new();
+        c.sync(false);
+        assert!(c.judged().get("labels_unreadable").is_none());
+        c.put("views/views.json", "{");
+        assert!(c.judged().get("labels_unreadable").is_none());
+    }
+
+    /// A view of another content than it was written with is made again, as
+    /// a missing one is.
+    #[test]
+    fn a_view_that_is_not_as_written_is_made_again() {
+        let mut c = Case::new();
+        c.sync(true);
+        let before = c.labels();
+        std::fs::write(c.stored(FILE), "{}").unwrap();
+        // The household file's change is what starts the pass.
+        c.mark("r_imagingaaaaaaaaaaaaa", Some(true));
+        c.mark("r_imagingaaaaaaaaaaaaa", None);
+        let h = fixture!("household.json").replace("\"rev\": 1", "\"rev\": 2");
+        c.put("household.json", &h);
+        c.sync(true);
+        assert_eq!(c.labels(), before);
     }
 
     #[test]
@@ -1399,19 +1588,110 @@ mod tests {
         let c = Case::new();
         c.sync(true);
         let w = Wanted::of([&c.index]);
-        c.keep(
-            &w,
-            &fixture!("directory.jsonl").replace("5550100101", "5550100199"),
-        );
+        let rows = fixture!("directory.jsonl").replace("5550100101", "5550100199");
+        c.keep_of("2026-04-12", &w, &rows);
         assert_eq!(c.sync(true), 1);
         assert!(c.labels().to_string().contains("555-010-0199"));
         assert!(!c.labels().to_string().contains("555-010-0101"));
+        assert_eq!(c.labels()["directory"]["date"], "2026-04-12");
 
         let path = nppes::path(&c.directories(), "f_exampleaaaaaaaaaaaaa");
         let kept = std::fs::read_to_string(&path).unwrap();
         std::fs::write(&path, kept.replace("5550100199", "5550100198")).unwrap();
         assert_eq!(c.sync(true), 0);
         assert!(c.labels().to_string().contains("555-010-0199"));
+    }
+
+    /// A provider that leaves the directory, or whom it was fetched before
+    /// anyone printed, keeps what was said of them.
+    #[test]
+    fn a_directory_without_a_provider_takes_no_label_away() {
+        let c = Case::new();
+        c.sync(true);
+        let before = c.labels();
+        let w = Wanted::of([&c.index]);
+        let rows: String = fixture!("directory.jsonl")
+            .lines()
+            .filter(|l| !l.contains("0000000014") && !l.contains("0000000022"))
+            .map(|l| format!("{l}\n"))
+            .collect();
+        c.keep_of("2026-04-12", &w, &rows);
+        assert_eq!(c.sync(true), 1);
+        assert!(c.private("r_talkaaaaaaaaaaaaaaaa"));
+        let now = c.labels();
+        assert_eq!(now["by_item"], before["by_item"]);
+        // Each phone is as of the file that gave it.
+        let date = |npi_name: &str| {
+            now["labels"]
+                .as_object()
+                .unwrap()
+                .values()
+                .find(|l| l["name"] == npi_name)
+                .unwrap()["phone_from"]["date"]
+                .clone()
+        };
+        assert_eq!(date("Example Primary Care"), "2026-03-08");
+        assert_eq!(date("Jordan Sample, MD"), "2026-04-12");
+
+        // A name the new file is not whole in keeps its match; one it is
+        // whole in, and no longer has, does not.
+        let mut narrow = Wanted::of([&c.index]);
+        narrow.people.retain(|(l, _)| l != "TESTPERSON");
+        let none = rows
+            .lines()
+            .filter(|l| !l.contains("TESTPERSON"))
+            .map(|l| format!("{l}\n"))
+            .collect::<String>();
+        c.keep_of("2026-05-10", &narrow, &none);
+        c.sync(true);
+        assert!(c.labels()["by_item"]
+            .get("r_imagingaaaaaaaaaaaaa")
+            .is_some());
+        c.keep_of("2026-06-14", &w, &none);
+        c.sync(true);
+        assert!(c.labels()["by_item"]
+            .get("r_imagingaaaaaaaaaaaaa")
+            .is_none());
+    }
+
+    /// Two machines, one with an older directory: what the newer one gave
+    /// stands, and neither makes the other's views again for nothing.
+    #[test]
+    fn an_older_directory_adds_and_replaces_nothing() {
+        let mut c = Case::new();
+        let w = Wanted::of([&c.index]);
+        let newer = fixture!("directory.jsonl").replace("5550100101", "5550100199");
+        let older: String = fixture!("directory.jsonl")
+            .lines()
+            .filter(|l| !l.contains("0000000014"))
+            .map(|l| format!("{l}\n"))
+            .collect();
+        c.keep_of("2026-04-12", &w, &newer);
+        c.sync(true);
+        let made = c.labels();
+        c.keep_of("2026-03-08", &w, &older);
+        assert_eq!(c.sync(true), 0);
+
+        // The older one's own pass.
+        c.add("r_newclaimaaaaaaaaaaaa", "D SPECIMEN", "0000000089");
+        assert_eq!(c.sync(true), 1);
+        let now = c.labels();
+        assert!(c.private("r_talkaaaaaaaaaaaaaaaa"));
+        assert_eq!(now["directory"], made["directory"]);
+        assert!(now.to_string().contains("555-010-0199"));
+        assert!(!now.to_string().contains("555-010-0101"));
+        // An NPI the newer one was not asked of is labelled all the same.
+        let id = now["by_item"]["r_newclaimaaaaaaaaaaaa"]["D SPECIMEN"].clone();
+        let l = &now["labels"][id.as_str().unwrap()];
+        assert_eq!(l["confidence"], "sure");
+        assert_eq!(l["phone_from"]["date"], "2026-03-08");
+
+        // The newer one's next pass fills in, then both rest.
+        c.keep_of("2026-04-12", &w, &newer);
+        assert_eq!(c.sync(true), 1);
+        assert_eq!(c.sync(true), 0);
+        c.keep_of("2026-03-08", &w, &older);
+        assert_eq!(c.sync(true), 0);
     }
 
     /// Papers need no directory. Their evidence is theirs to lose.
@@ -1474,7 +1754,7 @@ mod tests {
         assert!(v["by_item"].get("r_newnameaaaaaaaaaaaaa").is_none());
         assert!(v["by_item"].get("r_newstateaaaaaaaaaaaa").is_none());
         // Once it is whole in them, the one name matches.
-        c.keep(&Wanted::of([&c.index]), &rows);
+        c.keep_of("2026-04-12", &Wanted::of([&c.index]), &rows);
         c.sync(true);
         let v = c.labels();
         assert!(v["by_item"].get("r_newnameaaaaaaaaaaaaa").is_some());
@@ -1485,7 +1765,7 @@ mod tests {
     fn one_provider_has_one_id_in_a_folder_and_another_in_another() {
         let row: Provider =
             serde_json::from_str(fixture!("directory.jsonl").lines().next().unwrap()).unwrap();
-        let l = sure(&row).unwrap();
+        let l = sure(&row, "2026-03-08").unwrap();
         assert_eq!(l.id(SALT, "J SAMPLE"), l.id(SALT, "Jordan Sample"));
         assert_ne!(l.id(SALT, "J SAMPLE"), l.id("s_other", "J SAMPLE"));
         assert!(crate::ids::is_valid("v", &l.id(SALT, "J SAMPLE")));
