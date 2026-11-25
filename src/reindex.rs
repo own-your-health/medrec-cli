@@ -231,34 +231,48 @@ pub fn claims(
         out.people.push(row);
     }
     if dry_run {
-        let chosen: BTreeSet<&str> = as_read.iter().map(|(p, ..)| p.id.as_str()).collect();
-        for p in h.people.iter().filter(|p| !chosen.contains(&*p.id)) {
-            let (idx, md5) = folder.whole_index_read(p)?;
-            would_be.insert(p.id.clone(), idx.clone());
-            as_read.push((p, idx, md5));
-        }
-        let views = viewfiles::preview(folder, &would_be)?;
-        for (n, (p, was, _)) in as_read.iter().enumerate() {
-            let (before, after) = (views.before(folder, p)?, views.after(p)?);
-            let now = &would_be[&p.id];
-            let views = changes::of(p, was, now, &before, &after, &today());
-            match out.people.get_mut(n) {
-                Some(row) => row.views = Some(views),
-                None => out.others.push(OtherViews {
-                    person: p.id.clone(),
-                    views,
-                }),
-            }
-        }
-        for (p, _, md5) in &as_read {
-            as_read_still(folder, p, md5.as_deref())?;
-        }
-        out.fresh = Some(true);
+        count_views(folder, h, as_read, would_be, &mut out)?;
     } else {
         // What another medrec's rules made of the same files is made again too.
         folder.every_view();
     }
     Ok(out)
+}
+
+/// Count what would change in everyone's views: in the row of each person
+/// whose records were read again, and in `others`. `as_read` is their indexes
+/// as the folder has them, and `would_be` as a run would leave them.
+fn count_views<'a>(
+    folder: &Folder,
+    h: &'a Household,
+    mut as_read: Vec<(&'a Person, PersonIndex, Option<String>)>,
+    mut would_be: BTreeMap<String, PersonIndex>,
+    out: &mut Reindexed,
+) -> Result<(), CliError> {
+    for p in &h.people {
+        if !would_be.contains_key(&p.id) {
+            let (idx, md5) = folder.whole_index_read(p)?;
+            would_be.insert(p.id.clone(), idx.clone());
+            as_read.push((p, idx, md5));
+        }
+    }
+    let views = viewfiles::preview(folder, &would_be)?;
+    for (p, was, _) in &as_read {
+        let (before, after) = (views.before(folder, p)?, views.after(p)?);
+        let views = changes::of(p, was, &would_be[&p.id], &before, &after, &today());
+        match out.people.iter_mut().find(|row| row.person == p.id) {
+            Some(row) => row.views = Some(views),
+            None => out.others.push(OtherViews {
+                person: p.id.clone(),
+                views,
+            }),
+        }
+    }
+    for (p, _, md5) in &as_read {
+        as_read_still(folder, p, md5.as_deref())?;
+    }
+    out.fresh = Some(true);
+    Ok(())
 }
 
 /// The folders of raw files the records are of, one per source.

@@ -589,7 +589,7 @@ or id of an item, and names no kind of questionnaire that there is one of.
   schema is why, it says to upgrade.
 - A run with `--person` reads only that person's records again and makes every
   person's views, so its dry run has `others`: for each of the other people, their
-  `person` and their `views`.
+  `person` and their `views`. It is absent where there are none.
 
   | Field | Counts |
   |---|---|

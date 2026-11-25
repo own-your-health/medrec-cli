@@ -3999,7 +3999,10 @@ fn a_dry_run_counts_what_would_be_private() {
     assert_eq!(others.count() + 1, everyone);
     let out = e.run(&["reindex", "--dry-run", "--person", &other]);
     let text = String::from_utf8(out.stdout).unwrap();
-    assert!(text.contains(&format!("{alex}: in the views")), "{text}");
+    let (own, others) = text.split_once("\nthe others' records are not").unwrap();
+    for (part, id) in [(own, &other), (others, &alex)] {
+        assert!(part.contains(&format!("\n{id}: in the views")), "{text}");
+    }
     // No name, id, date or kind there is one of.
     let text = v.to_string();
     let words = [

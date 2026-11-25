@@ -1309,10 +1309,7 @@ fn run(cli: &Cli) -> Result<(), CliError> {
                 if let Some(n) = papers_unread(r.papers_unread) {
                     println!("{n}");
                 }
-                let chosen = r.people.iter();
-                let chosen = chosen.filter_map(|p| Some((&p.person, p.views.as_ref()?)));
-                let others = r.others.iter().map(|o| (&o.person, &o.views));
-                for (person, views) in chosen.chain(others) {
+                let in_views = |person: &str, views: &medrec::changes::Changes| {
                     let against = match (&views.against, views.stale) {
                         (None, _) => "there are no views yet".to_string(),
                         (Some(m), false) => format!("against medrec {m}'s"),
@@ -1326,6 +1323,17 @@ fn run(cli: &Cli) -> Result<(), CliError> {
                     for line in lines {
                         println!("  {line}");
                     }
+                };
+                for p in &r.people {
+                    if let Some(views) = &p.views {
+                        in_views(&p.person, views);
+                    }
+                }
+                if !r.others.is_empty() {
+                    println!("the others' records are not read again, and a run makes their views again:");
+                }
+                for o in &r.others {
+                    in_views(&o.person, &o.views);
                 }
             });
             Ok(())
