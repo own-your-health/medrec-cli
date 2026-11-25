@@ -1114,8 +1114,18 @@ pub struct Said<'a> {
     spots: Vec<Spot<'a>>,
     rulings: Vec<Ruling<'a>>,
     corrections: &'a [Correction],
+    /// The items each correction is about, when it names one.
+    about: Vec<Option<About>>,
     /// The names said to be one provider, by the set of them each is in.
     group_of: HashMap<&'a str, usize>,
+}
+
+/// The items a correction that names one is about now.
+struct About {
+    /// The item it names: for an event whose id changed, the one that holds
+    /// its members.
+    item: String,
+    all: BTreeSet<String>,
 }
 
 #[derive(Default)]
@@ -1142,21 +1152,25 @@ impl<'a> Said<'a> {
     ) -> Said<'a> {
         let spots = spots(idx, events);
         let ids: BTreeSet<&str> = list(events).filter_map(|e| e["id"].as_str()).collect();
-        // The items each correction is about, when it names one.
-        let about: Vec<Option<BTreeSet<String>>> = corrections
+        let about: Vec<Option<About>> = corrections
             .iter()
             .map(|c| {
                 let item = c.item.as_ref()?;
-                let mut items = BTreeSet::from([item.clone()]);
+                let mut now: Option<String> = None;
+                let mut all = BTreeSet::from([item.clone()]);
                 for e in list(events) {
                     let own = private::own_members(e);
                     let id = e["id"].as_str().unwrap_or("");
                     if private::is_of_event(item, &c.members, id, &own, &ids) {
-                        items.insert(id.to_string());
-                        items.extend(own);
+                        now.get_or_insert_with(|| id.to_string());
+                        all.insert(id.to_string());
+                        all.extend(own);
                     }
                 }
-                Some(items)
+                Some(About {
+                    item: now.unwrap_or_else(|| item.clone()),
+                    all,
+                })
             })
             .collect();
         let rulings = spots
@@ -1171,11 +1185,11 @@ impl<'a> Said<'a> {
                         .filter(|(c, _)| c.printed.iter().any(|p| p == s.printed))
                 };
                 // The last said of the item, else the last said of the name.
-                let of_item =
-                    of_name().find(|(_, items)| items.as_ref().is_some_and(|x| x.contains(s.item)));
+                let of_item = of_name()
+                    .find(|(_, about)| about.as_ref().is_some_and(|a| a.all.contains(s.item)));
                 let alone = of_item.is_some();
                 let c = of_item
-                    .or_else(|| of_name().find(|(_, items)| items.is_none()))
+                    .or_else(|| of_name().find(|(_, about)| about.is_none()))
                     .map(|(c, _)| c);
                 Ruling::of(s, c, alone, state)
             })
@@ -1185,6 +1199,7 @@ impl<'a> Said<'a> {
             group_of: groups(corrections),
             spots,
             corrections,
+            about,
         }
     }
 
@@ -1389,30 +1404,31 @@ pub fn build(inp: &Input) -> Option<Value> {
 /// items that are open print every name it gives, and what it says is of no
 /// private area.
 fn overrides(inp: &Input, uses: &[Use]) -> [Vec<Override>; 2] {
-    let of = |keep: &dyn Fn(&str, &str) -> bool| -> bool {
-        inp.said
-            .spots
-            .iter()
-            .zip(uses)
-            .any(|(s, u)| u.open && keep(s.item, s.printed))
-    };
+    let here = || inp.said.spots.iter().zip(uses);
     let mut out = [Vec::new(), Vec::new()];
-    for c in inp.said.corrections {
+    for (c, about) in inp.said.corrections.iter().zip(&inp.said.about) {
         let Some(kind) = c.kind() else { continue };
         let of_area = c
             .set
             .as_ref()
             .is_some_and(|s| household(c, s, None).area().is_some());
-        let open = !of_area
-            && c.printed.iter().all(|p| match &c.item {
-                Some(i) => of(&|item, printed| item == i && printed == p),
-                None => of(&|_, printed| printed == p),
-            });
+        let printed = |p: &str| {
+            here().any(|(s, u)| {
+                u.open && s.printed == p && about.as_ref().is_none_or(|a| a.all.contains(s.item))
+            })
+        };
+        // The item it names says by itself that there is one.
+        let hidden = about.as_ref().is_some_and(|a| {
+            ["records", "documents", "events"]
+                .iter()
+                .any(|kind| inp.private[*kind].get(&a.item).is_some())
+        });
+        let open = !of_area && !hidden && c.printed.iter().all(|p| printed(p));
         out[usize::from(!open)].push(Override {
             id: c.id.clone(),
             kind,
             printed: c.printed.clone(),
-            item: c.item.clone(),
+            item: about.as_ref().map(|a| a.item.clone()),
             by: c.by.clone(),
             at: c.at.clone(),
         });
@@ -1581,8 +1597,8 @@ fn uses(inp: &Input) -> Vec<Use> {
 }
 
 /// The names the household says are one provider have one label: the one it
-/// gave one of them, else a sure one, else a likely one. What an open item
-/// has comes from open items alone.
+/// gave one of them, else a sure one, else a likely one, with the phone it
+/// gave any of them. What an open item has comes from open items alone.
 fn one_provider(said: &Said, uses: &mut [Use]) {
     let sets: BTreeSet<usize> = said.group_of.values().copied().collect();
     for g in sets {
@@ -1600,18 +1616,38 @@ fn one_provider(said: &Said, uses: &mut [Use]) {
             let Some(known_as) = names.first().filter(|_| names.len() > 1) else {
                 continue;
             };
-            let mut found: BTreeMap<String, (usize, Label)> = BTreeMap::new();
-            for l in of.iter().filter_map(|n| before[*n].label.as_ref()) {
+            // A phone alone says of no one who they are.
+            let rank = |i: usize, l: &Label| match l.confidence {
+                _ if said.rulings[i].set => 3,
+                Confidence::Sure => 2,
+                Confidence::Likely => 1,
+                Confidence::Household => 0,
+            };
+            let mut found: BTreeMap<String, (u8, usize, Label)> = BTreeMap::new();
+            for n in &of {
+                let Some(l) = &before[*n].label else { continue };
+                let r = rank(members[*n], l);
                 found
                     .entry(l.id("", known_as))
-                    .and_modify(|(n, held)| {
+                    .and_modify(|(rank, n, held)| {
+                        *rank = r.max(*rank);
                         *n += 1;
                         held.and(l.clone());
                     })
-                    .or_insert_with(|| (1, l.clone()));
+                    .or_insert_with(|| (r, 1, l.clone()));
             }
-            let best = found.into_values().max_by_key(|(n, l)| (l.confidence, *n));
-            let Some((_, mut label)) = best else { continue };
+            let best = found.into_iter().max_by_key(|(_, (r, n, _))| (*r, *n));
+            let Some((best, (_, _, mut label))) = best else {
+                continue;
+            };
+            let phone = of
+                .iter()
+                .filter_map(|n| said.rulings[members[*n]].phone)
+                .max_by_key(|c| said.corrections.iter().position(|x| x.id == c.id));
+            let theirs = matches!(label.phone_from, Some(PhoneFrom::Household { .. }));
+            if let Some(c) = phone.filter(|_| !theirs) {
+                label = with_phone(Some(label), c);
+            }
             label.confidence = match label.confidence {
                 Confidence::Likely => Confidence::Likely,
                 _ => Confidence::Household,
@@ -1637,7 +1673,8 @@ fn one_provider(said: &Said, uses: &mut [Use]) {
                     continue;
                 }
                 uses[i].known_as = known_as.to_string();
-                if !said.rulings[i].set {
+                let is_it = u.label.as_ref().map(|l| l.id("", known_as)).as_ref() == Some(&best);
+                if is_it || !said.rulings[i].set {
                     uses[i].label = Some(label.clone());
                 }
             }
@@ -2543,7 +2580,7 @@ mod tests {
             .find(|e| e["members"].to_string().contains(SAMPLE))
             .unwrap()["id"]
             .clone();
-        for item in [event, json!("e_goneaaaaaaaaaaaaaaaa")] {
+        for item in [event.clone(), json!("e_goneaaaaaaaaaaaaaaaa")] {
             c.says(
                 &[json!({"printed": ["J SAMPLE"], "wrong": true, "item": item,
                 "members": [SAMPLE]})],
@@ -2551,7 +2588,15 @@ mod tests {
             c.sync(true);
             assert!(c.label(SAMPLE, "J SAMPLE").is_none(), "{item}");
             assert!(c.label("r_secondvisitaaaaaaaaa", "J SAMPLE").is_some());
+            // Listed with the event's id now, where an open reader finds it.
+            assert_eq!(c.labels()["overrides"][0]["item"], event, "{item}");
         }
+        // That the event is private is not to be told by its id.
+        c.mark(event.as_str().unwrap(), Some(true));
+        c.sync(true);
+        assert!(c.labels().get("overrides").is_none());
+        assert_eq!(c.labels()["private"]["overrides"][0]["item"], event);
+        c.mark(event.as_str().unwrap(), None);
         // With no label left, the file still says what the household said.
         let mut c = Case::new();
         c.index.documents.clear();
@@ -2604,6 +2649,48 @@ mod tests {
         assert_eq!(
             l["evidence"],
             json!([{"from": "only_match", "state": "FL"}, said('a')])
+        );
+        // A phone alone says of no one who they are: the sure one's label has
+        // it, and so has one the household set.
+        let phone =
+            |n: char| json!({"from": "household", "id": format!("o_said{n}aaaaaaaaaaaaaaa")});
+        c.says(&[
+            json!({"printed": [org], "set": {"phone": "555-010-0155"}}),
+            json!({"printed": [org, a], "same": true}),
+        ]);
+        c.sync(true);
+        for (item, printed) in [(SAMPLE, a), ("d_summaryaaaaaaaaaaaaa", org)] {
+            let l = c.label(item, printed).unwrap();
+            assert_eq!(
+                (&l["name"], &l["role"], &l["phone"], &l["phone_from"]),
+                (
+                    &json!("Jordan Sample, MD"),
+                    &json!("family doctor"),
+                    &json!("555-010-0155"),
+                    &phone('a')
+                ),
+                "{printed}"
+            );
+        }
+        c.says(&[
+            json!({"printed": [org], "set": {"phone": "555-010-0155"}}),
+            json!({"printed": [org, a], "same": true}),
+            json!({"printed": [a], "set": {"name": "Dr. Sample", "phone": "555-010-0166"}}),
+        ]);
+        c.sync(true);
+        assert_eq!(c.id_of(SAMPLE, a), c.id_of("d_summaryaaaaaaaaaaaaa", org));
+        assert_eq!(c.label(SAMPLE, a).unwrap()["phone"], "555-010-0166");
+        c.says(&[
+            json!({"printed": [org], "set": {"phone": "555-010-0155"}}),
+            json!({"printed": [org, a], "same": true}),
+            json!({"printed": [a], "set": {"name": "Dr. Sample"}}),
+        ]);
+        c.sync(true);
+        assert_eq!(c.id_of(SAMPLE, a), c.id_of("d_summaryaaaaaaaaaaaaa", org));
+        let l = c.label(SAMPLE, a).unwrap();
+        assert_eq!(
+            (&l["name"], &l["phone_from"]),
+            (&json!("Dr. Sample"), &phone('a'))
         );
         // One said of an item is outside it.
         c.says(&[

@@ -937,8 +937,9 @@ with `event` in place of `scope`:
 
 - `event` holds `person` and exactly one of `apart` or `together`, each two
   different record (`r_…`) or document (`d_…`) ids. A request with more
-  than one of `scope`, `event`, `paid` and `private` (below), or with none, is
-  `invalid` (rule 1), as is one whose `person` is not in `household.json`.
+  than one of `scope`, `event`, `paid`, `private` and `provider` (below), or
+  with none, is `invalid` (rule 1), as is one whose `person` is not in
+  `household.json`.
 - The next pass writes the decision to the person's `overrides.json`, and
   the views follow before it releases the lock, once for all of a pass's
   decisions. It imports nothing, so no guard or interval applies. While
@@ -963,7 +964,7 @@ The app's "Mark paid" is a request with `paid` in place of `scope`:
 - `amount` is a decimal string in US dollars, above zero with at most two
   places, or `{"amount", "currency"}` with a three-letter currency code.
   `on` is a `YYYY-MM-DD` day. A request with more than one of `scope`,
-  `event`, `paid` and `private`, or whose `person` is not in
+  `event`, `paid`, `private` and `provider`, or whose `person` is not in
   `household.json`, is `invalid` (rule 1).
 - It is applied as an event request is: by the next pass, to the person's
   `marks.json` `payments`, pending while another writer holds the
@@ -1014,11 +1015,17 @@ in place of `scope`:
 - It is applied as an event request is: by the next pass, to the person's
   `marks.json` `providers`, pending while another writer holds the folder.
   `handled.outcome` is `invalid` when the person's items do not print a name
-  it gives, the item is not theirs or does not print it, or the id to undo is
-  not one of theirs.
+  it gives, or the item is not theirs or does not print it. The same said
+  again is `ok`, and so is an undo of what is not there: a request can be
+  served twice, and two people can ask for the same.
 - Everyone's outcomes show together, so its `done/` file keeps only
   `provider: {person, kind}` (`set`, `same`, `different`, `wrong` or `undo`),
   and `handled.message` repeats no name or text: "recorded it as o_…".
+- As that file does not say what was asked, a request that could not be written
+  (the folder does not answer, the person's marks do not read) stays pending,
+  and each pass tries it again for 24 hours from the first that could not; then
+  it is `failed`, and what it said is gone from the folder. The app may show
+  what it asked while it is pending.
 
 ## views/ (`medrec-views/v2`, 0.8.0 and later)
 
@@ -1187,15 +1194,17 @@ provider, of whom the household said nothing, has no `providers.json`.
     phone the label stays what it is, with that phone.
   - `wrong`: there is no label, whatever one is found.
   - `same`: the names share one label, the one the household set, else a sure
-    one, as the household's. With only a likely one it stays likely.
+    one, as the household's, with the phone they gave any of the names. With
+    only a likely one it stays likely.
   - `different`: the names share no label. One label both would have, and the
     household did not set, is neither's.
   - One said of an item is outside what `same` and `different` say of its name.
   - Two names that stand for one provider in a list or a count do so by a sure
     label or the household's, never by a likely one.
   - `overrides` lists what they said, for readers to show it and to undo it, in
-    the order they said it. It is in `private` unless items that are not private
-    print every name it gives, and when what it sets is in a private area.
+    the order they said it, `item` the event's id now when it followed the
+    event's members. It is in `private` unless items that are not private print
+    every name it gives, and when its `item` or what it sets is private.
 - **The id** comes from the label's confidence, name (the printed one when it
   has none), practice, role and phone, with the folder's random `label_salt`
   (`views.json`), never from the NPI. One provider's sure label has one id in

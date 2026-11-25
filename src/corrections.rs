@@ -14,6 +14,10 @@ use crate::folder::Folder;
 use crate::model::{Household, Person};
 use crate::private;
 
+/// What a correction is refused for. Neither repeats a name.
+pub const NOT_PRINTED: &str = "a name it gives is not one the person's items print";
+pub const NOT_ITS_ITEM: &str = "the item it names is not one of the person's that prints the name";
+
 /// Printed names one correction may give.
 const MAX_PRINTED: usize = 10;
 const MAX_PRINTED_CHARS: usize = 200;
@@ -295,7 +299,8 @@ fn phone(s: Option<String>) -> Result<Option<String>, &'static str> {
 
 /// Write what the household says of a provider to the person's marks, or
 /// undo it: the correction (none once undone), and whether anything changed.
-/// `by` is who asked, as shown, and `request` the request it came from.
+/// `by` is who asked, as shown, and `request` the request it came from: one
+/// may be served again, so the same again changes nothing, an undo too.
 pub fn decide(
     folder: &Folder,
     h: &Household,
@@ -310,6 +315,9 @@ pub fn decide(
             let had = m.providers.len();
             m.providers.retain(|c| c.id != *id);
             if m.providers.len() == had {
+                if request.is_some() {
+                    return Ok((None, false));
+                }
                 return Err(CliError::NotFound(format!(
                     "{} is not one of the person's corrections",
                     crate::printable(id)
@@ -331,9 +339,7 @@ pub fn decide(
         .iter()
         .all(|n| prints.values().any(|names| names.contains(n)));
     if !known {
-        return Err(CliError::NotFound(
-            "a name it gives is not one the person's items print".into(),
-        ));
+        return Err(CliError::NotFound(NOT_PRINTED.into()));
     }
     let mut members = Vec::new();
     if let Some(i) = item {
@@ -341,9 +347,7 @@ pub fn decide(
             .get(i)
             .is_some_and(|names| names.contains(&printed[0]))
         {
-            return Err(CliError::NotFound(
-                "the item it names is not one of the person's that prints the name".into(),
-            ));
+            return Err(CliError::NotFound(NOT_ITS_ITEM.into()));
         }
         members = events["events"]
             .as_array()

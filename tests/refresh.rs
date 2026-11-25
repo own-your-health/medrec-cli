@@ -134,22 +134,29 @@ impl Env {
             std::fs::write(&p, serde_json::to_vec_pretty(&v).unwrap()).unwrap();
         }
         let secs = medrec::refresh::time::parse(at).unwrap();
-        let cache = self.root.join("cache");
-        if !cache.is_dir() {
-            return;
-        }
-        walk(&cache, &mut |f| {
-            let in_refresh = f.parent().and_then(|d| d.file_name()) == Some("refresh".as_ref());
-            if !in_refresh || f.extension() != Some("json".as_ref()) {
-                return;
-            }
-            let mut local: Value = serde_json::from_slice(&std::fs::read(f).unwrap()).unwrap();
+        self.local(&mut |local| {
             if let Some(m) = local.get_mut("ran_at").and_then(Value::as_object_mut) {
                 for t in m.values_mut() {
                     *t = json!(secs);
                 }
-                std::fs::write(f, serde_json::to_vec(&local).unwrap()).unwrap();
             }
+        });
+    }
+
+    /// This machine's record of its passes, changed by `f`.
+    fn local(&self, f: &mut dyn FnMut(&mut Value)) {
+        let cache = self.root.join("cache");
+        if !cache.is_dir() {
+            return;
+        }
+        walk(&cache, &mut |p| {
+            let in_refresh = p.parent().and_then(|d| d.file_name()) == Some("refresh".as_ref());
+            if !in_refresh || p.extension() != Some("json".as_ref()) {
+                return;
+            }
+            let mut local: Value = serde_json::from_slice(&std::fs::read(p).unwrap()).unwrap();
+            f(&mut local);
+            std::fs::write(p, serde_json::to_vec(&local).unwrap()).unwrap();
         });
     }
 
@@ -2218,10 +2225,70 @@ fn the_household_says_who_a_printed_name_is() {
         index
     );
 
-    // A marks.json that does not read is not written over.
-    std::fs::write(&file, b"{not json").unwrap();
+    // Served again, or for both people who asked, an undo is done.
+    decision_request(
+        &e,
+        "x_providersddddddddddd",
+        "provider",
+        json!({"person": aid, "undo": undone}),
+    );
+    e.ok(&["refresh", "--scheduled"]);
+    let done = e.json_at(&at("x_providersddddddddddd"));
+    assert_eq!(done["handled"]["outcome"], "ok", "{done}");
+    assert_eq!(done["handled"]["message"], "there was nothing to undo");
+
+    // A marks.json that does not read is not written over, and a request
+    // that says something stays pending: its done/ file would not keep it.
+    let held = std::fs::read(&file).unwrap();
+    let mut odd: Value = serde_json::from_slice(&held).unwrap();
+    odd["providers"][0]["printed"] = json!(practice);
+    let odd = serde_json::to_vec(&odd).unwrap();
+    std::fs::write(&file, &odd).unwrap();
     assert_ne!(e.code(&of(&[practice, "--role", "clinic"])).0, Some(0));
-    assert_eq!(std::fs::read(&file).unwrap(), b"{not json");
+    let id = "x_providerseeeeeeeeeee";
+    decision_request(
+        &e,
+        id,
+        "provider",
+        json!({"person": aid, "printed": [practice], "wrong": true, "item": visit}),
+    );
+    let pending = e
+        .records()
+        .join(format!("_requests/20261124T120000Z_{id}.json"));
+    for _ in 0..2 {
+        e.ok(&["refresh", "--scheduled"]);
+        assert!(pending.exists());
+        assert!(!e.records().join(at(id)).exists());
+    }
+    assert_eq!(std::fs::read(&file).unwrap(), odd);
+    // For a day, and then what it answers repeats nothing of the marks.
+    let mut first = 0;
+    e.local(&mut |l| {
+        let t = &mut l["failing"][id];
+        first = t.as_i64().unwrap();
+        *t = json!(first - 24 * 3600);
+    });
+    assert!(first > 0);
+    e.ok(&["refresh", "--scheduled"]);
+    assert!(!pending.exists());
+    let failed = e.json_at(&at(id));
+    assert_eq!(failed["handled"]["outcome"], "failed", "{failed}");
+    assert!(!failed.to_string().contains(practice), "{failed}");
+    e.local(&mut |l| assert!(l.get("failing").is_none(), "{l}"));
+
+    // Written once the marks read again.
+    let id = "x_providersfffffffffff";
+    decision_request(
+        &e,
+        id,
+        "provider",
+        json!({"person": aid, "printed": [practice], "wrong": true, "item": visit}),
+    );
+    e.ok(&["refresh", "--scheduled"]);
+    std::fs::write(&file, &held).unwrap();
+    e.ok(&["refresh", "--scheduled"]);
+    assert_eq!(e.json_at(&at(id))["handled"]["outcome"], "ok");
+    e.local(&mut |l| assert!(l.get("failing").is_none(), "{l}"));
 }
 
 #[test]

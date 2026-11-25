@@ -494,6 +494,10 @@ fn counts(r: &import::Report) -> BTreeMap<String, u64> {
 /// import's wait).
 const EVENT_LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(15);
 
+/// How long a provider request that cannot be written stays pending, from
+/// the first pass that could not.
+const PROVIDER_TRIES_SECS: i64 = 24 * 3600;
+
 /// Apply a request's decision (an event's, or one kept as a mark) through
 /// the pass's one write `folder`, whose views follow once, as it closes:
 /// `ok` once it is in the person's `overrides.json`, `invalid` when what it
@@ -515,9 +519,20 @@ fn decision_request(
         return match crate::corrections::decide(folder, h, p, ask, by.as_deref(), Some(&v.id)) {
             Ok((Some(c), true)) => ("ok", format!("recorded it as {}", c.id)),
             Ok((Some(c), false)) => ("ok", format!("it was already recorded as {}", c.id)),
-            Ok((None, _)) => ("ok", "undone".into()),
-            Err(CliError::NotFound(m)) => ("invalid", m),
-            Err(e) => ("failed", e.message().to_string()),
+            Ok((None, true)) => ("ok", "undone".into()),
+            Ok((None, false)) => ("ok", "there was nothing to undo".into()),
+            Err(CliError::NotFound(m))
+                if m == crate::corrections::NOT_PRINTED
+                    || m == crate::corrections::NOT_ITS_ITEM =>
+            {
+                ("invalid", m)
+            }
+            // What went wrong can quote the marks, and everyone's outcomes
+            // show together.
+            Err(_) => (
+                "failed",
+                "the person's marks could not be read or written".into(),
+            ),
         };
     }
     if let Scope::Private {
@@ -727,6 +742,11 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
     let mut parsed: Vec<Parsed> = Vec::new();
     if !settling {
         local.left.retain(|n| listing.iter().any(|e| &e.rel == n));
+        local.failing.retain(|id, _| {
+            listing
+                .iter()
+                .any(|e| requests::id_of_name(&e.rel).as_ref() == Some(id))
+        });
         let answered: BTreeSet<String> = if listing.is_empty() {
             BTreeSet::new()
         } else {
@@ -1208,6 +1228,16 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
                     Some(Err(e)) => ("failed", e.message().to_string()),
                     None => ("failed", "the folder was not opened to write".into()),
                 };
+                // Its `done/` file would keep nothing of what it says, so one
+                // that could not be written is tried again for a while.
+                if outcome == "failed" && matches!(v.scope, Scope::Provider { .. }) {
+                    let now = time::now();
+                    let first = *local.failing.entry(v.id.clone()).or_insert(now);
+                    if (0..PROVIDER_TRIES_SECS).contains(&(now - first)) {
+                        continue;
+                    }
+                }
+                local.failing.remove(&v.id);
                 (Vec::new(), outcome.into(), clip(&message, MESSAGE_MAX))
             }
             Parsed::Valid(v) => {
