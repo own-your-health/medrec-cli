@@ -178,6 +178,9 @@ struct Part {
     /// By item, then by the text it prints.
     #[serde(default)]
     by_item: BTreeMap<String, BTreeMap<String, String>>,
+    /// By claim, its provider's: for a reader that has no fields of it.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    claims: BTreeMap<String, String>,
     /// What the household said, so that a reader can say so and undo it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     overrides: Vec<Override>,
@@ -733,7 +736,7 @@ const PERSON_FIELDS: &[&str] = &["practitioner", "provider", "performer", "presc
 
 /// Every field that prints a provider, in the order one text of a record
 /// takes its label from.
-const FIELDS: &[&str] = &[
+pub const FIELDS: &[&str] = &[
     "provider",
     "practitioner",
     "performer",
@@ -1477,7 +1480,10 @@ impl Part {
         for (s, u) in here() {
             let Some(id) = u.id(salt) else { continue };
             let claim = matches!(s.on, On::Record(r) if r.kind == "claim" && printed(r, "provider") == Some(s.printed));
-            if claim || part.by_name.get(s.printed) != Some(&id) {
+            if claim {
+                part.claims.insert(s.item.to_string(), id.clone());
+            }
+            if part.by_name.get(s.printed) != Some(&id) {
                 part.by_item
                     .entry(s.item.to_string())
                     .or_default()
@@ -1996,14 +2002,14 @@ mod tests {
         c.sync(false);
         let now = c.labels();
         assert_eq!(
-            now["by_item"]["r_knownaaaaaaaaaaaaaaa"]["SOMETHING ELSE LLC"],
-            before["by_item"]["r_officevisitaaaaaaaaa"]["EXAMPLE PRIMARY CARE GROUP LLC"]
+            now["claims"]["r_knownaaaaaaaaaaaaaaa"],
+            before["claims"]["r_officevisitaaaaaaaaa"]
         );
-        assert!(now["by_item"].get("r_otheraaaaaaaaaaaaaaa").is_none());
+        assert!(now["claims"].get("r_otheraaaaaaaaaaaaaaa").is_none());
         assert!(now["by_name"].get("J SAMPLE").is_none());
         assert_eq!(
-            now["by_item"]["r_samplevisitaaaaaaaaa"],
-            before["by_item"]["r_samplevisitaaaaaaaaa"]
+            now["claims"]["r_samplevisitaaaaaaaaa"],
+            before["claims"]["r_samplevisitaaaaaaaaa"]
         );
         assert_eq!(now["directory"], before["directory"]);
         assert!(c.private("r_alsoaaaaaaaaaaaaaaaa"));
@@ -2017,10 +2023,10 @@ mod tests {
         c.mark("r_imagingaaaaaaaaaaaaa", Some(true));
         c.sync(false);
         let now = c.labels();
-        assert!(now["by_item"].get("r_imagingaaaaaaaaaaaaa").is_none());
+        assert!(now["claims"].get("r_imagingaaaaaaaaaaaaa").is_none());
         assert_eq!(
-            now["private"]["by_item"]["r_imagingaaaaaaaaaaaaa"]["A TESTPERSON"],
-            before["by_item"]["r_imagingaaaaaaaaaaaaa"]["A TESTPERSON"]
+            now["private"]["claims"]["r_imagingaaaaaaaaaaaaa"],
+            before["claims"]["r_imagingaaaaaaaaaaaaa"]
         );
         c.mark("r_imagingaaaaaaaaaaaaa", None);
         c.sync(false);
@@ -2866,8 +2872,8 @@ mod tests {
         assert_eq!(
             v["by_name"],
             json!({
-                "M TEMPLATE": v["by_item"]["r_paperaloneaaaaaaaaaa"]["M TEMPLATE"],
-                "R PLACEHOLDER": v["by_item"]["r_onepaperaaaaaaaaaaaa"]["R PLACEHOLDER"],
+                "M TEMPLATE": v["claims"]["r_paperaloneaaaaaaaaaa"],
+                "R PLACEHOLDER": v["claims"]["r_onepaperaaaaaaaaaaaa"],
             })
         );
         let l = |k: &str| v["labels"][v["by_name"][k].as_str().unwrap()].clone();
@@ -2912,15 +2918,15 @@ mod tests {
         c.keep(&w, &rows);
         c.sync(true);
         let v = c.labels();
-        assert!(v["by_item"].get("r_imagingaaaaaaaaaaaaa").is_some());
-        assert!(v["by_item"].get("r_newnameaaaaaaaaaaaaa").is_none());
-        assert!(v["by_item"].get("r_newstateaaaaaaaaaaaa").is_none());
+        assert!(v["claims"].get("r_imagingaaaaaaaaaaaaa").is_some());
+        assert!(v["claims"].get("r_newnameaaaaaaaaaaaaa").is_none());
+        assert!(v["claims"].get("r_newstateaaaaaaaaaaaa").is_none());
         // Once it is whole in them, the one name matches.
         c.keep_of("2026-04-12", &Wanted::of([&c.index]), &rows);
         c.sync(true);
         let v = c.labels();
-        assert!(v["by_item"].get("r_newnameaaaaaaaaaaaaa").is_some());
-        assert!(v["by_item"].get("r_newstateaaaaaaaaaaaa").is_none());
+        assert!(v["claims"].get("r_newnameaaaaaaaaaaaaa").is_some());
+        assert!(v["claims"].get("r_newstateaaaaaaaaaaaa").is_none());
     }
 
     #[test]

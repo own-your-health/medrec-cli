@@ -34,9 +34,14 @@ pub struct PersonRow {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub birth_date: Option<String>,
     pub adult: bool,
+    // The tools' definitions have a budget: these schemas say no minimum.
+    #[schemars(with = "i64")]
     pub documents: usize,
+    #[schemars(with = "i64")]
     pub records: usize,
+    #[schemars(with = "i64")]
     pub studies: usize,
+    #[schemars(with = "i64")]
     pub notes: usize,
     /// The date of the newest dated document, record or study.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -161,6 +166,7 @@ pub struct Bill {
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct SourceRow {
     pub source: String,
+    #[schemars(with = "i64")]
     pub records: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub newest: Option<String>,
