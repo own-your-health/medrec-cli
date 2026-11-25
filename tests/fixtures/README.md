@@ -16,6 +16,10 @@ real record, document, study or provider response.
   server and on another, by an inline identifier and by a reference to
   nothing. Its NPIs pass the check digit and start with 0, so they belong to
   nobody; one (`0000000007`) fails the check.
+- `stream/connection.ndjson` is one patient's stream of a records connection
+  that serves every practice under one organization id and FHIR base.
+  `testdata::connection_streams` fills in its `{{…}}`: two practices' streams
+  for Robin, and a third's, with no records, for Alex.
 - `stream/fakeprov-info.json` is the `info --json` of `fakeprov`, the fake
   `health-records/v1` provider that `medrec::testdata::write_provider` writes.
   It lists the `login-profiles` capability. `fakeprov-info-unprofiled.json` is
@@ -68,6 +72,9 @@ real record, document, study or provider response.
   `F40.10`), a medicine, and a visit and letter from a behavioral health
   practice, which the rules keep private, beside a condition, a medicine, a
   visit, a result and a visit summary they do not.
+- `private/papers.json` is a list of invented bills, receipts and other papers
+  with the text each gives: a therapist's statements, copy, rescan and
+  receipt, a pharmacy's and a laboratory's, and some no rule lists.
 
 The scans, DICOM studies and the fake provider script are generated at test
 time by `medrec::testdata` (and by `cargo run --example synth -- <DIR>` for

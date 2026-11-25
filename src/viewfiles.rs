@@ -436,7 +436,7 @@ pub(crate) fn sync_with(
             .and_then(|m| m.as_ref().ok())
             .map(|m| m.payments.as_slice())
             .unwrap_or_default();
-        let mut bills = crate::bills::build(p, &me.idx, &events, payments);
+        let mut bills = crate::bills::build(p, &me.idx, &me.texts, &events, payments);
         let private_marks = marks
             .as_ref()
             .and_then(|m| m.as_ref().ok())
@@ -469,8 +469,14 @@ pub(crate) fn sync_with(
                 text,
             });
         }
-        let mut private =
-            crate::private::build(p, &me.idx, &events, private_marks, &state.areas(&me.idx));
+        let mut private = crate::private::build(
+            p,
+            &me.idx,
+            &me.texts,
+            &events,
+            private_marks,
+            &state.areas(&me.idx),
+        );
         if state.lost() {
             private["labels_unreadable"] = Value::Bool(true);
             private["marks_unreadable"] = Value::Bool(true);
@@ -869,8 +875,8 @@ fn numbered(stem: &str, n: i64) -> String {
 
 /// A record as the tools need it: its `index.json` fields but `key` and
 /// `documents`, with only its first source's `fhir_base`, `cli` and
-/// `organization_id` (`null` when it has none).
-fn slim(r: &Record) -> Value {
+/// `organization_id` (`null` when it has none), and its label.
+fn slim(r: &Record, from: crate::sources::Sources) -> Value {
     let mut m = Map::new();
     m.insert("id".into(), r.id.clone().into());
     m.insert("kind".into(), r.kind.clone().into());
@@ -912,6 +918,7 @@ fn slim(r: &Record) -> Value {
                 .cloned()
                 .unwrap_or(Value::Null),
         );
+        keep.insert("label".into(), views::record_source(from, r).into());
         m.insert(
             "provenance".into(),
             Value::Array(vec![serde_json::json!({ "source": keep })]),
@@ -1079,12 +1086,13 @@ pub(crate) fn person(
     for r in &idx.records {
         by_kind.entry(r.kind.as_str()).or_default().push(r);
     }
+    let sources = crate::sources::Sources::of(&h.sources, idx);
     let mut records = BTreeMap::new();
     let mut place: HashMap<*const Record, (i64, usize)> = HashMap::new();
     for (kind, mut list) in by_kind {
         check_kind(kind)?;
         list.sort_by_cached_key(|r| (Reverse(day(r.date.as_deref())), clip(&r.display, CLIP)));
-        let slims: Vec<Vec<u8>> = list.iter().map(|r| json(&slim(r))).collect();
+        let slims: Vec<Vec<u8>> = list.iter().map(|r| json(&slim(r, sources))).collect();
         let days: Vec<Option<String>> = list.iter().map(|r| day(r.date.as_deref())).collect();
         let sizes: Vec<usize> = slims.iter().map(Vec::len).collect();
         let (shards, undated) = cut_from_oldest(&days, &sizes);
@@ -1712,7 +1720,18 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_slim_record_keeps_the_source_keys_a_label_is_found_by() {
+    fn a_slim_record_keeps_its_sources_keys_and_its_label() {
+        let h: Household = serde_json::from_value(serde_json::json!({
+            "schema": "medrec-household/v1", "format": 1, "folder_id": "f_1", "rev": 1,
+            "created_at": "2026-01-01T00:00:00Z", "people": [], "organizations": [],
+            "sources": [{"id": "s_exampleaaaaaaaaaaaaa", "kind": "fhir", "person": "p_x",
+                "cli": "athena", "organization": "900001", "patient_id": "1",
+                "organization_name": "Example Pediatrics",
+                "fhir_base": "https://athena.example.test/fhir/r4"}]
+        }))
+        .unwrap();
+        let idx = PersonIndex::new("p_x");
+        let from = crate::sources::Sources::of(&h.sources, &idx);
         let source = |org: Value| {
             let mut r = result(0, "2026-12-28");
             r.provenance = vec![serde_json::from_value(serde_json::json!({
@@ -1722,13 +1741,14 @@ pub(crate) mod tests {
                 "method": "fhir-api", "filed_at": "2026-11-20T10:00:00Z", "filed_by": "medrec 0.9.4"
             }))
             .unwrap()];
-            serde_json::to_string(&slim(&r)).unwrap()
+            serde_json::to_string(&slim(&r, from)).unwrap()
         };
-        // fhir_base, cli and organization_id, in that order, nothing else.
+        // fhir_base, cli, organization_id and label, in that order, nothing
+        // else.
         let slimmed = source("900001".into());
         assert!(
             slimmed.ends_with(
-                r#""provenance":[{"source":{"fhir_base":"https://athena.example.test/fhir/r4","cli":"athena","organization_id":"900001"}}]}"#
+                r#""provenance":[{"source":{"fhir_base":"https://athena.example.test/fhir/r4","cli":"athena","organization_id":"900001","label":"Example Pediatrics"}}]}"#
             ),
             "{slimmed}"
         );
@@ -1736,7 +1756,7 @@ pub(crate) mod tests {
         let none = source(Value::Null);
         assert!(
             none.ends_with(
-                r#""fhir_base":"https://athena.example.test/fhir/r4","cli":"athena","organization_id":null}}]}"#
+                r#""fhir_base":"https://athena.example.test/fhir/r4","cli":"athena","organization_id":null,"label":"athena"}}]}"#
             ),
             "{none}"
         );

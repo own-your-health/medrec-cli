@@ -11,6 +11,7 @@ use crate::folder::Folder;
 use crate::intake::classify;
 use crate::model::{Household, Note, Person, PersonIndex, PersonText, Record};
 use crate::people;
+use crate::sources::Sources;
 
 #[derive(Debug, Clone, Default)]
 pub struct Range {
@@ -148,6 +149,7 @@ pub(crate) fn person_events(
             });
         }
     }
+    let from = Sources::of(&h.sources, idx);
     for r in &idx.records {
         if !want(&r.kind) || !range.holds(r.date.as_deref()) {
             continue;
@@ -160,7 +162,7 @@ pub(crate) fn person_events(
             id: r.id.clone(),
             title: r.display.clone(),
             detail: record_detail(r),
-            source: record_source(h, r),
+            source: record_source(from, r),
         });
     }
     if want("study") {
@@ -350,47 +352,9 @@ pub(crate) fn value_text(v: &Value) -> String {
     }
 }
 
-pub(crate) fn record_source(h: &Household, r: &Record) -> Option<String> {
-    source_label(h, r.provenance.first()?)
-}
-
-/// The name of the organization a record came through: its own sign-in's
-/// (the household source with its CLI, organization and FHIR base), else
-/// the household organization at its FHIR base, else its CLI. One base
-/// can serve many practices (athenahealth's), so the sign-in comes first.
-pub(crate) fn source_label(h: &Household, pv: &crate::model::Provenance) -> Option<String> {
-    let base = pv
-        .source
-        .fhir_base
-        .as_deref()
-        .map(|b| b.trim_end_matches('/'));
-    h.sources
-        .iter()
-        .filter(|s| {
-            s.cli.is_some()
-                && s.cli == pv.source.cli
-                && s.organization.is_some()
-                && s.organization == pv.source.organization_id
-                && (base.is_none()
-                    || s.fhir_base.as_deref().map(|b| b.trim_end_matches('/')) == base)
-        })
-        .find_map(|s| {
-            s.organization_name
-                .as_deref()
-                .map(str::trim)
-                .filter(|n| !n.is_empty())
-                .map(str::to_string)
-        })
-        .or_else(|| {
-            h.organizations
-                .iter()
-                .find(|o| {
-                    base.is_some()
-                        && o.fhir_base.as_deref().map(|b| b.trim_end_matches('/')) == base
-                })
-                .map(|o| o.name.clone())
-        })
-        .or_else(|| pv.source.cli.clone())
+/// The name of the source a record came through ([`crate::sources`]).
+pub(crate) fn record_source(from: Sources, r: &Record) -> Option<String> {
+    from.label(r.provenance.first()?)
 }
 
 /// One row of a record list.
@@ -430,17 +394,19 @@ pub fn records(
     range.validate()?;
     let mut out = Vec::new();
     for p in people::selected(h, person)? {
-        for r in folder.index(p)?.records {
+        let idx = folder.index(p)?;
+        let from = Sources::of(&h.sources, &idx);
+        for r in &idx.records {
             if !kinds.contains(&r.kind.as_str()) || !range.holds(r.date.as_deref()) {
                 continue;
             }
             if active && is_ended(r.status.as_deref()) {
                 continue;
             }
-            if code.is_some_and(|q| !matches_code(&r, q)) {
+            if code.is_some_and(|q| !matches_code(r, q)) {
                 continue;
             }
-            out.push(row(h, p, r));
+            out.push(row(from, p, r.clone()));
         }
     }
     out.sort_by(|a, b| b.date.cmp(&a.date).then(a.display.cmp(&b.display)));
@@ -487,11 +453,11 @@ pub(crate) fn is_ended(status: Option<&str>) -> bool {
     )
 }
 
-fn row(h: &Household, p: &Person, r: Record) -> RecordRow {
+fn row(from: Sources, p: &Person, r: Record) -> RecordRow {
     let mut sources: Vec<String> = r
         .provenance
         .iter()
-        .filter_map(|pv| source_label(h, pv))
+        .filter_map(|pv| from.label(pv))
         .collect();
     sources.dedup();
     let detail = record_detail(&r).filter(|d| Some(d) != r.status.as_ref());

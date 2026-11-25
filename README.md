@@ -509,7 +509,9 @@ medrec bills undo <payment id>
 
 `bills list` also shows the bills and desk payments worth a call: a bill
 that asks more or less than its claim says is owed, a bill with no claim
-behind it, a copay paid at the desk that the claims say was not owed. It
+behind it, a copay paid at the desk that the claims say was not owed. A
+settled bill is not among them, nor one that says it charges for storage or
+is self-pay for want of a claim, since no insurer is billed for those. It
 then lists the shares the claims say are owed that no bill has asked for
 yet, with pharmacy fills marked, since those are usually paid at the
 counter. `--limit` bounds the bills; the other two lists are shown whole.
@@ -530,8 +532,9 @@ medicines tied to them, are private: the app keeps them off shared screens (Home
 Everyone calendar, a doctor sheet for someone else) and shows them on that
 person's own pages, and Claude leaves them out of answers about the whole
 household. medrec finds them by their codes, medicines, tests and the
-practice that made them, a document by any private record that links it,
-and a study by its report. A study with no report is left out of answers
+practice that made them, a document by any private record that links it, a
+bill or receipt by its own words, with its copies and the statements and
+payments before and after it, and a study by its report. A study with no report is left out of answers
 about the whole household too. The household has the last word.
 
 ```sh

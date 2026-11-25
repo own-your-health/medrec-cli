@@ -21,6 +21,7 @@ use crate::intake::classify;
 use crate::model::{today, Household, Record};
 use crate::people;
 use crate::refresh::signin;
+use crate::sources::Sources;
 use crate::store::{Location, BIN};
 use crate::summary::{self, clip, day, PersonRow, ResultRow, CLIP};
 use crate::views::{self, first_line, is_ended, label, record_detail, record_source, Range};
@@ -879,7 +880,7 @@ impl MedrecTools {
                             .or_default()
                             .push(x.id.clone());
                     }
-                    for row in summary::latest_results(&h, &results) {
+                    for row in summary::latest_results(Sources::of(&h.sources, &idx), &results) {
                         let members = results
                             .iter()
                             .find(|x| Some(x.id.as_str()) == row.id.as_deref())
@@ -894,7 +895,9 @@ impl MedrecTools {
             }
             (_, Some(kind)) => {
                 for p in &selected {
-                    for x in f.index(p)?.records {
+                    let idx = f.index(p)?;
+                    let from = Sources::of(&h.sources, &idx);
+                    for x in idx.records.clone() {
                         if x.kind != kind
                             || !r.holds(x.date.as_deref())
                             || (active && is_ended(x.status.as_deref()))
@@ -902,7 +905,7 @@ impl MedrecTools {
                         {
                             continue;
                         }
-                        let mut item = record_item(&h, &p.name, x, detailed);
+                        let mut item = record_item(from, &p.name, x, detailed);
                         item.person_id = p.id.clone();
                         items.push(item);
                     }
@@ -1381,7 +1384,7 @@ fn marked(chars: &[char], first: u32) -> String {
     out
 }
 
-fn record_item(h: &Household, person: &str, r: Record, detailed: bool) -> Item {
+fn record_item(from: Sources, person: &str, r: Record, detailed: bool) -> Item {
     let mut item = Item {
         kind: r.kind.clone(),
         person: person.to_string(),
@@ -1395,7 +1398,7 @@ fn record_item(h: &Household, person: &str, r: Record, detailed: bool) -> Item {
             .filter(|d| Some(d) != r.status.as_ref())
             .map(|d| clip(&d, CLIP)),
         status: r.status.clone(),
-        source: record_source(h, &r),
+        source: record_source(from, &r),
         code: r.code.as_ref().and_then(|c| c.code.clone()),
         name_key: crate::code_names::condition_key(&r),
         fields: detailed.then(|| r.fields.clone()),
@@ -1403,7 +1406,7 @@ fn record_item(h: &Household, person: &str, r: Record, detailed: bool) -> Item {
     };
     match r.kind.as_str() {
         "result" => {
-            let row = summary::result_row(h, &r);
+            let row = summary::result_row(from, &r);
             item.value = row.value;
             item.unit = row.unit;
             item.range = row.range;

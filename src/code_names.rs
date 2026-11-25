@@ -259,7 +259,14 @@ mod tests {
         let mut idx = PersonIndex::new("p_test");
         idx.records = records.into_iter().map(record).collect();
         let events = json!({"schema": crate::events::SCHEMA, "events": []});
-        let mut private = private::build(&p, &idx, &events, marks, &BTreeMap::new());
+        let mut private = private::build(
+            &p,
+            &idx,
+            &crate::model::PersonText::new("p_test"),
+            &events,
+            marks,
+            &BTreeMap::new(),
+        );
         if unreadable {
             private["marks_unreadable"] = Value::Bool(true);
         }
