@@ -1390,6 +1390,14 @@ fn a_test_its_source_says_is_of_another_person_is_in_no_list() {
         assert_eq!(of(&e), json!([note]));
         let list = e.ok(&["records", "about-another"]);
         assert_eq!(list["items"].as_array().unwrap().len(), 1, "{list}");
+        // Its raw files are opened as it is, and in no count of many.
+        assert_eq!(e.ok(&["records", "raw", &id])["notes"], json!([note]));
+        for how in ["--fields", "--changes"] {
+            let notes = &e.ok(&["records", "raw", &id, how])["notes"];
+            assert_eq!(*notes, json!([format!("about {says}")]));
+        }
+        let many = e.ok(&["records", "fields", "--kind", "result"]);
+        assert_eq!((&many["records"], &many["types"]), (&json!(0), &json!([])));
         // Again; by another source with nothing of it; and by the first.
         let kept = e.index().records.len();
         e.import(&test_about("one", Some(focus), 1));

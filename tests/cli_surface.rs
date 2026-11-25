@@ -104,6 +104,8 @@ fn every_command_renders_its_help() {
         &["allergies"],
         &["immunizations"],
         &["records", "show"],
+        &["records", "raw"],
+        &["records", "fields"],
         &["records", "about-another"],
         &["documents", "list"],
         &["documents", "open"],
