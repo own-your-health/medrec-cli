@@ -449,8 +449,10 @@ pub fn records(
                     continue;
                 }
                 let mut one = row(from, p, r.record.clone());
-                one.standing = r.standing;
-                one.says = r.says;
+                if r.standing.is_some() {
+                    one.standing = r.standing;
+                    one.says = r.says;
+                }
                 out.push((r.group, one));
             }
             notes.extend(list.notes.into_iter().map(|n| match selected.len() {

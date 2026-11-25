@@ -1074,7 +1074,7 @@ fn what_is_entered_in_error_is_counted_and_opened_by_its_id() {
         let v = of("events");
         let visits = v["items"].as_array().unwrap().iter();
         let visits: Vec<&Value> = visits
-            .filter(|i| i["person"] == "Alex Testperson")
+            .filter(|i| i["person"] == "Alex Testperson" && i["kind"] == "office")
             .collect();
         assert_eq!(visits.len(), 1, "{v}");
         assert_eq!(visits[0]["you_owe"], "40.00 USD");
@@ -1092,6 +1092,17 @@ fn what_is_entered_in_error_is_counted_and_opened_by_its_id() {
         warned(&v, "entered-in-error").unwrap(),
         "1 entered in error, not shown"
     );
+    // A fill, which has no standing of its own, too.
+    for args in [
+        json!({"kind": "medications", "person": "Alex"}),
+        json!({"kind": "medications"}),
+    ] {
+        let fill = item(&ask(RECORDS, args), "r_filldiffersaaaaaaaaa");
+        assert_eq!(fill["standing"], "sources differ");
+        let completed = NORTH.replace("current", "completed");
+        assert_eq!(fill["says"], json!(format!("{completed}; {EAST}")));
+        assert_eq!(fill["status"], "completed");
+    }
     let v = ask(SEARCH, json!({"query": "example letter"}));
     assert_eq!(ids(&v), Vec::<String>::new());
     assert_eq!(
@@ -1131,8 +1142,9 @@ fn what_is_entered_in_error_is_counted_and_opened_by_its_id() {
     let differ = format!("Its sources differ ({NORTH}; {EAST}). No text");
     assert!(hint(EYE_BILL).starts_with(&differ), "{}", hint(EYE_BILL));
     let events = e.ok(&["events", "list", "--person", "Alex"]);
-    let visit = events["items"][0]["id"].as_str().unwrap().to_string();
-    assert_eq!(events["items"].as_array().unwrap().len(), 1);
+    // The fill, and the visit.
+    assert_eq!(events["items"].as_array().unwrap().len(), 2);
+    let visit = events["items"][1]["id"].as_str().unwrap().to_string();
     let v = ask(RECORDS, json!({"kind": "events", "id": visit}));
     let fields = &v["items"][0]["fields"];
     assert_eq!(fields["in_error"], json!([LETTER, SKIN_BILL]));
@@ -1170,6 +1182,38 @@ fn what_is_entered_in_error_is_counted_and_opened_by_its_id() {
     let v = ask(RECORDS, json!({"kind": "events", "id": visit}));
     let members = v["items"][0]["fields"]["members"].to_string();
     assert!(members.contains(LETTER), "{members}");
+}
+
+/// A page of bills counts bills, whether or not one was paid.
+#[test]
+fn a_page_of_bills_entered_in_error_counts_bills() {
+    let e = Env::new("errors-bills");
+    let dir = fixture_household(&e, "errors", ERRORS);
+    let marks = dir.join("marks.json");
+    let mut v: Value = serde_json::from_slice(&std::fs::read(&marks).unwrap()).unwrap();
+    v["payments"] = json!([]);
+    std::fs::write(&marks, serde_json::to_vec(&v).unwrap()).unwrap();
+    let t = e.tools();
+    for (args, line) in [
+        (
+            json!({"kind": "bills"}),
+            "1 bill entered in error, not shown",
+        ),
+        (
+            json!({"kind": "bills", "person": "Alex"}),
+            "2 bills entered in error, not shown",
+        ),
+        (
+            json!({"kind": "documents", "person": "Alex"}),
+            "3 entered in error, not shown",
+        ),
+    ] {
+        let r = call(&t, RECORDS, args.clone());
+        let v = assert_fits(&t, RECORDS, &r);
+        let mut of = v["warnings"].as_array().unwrap().iter();
+        let said = of.find(|w| w["code"] == "entered-in-error").unwrap();
+        assert_eq!(said["message"], line, "{args}");
+    }
 }
 
 /// The commands say the same, and what the household decided of what is in
@@ -1221,6 +1265,9 @@ fn the_commands_count_what_is_entered_in_error_and_keep_what_was_decided() {
     assert_eq!(v["items"][0]["standing"], "sources differ");
     assert_eq!(v["items"][0]["says"], json!([NORTH, EAST]));
 
+    let v = e.ok(&["meds", "--person", "Alex"]);
+    assert_eq!(v["items"][0]["standing"], "sources differ", "{v}");
+    assert_eq!(v["items"][0]["says"][1], json!(EAST));
     let kept = |args: &[&str], id: &str| {
         let v = e.ok(args);
         let mut items = v["items"].as_array().unwrap().iter();

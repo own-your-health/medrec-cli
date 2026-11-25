@@ -158,6 +158,8 @@ write(
             record("result", "levelerror", "2024-03-07", "Example level", EAST, value="9"),
             record("immunization", "doseerror", "2024-03-08", "Example vaccine", EAST),
             record("encounter", "checkerror", "2024-06-18", "Example check", EAST),
+            record("medication", "filldiffers", "2024-03-09", "Sample tablet",
+                   {"north": "completed", "east": ERROR}, source="dispense"),
         ],
         "documents": [
             paper("bill", "skinbill", "2024-04-02", "Example Skin Room", "Skin statement", EAST, "40.00"),
