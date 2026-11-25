@@ -593,6 +593,10 @@ medrec private unmark <id>                  # not private, whatever the rules sa
 medrec private reset <id>                   # back to the rules
 ```
 
+A request from the app can mark an item private and undo the household's own
+mark. It opens nothing that is private otherwise: that is done at the Mac, with
+the commands above, `events apart` and `together`, and `labels`.
+
 This is discretion, not access control: anyone who can read the folder
 can read every record in it. Marks are kept in the person's `marks.json`
 with the payments, and each person's private items are a view,

@@ -2109,7 +2109,7 @@ fn events_cmd(cli: &Cli, cmd: &EventsCmd, store: &ConfigStore) -> Result<(), Cli
             let f = Folder::open(&cfg, Access::Write)?;
             let h = f.household()?;
             let p = owner_of(&f, &h, a)?;
-            let (d, new) = medrec::events::decide(&f, p, kind, a, b, None, None)?;
+            let (d, new) = medrec::events::decide(&f, &h, p, kind, a, b, None, None)?;
             let mut v = to_value(&d);
             let idx = f.index(p)?;
             if medrec::standing::errors(&idx).any(|id| id == a || id == b) {

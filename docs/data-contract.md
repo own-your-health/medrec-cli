@@ -1129,6 +1129,7 @@ does not read past the limit) and `handled`. A `done/` file is at most 8 KiB.
 | `outcome` | From the sources' outcomes. `ok`: at least one `ok`, none `failed` or `needs_person`. `partial`: at least one `ok`, and at least one `failed` or `needs_person`. `needs_person`: none `ok` or `failed`, at least one `needs_person`. `failed`: none `ok`, at least one `failed`. `skipped`: every source skipped. `invalid`: refused by rule 1, with `sources` empty and `message` saying why. |
 | `sources[]` | Each source the request covered: its outcome (an attempt outcome), the attempt that served it (`null` for a skip found without one), and `next_allowed_at`, the earliest time a request may import it again (rule 3). |
 | `message` | One line for a person, with no record content. |
+| `reason` | `kept_private` when the request was refused because it would open something the rules hold private (Private requests, below; 0.9.9 and later). Absent otherwise. A reader goes by this, never by `message`. |
 | `by` | The medrec that handled it. |
 
 ### Event requests (0.9.0 and later)
@@ -1155,7 +1156,8 @@ with `event` in place of `scope`:
 - Its `done/` file keeps `event` where a refresh's keeps `scope`.
   `handled.outcome` is `ok` once recorded (a decision already recorded is
   `ok` too), `invalid` when a member is not one of that person's records or
-  documents, and `failed` when the folder could not be read or written.
+  documents, or when it would open something the rules hold private (Private
+  requests, below), and `failed` when the folder could not be read or written.
   `sources` is empty.
 - A `failed` decision (an event, paid, unpaid or private request) is answered
   once and not tried again: its `done/` file says `failed`, and the person
@@ -1208,8 +1210,8 @@ The app's undo of "Mark paid" is a request with `unpaid` in place of `scope`:
 
 ### Private requests (0.9.1 and later)
 
-The app's "Keep private" and "Not private" are a request with `private` in
-place of `scope`:
+The app's "Keep private" and its undo are a request with `private` in place of
+`scope`:
 
 ```json
 {"schema": "medrec-request/v1", "id": "x_…", "requested_at": "…",
@@ -1218,14 +1220,34 @@ place of `scope`:
 ```
 
 - `item` is one of the person's record, document or event ids (`r_…`,
-  `d_…`, `e_…`). `private` is `true`, `false`, or `null` to drop the
-  household's mark and leave the item to the rules. A request with more
+  `d_…`, `e_…`). `private` is `true`, or `null` to drop the household's mark
+  and leave the item to the rules, or `false` (next). A request with more
   than one of `scope`, `event`, `paid`, `unpaid`, `private` and `provider`, or whose
   `person` is not in `household.json`, is `invalid` (rule 1).
 - It is applied as an event request is: by the next pass, to the person's
   `marks.json` `private`, pending while another writer holds the folder.
   Its `done/` file keeps `private`. `handled.outcome` is `invalid` when the
   item is not one of that person's.
+- **A request opens nothing the rules hold private** (0.9.9 and later).
+  Whoever can write to `_requests/` can make one, so what is private otherwise
+  than by the household's own mark (by a rule, a provider label, or what a
+  source gave) is opened at the Mac alone, by `medrec private unmark`, `events
+  apart` and `together`, and `labels`.
+  - `false` records no mark. It is refused where the item is private without
+    the household's mark, and does what `null` does where it is not. An item
+    the household marked not private at the Mac stays so.
+  - An event request, and a provider request of any kind, is refused when
+    something would not be private after it that is now, otherwise than by the
+    household's own mark. Both are judged without the household's `true` marks,
+    so that no two requests open together what neither does alone. Of an event
+    that is private, each event that would have a private member of it must be
+    private.
+  - Refused, `handled.outcome` is `invalid`, `reason` is `kept_private`, and
+    `message` is "something in it is kept off shared screens, and that can be
+    changed at the Mac": everyone's outcomes show together, so it does not say
+    which item. While the person's provider labels are not known
+    (`labels_unreadable`), one that has to be judged cannot be read, and fails.
+  - Marks, decisions and corrections recorded before stay as they are.
 
 ### Provider requests (0.9.7 and later)
 
@@ -1249,7 +1271,8 @@ in place of `scope`:
 - It is applied as an event request is: by the next pass, to the person's
   `marks.json` `providers`, pending while another writer holds the folder.
   `handled.outcome` is `invalid` when the person's items do not print a name
-  it gives, or the item is not theirs or does not print it. The same said
+  it gives, when the item is not theirs or does not print it, and when it would
+  open something the rules hold private (Private requests, above). The same said
   again is `ok`, and so is an undo of what is not there: a request can be
   served twice, and two people can ask for the same.
 - What it says is as of when its file reached the folder, by the store's time

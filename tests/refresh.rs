@@ -2168,7 +2168,7 @@ fn private_items_follow_the_rules_until_the_household_marks_them() {
     assert!(!records.iter().any(|r| r.0 == varenicline), "{v}");
 
     // The app marks a condition private and names an item that is not the
-    // person's; an unmarked event's members stay private by the event.
+    // person's.
     decision_request(
         &e,
         "x_privateaaaaaaaaaaaaa",
@@ -2180,12 +2180,6 @@ fn private_items_follow_the_rules_until_the_household_marks_them() {
         "x_privatebbbbbbbbbbbbb",
         "private",
         json!({"person": aid, "item": "r_nosuchrecordaaaaaaaa", "private": true}),
-    );
-    decision_request(
-        &e,
-        "x_privateccccccccccccc",
-        "private",
-        json!({"person": aid, "item": visit_event, "private": false}),
     );
     e.ok(&["refresh", "--scheduled"]);
     let done = e.json_at("_requests/done/20261124T120000Z_x_privateaaaaaaaaaaaaa.json");
@@ -2223,11 +2217,15 @@ fn private_items_follow_the_rules_until_the_household_marks_them() {
         records.contains(&(migraine.into(), "household".into(), "household".into())),
         "{v}"
     );
+    // An unmarked event's visit is private by its place still.
+    e.ok(&["private", "unmark", &visit_event]);
+    e.ok(&["views", "write"]);
+    let v = private_view(&e, aid);
     assert!(
         v["events"].get(&visit_event).is_none(),
         "the event is unmarked: {v}"
     );
-    // Its visit is private by its place still.
+    let records = private_rows(&v, "records");
     assert!(
         records.contains(&(visit.into(), area(), "provider".into())),
         "{v}"
@@ -2258,6 +2256,260 @@ fn private_items_follow_the_rules_until_the_household_marks_them() {
     let (code, _) = e.code(&["private", "mark", sumatriptan]);
     assert_ne!(code, Some(0));
     assert_eq!(std::fs::read(&file).unwrap(), b"{not json");
+}
+
+/// The private fixtures, with a result of the group visit's day that only its
+/// event makes private, and a visit to a place nothing else prints.
+fn with_a_members_result(e: &Env) -> Value {
+    let alex = with_private_fixtures(e);
+    let path = e
+        .records()
+        .join(alex["folder"].as_str().unwrap())
+        .join("index.json");
+    let mut v: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let records = v["records"].as_array_mut().unwrap();
+    let like = |records: &[Value], id: &str| -> Value {
+        records.iter().find(|r| r["id"] == id).unwrap().clone()
+    };
+    let mut level = like(records, "r_magnesiumaaaaaaaaaaa");
+    level["id"] = LEVEL.into();
+    level["key"] = "result|level|2025-02-20".into();
+    level["display"] = "Example level".into();
+    level["date"] = "2025-02-20T17:30:00Z".into();
+    level["provenance"] = like(records, QUIT)["provenance"].clone();
+    let mut plain = like(records, HEAD);
+    plain["id"] = PLAIN.into();
+    plain["key"] = "encounter|plain|2025-05-06".into();
+    plain["date"] = "2025-05-06T15:00:00Z".into();
+    plain["fields"] = json!({"class": "AMB", "service_provider": "Example Plain Room"});
+    records.extend([level, plain]);
+    std::fs::write(&path, serde_json::to_vec(&v).unwrap()).unwrap();
+    alex
+}
+
+const LEVEL: &str = "r_levelaaaaaaaaaaaaaaa";
+const PLAIN: &str = "r_plainaaaaaaaaaaaaaaa";
+const QUIT: &str = "r_quitvisitaaaaaaaaaaa";
+const HEAD: &str = "r_headvisitaaaaaaaaaaa";
+const HEADACHE: &str = "Sample Headache Clinic";
+const PLAIN_ROOM: &str = "Example Plain Room";
+
+/// One person's requests, served one at a time.
+struct Asking<'a> {
+    e: &'a Env,
+    aid: String,
+    file: PathBuf,
+    asked: std::cell::Cell<u8>,
+}
+
+impl Asking<'_> {
+    fn new(e: &Env) -> Asking<'_> {
+        setup(e);
+        let alex = with_a_members_result(e);
+        e.ok(&["views", "write"]);
+        let folder = e.records().join(alex["folder"].as_str().unwrap());
+        Asking {
+            e,
+            aid: alex["id"].as_str().unwrap().into(),
+            file: folder.join("marks.json"),
+            asked: std::cell::Cell::new(b'a'),
+        }
+    }
+
+    /// What a request asked now is answered: its `handled`.
+    fn ask(&self, key: &str, mut body: Value) -> Value {
+        body["person"] = self.aid.clone().into();
+        let n = self.asked.get();
+        self.asked.set(n + 1);
+        let id = format!("x_{}", (n as char).to_string().repeat(20));
+        let now = medrec::model::now_rfc3339();
+        decision_request_at(self.e, &id, key, body, &now);
+        self.e.ok(&["refresh", "--scheduled"]);
+        let stamp: String = now.chars().filter(|c| *c != '-' && *c != ':').collect();
+        let done = format!("_requests/done/{stamp}_{id}.json");
+        self.e.json_at(&done)["handled"].clone()
+    }
+
+    /// Asked and refused, with nothing written and no item named.
+    fn refused(&self, key: &str, body: Value) {
+        let (marks, private) = (self.decided(), self.private());
+        let h = self.ask(key, body.clone());
+        assert_eq!(h["outcome"], "invalid", "{body}: {h}");
+        assert_eq!(h["reason"], "kept_private", "{body}: {h}");
+        assert_eq!(
+            h["message"],
+            "something in it is kept off shared screens, and that can be changed at the Mac"
+        );
+        assert_eq!((self.decided(), self.private()), (marks, private), "{body}");
+    }
+
+    fn granted(&self, key: &str, body: Value) -> Value {
+        let h = self.ask(key, body.clone());
+        assert_eq!(h["outcome"], "ok", "{body}: {h}");
+        assert!(h.get("reason").is_none(), "{h}");
+        h["message"].clone()
+    }
+
+    /// The person's marks and decisions, as the folder has them.
+    fn decided(&self) -> [Option<Vec<u8>>; 2] {
+        ["marks.json", "overrides.json"].map(|f| std::fs::read(self.file.with_file_name(f)).ok())
+    }
+
+    fn marks(&self) -> Value {
+        serde_json::from_slice(&std::fs::read(&self.file).unwrap()).unwrap()
+    }
+
+    fn private(&self) -> Value {
+        self.e.ok(&["views", "write"]);
+        private_view(self.e, &self.aid)
+    }
+
+    fn is_private(&self, record: &str) -> bool {
+        self.private()["records"].get(record).is_some()
+    }
+
+    /// The event a record is in.
+    fn event_of(&self, record: &str) -> String {
+        self.e.ok(&["views", "write"]);
+        let v = events_view(self.e, &self.aid);
+        let mut events = v["events"].as_array().unwrap().iter();
+        let of = events.find(|e| e["members"].to_string().contains(record));
+        of.unwrap()["id"].as_str().unwrap().to_string()
+    }
+}
+
+/// A request never marks an item not private: it drops the household's own
+/// mark, and is refused where the item is private without it.
+#[test]
+fn a_request_marks_nothing_not_private() {
+    let e = Env::new("private-asked");
+    let a = Asking::new(&e);
+    let (smoking, migraine, varenicline) = (
+        "r_smokingaaaaaaaaaaaaa",
+        "r_migraineaaaaaaaaaaaa",
+        "r_vareniclineaaaaaaaaa",
+    );
+    let item = |item: &str, private: Value| json!({"item": item, "private": private});
+    // By a rule, by the event it is in, and an event by its members.
+    assert!(a.is_private(LEVEL));
+    let event = a.event_of(QUIT);
+    for i in [smoking, LEVEL, &event] {
+        a.refused("private", item(i, false.into()));
+    }
+    // With the household's mark too, which stays and can be dropped.
+    for i in [smoking, &event] {
+        a.granted("private", item(i, true.into()));
+        a.refused("private", item(i, false.into()));
+        a.granted("private", item(i, Value::Null));
+        assert_eq!(a.marks()["private"].as_array().map_or(0, Vec::len), 0);
+    }
+    assert!(a.is_private(smoking) && a.is_private(LEVEL));
+
+    // One only the household's own mark makes private.
+    a.granted("private", item(migraine, true.into()));
+    assert!(a.is_private(migraine));
+    assert_eq!(
+        a.granted("private", item(migraine, false.into())),
+        "the item follows the rules"
+    );
+    assert!(!a.is_private(migraine));
+    assert!(a.marks().get("private").is_none());
+    a.granted("private", item(migraine, false.into()));
+    assert!(a.marks().get("private").is_none());
+
+    // Marked not private at the Mac, it stays so, and a request that says so
+    // again changes nothing.
+    e.ok(&["private", "unmark", varenicline]);
+    let marks = a.decided();
+    a.granted("private", item(varenicline, false.into()));
+    assert_eq!(a.decided(), marks);
+    assert!(!a.is_private(varenicline));
+    a.granted("private", item(varenicline, Value::Null));
+    assert!(a.is_private(varenicline));
+}
+
+/// A result only its visit's event makes private is not taken out of it, not
+/// even when the household marked it private first; at the Mac it is.
+#[test]
+fn a_request_takes_no_member_out_of_a_private_event_that_would_open() {
+    let e = Env::new("private-apart");
+    let a = Asking::new(&e);
+    a.refused("event", json!({"apart": [QUIT, LEVEL]}));
+    a.granted("private", json!({"item": LEVEL, "private": true}));
+    a.refused("event", json!({"apart": [LEVEL, QUIT]}));
+    a.granted("private", json!({"item": LEVEL, "private": null}));
+    assert!(a.is_private(LEVEL));
+    // Of an open event, and of one whose members are each private.
+    a.granted("event", json!({"apart": [HEAD, "r_magnesiumaaaaaaaaaaa"]}));
+    e.ok(&["events", "apart", QUIT, LEVEL]);
+    assert!(!a.is_private(LEVEL));
+    assert!(a.is_private(QUIT));
+}
+
+/// Nor is a private event put into one the household opened; into one that
+/// becomes private with it, it is.
+#[test]
+fn a_request_puts_no_private_event_into_an_open_one() {
+    let e = Env::new("private-together");
+    let a = Asking::new(&e);
+    a.granted("event", json!({"together": [QUIT, PLAIN]}));
+    assert!(a.is_private(PLAIN));
+    a.refused("event", json!({"apart": [PLAIN, QUIT]}));
+    e.ok(&["events", "apart", PLAIN, QUIT]);
+    let open = a.event_of(PLAIN);
+    e.ok(&["private", "unmark", &open]);
+    a.refused("event", json!({"together": [QUIT, PLAIN]}));
+    a.refused("event", json!({"together": [LEVEL, PLAIN]}));
+}
+
+/// What a label makes private stays so whatever a request says of the
+/// provider.
+#[test]
+fn a_request_about_a_provider_opens_nothing() {
+    let e = Env::new("private-provider");
+    let a = Asking::new(&e);
+    let names = || json!([HEADACHE, PLAIN_ROOM]);
+    // Nothing of it is private: each is as asked.
+    a.granted(
+        "provider",
+        json!({"printed": [HEADACHE], "set": {"name": "Head room"}}),
+    );
+    a.granted("provider", json!({"printed": [HEADACHE], "wrong": true}));
+    let wrong = a.marks()["providers"][0]["id"].clone();
+    a.granted("provider", json!({"undo": wrong}));
+    a.granted("provider", json!({"printed": names(), "same": false}));
+    a.granted("provider", json!({"printed": names(), "same": true}));
+    assert!(!a.is_private(HEAD) && !a.is_private(PLAIN));
+
+    let said = e.ok(&[
+        "labels",
+        "set",
+        "--person",
+        "Alex",
+        "--printed",
+        HEADACHE,
+        "--role",
+        "Substance use counselor",
+    ]);
+    let said = said["said"]["id"].clone();
+    assert!(a.is_private(HEAD) && a.is_private(PLAIN));
+    let set = json!({"role": "family doctor"});
+    for body in [
+        json!({"printed": [HEADACHE], "set": set}),
+        json!({"printed": [HEADACHE], "set": set, "item": HEAD}),
+        json!({"printed": [HEADACHE], "wrong": true}),
+        json!({"printed": [HEADACHE], "wrong": true, "item": HEAD}),
+        json!({"printed": names(), "same": false}),
+        json!({"undo": said}),
+    ] {
+        a.refused("provider", body);
+    }
+    // What keeps it private is granted.
+    a.granted(
+        "provider",
+        json!({"printed": [HEADACHE], "set": {"role": "Substance use counselor", "name": "Head room"}}),
+    );
+    assert!(a.is_private(HEAD) && a.is_private(PLAIN));
 }
 
 /// A person's `providers.json`.
