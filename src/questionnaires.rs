@@ -7,8 +7,10 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
-use crate::model::Code;
-use crate::normalize::LOINC;
+use serde_json::Value;
+
+use crate::model::{Code, Record};
+use crate::normalize::{COMPONENTS, LOINC};
 use crate::private::{MENTAL_HEALTH, SUBSTANCE_USE};
 
 /// Whom an answer is about.
@@ -148,6 +150,27 @@ pub fn of(name: &str, code: Option<&Code>) -> Option<Questionnaire> {
             .map(|(_, q)| *q)
             .next()
     })
+}
+
+/// What a result or a report is told by: its name and code, then those of each
+/// of its parts.
+pub fn told_by(r: &Record) -> Vec<(String, Option<Code>)> {
+    let parts = r.fields.get(COMPONENTS).and_then(Value::as_array);
+    let code = |p: &Value| serde_json::from_value::<Code>(p.get("code")?.clone()).ok();
+    let parts = parts.into_iter().flatten().filter_map(code);
+    let parts = parts.map(|c| (c.display.clone().unwrap_or_default(), Some(c)));
+    std::iter::once((r.display.clone(), r.code.clone()))
+        .chain(parts)
+        .collect()
+}
+
+/// The questionnaires that a result or a report is of.
+pub fn asked_by(r: &Record) -> Vec<Questionnaire> {
+    let told = told_by(r);
+    let each = told
+        .iter()
+        .filter_map(|(name, code)| of(name, code.as_ref()));
+    each.collect()
 }
 
 #[cfg(test)]

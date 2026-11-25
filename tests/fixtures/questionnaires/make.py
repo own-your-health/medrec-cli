@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Writes index.json: an invented person's results, one for each kind of
-questionnaire of "Private" in docs/data-contract.md and one that is none,
+questionnaire of "Private" in docs/data-contract.md and one that is none, a
+reading that only the code of one of its parts says is of one,
 conditions with a code for tobacco use and one without, a report of one with its
 paper, a paper named as one, a visit and claims of some
 of those days, and two pharmacy claims. The sources are those of
@@ -123,6 +124,10 @@ RESULTS = [
     ("sunlight", "2024-05-20", "Example sunlight index", None),
 ]
 
+
+def part(display, code, value):
+    return {"code": {"system": LOINC, "code": code, "display": display}, "value": value}
+
 with open(os.path.join(HERE, "index.json"), "w") as f:
     json.dump(
         {
@@ -135,6 +140,18 @@ with open(os.path.join(HERE, "index.json"), "w") as f:
                 *(
                     record("result", n, day, display, code, value="4", category="Survey")
                     for n, day, display, code in RESULTS
+                ),
+                record(
+                    "result",
+                    "pieces",
+                    "2024-06-24",
+                    "Example check-in",
+                    value="First piece 6; Second piece 2",
+                    components=[
+                        part("First piece", "00000-9", 6),
+                        part("Second piece", "44261-6", 2),
+                    ],
+                    category="Survey",
                 ),
                 condition("leaves", "2024-05-28", "Z72.0"),
                 condition("formerly", "2024-05-29", "Z87.891"),

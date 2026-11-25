@@ -223,15 +223,18 @@ The last column is the FHIR element the value comes from.
 | `encounter` | `service_provider` | text | `serviceProvider.display` |
 | `encounter` | `period` | `{start, end}` | `period` |
 | `result` | `when` | as written | `effectiveDateTime`, `effectivePeriod.start`, `effectiveInstant` or `issued` |
-| `result` | `value` | `{value, unit, system}` (a quantity), else text, a boolean, a whole number or a date | `valueQuantity`, `valueString`, `valueCodeableConcept`, `valueBoolean`, `valueInteger`, `valueDateTime` |
+| `result` | `value` | `{value, unit, system}` (a quantity; 0.9.10 and later with `comparator`, one of `<`, `<=`, `>=` and `>`, where the source gives one), else text, a boolean, a whole number or a date | `valueQuantity`, `valueString`, `valueCodeableConcept`, `valueBoolean`, `valueInteger`, `valueDateTime`; 0.9.10 and later `valueTime`, `valueRange` and `valueRatio` as text, and what its parts say where it has none of its own |
+| `result` | `components` | a list of parts, below (0.9.10 and later) | each `component` with a code and a value |
 | `result` | `reference_range` | text | first `referenceRange` (its `text`, else its low and high) |
 | `result` | `interpretation` | text | first `interpretation` |
 | `result` | `category` | text | first `category` |
+| `result` | `categories` | a list of codes, below (0.9.10 and later) | each `category` |
 | `result` | `issued` | as written | `issued` |
 | `result` | `about` | `a parent` or `another person` (0.9.9 and later) | `focus`: About another person, below |
 | `report` | `when` | as written | `effectiveDateTime`, `effectivePeriod.start` or `issued` |
 | `report` | `conclusion` | text | `conclusion` |
 | `report` | `category` | text | `category` |
+| `report` | `categories` | a list of codes, below (0.9.10 and later) | each `category` |
 | `report` | `results` | the number of results it lists | `result` |
 | `report` | `issued` | as written | `issued` |
 | `condition` | `when` | as written | `onsetDateTime`, `onsetPeriod.start`, `recordedDate` or `assertedDate` |
@@ -312,11 +315,30 @@ there was one. It is text to show, and a date only where it is one.
 `abatement` stays a date. `categories` is the code of each `category`, in
 FHIR's and US Core's own systems before a vendor's, each once; a category with
 no code is its text, in the same list, so a reader looks for the codes it knows
-and shows the rest as they are. Before 0.9.9 a condition had no `onset`,
+and shows the rest as they are. A result's and a report's are those of FHIR's
+observation categories and of HL7's table 0074 (0.9.10 and later). Before 0.9.9 a
+condition had no `onset`,
 `recorded`, `categories` or `abatement_text`, an allergy had only `when`,
 `criticality` and `reaction`, and a medicine had no `start`, `end`, `end_of`,
 `categories`, `status_reason` or `reported`. `medrec reindex` gives them to
 records filed before.
+
+**A reading of several parts** (0.9.10 and later) is one result. `components` is
+its parts as the source orders them, `{code, value, reference_range,
+interpretation}`, each as a result's own (`code` is `{system, code, display}`),
+the last two absent where the part has none. A part with no code or no value is
+not in it. Where the Observation has a value of its own, `value` is that.
+Otherwise it is what its parts say:
+
+- the two of a blood pressure, told by their LOINC codes (8480-6 and 8462-4) and
+  by nothing else, are `{value: "128/76", unit}`, where there is one of each, both
+  are exact numbers and both are in the same unit;
+- each other part is its name and its value, `; ` between them. Where there are
+  others beside a blood pressure, `value` is a text that begins with it.
+
+A part is not a record. A reading is judged by the names and codes of its parts
+too (Private, below). `medrec reindex` gives results and reports filed before
+what 0.9.10 reads of them.
 
 **Words.** A condition's, an allergy's and a medicine's `words` (0.9.9 and
 later) is what each of its sources says of it that can differ between them.
@@ -568,7 +590,8 @@ gained fields), `providers_updated` (0.9.6 and later: records whose
 of, and conditions, allergies and medicines whose `status` or `fields`
 changed), `given_updated` (0.9.9 and later: records whose `given` gained
 something), `results_split` (0.9.9 and later: results about somebody else that
-were filed as the person's own, or in one record with it), `papers_updated` (0.9.9 and later: papers whose `also_from`,
+were filed as the person's own, or in one record with it), `results_updated` (0.9.10
+and later: results and reports whose `fields` changed), `papers_updated` (0.9.9 and later: papers whose `also_from`,
 `words`, `errors` or `given` changed) and `papers_unread` (0.9.9 and later: raw files of
 papers that do not read). From 0.9.9 a run makes every person's views again, even
 when no record changes.
@@ -2350,7 +2373,7 @@ nothing is private.
   | `code` | is a condition whose ICD-10 code is in an area, or a claim whose principal diagnosis (the lowest `sequence`) is: F10–F19 and Z71.4–Z71.5 substance use, and (0.9.9 and later) Z71.6, Z72.0, Z77.22, Z87.891 and O99.33; the other F codes mental health; Z30–Z32, Z33.2, O00–O08, N46 and N96–N98 reproductive; A50–A64, B20, Z21, Z11.3–Z11.4, Z20.2, Z20.6 and Z72.5 sexual health |
   | `provider` | was made by a practice or clinician whose name or credential says its area: a claim's provider or facility, a visit's place, location or clinician, a medicine's prescriber, a result's performer, a document's organization; or is a record that prints a provider with a sure label (Provider labels, above) whose name, practice or role does, or a record, document or event that prints one the household calls so (0.9.7 and later) |
   | `medicine` | is a medicine of an area by its name or code, or (0.9.9 and later) a pharmacy claim its `display` names as one: antidepressants, antipsychotics, anxiolytics, stimulants and lithium; fertility drugs and contraceptives; HIV medicines and those for erectile dysfunction; medicines for substance use and smoking |
-  | `test` | is a result or report of a test of an area: sexually transmitted infections, pregnancy and fertility, drug screens; or (0.9.9 and later) of a questionnaire of one, or of tobacco use (Questionnaires, below) |
+  | `test` | is a result or report of a test of an area: sexually transmitted infections, pregnancy and fertility, drug screens; or (0.9.9 and later) of a questionnaire of one, or of tobacco use (Questionnaires, below); by its own name and code or those of any of its parts (0.9.10 and later) |
   | `members` | is an event with a private claim or portal visit, or whose own members are all private |
   | `event` | is a member of a private event |
   | `words` | is a bill or receipt whose first page that has any text says an area, by a service, a medicine or a test, or any document whose title does (0.9.6 and later), or whose title is a questionnaire's, or with an `original_name` that says either (0.9.9 and later; `_`, `.` and `-` read as spaces) |

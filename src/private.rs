@@ -358,8 +358,13 @@ fn record_why(r: &Record) -> Option<Why> {
                 .map(|area| Why::of(area, "medicine"))
                 .or_else(|| by_names(&["prescriber"]))
         }
-        "result" | "report" => first_area(&TESTS, &r.display)
-            .or_else(|| questionnaires::of(&r.display, r.code.as_ref()).map(|q| q.area))
+        // A reading is, by any of its parts.
+        "result" | "report" => questionnaires::told_by(r)
+            .iter()
+            .find_map(|(name, code)| {
+                first_area(&TESTS, name)
+                    .or_else(|| questionnaires::of(name, code.as_ref()).map(|q| q.area))
+            })
             .map(|area| Why::of(area, "test"))
             .or_else(|| by_names(&["performer"])),
         _ => None,

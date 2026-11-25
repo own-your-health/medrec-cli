@@ -3024,6 +3024,106 @@ fn a_record_keeps_what_each_source_says_of_its_status() {
     assert_eq!(read()["records"], full["records"]);
 }
 
+/// A result is imported with its parts, its exact value and its categories,
+/// and `reindex` gives them to results and reports that lack them.
+#[test]
+fn a_results_parts_and_categories_come_with_an_import_and_by_reindex() {
+    const READINGS: &str = include_str!("fixtures/fhir/readings.json");
+    let base = Env::new("readings");
+    setup(&base);
+    let cases: Vec<Value> = serde_json::from_str(READINGS).unwrap();
+    let mut resources: Vec<Value> = cases.into_iter().map(|c| c["resource"].clone()).collect();
+    // Each of its own day, so of its own record.
+    for (i, r) in resources.iter_mut().enumerate() {
+        r["effectiveDateTime"] = format!("2024-04-{:02}T09:30:00Z", i + 1).into();
+    }
+    resources.push(serde_json::json!({
+        "resourceType": "DiagnosticReport", "id": "report-1", "status": "final",
+        "code": {"text": "Example panel"}, "effectiveDateTime": "2024-04-20T09:30:00Z",
+        "category": [{"coding": [
+            {"system": "http://terminology.hl7.org/CodeSystem/v2-0074", "code": "LAB"}]}],
+    }));
+    let observations = resources.len() - 1;
+    for r in &mut resources {
+        r["subject"] = serde_json::json!({"reference": "Patient/pat-0001"});
+    }
+    let mut lines: Vec<Value> = Vec::new();
+    for l in medrec::testdata::PROVIDERS_STREAM.lines() {
+        let mut v: Value = serde_json::from_str(l).unwrap();
+        if v.get("counts").is_some() {
+            v["counts"] = serde_json::json!({"Patient": 1, "Observation": observations,
+                "DiagnosticReport": 1});
+            lines.append(&mut resources);
+        }
+        if v["resourceType"].as_str().is_none_or(|t| t == "Patient") {
+            lines.push(v);
+        }
+    }
+    let stream: String = lines.iter().map(|v| format!("{v}\n")).collect();
+    provider_env(&base, &stream).ok(&[
+        "import",
+        "--from",
+        "fakeprov",
+        "--from-profile",
+        "adult1",
+        "--patient",
+        "pat-0001",
+        "--person",
+        "Robin",
+    ]);
+    let path = base.records().join("Robin Testperson/index.json");
+    let read =
+        || -> Value { serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap() };
+    let whole = read();
+    let of_day = |v: &Value, day: &str| -> Value {
+        let mut all = v["records"].as_array().unwrap().iter();
+        all.find(|r| r["date"] == day).unwrap()["fields"].clone()
+    };
+    let first = of_day(&whole, "2024-04-01");
+    assert_eq!(
+        first["value"],
+        serde_json::json!({"value": "128/76", "unit": "mmHg"})
+    );
+    assert_eq!(first["components"].as_array().unwrap().len(), 2, "{first}");
+    assert_eq!(first["categories"], serde_json::json!(["vital-signs"]));
+    assert_eq!(
+        of_day(&whole, "2024-04-20")["categories"],
+        serde_json::json!(["LAB"])
+    );
+    let shown = base.ok(&["results", "--person", "Robin"]).to_string();
+    for text in ["128/76", "<0.5", "1:40"] {
+        assert!(shown.contains(text), "{text}: {shown}");
+    }
+    assert_eq!(base.ok(&["reindex"])["results_updated"], 0);
+
+    // An index without them, as an earlier medrec wrote it.
+    let mut old = read();
+    let mut lacking = 0;
+    for r in old["records"].as_array_mut().unwrap() {
+        let fields = r["fields"].as_object_mut().unwrap();
+        let parts = fields.remove("components").is_some();
+        let had = fields.len();
+        fields.retain(|k, v| k != "categories" && !(k == "value" && parts && v.is_string()));
+        lacking += usize::from(parts || fields.len() < had);
+    }
+    std::fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
+    let r = base.ok(&["reindex", "--dry-run"]);
+    assert_eq!(r["results_updated"], lacking, "{r}");
+    assert_eq!(read()["records"], old["records"]);
+    assert_eq!(base.ok(&["reindex"])["results_updated"], lacking);
+    assert_eq!(read()["records"], whole["records"]);
+    assert_eq!(base.ok(&["reindex"])["results_updated"], 0);
+
+    // A raw file that no longer reads takes nothing from a result.
+    let raw = base
+        .records()
+        .join("Robin Testperson/Records/fakeprov-example-health/Observation");
+    std::fs::write(raw.join("bp-1.json"), "{").unwrap();
+    assert_eq!(base.ok(&["reindex"])["results_updated"], 0);
+    assert_eq!(of_day(&read(), "2024-04-01"), first);
+    let _ = std::fs::remove_dir_all(&base.root);
+}
+
 #[test]
 fn a_claim_line_its_totals_leave_out_is_marked_and_kept_through_reindex() {
     let base = Env::new("claim-lines");

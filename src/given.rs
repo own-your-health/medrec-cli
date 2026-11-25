@@ -7,9 +7,10 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::{json, Map, Value};
 
 use crate::model::{Code, Document, PersonIndex, ProviderRef, Record};
+use crate::normalize::COMPONENTS;
 use crate::providers::FIELDS;
 use crate::services;
 
@@ -69,6 +70,11 @@ pub fn of(r: &Record) -> Given {
     }
     if let Some(lines) = r.fields.get(LINES).filter(|_| r.kind == "claim") {
         fields.insert(LINES.into(), services::read_of(lines));
+    }
+    let parts = r.fields.get(COMPONENTS).and_then(Value::as_array);
+    if let Some(parts) = parts.filter(|_| r.kind == "result") {
+        let codes = parts.iter().map(|p| json!({"code": p["code"]}));
+        fields.insert(COMPONENTS.into(), codes.collect());
     }
     let npi = |p: &ProviderRef| Some((p.field.clone(), p.npi.clone()?));
     Given {
@@ -257,6 +263,24 @@ mod tests {
         r.fields["provider"] = json!("Sample C");
         assert!(keep(&mut r, was));
         assert_eq!(as_given(&r).count(), 2);
+    }
+
+    /// The names and codes of a reading's parts are kept, and no value.
+    #[test]
+    fn what_a_readings_parts_were_is_kept() {
+        let part = |name: &str| json!({"code": {"display": name}, "value": 3});
+        let parts = |names: [&str; 2]| json!({"components": names.map(part), "value": "two"});
+        let mut r = record("result", parts(["One", "Two"]));
+        let other = of(&record("result", parts(["One", "Three"])));
+        assert!(keep(&mut r, other.clone()));
+        assert!(!keep(&mut r, other));
+        let want = json!([{"fields": {"components":
+            [{"code": {"display": "One"}}, {"code": {"display": "Three"}}]}}]);
+        assert_eq!(serde_json::to_value(&r.given).unwrap(), want);
+        let as_was = as_given(&r).next().unwrap();
+        let named = crate::questionnaires::told_by(&as_was);
+        let named: Vec<&str> = named.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(named, ["Example one", "One", "Three"]);
     }
 
     /// An NPI is of the name it came with.

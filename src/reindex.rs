@@ -58,6 +58,8 @@ pub struct Reindexed {
     pub given_updated: usize,
     /// Results that were filed with one about somebody else.
     pub results_split: usize,
+    /// Results and reports whose fields changed.
+    pub results_updated: usize,
     /// Papers whose sources, or what one says or gave of them, changed.
     pub papers_updated: usize,
     /// Raw files of papers that do not read.
@@ -76,6 +78,8 @@ pub struct PersonReindexed {
     pub statuses_updated: usize,
     pub given_updated: usize,
     pub results_split: usize,
+    /// Results and reports whose fields changed.
+    pub results_updated: usize,
     pub papers_updated: usize,
     pub papers_unread: usize,
     /// Of a dry run: what would change in the person's views.
@@ -164,6 +168,7 @@ pub fn claims(
         row.results_split = apart(&mut idx, &older, tmp.path())?;
         let showed: Vec<Given> = idx.records.iter().map(import::showed).collect();
         row.statuses_updated = statuses(&mut idx, tmp.path())?;
+        row.results_updated = results(&mut idx, tmp.path());
         for r in idx.records.iter_mut().filter(|r| r.kind == "claim") {
             row.claims += 1;
             let of = import::writer(r).map(str::to_string);
@@ -206,6 +211,7 @@ pub fn claims(
             row.statuses_updated,
             row.given_updated,
             row.results_split,
+            row.results_updated,
             row.papers_updated,
         ];
         match (changed.iter().any(|n| *n > 0), dry_run) {
@@ -222,6 +228,7 @@ pub fn claims(
         out.statuses_updated += row.statuses_updated;
         out.given_updated += row.given_updated;
         out.results_split += row.results_split;
+        out.results_updated += row.results_updated;
         out.papers_updated += row.papers_updated;
         out.papers_unread += row.papers_unread;
         out.claims += row.claims;
@@ -667,6 +674,34 @@ fn statuses(idx: &mut PersonIndex, tmp: &Path) -> Result<usize, CliError> {
     Ok(changed)
 }
 
+/// The fields of each result and report again, from the raw file they are of:
+/// one that does not say it is entered in error, and would not give the record
+/// another `key`. Records changed, counted.
+fn results(idx: &mut PersonIndex, tmp: &Path) -> usize {
+    let mut changed = 0;
+    let each = idx.records.iter_mut();
+    for r in each.filter(|r| matches!(r.kind.as_str(), "result" | "report")) {
+        let Some(path) = import::wrote(r) else {
+            continue;
+        };
+        let of = |p: &&Provenance| p.raw_path.as_deref() == Some(path);
+        let shape = r.provenance.iter().find(of).and_then(|p| {
+            let new = normalize::record(&read(tmp, path)?, p.clone())?;
+            let in_error = new.words.iter().any(|w| w.in_error());
+            (new.key == r.key && new.kind == r.kind && !in_error).then_some(new)
+        });
+        let Some(mut new) = shape else { continue };
+        if let Some(who) = r.fields.get(about::FIELD) {
+            new.fields.entry(about::FIELD).or_insert(who.clone());
+        }
+        if new.fields != r.fields {
+            r.fields = new.fields;
+            changed += 1;
+        }
+    }
+    changed
+}
+
 /// Whether a record's status and fields are of this shape of one of its raw
 /// files: it has each, but the prescriber import finds elsewhere.
 fn agrees(shape: &Record, r: &Record) -> bool {
@@ -712,6 +747,7 @@ fn read(tmp: &Path, rel: &str) -> Option<Value> {
 /// they point at.
 const RAW_TYPES: &[&str] = &[
     "Observation",
+    "DiagnosticReport",
     "Encounter",
     "MedicationRequest",
     "MedicationDispense",
