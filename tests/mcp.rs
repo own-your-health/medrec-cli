@@ -3191,6 +3191,97 @@ fn what_services_say_makes_claims_and_procedures_private() {
     let _ = std::fs::remove_dir_all(&e.root);
 }
 
+/// A visit is private by its name and its reason, a condition with no ICD-10
+/// code by its name, a medicine and its fill by a brand, a report by its
+/// conclusion, a result by a value that is a text, and a condition by the codes
+/// that say an area, in every answer and view.
+#[test]
+fn what_a_record_says_in_its_own_words_is_private_everywhere() {
+    const HELD: [(&str, &str, &str); 9] = [
+        ("r_reasonedaaaaaaaaaaaa", "mental_health", "words"),
+        ("r_namedvisitaaaaaaaaaa", "mental_health", "words"),
+        ("r_uncodedaaaaaaaaaaaaa", "mental_health", "words"),
+        ("r_othercodeaaaaaaaaaaa", "substance_use", "words"),
+        ("r_familyaaaaaaaaaaaaaa", "substance_use", "code"),
+        ("r_brandaaaaaaaaaaaaaaa", "mental_health", "medicine"),
+        ("r_brandfillaaaaaaaaaaa", "mental_health", "medicine"),
+        ("r_toldaaaaaaaaaaaaaaaa", "sexual_health", "test"),
+        ("r_textvalueaaaaaaaaaaa", "sexual_health", "test"),
+    ];
+    const OPEN: [&str; 6] = [
+        "r_earvisitaaaaaaaaaaaa",
+        "r_heartaaaaaaaaaaaaaaa",
+        "r_noseaaaaaaaaaaaaaaaa",
+        "r_nosefillaaaaaaaaaaaa",
+        "r_eartoldaaaaaaaaaaaaa",
+        "r_earvalueaaaaaaaaaaaa",
+    ];
+    const WORDS: [&str; 9] = [
+        "Anxiety",
+        "anxiety",
+        "Behavioral",
+        "Tobacco",
+        "Sample habit",
+        "Zoloft",
+        "Lexapro",
+        "HIV",
+        "Chlamydia",
+    ];
+    let e = Env::new("words");
+    let dir = fixture_household(&e, "words", &["index.json"]);
+    raw_folders(&e, &dir);
+    let alex = h_id(&e, "Alex Testperson");
+    let t = e.tools();
+    let answers = |person: Option<&str>| -> Vec<Value> {
+        let mut all: Vec<Value> = every_answer(&t, person).into_values().collect();
+        for form in ["concise", "detailed"] {
+            let mut args = json!({"kind": "medications", "response_format": form});
+            if let Some(p) = person {
+                args["person"] = p.into();
+            }
+            let r = call(&t, RECORDS, args);
+            all.push(assert_fits(&t, RECORDS, &r).clone());
+        }
+        // Words that name no title here: what is named is shown.
+        for word in ["follow", "seen", "loratadine", "ear"] {
+            let mut args = json!({"query": word});
+            if let Some(p) = person {
+                args["person"] = p.into();
+            }
+            let r = call(&t, SEARCH, args);
+            let v = assert_fits(&t, SEARCH, &r).clone();
+            all.push(v["items"].clone());
+        }
+        all
+    };
+    let (files, _) = views_of(&e, &alex);
+    let (shared, own) = (answers(None), answers(Some("Alex")));
+    for (id, area, from) in HELD {
+        let why = &files["private"]["records"][id];
+        assert_eq!(*why, json!({"area": area, "from": from}), "{id}");
+        for v in &shared {
+            assert!(!v.to_string().contains(id), "{id}: {v}");
+        }
+        assert!(own.iter().any(|v| v.to_string().contains(id)), "{id}");
+    }
+    for word in WORDS {
+        for v in &shared {
+            assert!(!v.to_string().contains(word), "{word}: {v}");
+        }
+    }
+    for id in OPEN {
+        assert!(files["private"]["records"].get(id).is_none(), "{id}");
+        assert!(shared.iter().any(|v| v.to_string().contains(id)), "{id}");
+    }
+    // Of the views an app shows the household, what search finds is marked.
+    let own = row_of(
+        &every_answer(&t, Some("Alex"))["timeline, detailed"],
+        HELD[0].0,
+    );
+    assert_eq!(own["private"], "mental_health");
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
 /// The words, number and name of a private line, diagnosis or payer note of an
 /// open item are in no answer that names no person: not in its title, its
 /// event, a search, or what an answer counts. Its amounts are, and what is left

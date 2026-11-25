@@ -586,7 +586,9 @@ medicines tied to them, are private: the app keeps them off shared screens (Home
 Everyone calendar, a doctor sheet for someone else) and shows them on that
 person's own pages, and Claude leaves them out of answers about the whole
 household. medrec finds them by their codes, medicines, tests, services and the
-practice that made them, a document by its title, the name its file came with or
+practice that made them, a visit by its name and reason, a condition with no
+ICD-10 code by what it is called, a report by its conclusion and a result by a
+value that is a text, a document by its title, the name its file came with or
 any private record that links it, a bill or receipt by its own words, with its
 copies and the statements and payments before and after it, and a study by its
 report. A study with no report is left out of answers

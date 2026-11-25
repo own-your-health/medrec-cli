@@ -84,6 +84,9 @@ real record, document, study or provider response.
   part. `make.py` writes `index.json` and `text.json`; `parts.json` is what
   `private.json` says of the parts, an event's under a claim in it. Its sources
   are those of `standing/household.json`.
+- `words/` is an invented person's records, one for each rule of the contract's
+  "Private" by a record's own words and codes. `make.py` writes `index.json`. Its
+  sources are those of `standing/household.json`.
 - `bills/` holds invented text in the shapes `pdftotext -layout` gives a
   provider's patient statement and a payment receipt:
   `statement-columns.txt` puts the statement's fields in a header row over a
