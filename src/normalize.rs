@@ -12,12 +12,18 @@ use serde_json::{json, Map, Value};
 use crate::claims;
 use crate::model::{Code, Provenance, Record, Word};
 use crate::providers::printed;
+use crate::views::value_text;
 
 pub const LOINC: &str = "http://loinc.org";
 pub const SNOMED: &str = "http://snomed.info/sct";
 pub const ICD10: &str = "http://hl7.org/fhir/sid/icd-10-cm";
 pub const RXNORM: &str = "http://www.nlm.nih.gov/research/umls/rxnorm";
 pub const CVX: &str = "http://hl7.org/fhir/sid/cvx";
+/// The field of a result that holds its parts.
+pub const COMPONENTS: &str = "components";
+/// The two parts of a blood pressure, by their LOINC codes.
+const SYSTOLIC: &str = "8480-6";
+const DIASTOLIC: &str = "8462-4";
 pub const NDC: &str = "http://hl7.org/fhir/sid/ndc";
 
 /// Each kind's `fields`, as data-contract.md's table lists them: a reader
@@ -41,16 +47,25 @@ pub const FIELDS: &[(&str, &[&str])] = &[
         &[
             "when",
             "value",
+            COMPONENTS,
             "reference_range",
             "interpretation",
             "category",
+            "categories",
             "issued",
             crate::about::FIELD,
         ],
     ),
     (
         "report",
-        &["when", "conclusion", "category", "results", "issued"],
+        &[
+            "when",
+            "conclusion",
+            "category",
+            "categories",
+            "results",
+            "issued",
+        ],
     ),
     (
         "condition",
@@ -216,6 +231,7 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
         .find_map(|p| path_str(r, p))
         .map(str::to_string);
     let mut fields = Map::new();
+    let mut absent = Vec::new();
     if let Some(w) = &when {
         fields.insert("when".into(), json!(w));
     }
@@ -243,7 +259,20 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
             put(&mut fields, "period", r.get("period").cloned());
         }
         "Observation" => {
-            put(&mut fields, "value", observation_value(r));
+            let (parts, without_value) = components(r);
+            let value = observation_value(r);
+            let own = value.as_ref().is_some_and(|v| !value_text(v).is_empty());
+            let value = if own || parts.is_empty() {
+                value
+            } else {
+                reading(&parts)
+            };
+            put(&mut fields, "value", value);
+            if !parts.is_empty() {
+                let parts: Vec<Value> = parts.into_iter().map(Value::Object).collect();
+                fields.insert(COMPONENTS.into(), parts.into());
+            }
+            absent = without_value;
             put(
                 &mut fields,
                 "reference_range",
@@ -259,6 +288,7 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
                 "category",
                 first(r, "category").map(concept_text),
             );
+            put(&mut fields, "categories", categories(r));
             put_str(&mut fields, "issued", path_str(r, "issued"));
             put_str(&mut fields, crate::about::FIELD, about(r));
         }
@@ -269,6 +299,7 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
                 "category",
                 first_or_one(r, "category").map(concept_text),
             );
+            put(&mut fields, "categories", categories(r));
             put(
                 &mut fields,
                 "results",
@@ -563,6 +594,7 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
         errors: Vec::new(),
         fields_from: None,
         given: Vec::new(),
+        absent,
         documents: Vec::new(),
         provenance: vec![provenance],
     })
@@ -740,6 +772,10 @@ fn categories(r: &Value) -> Option<Value> {
         "http://hl7.org/fhir/condition-category",
         "http://terminology.hl7.org/CodeSystem/medicationrequest-category",
         "http://terminology.hl7.org/CodeSystem/medication-statement-category",
+        "http://terminology.hl7.org/CodeSystem/observation-category",
+        "http://hl7.org/fhir/observation-category",
+        "http://terminology.hl7.org/CodeSystem/v2-0074",
+        "http://hl7.org/fhir/v2/0074",
     ];
     let list: Vec<&Value> = match r.get("category")? {
         Value::Array(a) => a.iter().collect(),
@@ -867,11 +903,20 @@ fn coding_text(c: &Value) -> Value {
 
 fn observation_value(r: &Value) -> Option<Value> {
     if let Some(q) = r.get("valueQuantity") {
-        return Some(json!({
-            "value": q.get("value"),
-            "unit": q.get("unit").or_else(|| q.get("code")),
-            "system": q.get("system"),
-        }));
+        let mut v = measured(q)?;
+        v["system"] = q.get("system").cloned().unwrap_or_default();
+        return Some(v);
+    }
+    if let Some(of) = r.get("valueRange") {
+        return Some(range_text(of)).filter(|v| !v.is_null());
+    }
+    if let Some(of) = r.get("valueRatio") {
+        let side = |k: &str| {
+            let text = of.get(k).and_then(measured);
+            text.map(|q| value_text(&q)).filter(|t| !t.is_empty())
+        };
+        let (n, d) = (side("numerator")?, side("denominator")?);
+        return Some(format!("{n}:{d}").into());
     }
     if let Some(s) = r.get("valueString") {
         return Some(s.clone());
@@ -879,9 +924,95 @@ fn observation_value(r: &Value) -> Option<Value> {
     if let Some(c) = r.get("valueCodeableConcept") {
         return Some(concept_text(c));
     }
-    ["valueBoolean", "valueInteger", "valueDateTime"]
+    ["valueBoolean", "valueInteger", "valueDateTime", "valueTime"]
         .iter()
         .find_map(|k| r.get(*k).cloned())
+}
+
+/// A number with its unit, and what says it is a bound: below or above what
+/// could be measured is not the number itself.
+fn measured(q: &Value) -> Option<Value> {
+    let mut v = quantity(Some(q)).filter(|v| !v["value"].is_null())?;
+    let than = path_str(q, "comparator");
+    if let Some(c) = than.filter(|c| ["<", "<=", ">=", ">"].contains(c)) {
+        v["comparator"] = c.into();
+    }
+    Some(v)
+}
+
+/// The parts of a reading that have a value, each as a result has its own, and
+/// the codes of those that have none.
+fn components(r: &Value) -> (Vec<Map<String, Value>>, Vec<Code>) {
+    let parts = r.get("component").and_then(Value::as_array);
+    let (mut out, mut absent) = (Vec::new(), Vec::new());
+    for c in parts.into_iter().flatten() {
+        let code = c.get("code").and_then(|c| codeable(c, &[LOINC]));
+        let Some(code) = code.filter(|c| c.display.is_some() || c.code.is_some()) else {
+            continue;
+        };
+        let value = observation_value(c).filter(|v| !value_text(v).is_empty());
+        let Some(value) = value else {
+            absent.push(code);
+            continue;
+        };
+        let mut part = Map::new();
+        put(&mut part, "code", serde_json::to_value(code).ok());
+        part.insert("value".into(), value);
+        put(
+            &mut part,
+            "reference_range",
+            first(c, "referenceRange").map(range_text),
+        );
+        put(
+            &mut part,
+            "interpretation",
+            first_or_one(c, "interpretation").map(concept_text),
+        );
+        out.push(part);
+    }
+    (out, absent)
+}
+
+/// What a reading of parts says as one: the two of a blood pressure, told by
+/// their codes alone and in one unit, then each other by its name.
+fn reading(parts: &[Map<String, Value>]) -> Option<Value> {
+    let of = |code: &str| {
+        let mut its = parts
+            .iter()
+            .filter(|p| p["code"]["system"] == LOINC && p["code"]["code"] == code);
+        let one = its.next().filter(|_| its.next().is_none())?;
+        let v = &one["value"];
+        let exact = v.get("comparator").is_none();
+        let n = v.get("value").filter(|_| exact)?.as_number()?;
+        Some((n.to_string(), v.get("unit")?.as_str()?.to_string(), one))
+    };
+    let pressure = match (of(SYSTOLIC), of(DIASTOLIC)) {
+        (Some((s, unit, a)), Some((d, other, b))) if unit == other => {
+            Some((format!("{s}/{d}"), unit, [a, b]))
+        }
+        _ => None,
+    };
+    let its = |p: &Map<String, Value>| {
+        pressure
+            .as_ref()
+            .is_some_and(|(_, _, of)| of.iter().any(|x| std::ptr::eq(*x, p)))
+    };
+    let others: Vec<String> = parts
+        .iter()
+        .filter(|p| !its(p))
+        .map(|p| {
+            let name = p["code"]["display"].as_str().or(p["code"]["code"].as_str());
+            let value = value_text(&p["value"]);
+            format!("{} {value}", name.unwrap_or_default())
+                .trim()
+                .to_string()
+        })
+        .collect();
+    match pressure {
+        Some((value, unit, _)) if others.is_empty() => Some(json!({"value": value, "unit": unit})),
+        Some((value, unit, _)) => Some(format!("{value} {unit}; {}", others.join("; ")).into()),
+        None => (!others.is_empty()).then(|| others.join("; ").into()),
+    }
 }
 
 fn range_text(rr: &Value) -> Value {
@@ -889,11 +1020,9 @@ fn range_text(rr: &Value) -> Value {
         return t.clone();
     }
     let side = |k: &str| {
-        rr.get(k).map(|q| {
-            let v = q.get("value").map(|v| v.to_string()).unwrap_or_default();
-            let u = q.get("unit").and_then(Value::as_str).unwrap_or("");
-            format!("{v} {u}").trim().to_string()
-        })
+        let q = rr.get(k)?;
+        let u = q.get("unit").and_then(Value::as_str).unwrap_or("");
+        Some(format!("{} {u}", q.get("value")?).trim().to_string())
     };
     match (side("low"), side("high")) {
         (Some(l), Some(h)) => json!(format!("{l} – {h}")),
@@ -1310,6 +1439,7 @@ mod tests {
     const LEFT_OUT_LINE_EOB: &str = include_str!("../tests/fixtures/fhir/left-out-line-eob.json");
     const STU3: &str = include_str!("../tests/fixtures/fhir/stu3.json");
     const STATUS: &str = include_str!("../tests/fixtures/fhir/status.json");
+    const READINGS: &str = include_str!("../tests/fixtures/fhir/readings.json");
     const DISPENSE_CONTAINED: &str =
         include_str!("../tests/fixtures/fhir/medication-dispense-contained.json");
 
@@ -1731,5 +1861,37 @@ mod tests {
         ] {
             assert!(record(&json!({"resourceType": rt, "id": "x"}), prov()).is_none());
         }
+    }
+
+    /// A result's value, with its parts, as each shape of it says.
+    #[test]
+    fn a_reading_is_its_value_or_what_its_parts_say() {
+        let cases: Vec<Value> = serde_json::from_str(READINGS).unwrap();
+        assert!(cases.len() > 10);
+        for case in &cases {
+            let of = case["of"].as_str().unwrap();
+            let r = record(&case["resource"], prov()).unwrap();
+            let (value, unit) = crate::summary::reading(&r);
+            assert_eq!(json!(value), case["value"], "{of}");
+            assert_eq!(json!(unit), case["unit"], "{of}");
+            assert_eq!(json!(crate::views::record_detail(&r)), case["says"], "{of}");
+            let parts = r.fields.get(COMPONENTS).and_then(Value::as_array);
+            let parts = parts.cloned().unwrap_or_default();
+            assert_eq!(json!(parts.len()), case["parts"], "{of}");
+            let absent = r.absent.iter().map(|c| c.display.as_deref());
+            let absent: Vec<Option<&str>> = absent.collect();
+            assert_eq!(json!(absent), case["absent"], "{of}");
+            assert!(
+                parts.iter().all(|p| p["code"]["display"].is_string()),
+                "{of}"
+            );
+            let categories = r.fields.get("categories").cloned().unwrap_or_default();
+            assert_eq!(categories, case["categories"], "{of}");
+        }
+        let first = record(&cases[0]["resource"], prov()).unwrap();
+        let parts = &first.fields[COMPONENTS];
+        assert_eq!(parts[0]["reference_range"], "90 – 120");
+        assert_eq!(parts[0]["interpretation"], "High");
+        assert_eq!(parts[1]["value"]["value"], 76);
     }
 }

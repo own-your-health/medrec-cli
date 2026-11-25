@@ -307,6 +307,51 @@
    ]
   },
   {
+   "id": "r_piecesaaaaaaaaaaaaaa",
+   "kind": "result",
+   "key": "result|pieces|2024-06-24",
+   "date": "2024-06-24",
+   "display": "Example check-in",
+   "status": "final",
+   "fields": {
+    "value": "First piece 6; Second piece 2",
+    "components": [
+     {
+      "code": {
+       "system": "http://loinc.org",
+       "code": "00000-9",
+       "display": "First piece"
+      },
+      "value": 6
+     },
+     {
+      "code": {
+       "system": "http://loinc.org",
+       "code": "44261-6",
+       "display": "Second piece"
+      },
+      "value": 2
+     }
+    ],
+    "category": "Survey"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-07-02T10:00:00Z",
+     "filed_at": "2024-07-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/Observation/pieces.json"
+    }
+   ]
+  },
+  {
    "id": "r_leavesaaaaaaaaaaaaaa",
    "kind": "condition",
    "key": "condition|leaves|2024-05-28",

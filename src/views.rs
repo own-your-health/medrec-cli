@@ -380,6 +380,8 @@ pub(crate) fn value_text(v: &Value) -> String {
                 .or_else(|| o.get("amount"))
                 .map(value_text)
                 .unwrap_or_default();
+            let than = o.get("comparator").and_then(Value::as_str).unwrap_or("");
+            let num = format!("{than}{num}");
             let unit = o
                 .get("unit")
                 .or_else(|| o.get("currency"))

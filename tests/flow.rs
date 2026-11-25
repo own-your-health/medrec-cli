@@ -3288,6 +3288,157 @@ fn a_record_keeps_what_each_source_says_of_its_status() {
     assert_eq!(read()["records"], full["records"]);
 }
 
+/// A result is imported with its parts, its exact value and its categories,
+/// and `reindex` gives them to results and reports that lack them.
+#[test]
+fn a_results_parts_and_categories_come_with_an_import_and_by_reindex() {
+    const READINGS: &str = include_str!("fixtures/fhir/readings.json");
+    let base = Env::new("readings");
+    setup(&base);
+    let cases: Vec<Value> = serde_json::from_str(READINGS).unwrap();
+    let mut resources: Vec<Value> = cases.into_iter().map(|c| c["resource"].clone()).collect();
+    // Each of its own day, so of its own record.
+    for (i, r) in resources.iter_mut().enumerate() {
+        r["effectiveDateTime"] = format!("2024-04-{:02}T09:30:00Z", i + 1).into();
+    }
+    resources.push(serde_json::json!({
+        "resourceType": "DiagnosticReport", "id": "report-1", "status": "final",
+        "code": {"text": "Example panel"}, "effectiveDateTime": "2024-04-30T09:30:00Z",
+        "category": [{"coding": [
+            {"system": "http://terminology.hl7.org/CodeSystem/v2-0074", "code": "LAB"}]}],
+    }));
+    let observations = resources.len() - 1;
+    for r in &mut resources {
+        r["subject"] = serde_json::json!({"reference": "Patient/pat-0001"});
+    }
+    let mut lines: Vec<Value> = Vec::new();
+    for l in medrec::testdata::PROVIDERS_STREAM.lines() {
+        let mut v: Value = serde_json::from_str(l).unwrap();
+        if v.get("counts").is_some() {
+            v["counts"] = serde_json::json!({"Patient": 1, "Observation": observations,
+                "DiagnosticReport": 1});
+            lines.append(&mut resources);
+        }
+        if v["resourceType"].as_str().is_none_or(|t| t == "Patient") {
+            lines.push(v);
+        }
+    }
+    let stream: String = lines.iter().map(|v| format!("{v}\n")).collect();
+    provider_env(&base, &stream).ok(&[
+        "import",
+        "--from",
+        "fakeprov",
+        "--from-profile",
+        "adult1",
+        "--patient",
+        "pat-0001",
+        "--person",
+        "Robin",
+    ]);
+    let path = base.records().join("Robin Testperson/index.json");
+    let read =
+        || -> Value { serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap() };
+    let whole = read();
+    let of_day = |v: &Value, day: &str| -> Value {
+        let mut all = v["records"].as_array().unwrap().iter();
+        all.find(|r| r["date"] == day).unwrap()["fields"].clone()
+    };
+    let first = of_day(&whole, "2024-04-01");
+    assert_eq!(
+        first["value"],
+        serde_json::json!({"value": "128/76", "unit": "mmHg"})
+    );
+    assert_eq!(first["components"].as_array().unwrap().len(), 2, "{first}");
+    assert_eq!(first["categories"], serde_json::json!(["vital-signs"]));
+    assert_eq!(
+        of_day(&whole, "2024-04-30")["categories"],
+        serde_json::json!(["LAB"])
+    );
+    let shown = base.ok(&["results", "--person", "Robin"]).to_string();
+    for text in ["128/76", "<0.5", "1:40"] {
+        assert!(shown.contains(text), "{text}: {shown}");
+    }
+    // A part with no value is in what the source gave, and nowhere else.
+    const ABSENT: &str = "Sample wristband reading";
+    let lists = |of: &Value| -> Vec<Value> {
+        let all = of["records"].as_array().unwrap().iter();
+        let says = all.filter(|r| r.to_string().contains(ABSENT));
+        says.cloned().collect()
+    };
+    let has = lists(&whole);
+    assert_eq!(has.len(), 1);
+    let gave = has[0]["given"][0]["fields"]["components"].as_array();
+    assert_eq!(gave.unwrap().len(), 3, "{}", has[0]);
+    let mut of = has[0].clone();
+    of.as_object_mut().unwrap().remove("given");
+    assert!(!of.to_string().contains(ABSENT), "{of}");
+    for args in [
+        &["results", "--person", "Robin"] as &[&str],
+        &["timeline", "--person", "Robin"],
+        &["search", "wristband"],
+    ] {
+        let v = base.ok(args);
+        assert!(!v.to_string().contains(ABSENT), "{args:?}: {v}");
+    }
+    assert_eq!(
+        base.ok(&["search", "wristband"])["items"],
+        serde_json::json!([])
+    );
+    for f in std::fs::read_dir(base.records().join("views"))
+        .unwrap()
+        .flatten()
+    {
+        let files = std::fs::read_dir(f.path()).into_iter().flatten().flatten();
+        for file in files
+            .map(|f| f.path())
+            .chain([f.path()])
+            .filter(|p| p.is_file())
+        {
+            let text = String::from_utf8_lossy(&std::fs::read(&file).unwrap()).to_lowercase();
+            assert!(!text.contains("wristband"), "{}", file.display());
+        }
+    }
+    let r = base.ok(&["reindex"]);
+    assert_eq!(
+        (&r["results_updated"], &r["given_updated"]),
+        (&0.into(), &0.into())
+    );
+
+    // An index without them, as an earlier medrec wrote it.
+    let mut old = read();
+    let mut lacking = 0;
+    let without = |v: &mut Value| {
+        let absent = v.to_string().contains(ABSENT);
+        absent && v.as_object_mut().unwrap().remove("given").is_some()
+    };
+    let less = old["records"].as_array_mut().unwrap().iter_mut();
+    let given = less.map(without).filter(|had| *had).count();
+    assert_eq!(given, 1);
+    for r in old["records"].as_array_mut().unwrap() {
+        let fields = r["fields"].as_object_mut().unwrap();
+        let parts = fields.remove("components").is_some();
+        let had = fields.len();
+        fields.retain(|k, v| k != "categories" && !(k == "value" && parts && v.is_string()));
+        lacking += usize::from(parts || fields.len() < had);
+    }
+    std::fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
+    let r = base.ok(&["reindex", "--dry-run"]);
+    assert_eq!(r["results_updated"], lacking, "{r}");
+    assert_eq!(read()["records"], old["records"]);
+    assert_eq!(base.ok(&["reindex"])["results_updated"], lacking);
+    assert_eq!(read()["records"], whole["records"]);
+    assert_eq!(base.ok(&["reindex"])["results_updated"], 0);
+
+    // A raw file that no longer reads takes nothing from a result.
+    let raw = base
+        .records()
+        .join("Robin Testperson/Records/fakeprov-example-health/Observation");
+    std::fs::write(raw.join("bp-1.json"), "{").unwrap();
+    assert_eq!(base.ok(&["reindex"])["results_updated"], 0);
+    assert_eq!(of_day(&read(), "2024-04-01"), first);
+    let _ = std::fs::remove_dir_all(&base.root);
+}
+
 #[test]
 fn a_claim_line_its_totals_leave_out_is_marked_and_kept_through_reindex() {
     let base = Env::new("claim-lines");

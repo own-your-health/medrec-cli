@@ -7,9 +7,11 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::{json, Map, Value};
 
 use crate::model::{Code, Document, PersonIndex, ProviderRef, Record};
+use crate::normalize::COMPONENTS;
+use crate::private;
 use crate::providers::FIELDS;
 use crate::services;
 
@@ -53,6 +55,19 @@ pub struct GivenPaper {
     pub name: Option<String>,
 }
 
+/// What a resource gives of the record it is read as: what that shows, and the
+/// parts with no value.
+pub fn gives(r: &Record) -> Given {
+    let mut out = of(r);
+    if !r.absent.is_empty() {
+        let absent = r.absent.iter().map(|c| json!({ "code": c }));
+        let shown = out.fields.get(COMPONENTS).and_then(Value::as_array);
+        let all = shown.into_iter().flatten().cloned().chain(absent);
+        out.fields.insert(COMPONENTS.into(), all.collect());
+    }
+    out
+}
+
 /// What the rules read of a record.
 pub fn of(r: &Record) -> Given {
     let coded = matches!(
@@ -69,6 +84,19 @@ pub fn of(r: &Record) -> Given {
     }
     if let Some(lines) = r.fields.get(LINES).filter(|_| r.kind == "claim") {
         fields.insert(LINES.into(), services::read_of(lines));
+    }
+    let parts = r.fields.get(COMPONENTS).and_then(Value::as_array);
+    if let Some(parts) = parts.filter(|_| r.kind == "result") {
+        let read = |p: &Value| {
+            let mut part = json!({"code": p["code"]});
+            // A text that says an area, and no other value.
+            let text = p["value"].as_str();
+            if let Some(t) = text.filter(|t| private::words(t).is_some()) {
+                part["value"] = t.into();
+            }
+            part
+        };
+        fields.insert(COMPONENTS.into(), parts.iter().map(read).collect());
     }
     let npi = |p: &ProviderRef| Some((p.field.clone(), p.npi.clone()?));
     Given {
@@ -257,6 +285,41 @@ mod tests {
         r.fields["provider"] = json!("Sample C");
         assert!(keep(&mut r, was));
         assert_eq!(as_given(&r).count(), 2);
+    }
+
+    /// The names and codes of a reading's parts are kept, and of their values
+    /// the texts that say an area alone.
+    #[test]
+    fn what_a_readings_parts_were_is_kept() {
+        let part = |name: &str, value: Value| json!({"code": {"display": name}, "value": value});
+        let parts = |of: [Value; 2]| json!({"components": of, "value": "two"});
+        let absent = |r: &Record, name: &str| {
+            gives(&Record {
+                absent: vec![serde_json::from_value(json!({ "display": name })).unwrap()],
+                ..r.clone()
+            })
+        };
+        let one = part("One", 3.into());
+        let two = part("Two", "Seen".into());
+        let mut r = record("result", parts([one.clone(), two]));
+        let says = part("Three", "Chlamydia seen".into());
+        let other = absent(&record("result", parts([one, says])), "Five");
+        assert!(keep(&mut r, other.clone()));
+        assert!(!keep(&mut r, other));
+        let want = json!([{"fields": {
+            "components": [{"code": {"display": "One"}},
+                {"code": {"display": "Three"}, "value": "Chlamydia seen"},
+                {"code": {"display": "Five"}}]}}]);
+        assert_eq!(serde_json::to_value(&r.given).unwrap(), want);
+        let as_was = as_given(&r).next().unwrap();
+        let named = crate::questionnaires::told_by(&as_was);
+        let named: Vec<&str> = named.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(named, ["Example one", "One", "Three", "Five"]);
+        // Its own part with no value is other than what it shows.
+        let own = absent(&r, "Four");
+        assert!(keep(&mut r, own.clone()) && !keep(&mut r, own.clone()));
+        let own = serde_json::to_string(&own).unwrap();
+        assert!(!own.contains("Seen") && !own.contains("two"), "{own}");
     }
 
     /// An NPI is of the name it came with.

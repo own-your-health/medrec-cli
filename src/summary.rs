@@ -459,10 +459,13 @@ fn vaccines(from: Sources, records: &[&Record]) -> Vec<Vaccine> {
 pub(crate) fn reading(r: &Record) -> (Option<String>, Option<String>) {
     let text = |v: &Value| Some(value_text(v)).filter(|s| !s.is_empty());
     match r.fields.get("value") {
-        Some(Value::Object(o)) => (
-            o.get("value").and_then(text),
-            o.get("unit").and_then(Value::as_str).map(str::to_string),
-        ),
+        Some(Value::Object(o)) => {
+            let than = o.get("comparator").and_then(Value::as_str).unwrap_or("");
+            (
+                o.get("value").and_then(text).map(|v| format!("{than}{v}")),
+                o.get("unit").and_then(Value::as_str).map(str::to_string),
+            )
+        }
         Some(v) => (text(v).map(|s| clip(&s, CLIP)), None),
         None => (None, None),
     }
