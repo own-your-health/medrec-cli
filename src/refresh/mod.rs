@@ -95,8 +95,8 @@ pub struct RequestRow {
     /// `handled.outcome`; `retrying` or `waiting` for a provider request
     /// that stays pending.
     pub outcome: String,
-    /// What kept a provider request from being written: which step, and the
-    /// kind of error. Never its message, which can quote a record.
+    /// What kept a decision from being written: which step, and the kind of
+    /// error. Never its message, which can quote a record.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cause: Option<String>,
     /// medrec could not remove the pending file; its `done/` file stands.
@@ -521,12 +521,12 @@ impl Decided {
         }
     }
 
-    /// Failed at `doing`. Everyone's outcomes show together, so the message
-    /// is the caller's own words.
-    fn failed(message: &str, doing: &str, error: &CliError) -> Decided {
+    /// Failed at `doing`. Everyone's outcomes show together, and an error's
+    /// message can quote a file, so the message is the step in medrec's words.
+    fn failed(doing: &str, error: &CliError) -> Decided {
         Decided {
             cause: Some(format!("{doing}: {}", error.code())),
-            ..Decided::new("failed", message)
+            ..Decided::new("failed", format!("it failed at {doing}"))
         }
     }
 }
@@ -536,14 +536,11 @@ fn provider_request(
     folder: &Folder,
     h: &crate::model::Household,
     v: &requests::Valid,
-    person: &str,
+    p: &crate::model::Person,
     ask: &crate::corrections::Ask,
     at: i64,
 ) -> Decided {
     use crate::corrections::{decide, Done, Failed, Request};
-    let Some(p) = h.person(person) else {
-        return Decided::new("invalid", "its provider names no person in household.json");
-    };
     let by = v.requested_by_name();
     let request = Request {
         id: &v.id,
@@ -557,122 +554,129 @@ fn provider_request(
         Ok(Done::NothingToUndo) => Decided::new("ok", "there was nothing to undo"),
         Ok(Done::SaidLater) => Decided::new("skipped", "something said later stands"),
         Err(Failed::Refused(r)) => Decided::new("invalid", r.words()),
-        Err(Failed::Folder { doing, error }) => Decided::failed(
-            "the person's marks could not be read or written",
-            doing,
-            &error,
-        ),
+        Err(Failed::Folder { doing, error }) => Decided::failed(doing, &error),
     }
 }
 
 /// Apply a request's decision (an event's, or one kept as a mark) through
 /// the pass's one write `folder`, whose views follow once, as it closes:
-/// `ok` once it is in the person's `overrides.json`, `invalid` when what it
-/// names is not that person's (or, for `paid`, not a bill), `failed` when
-/// the folder could not be written.
+/// `ok` once it is in the person's `overrides.json` or `marks.json`,
+/// `invalid` when what it names is not that person's (or, for `paid`, not a
+/// bill), `skipped` when what it asks was taken back since, `failed` when
+/// the folder could not be read or written. `at` is when a provider request
+/// was asked.
 fn decision_request(
     folder: &Folder,
     h: &crate::model::Household,
     v: &requests::Valid,
-) -> (&'static str, String) {
-    if let Scope::Private {
-        person,
-        item,
-        private,
-    } = &v.scope
-    {
-        let Some(p) = h.person(person) else {
-            return (
-                "invalid",
-                "its private names no person in household.json".into(),
-            );
-        };
-        let by = v.requested_by_name();
-        return match crate::private::mark(folder, h, p, item, *private, by.as_deref(), Some(&v.id))
-        {
-            Ok((Some(m), true)) => ("ok", format!("recorded the mark as {}", m.id)),
-            Ok((Some(m), false)) => ("ok", format!("the mark was already recorded as {}", m.id)),
-            Ok((None, _)) => ("ok", "the item follows the rules".into()),
-            Err(CliError::NotFound(_)) => (
-                "invalid",
-                "the item it names is not one of the person's".into(),
-            ),
-            Err(CliError::Usage(m)) => ("invalid", m),
-            Err(e) => ("failed", e.message().to_string()),
-        };
-    }
-    if let Scope::Paid {
-        person,
-        document,
-        on,
-        amount,
-        currency,
-    } = &v.scope
-    {
-        let Some(p) = h.person(person) else {
-            return (
-                "invalid",
-                "its paid names no person in household.json".into(),
-            );
-        };
-        let by = v.requested_by_name();
-        let amount = crate::model::Amount {
-            amount: amount.clone(),
-            currency: currency.clone(),
-        };
-        return match crate::bills::mark_paid(
-            folder,
-            p,
+    at: i64,
+) -> Decided {
+    use crate::bills::Marked;
+    use crate::marks::Failed;
+    let person = |id: &str| h.person(id);
+    let by = v.requested_by_name();
+    let by = by.as_deref();
+    let no_person = |what: &str| {
+        Decided::new(
+            "invalid",
+            format!("its {what} names no person in household.json"),
+        )
+    };
+    match &v.scope {
+        Scope::Provider { person: p, ask } => match person(p) {
+            Some(p) => provider_request(folder, h, v, p, ask, at),
+            None => no_person("provider"),
+        },
+        Scope::Private {
+            person: p,
+            item,
+            private,
+        } => {
+            let Some(p) = person(p) else {
+                return no_person("private");
+            };
+            match crate::private::mark(folder, h, p, item, *private, by, Some(&v.id)) {
+                Ok((Some(m), true)) => Decided::new("ok", format!("recorded the mark as {}", m.id)),
+                Ok((Some(m), false)) => {
+                    Decided::new("ok", format!("the mark was already recorded as {}", m.id))
+                }
+                Ok((None, _)) => Decided::new("ok", "the item follows the rules"),
+                Err(Failed::Refused(CliError::Usage(m))) => Decided::new("invalid", m),
+                Err(Failed::Refused(_)) => {
+                    Decided::new("invalid", "the item it names is not one of the person's")
+                }
+                Err(Failed::Folder { doing, error }) => Decided::failed(doing, &error),
+            }
+        }
+        Scope::Paid {
+            person: p,
             document,
             on,
-            &amount,
-            by.as_deref(),
-            Some(&v.id),
-        ) {
-            Ok((pm, true)) => ("ok", format!("recorded the payment as {}", pm.id)),
-            Ok((pm, false)) => (
-                "ok",
-                format!("the payment was already recorded as {}", pm.id),
-            ),
-            Err(CliError::NotFound(_)) => (
-                "invalid",
-                "the document it names is not one of the person's".into(),
-            ),
-            Err(CliError::Usage(_)) => ("invalid", "the document it names is not a bill".into()),
-            Err(e) => ("failed", e.message().to_string()),
-        };
-    }
-    let Scope::Event {
-        person,
-        kind,
-        members,
-    } = &v.scope
-    else {
-        return ("invalid", "not a decision".into());
-    };
-    let Some(p) = h.person(person) else {
-        return (
-            "invalid",
-            "its event names no person in household.json".into(),
-        );
-    };
-    let by = v.requested_by_name();
-    match crate::events::decide(
-        folder,
-        p,
-        kind,
-        &members[0],
-        &members[1],
-        by.as_deref(),
-        Some(&v.id),
-    ) {
-        Ok((d, true)) => ("ok", format!("recorded {kind} as {}", d.id)),
-        Ok((d, false)) => ("ok", format!("{kind} was already recorded as {}", d.id)),
-        Err(CliError::NotFound(_)) => (
-            "invalid",
-            "a member it names is not one of the person's records or documents".into(),
-        ),
-        Err(e) => ("failed", e.message().to_string()),
+            amount,
+            currency,
+        } => {
+            let Some(p) = person(p) else {
+                return no_person("paid");
+            };
+            let amount = crate::model::Amount {
+                amount: amount.clone(),
+                currency: currency.clone(),
+            };
+            match crate::bills::mark_paid(folder, p, document, on, &amount, by, Some(&v.id)) {
+                Ok(Marked::Recorded(pm)) => {
+                    Decided::new("ok", format!("recorded the payment as {}", pm.id))
+                }
+                Ok(Marked::Already(pm)) => Decided::new(
+                    "ok",
+                    format!("the payment was already recorded as {}", pm.id),
+                ),
+                Ok(Marked::TakenBack) => {
+                    Decided::new("skipped", "the payment it recorded was taken back")
+                }
+                Err(Failed::Refused(CliError::Usage(_))) => {
+                    Decided::new("invalid", "the document it names is not a bill")
+                }
+                Err(Failed::Refused(_)) => Decided::new(
+                    "invalid",
+                    "the document it names is not one of the person's",
+                ),
+                Err(Failed::Folder { doing, error }) => Decided::failed(doing, &error),
+            }
+        }
+        Scope::Unpaid { person: p, payment } => {
+            let Some(p) = person(p) else {
+                return no_person("unpaid");
+            };
+            match crate::bills::undo(folder, p, payment) {
+                Ok(pm) => Decided::new("ok", format!("undone {}", pm.id)),
+                // Served again, or asked by two people, it is undone.
+                Err(Failed::Refused(_)) => Decided::new("ok", "there was nothing to undo"),
+                Err(Failed::Folder { doing, error }) => Decided::failed(doing, &error),
+            }
+        }
+        Scope::Event {
+            person: p,
+            kind,
+            members: [a, b],
+        } => {
+            let Some(p) = person(p) else {
+                return no_person("event");
+            };
+            match crate::events::decide(folder, p, kind, a, b, by, Some(&v.id)) {
+                Ok((d, true)) => Decided::new("ok", format!("recorded {kind} as {}", d.id)),
+                Ok((d, false)) => {
+                    Decided::new("ok", format!("{kind} was already recorded as {}", d.id))
+                }
+                Err(Failed::Refused(_)) => Decided::new(
+                    "invalid",
+                    "a member it names is not one of the person's records or documents",
+                ),
+                Err(Failed::Folder { doing, error }) => Decided::failed(doing, &error),
+            }
+        }
+        Scope::All | Scope::Person(_) | Scope::Source(_) => {
+            Decided::new("invalid", "not a decision")
+        }
     }
 }
 
@@ -883,6 +887,7 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
             Scope::Source(s) => vec![s.clone()],
             Scope::Event { .. }
             | Scope::Paid { .. }
+            | Scope::Unpaid { .. }
             | Scope::Private { .. }
             | Scope::Provider { .. } => Vec::new(),
         };
@@ -1279,7 +1284,7 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
                         report.requests.push(row("waiting", Some(why.into())));
                         continue;
                     }
-                    (Scope::Provider { person, ask }, Some(Ok(f))) => {
+                    (_, Some(Ok(f))) => {
                         // The store's time for its file, which is the same at
                         // each try and is not the asking device's clock. Never
                         // later than the first try.
@@ -1288,18 +1293,9 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
                         let tried = local.failing.get(&v.id).copied();
                         let tried = tried.unwrap_or_else(time::now);
                         let at = asked.map_or(tried, |t| t.min(tried));
-                        provider_request(f, &h, v, person, ask, at)
+                        decision_request(f, &h, v, at)
                     }
-                    (Scope::Provider { .. }, Some(Err(e))) => Decided::failed(
-                        "the folder could not be opened to write",
-                        "opening the folder to write",
-                        e,
-                    ),
-                    (_, Some(Ok(f))) => {
-                        let (outcome, message) = decision_request(f, &h, v);
-                        Decided::new(outcome, message)
-                    }
-                    (_, Some(Err(e))) => Decided::new("failed", e.message()),
+                    (_, Some(Err(e))) => Decided::failed("opening the folder to write", e),
                     (_, None) => Decided::new("failed", "the folder was not opened to write"),
                 };
                 // Its `done/` file would keep nothing of what it says, so one

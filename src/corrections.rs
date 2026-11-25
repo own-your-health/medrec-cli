@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::folder::Folder;
+use crate::marks::{READ, RECORDS, WRITE};
 use crate::model::{Household, Person};
 use crate::private;
 use crate::refresh::time;
@@ -178,10 +179,6 @@ impl Undone {
                 == c.names()
     }
 }
-
-/// How long what was taken back is kept: longer than any request is
-/// answered late.
-const UNDONE_KEEP_SECS: i64 = 90 * 86_400;
 
 fn secs(at: &str) -> i64 {
     time::parse(at).unwrap_or(0)
@@ -453,9 +450,6 @@ pub fn decide(
     request: Option<&Request>,
 ) -> Result<Done, Failed> {
     let failed = |doing: &'static str| move |error: CliError| Failed::Folder { doing, error };
-    const READ: &str = "reading the person's marks.json";
-    const RECORDS: &str = "reading the person's records";
-    const WRITE: &str = "writing the person's marks.json";
 
     let mut m = folder.marks(p).map_err(failed(READ))?;
     let now = time::now();
@@ -466,7 +460,7 @@ pub fn decide(
         None => last.max().unwrap_or(now).max(now),
     };
     m.providers_undone
-        .retain(|u| u.kind().is_none() || now - secs(&u.at) < UNDONE_KEEP_SECS);
+        .retain(|u| u.kind().is_none() || now - secs(&u.at) < crate::marks::UNDONE_KEEP_SECS);
     let (printed, what, item) = match ask {
         Ask::Undo(id) => {
             let Some(i) = m.providers.iter().position(|c| c.id == *id) else {

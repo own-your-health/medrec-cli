@@ -28,6 +28,11 @@ pub enum Scope {
         amount: String,
         currency: String,
     },
+    /// Not an import: the household taking back a payment it marked.
+    Unpaid {
+        person: String,
+        payment: String,
+    },
     /// Not an import: the household marking an item private, not private,
     /// or (`None`) back to the rules.
     Private {
@@ -50,6 +55,7 @@ impl Scope {
             self,
             Scope::Event { .. }
                 | Scope::Paid { .. }
+                | Scope::Unpaid { .. }
                 | Scope::Private { .. }
                 | Scope::Provider { .. }
         )
@@ -196,13 +202,14 @@ pub fn parse(name: &str, body: &[u8], known: &dyn Known) -> Parsed {
         return bad("its requested_at is not an RFC 3339 time".into());
     };
     let is_member = |s: &str| crate::ids::is_valid("r", s) || crate::ids::is_valid("d", s);
-    let given = ["scope", "event", "paid", "private", "provider"]
+    let given = ["scope", "event", "paid", "unpaid", "private", "provider"]
         .into_iter()
         .filter(|k| v.get(*k).is_some())
         .count();
     if given > 1 {
         return bad(
-            "it has more than one of a scope, an event, a paid, a private and a provider".into(),
+            "it has more than one of a scope, an event, a paid, an unpaid, a private and a provider"
+                .into(),
         );
     }
     let provider = match v.get("provider") {
@@ -293,7 +300,26 @@ pub fn parse(name: &str, body: &[u8], known: &dyn Known) -> Parsed {
         Some(_) => return bad("its paid is not an object".into()),
         None => None,
     };
-    let event = match (v.get("event"), paid.or(private).or(provider)) {
+    let unpaid = match v.get("unpaid") {
+        Some(Value::Object(e)) => {
+            let person = e.get("person").and_then(Value::as_str).unwrap_or("");
+            if !(crate::ids::is_valid("p", person) && known.person(person)) {
+                return bad("its unpaid names no person in household.json".into());
+            }
+            let payment = e.get("payment").and_then(Value::as_str).unwrap_or("");
+            if !crate::ids::is_valid("o", payment) {
+                return bad("its unpaid's payment is not a payment id (o_…)".into());
+            }
+            Some(Scope::Unpaid {
+                person: person.into(),
+                payment: payment.into(),
+            })
+        }
+        Some(_) => return bad("its unpaid is not an object".into()),
+        None => None,
+    };
+    let decision = paid.or(unpaid).or(private).or(provider);
+    let event = match (v.get("event"), decision) {
         (_, Some(decision)) => Some(decision),
         (Some(Value::Object(e)), None) => {
             let person = e.get("person").and_then(Value::as_str).unwrap_or("");
@@ -374,6 +400,7 @@ pub fn parse(name: &str, body: &[u8], known: &dyn Known) -> Parsed {
             }
             p
         }
+        Scope::Unpaid { person, payment } => json!({"person": person, "payment": payment}),
         Scope::Private {
             person,
             item,
@@ -389,6 +416,7 @@ pub fn parse(name: &str, body: &[u8], known: &dyn Known) -> Parsed {
     let key = match scope {
         Scope::Event { .. } => "event",
         Scope::Paid { .. } => "paid",
+        Scope::Unpaid { .. } => "unpaid",
         Scope::Private { .. } => "private",
         Scope::Provider { .. } => "provider",
         _ => "scope",
@@ -598,6 +626,56 @@ mod tests {
         ] {
             let why = why(parse(NAME, &body(paid.clone()), &K));
             assert!(why.contains(want), "{paid}: {why}");
+        }
+    }
+
+    #[test]
+    fn an_unpaid_request_names_a_person_and_a_payment() {
+        let body = |extra: Value| {
+            let mut v = json!({
+                "schema": REQUEST_SCHEMA,
+                "id": "x_aaaaaaaaaaaaaaaaaaaa",
+                "requested_at": "2026-11-22T20:03:12Z",
+            });
+            for (k, x) in extra.as_object().unwrap() {
+                v[k] = x.clone();
+            }
+            serde_json::to_vec(&v).unwrap()
+        };
+        let (pid, payment) = ("p_aaaaaaaaaaaaaaaaaaaa", "o_bbbbbbbbbbbbbbbbbbbb");
+        let unpaid = json!({"person": pid, "payment": payment});
+        match parse(NAME, &body(json!({"unpaid": unpaid})), &K) {
+            Parsed::Valid(v) => {
+                assert_eq!(
+                    v.scope,
+                    Scope::Unpaid {
+                        person: pid.into(),
+                        payment: payment.into(),
+                    }
+                );
+                assert!(v.scope.is_decision());
+                assert_eq!(v.kept["unpaid"], unpaid);
+            }
+            Parsed::Invalid(i) => panic!("{}", i.why),
+        }
+        for (req, want) in [
+            (
+                json!({"unpaid": {"person": pid, "payment": "d_bbbbbbbbbbbbbbbbbbbb"}}),
+                "not a payment id",
+            ),
+            (json!({"unpaid": {"person": pid}}), "not a payment id"),
+            (
+                json!({"unpaid": {"person": "p_nosuchpersonaaaaaaaa", "payment": payment}}),
+                "no person",
+            ),
+            (json!({"unpaid": payment}), "not an object"),
+            (
+                json!({"unpaid": unpaid, "private": {"person": pid, "item": "r_aaaaaaaaaaaaaaaaaaaa", "private": true}}),
+                "more than one",
+            ),
+        ] {
+            let why = why(parse(NAME, &body(req.clone()), &K));
+            assert!(why.contains(want), "{req}: {why}");
         }
     }
 
