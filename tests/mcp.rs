@@ -2910,6 +2910,605 @@ fn what_a_questionnaire_asks_is_private_everywhere() {
     let _ = std::fs::remove_dir_all(&e.root);
 }
 
+/// Each open item of the parts fixture with a private part, and what is said of
+/// it in its place.
+const PARTS: [(&str, &str); 9] = [
+    ("r_mixedaaaaaaaaaaaaaaa", "1 service not shown"),
+    ("r_checksaaaaaaaaaaaaaa", "1 service not shown"),
+    ("r_notedaaaaaaaaaaaaaaa", "1 service not shown"),
+    ("r_roomsaaaaaaaaaaaaaaa", "1 service not shown"),
+    ("r_uncountedaaaaaaaaaaa", "1 service not shown"),
+    (
+        "r_secondaaaaaaaaaaaaaa",
+        "1 diagnosis and 1 payer note not shown",
+    ),
+    ("r_beforeaaaaaaaaaaaaaa", "1 service not shown"),
+    (ACCOUNT, "3 lines not shown"),
+    (EXPLAINED, "3 lines not shown"),
+];
+const ACCOUNT: &str = "d_accountaaaaaaaaaaaaa";
+const EXPLAINED: &str = "d_explainedaaaaaaaaaaa";
+/// The words of them, each of which is in an answer about the person.
+const PRIVATE_WORDS: [&str; 9] = [
+    "Quick feelings form",
+    "96127",
+    "Depression screening",
+    "Psychotherapy is paid apart",
+    "Group hour",
+    "0900",
+    "Tobacco counseling",
+    "F41.1",
+    "Behavioral health is paid apart",
+];
+/// What only services make private, and a paper by its file's name.
+const BY_SERVICES: [&str; 5] = [
+    "r_everyaaaaaaaaaaaaaaa",
+    "r_waseveryaaaaaaaaaaaa",
+    "r_nolinesaaaaaaaaaaaaa",
+    "r_talkaaaaaaaaaaaaaaaa",
+    "r_implantaaaaaaaaaaaaa",
+];
+const BY_NAME: &str = "d_unnamedaaaaaaaaaaaaa";
+/// Two claims with a private test: one with another test beside it.
+const LABS: [&str; 2] = ["r_labbedaaaaaaaaaaaaaa", "r_labbothaaaaaaaaaaaaa"];
+
+/// The parts fixture's person, and their id.
+fn parts_household(tag: &str) -> (Env, String) {
+    let e = Env::new(tag);
+    fixture_household(&e, "parts", &["index.json", "text.json"]);
+    let alex = h_id(&e, "Alex Testperson");
+    (e, alex)
+}
+
+fn row_of(v: &Value, id: &str) -> Value {
+    let mut rows = v["items"].as_array().unwrap().iter();
+    rows.find(|i| i["id"] == id).unwrap_or(&Value::Null).clone()
+}
+
+/// A claim all of whose services say an area, one with none by its own name, a
+/// procedure by its number or its name, and a paper by the name its file came
+/// with are private in every answer and view.
+#[test]
+fn what_services_say_makes_claims_and_procedures_private() {
+    let (e, alex) = parts_household("services");
+    let t = e.tools();
+    let shared = every_answer(&t, None);
+    let own = every_answer(&t, Some("Alex"));
+    let (files, _) = views_of(&e, &alex);
+    for id in BY_SERVICES {
+        let why = &files["private"]["records"][id];
+        assert_eq!(why["from"], "service", "{id}: {why}");
+        let area = match id {
+            "r_implantaaaaaaaaaaaaa" => "reproductive",
+            _ => "mental_health",
+        };
+        assert_eq!(why["area"], area, "{id}");
+        // Where only what it gave says so, it is told apart.
+        assert_eq!(why["given"] == true, id == BY_SERVICES[1], "{id}");
+        let row = row_of(&own["timeline, detailed"], id);
+        assert_eq!(row["private"], area, "{id}: {row}");
+    }
+    let why = &files["private"]["documents"][BY_NAME];
+    assert_eq!(*why, json!({"area": "mental_health", "from": "words"}));
+    for id in BY_SERVICES.iter().chain([&BY_NAME]) {
+        for (name, v) in &shared {
+            assert!(!v.to_string().contains(id), "{name}: {id}");
+        }
+    }
+    for (name, v) in &shared {
+        for word in ["Anxiety", "ontraceptive", "Sample hour", "G0444", "session"] {
+            assert!(!v.to_string().contains(word), "{name}: {word}");
+        }
+    }
+    // Each in the event it is all of.
+    let events = files["events"]["events"].as_array().unwrap();
+    for id in &BY_SERVICES[..3] {
+        let mut events = events.iter();
+        let event = events.find(|x| x["members"].to_string().contains(id));
+        let eid = event.unwrap()["id"].as_str().unwrap();
+        let why = &files["private"]["events"][eid];
+        assert_eq!(why["from"], "members", "{id}");
+    }
+    // What says nothing is the household's to see.
+    for id in ["r_plainaaaaaaaaaaaaaaa", "r_stitchesaaaaaaaaaaaa"] {
+        assert!(files["private"]["records"].get(id).is_none(), "{id}");
+        let row = row_of(&shared["timeline, concise"], id);
+        assert_eq!(row["id"], id);
+        assert!(row.get("not_shown").is_none(), "{row}");
+    }
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
+/// The words, number and name of a private line, diagnosis or payer note of an
+/// open item are in no answer that names no person: not in its title, its
+/// event, a search, or what an answer counts. Its amounts are, and what is left
+/// out is counted.
+#[test]
+fn a_private_part_of_an_open_item_is_in_no_answer_about_the_household() {
+    let (e, alex) = parts_household("parts");
+    let t = e.tools();
+    let mut shared = every_answer(&t, None);
+    let mut own = every_answer(&t, Some("Alex"));
+    for q in ["feelings", "96127", "depression", "group hour", "tobacco"] {
+        for (answers, person) in [(&mut shared, None), (&mut own, Some("Alex"))] {
+            let mut args = json!({"query": q, "limit": 50});
+            if let Some(p) = person {
+                args["person"] = p.into();
+            }
+            let v = assert_fits(&t, SEARCH, &call(&t, SEARCH, args)).clone();
+            answers.insert(format!("search, {q}"), v);
+        }
+    }
+    for word in PRIVATE_WORDS {
+        for (name, v) in &shared {
+            // A search that names what is all private finds it, marked; and the
+            // words of a paper that charges for nothing are all there.
+            let all = [v.clone()];
+            let items = v["items"].as_array().map_or(&all[..], Vec::as_slice);
+            let open = items.iter().filter(|i| i.get("private").is_none());
+            for i in open.filter(|i| i["id"] != "d_afterwardaaaaaaaaaaa") {
+                assert!(!i.to_string().contains(word), "{name}: {word}: {i}");
+            }
+        }
+        let mut theirs = own.values();
+        assert!(theirs.any(|v| v.to_string().contains(word)), "{word}");
+    }
+    let (files, _) = views_of(&e, &alex);
+    for (id, says) in PARTS {
+        assert_eq!(files["private"]["parts"][id]["says"], says, "{id}");
+        let list = match &id[..2] {
+            "r_" => "claims, detailed",
+            _ => "documents, detailed",
+        };
+        let (open, whole) = (row_of(&shared[list], id), row_of(&own[list], id));
+        assert_eq!(open["id"], id, "{list}");
+        assert!(open.get("private").is_none(), "{open}");
+        assert!(whole.get("not_shown").is_none(), "{whole}");
+        if list.starts_with("claims") {
+            assert_eq!(open["not_shown"], says, "{id}");
+            for k in ["amounts", "provider", "insurer", "type"] {
+                assert_eq!(open["fields"][k], whole["fields"][k], "{id}: {k}");
+            }
+            assert_eq!(open["you_owe"], whole["you_owe"], "{id}");
+            assert_eq!(open["detail"], whole["detail"], "{id}");
+        }
+    }
+    // What is said of a claim by the lines that are left.
+    let mixed = row_of(&shared["claims, detailed"], PARTS[0].0);
+    let name = "Sample visit and Ear wax look · Example Pediatrics";
+    assert_eq!(mixed["title"], name);
+    assert_eq!(mixed["fields"]["items"].as_array().unwrap().len(), 2);
+    let checks = row_of(&shared["claims, detailed"], PARTS[1].0);
+    assert_eq!(checks["title"], "Ear wax look · Example Pediatrics");
+    let second = row_of(&shared["claims, detailed"], PARTS[5].0);
+    let diagnoses = second["fields"]["diagnoses"].as_array().unwrap();
+    assert_eq!(diagnoses.len(), 1, "{diagnoses:?}");
+    assert_eq!(second["fields"]["payer_notes"], json!(["Paid in full"]));
+    // By number, a private line with a name that says nothing is gone too.
+    for id in [PARTS[2].0, PARTS[3].0, PARTS[6].0] {
+        let row = row_of(&shared["claims, detailed"], id);
+        assert_eq!(row["fields"]["items"].as_array().unwrap().len(), 1, "{id}");
+    }
+    // The same in its event, in the timeline, and in a search for what is left.
+    let holding = |answers: &BTreeMap<String, Value>, id: &str| -> Value {
+        let mut events = answers["events, detailed"]["items"]
+            .as_array()
+            .unwrap()
+            .iter();
+        let of = events.find(|e| e["fields"]["members"].to_string().contains(id));
+        of.unwrap().clone()
+    };
+    for (id, says) in &PARTS[..5] {
+        let event = holding(&shared, id);
+        assert_eq!(event["not_shown"], *says, "{event}");
+        assert!(event.get("private").is_none(), "{event}");
+        let was = holding(&own, id);
+        assert!(was.get("not_shown").is_none(), "{was}");
+        assert_eq!(event["fields"]["money"], was["fields"]["money"], "{id}");
+        let members = event["fields"]["members"].as_array().unwrap();
+        let mut of = members.iter().filter(|m| m["record"] == **id);
+        let title = row_of(&shared["claims, detailed"], id)["title"].clone();
+        assert_eq!(of.next().unwrap()["title"], title);
+        let row = row_of(&shared["timeline, concise"], id);
+        assert_eq!((&row["title"], &row["not_shown"]), (&title, &json!(says)));
+    }
+    // An event is of the kind that what is left makes it.
+    for (answers, title) in [(&shared, "Office visit"), (&own, "Tests")] {
+        assert_eq!(holding(answers, LABS[0])["title"], title);
+    }
+    let checks = holding(&shared, PARTS[1].0);
+    assert!(checks["detail"]
+        .as_str()
+        .unwrap()
+        .starts_with("Ear wax look;"));
+    for (query, hit) in [("wax", true), ("feelings", false)] {
+        let args = json!({"query": query, "limit": 50});
+        let v = assert_fits(&t, SEARCH, &call(&t, SEARCH, args)).clone();
+        let row = row_of(&v, PARTS[0].0);
+        assert_eq!(row["id"] == PARTS[0].0, hit, "{query}: {v}");
+        if hit {
+            assert_eq!(
+                (&row["title"], &row["not_shown"]),
+                (&json!(name), &json!(PARTS[0].1))
+            );
+        } else {
+            let warnings = v["warnings"].to_string();
+            assert!(warnings.contains("private-left-out"), "{warnings}");
+        }
+    }
+    // An open event takes no place from a private paper.
+    let doctor = "r_doctoraaaaaaaaaaaaaa";
+    assert_eq!(holding(&own, doctor)["source"], "Sample Riverside Group");
+    assert!(holding(&shared, doctor).get("source").is_none());
+    // One asked for by its id is the same as in the list.
+    let id = holding(&own, PARTS[0].0)["id"].clone();
+    let r = call(&t, RECORDS, json!({"kind": "events", "id": id}));
+    let v = assert_fits(&t, RECORDS, &r);
+    assert_eq!(v["items"][0]["not_shown"], PARTS[0].1, "{v}");
+    assert!(!v.to_string().contains("feelings"), "{v}");
+    // Only the household opens one.
+    e.ok(&["private", "unmark", PARTS[0].0]);
+    let v = &every_answer(&t, None)["claims, detailed"];
+    let mixed = row_of(v, PARTS[0].0);
+    assert!(mixed["title"].as_str().unwrap().contains("Quick feelings"));
+    assert!(mixed.get("not_shown").is_none(), "{mixed}");
+    // The household's word on an event opens the event, and not its claim.
+    let every = "r_everyaaaaaaaaaaaaaaa";
+    let event = holding(&own, every);
+    let (id, was) = (event["id"].clone(), event["title"].clone());
+    assert_eq!(event["private"], "mental_health");
+    e.ok(&["private", "unmark", id.as_str().unwrap()]);
+    let v = &every_answer(&t, None)["events, detailed"];
+    let event = row_of(v, id.as_str().unwrap());
+    assert_eq!(event["id"], id, "{v}");
+    assert_eq!(event["title"], was, "{event}");
+    assert_eq!(event["fields"]["private_members"], 1, "{event}");
+    assert_eq!(event["detail"], "still expected: a bill");
+    for k in ["source", "you_owe", "not_shown"] {
+        assert!(event.get(k).is_none(), "{k}: {event}");
+    }
+    for k in ["what", "place", "clinicians", "money"] {
+        assert!(event["fields"].get(k).is_none(), "{k}: {event}");
+    }
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
+/// Of a bill's, a receipt's or an explanation's text, the lines that say an
+/// area are read only where the person is named.
+#[test]
+fn a_bills_private_lines_are_read_only_where_its_person_is_named() {
+    let (e, alex) = parts_household("lines");
+    let t = e.tools();
+    let read = |args: Value| assert_fits(&t, DOCUMENT, &call(&t, DOCUMENT, args)).clone();
+    for (id, text, words) in [
+        (
+            ACCOUNT,
+            "Example Pediatrics\nSample visit 20.00\n(2 lines not shown)\n\
+             Ear wax look 20.00\nTotal 60.00--- page 2 ---Questions? Call us.\n\
+             (1 line not shown)\nThank you",
+            ["Depression screening", "PHQ-9", "Fagerstrom"],
+        ),
+        (
+            EXPLAINED,
+            "Example Health Plan\n99213 Sample visit\n(3 lines not shown)\n\
+             This is not a bill",
+            ["96127", "Behavioral", "health hour"],
+        ),
+    ] {
+        let v = read(json!({"id": id}));
+        assert_eq!(v["text"], text);
+        assert_eq!(v["hint"], "3 lines not shown: pass person for all of it.");
+        let whole = read(json!({"id": id, "person": "Alex"}));
+        assert!(whole.get("hint").is_none(), "{whole}");
+        for word in words {
+            assert!(!v.to_string().contains(word), "{word}");
+            assert!(whole.to_string().contains(word), "{word}");
+        }
+        assert_eq!(whole["text_chars"], files_text(&e, id).chars().count());
+    }
+    // One with none, and a paper of no charge.
+    for id in ["d_paidslipaaaaaaaaaaaa", "d_afterwardaaaaaaaaaaa"] {
+        let v = read(json!({"id": id}));
+        assert!(v.get("hint").is_none(), "{v}");
+        assert_eq!(v["text"], files_text(&e, id));
+    }
+    let r = call(&t, DOCUMENT, json!({"id": ACCOUNT, "person": "Sam"}));
+    assert!(r.is_error(), "{}", r.text());
+    // A private record that tells of an open paper is named with its person.
+    let letter = "d_letteraaaaaaaaaaaaaa";
+    e.ok(&["private", "unmark", letter]);
+    let v = read(json!({"id": letter}));
+    assert!(v.get("records").is_none(), "{v}");
+    let v = read(json!({"id": letter, "person": "Alex"}));
+    let name = "Depression screening · Example Pediatrics";
+    assert_eq!(v["records"], json!([name]), "{v}");
+    // It is cut where it says, in the text the view has.
+    let (files, _) = views_of(&e, &alex);
+    for id in [ACCOUNT, EXPLAINED] {
+        let text = files_text(&e, id);
+        let places = files["private"]["parts"][id]["text"].as_array().unwrap();
+        let cut = places.iter().map(|p| {
+            let at = p[0].as_u64().unwrap() as usize;
+            &text[at..at + p[1].as_u64().unwrap() as usize]
+        });
+        assert_eq!(cut.count(), 3, "{id}");
+    }
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
+/// A text of the parts fixture.
+fn files_text(e: &Env, id: &str) -> String {
+    let path = e.records().join("Alex Testperson/text.json");
+    let v: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    v["texts"][id].as_str().unwrap().to_string()
+}
+
+/// What `private.json` says of the parts, whole: the fixture `parts.json` has an
+/// item's by its id, and an event's by that of a member.
+#[test]
+fn the_private_view_says_what_is_left_out_of_each_open_item() {
+    let (e, alex) = parts_household("parts-view");
+    let (files, _) = views_of(&e, &alex);
+    let events = files["events"]["events"].as_array().unwrap();
+    let mut told = files["private"]["parts"].as_object().unwrap().clone();
+    let of_events: Vec<String> = told
+        .keys()
+        .filter(|k| k.starts_with("e_"))
+        .cloned()
+        .collect();
+    for id in of_events {
+        let part = told.remove(&id).unwrap();
+        let event = events.iter().find(|x| x["id"] == id.as_str()).unwrap();
+        let member = event["members"][0]["record"].as_str().unwrap();
+        told.insert(format!("event of {member}"), part);
+    }
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/parts/parts.json");
+    let want: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    for (id, part) in want.as_object().unwrap() {
+        assert_eq!(told.remove(id).as_ref(), Some(part), "{id}");
+    }
+    assert!(told.is_empty(), "{told:?}");
+    assert!(files["private"].get("clear_events").is_none());
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
+/// A person's views by the name a reader asks for them by.
+fn view_bytes(e: &Env, pid: &str) -> BTreeMap<String, Vec<u8>> {
+    e.ok(&["views", "write"]);
+    let mut out = BTreeMap::new();
+    for f in std::fs::read_dir(e.records().join("views").join(pid)).unwrap() {
+        let path = f.unwrap().path();
+        let name = path.file_name().unwrap().to_str().unwrap();
+        let mut parts: Vec<&str> = name.split('.').collect();
+        if parts.len() == 3 {
+            parts.remove(1);
+        }
+        out.insert(parts.join("."), std::fs::read(&path).unwrap());
+    }
+    out
+}
+
+/// A search of one person's views, as docs/data-contract.md tells a reader to:
+/// the hits, best first, as `(id, title, snippet)`, without their private parts.
+fn search_of_views(
+    files: &BTreeMap<String, Vec<u8>>,
+    terms: &[&str],
+) -> Vec<(String, String, String)> {
+    let json = |name: &str| -> Value {
+        files
+            .get(name)
+            .map_or(Value::Null, |b| serde_json::from_slice(b).unwrap())
+    };
+    let (parts, private) = (json("search-parts.json"), json("private.json"));
+    let bin = &files["search-items.bin"];
+    let u32_at =
+        |i: usize| u32::from_le_bytes(bin[4 * i..4 * (i + 1)].try_into().unwrap()) as usize;
+    let n = u32_at(0);
+    let texts: Vec<usize> = (0..=n).map(|i| u32_at(1 + i)).collect();
+    let metas: Vec<usize> = (0..=n).map(|i| u32_at(2 + n + i)).collect();
+    let rest = &bin[4 * (1 + 2 * (n + 1))..];
+    let packs: Vec<u8> = (0..n.div_ceil(512))
+        .flat_map(|k| files[&format!("search-hay-{k}.bin")].clone())
+        .collect();
+    let hex = |s: &str| s.bytes().map(|b| format!("{b:02x}")).collect::<String>();
+    let labs = terms == ["labs"];
+    let mut found = Vec::new();
+    for i in 0..n {
+        let item: Value = serde_json::from_slice(&rest[metas[i]..metas[i + 1]]).unwrap();
+        let id = item[2].as_str().unwrap();
+        let held = ["records", "documents", "studies"];
+        if held.iter().any(|k| private[*k].get(id).is_some()) {
+            continue;
+        }
+        let part = &parts[i.to_string()];
+        let cuts: Vec<[usize; 2]> =
+            serde_json::from_value(part["cuts"].clone()).unwrap_or_default();
+        let display = private["parts"][id]["display"].as_str();
+        let title = display.or(item[3].as_str()).unwrap().to_string();
+        let head = match cuts.first() {
+            Some([0, _]) => format!("{title}\n"),
+            _ => String::new(),
+        };
+        let mut left = head.clone();
+        let hay = &packs[texts[i]..texts[i + 1]];
+        let mut at = 0;
+        for [start, len] in &cuts {
+            left.push_str(std::str::from_utf8(&hay[at..*start]).unwrap());
+            at = start + len;
+        }
+        left.push_str(std::str::from_utf8(&hay[at..]).unwrap());
+        // Each word's occurrences, and where the first is in what is left.
+        let mut score = 0;
+        let mut first = usize::MAX;
+        let mut all = true;
+        for t in terms {
+            let start: String = t.chars().take(2).collect();
+            let name = match t.chars().count() {
+                1 => format!("search-1-{}.json", hex(t)),
+                _ => format!("search-{}.json", hex(&start)),
+            };
+            let shard = json(&name);
+            let mut words: BTreeMap<String, (usize, usize)> = BTreeMap::new();
+            for (w, posts) in shard.as_object().into_iter().flatten() {
+                let posts: Vec<usize> = serde_json::from_value(posts.clone()).unwrap();
+                for p in posts.chunks(3).filter(|p| p[0] == i) {
+                    let cut = cuts.iter().filter(|[s, _]| *s <= p[2]);
+                    let before: usize = cut.map(|[_, len]| len).sum();
+                    words.insert(w.clone(), (p[1], head.len() + p[2] - before.min(p[2])));
+                }
+            }
+            for (w, of) in part["words"].as_object().into_iter().flatten() {
+                let of: Vec<usize> = serde_json::from_value(of.clone()).unwrap();
+                match of[..] {
+                    [count, at] => drop(words.insert(w.clone(), (count, at))),
+                    _ => drop(words.remove(w)),
+                }
+            }
+            let mut of = words.iter().filter(|(w, _)| w.starts_with(t)).peekable();
+            all &= of.peek().is_some();
+            for (_, (count, at)) in of {
+                score += count;
+                first = first.min(*at);
+            }
+        }
+        let lab = labs && part.get("lab").is_none();
+        let lab = lab.then(|| {
+            (0..)
+                .map_while(|k| files.get(&format!("search-labs-{k}.json")))
+                .flat_map(|b| serde_json::from_slice::<Vec<Value>>(b).unwrap())
+                .find(|row| row[0] == i)
+                .map(|row| row[5].as_str().unwrap_or_default().to_string())
+        });
+        let snippet = match (all, lab.flatten()) {
+            (true, _) => {
+                let floor = |mut x: usize| {
+                    x = x.min(left.len());
+                    while !left.is_char_boundary(x) {
+                        x -= 1;
+                    }
+                    x
+                };
+                let (from, to) = (floor(first.saturating_sub(60)), floor(first + 100));
+                let words: Vec<&str> = left[from..to].split_whitespace().collect();
+                format!(
+                    "{}{}{}",
+                    if from > 0 { "…" } else { "" },
+                    words.join(" "),
+                    if to < left.len() { "…" } else { "" }
+                )
+            }
+            (false, Some(detail)) => {
+                score = 0;
+                detail
+            }
+            (false, None) => continue,
+        };
+        found.push((score, i, id.to_string(), title, snippet));
+    }
+    found.sort_by_key(|a| std::cmp::Reverse((a.0, a.1)));
+    found
+        .into_iter()
+        .map(|(_, _, id, title, snippet)| (id, title, snippet))
+        .collect()
+}
+
+/// A reader of the views finds what the tool does of open items, by the same
+/// words, with the same titles and snippets, in the same order.
+#[test]
+fn a_search_of_the_views_leaves_out_the_same_parts() {
+    let (e, alex) = parts_household("parts-search");
+    let t = e.tools();
+    let files = view_bytes(&e, &alex);
+    let parts: Value = serde_json::from_slice(&files["search-parts.json"]).unwrap();
+    let shapes = parts.as_object().unwrap();
+    assert!(shapes.values().any(|p| p["lab"] == false), "{parts}");
+    let mut hits = 0;
+    for query in [
+        "wax",
+        "sample visit",
+        "form",
+        "usd",
+        "feelings",
+        "96127",
+        "medicine",
+        "facility",
+        "example",
+        "9",
+        "paid",
+        "screening",
+        "health",
+        "and",
+        "more",
+        "1 more",
+        "0900",
+        "group hour",
+        "40",
+        "visit example",
+        "a",
+        "depression",
+        "labs",
+        "account thank",
+        "behavioral",
+        "drug screen",
+        "blood count",
+        "not a bill",
+    ] {
+        let v = call(&t, SEARCH, json!({"query": query, "limit": 100}));
+        let v = assert_fits(&t, SEARCH, &v);
+        let of = |k: &str, i: &Value| i[k].as_str().unwrap().to_string();
+        let items = v["items"].as_array().unwrap().iter();
+        let told: Vec<(String, String, String)> = items
+            .filter(|i| i["person"] == "Alex Testperson" && i["kind"] != "note")
+            .filter(|i| i.get("private").is_none())
+            .map(|i| (of("id", i), of("title", i), of("snippet", i)))
+            .collect();
+        let terms: Vec<&str> = query.split(' ').collect();
+        assert_eq!(search_of_views(&files, &terms), told, "{query}");
+        hits += told.len();
+    }
+    assert!(hits > 100, "{hits}");
+    // Nothing open, nothing left out: there is no such view.
+    e.ok(&["private", "unmark", PARTS[0].0]);
+    let fewer: Value = serde_json::from_slice(&view_bytes(&e, &alex)["search-parts.json"]).unwrap();
+    assert_eq!(fewer.as_object().unwrap().len(), shapes.len() - 1);
+    for (id, _) in &PARTS[1..] {
+        e.ok(&["private", "unmark", id]);
+    }
+    for id in LABS {
+        e.ok(&["private", "unmark", id]);
+    }
+    assert!(!view_bytes(&e, &alex).contains_key("search-parts.json"));
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
+/// At the Mac, the list of what is private says which open items have a part.
+#[test]
+fn the_private_list_says_which_open_items_have_a_private_part() {
+    let (e, _) = parts_household("parts-list");
+    let v = e.ok(&["private", "list", "--person", "Alex", "--limit", "50"]);
+    let parts = v["parts"].as_array().unwrap();
+    for (id, says) in PARTS {
+        let row = parts.iter().find(|r| r["id"] == id).unwrap();
+        assert_eq!(row["not_shown"], says, "{row}");
+        let kind = if id.starts_with("r_") {
+            "record"
+        } else {
+            "document"
+        };
+        assert_eq!(row["kind"], kind, "{row}");
+    }
+    assert!(parts.iter().any(|r| r["kind"] == "event"), "{parts:?}");
+    let items = v["items"].as_array().unwrap();
+    for (id, _) in PARTS {
+        assert!(items.iter().all(|r| r["id"] != id), "{id}");
+    }
+    e.ok(&["private", "unmark", PARTS[0].0]);
+    let v = e.ok(&["private", "list", "--person", "Alex", "--limit", "50"]);
+    let parts = v["parts"].as_array().unwrap();
+    assert!(parts.iter().all(|r| r["id"] != PARTS[0].0), "{parts:?}");
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
 /// In the chart of a child under 11 on the day, what a grown person answers is
 /// about somebody else: nothing has it but a count of it, and it opens by its
 /// id at the Mac.
@@ -3047,13 +3646,10 @@ fn what_is_about_another_person_is_in_no_answer_or_view() {
     let _ = std::fs::remove_dir_all(&e.root);
 }
 
-/// Another person's paper in an event (X2), and the event of theirs it tells
-/// of (X1), are judged as theirs: one that is private is in no answer about
-/// this person, nor about the household.
-#[test]
-fn what_an_event_shows_of_another_person_is_judged_as_theirs() {
-    let e = Env::new("linked");
-    household(&e);
+/// A parent, Alex, and their child, Robin, with the events of one linked to the
+/// other's.
+fn linked_household(e: &Env) {
+    household(e);
     let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/events");
     let read = |p: &Path| -> Value { serde_json::from_slice(&std::fs::read(p).unwrap()).unwrap() };
     let path = e.records().join("household.json");
@@ -3069,18 +3665,98 @@ fn what_an_event_shows_of_another_person_is_judged_as_theirs() {
             std::fs::copy(from, dir.join(format!("{f}.json"))).unwrap();
         }
     }
+}
+
+fn events_in(t: &MedrecTools, person: Option<&str>) -> Vec<Value> {
+    let mut args = json!({"kind": "events", "response_format": "detailed", "limit": 50});
+    if let Some(p) = person {
+        args["person"] = p.into();
+    }
+    let r = call(t, RECORDS, args);
+    assert_fits(t, RECORDS, &r)["items"]
+        .as_array()
+        .unwrap()
+        .clone()
+}
+
+/// The place of a linked person's event (X1) is as private as that is: in no
+/// answer, about its own person too, where it is private, holds something
+/// private, is not there, or what is private of theirs is not known.
+#[test]
+fn a_place_of_another_persons_event_is_as_private_as_that_is() {
+    let e = Env::new("linked-place");
+    linked_household(&e);
     let t = e.tools();
-    let events = |person: Option<&str>| -> Vec<Value> {
-        let mut args = json!({"kind": "events", "response_format": "detailed", "limit": 50});
-        if let Some(p) = person {
-            args["person"] = p.into();
-        }
-        let r = call(&t, RECORDS, args);
-        assert_fits(&t, RECORDS, &r)["items"]
-            .as_array()
-            .unwrap()
-            .clone()
+    let (hospital, intake) = ("Example Harbor Hospital", "r_intakeoneaaaaaaaaaaa");
+    // Whether it says the place, in each answer.
+    let says = |t: &MedrecTools| {
+        [None, Some("Robin")].map(|person| {
+            let events = events_in(t, person);
+            let holds = |x: &&Value| x["fields"]["members"].to_string().contains(intake);
+            let event = events.iter().find(holds).unwrap().clone();
+            assert_ne!(event["private"], "household", "{event}");
+            let mut args = json!({"kind": "events", "name": "harbor", "limit": 50});
+            if let Some(p) = person {
+                args["person"] = p.into();
+            }
+            let named = call(t, RECORDS, args);
+            let id = event["id"].as_str().unwrap();
+            let found = assert_fits(t, RECORDS, &named).to_string().contains(id);
+            assert_eq!(found, event["source"] == hospital, "{event}");
+            assert_eq!(found, event.to_string().contains(hospital), "{event}");
+            found
+        })
     };
+    assert_eq!(says(&t), [true, true]);
+    let stay = {
+        let events = events_in(&t, Some("Alex"));
+        let holds = |x: &&Value| x["fields"]["members"].to_string().contains("r_restroom");
+        let stay = events.iter().find(holds).unwrap();
+        stay["id"].as_str().unwrap().to_string()
+    };
+    let clear = |e: &Env| -> Vec<Value> {
+        let alex = h_id(e, "Alex Example");
+        let v = views_of(e, &alex).0["private"]["clear_events"].clone();
+        v.as_array().cloned().unwrap_or_default()
+    };
+    assert!(clear(&e).contains(&json!(stay)));
+    // The event itself.
+    e.ok(&["private", "mark", &stay]);
+    assert_eq!(says(&t), [false, false]);
+    assert!(clear(&e).is_empty());
+    e.ok(&["private", "reset", &stay]);
+    assert_eq!(says(&t), [true, true]);
+    // One of its members, in an event the household says is open.
+    e.ok(&["private", "unmark", &stay]);
+    e.ok(&["private", "mark", "r_restlabaaaaaaaaaaaaa"]);
+    assert!(
+        !e.ok(&["private", "list", "--person", "Alex", "--limit", "50"])["items"]
+            .to_string()
+            .contains(&stay)
+    );
+    assert_eq!(says(&t), [false, false]);
+    assert!(clear(&e).is_empty());
+    e.ok(&["private", "reset", "r_restlabaaaaaaaaaaaaa"]);
+    assert_eq!(says(&t), [true, true]);
+    // What is private of theirs does not read.
+    let marks = e.records().join("Alex Example/marks.json");
+    let kept = std::fs::read(&marks).unwrap();
+    std::fs::write(&marks, "{").unwrap();
+    assert_eq!(says(&t), [false, false]);
+    std::fs::write(&marks, kept).unwrap();
+    assert_eq!(says(&t), [true, true]);
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
+/// Another person's paper in an event (X2), and the event of theirs it tells
+/// of (X1), are judged as theirs: one that is private is in no answer about
+/// this person, nor about the household.
+#[test]
+fn what_an_event_shows_of_another_person_is_judged_as_theirs() {
+    let e = Env::new("linked");
+    linked_household(&e);
+    let t = e.tools();
+    let events = |person: Option<&str>| events_in(&t, person);
     let holding = |list: &[Value], id: &str| -> Value {
         let mut all = list.iter();
         let of = all.find(|e| e["fields"]["members"].to_string().contains(id));

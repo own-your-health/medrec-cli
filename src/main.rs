@@ -1756,6 +1756,7 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
         PrivateCmd::List { person, list } => {
             let (f, h) = read(store, cli)?;
             let mut items = Vec::new();
+            let mut parts = Vec::new();
             let mut unreadable: Vec<String> = Vec::new();
             let mut labels: Vec<String> = Vec::new();
             let mut in_error = 0;
@@ -1781,6 +1782,53 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
                             )
                         })
                 };
+                let named = |kind: &str, id: &str| {
+                    match kind {
+                        "record" => idx
+                            .records
+                            .iter()
+                            .find(|r| r.id == id)
+                            .map(|r| (r.date.clone(), r.display.clone())),
+                        "document" => idx.documents.iter().find(|d| d.id == id).map(|d| {
+                            (
+                                d.date.clone(),
+                                d.title
+                                    .clone()
+                                    .or(d.original_name.clone())
+                                    .unwrap_or_default(),
+                            )
+                        }),
+                        "study" => idx.studies.iter().find(|s| s.id == id).map(|s| {
+                            (
+                                s.date.clone(),
+                                s.description
+                                    .clone()
+                                    .unwrap_or_else(|| "Imaging study".into()),
+                            )
+                        }),
+                        _ => event_of(id),
+                    }
+                    .unwrap_or_default()
+                };
+                for (id, part) in v["parts"].as_object().into_iter().flatten() {
+                    let kind = match id.get(..2) {
+                        Some("r_") => "record",
+                        Some("d_") => "document",
+                        _ => "event",
+                    };
+                    let known = kind != "event" || event_of(id).is_some();
+                    let Some(says) = part["says"].as_str().filter(|_| known) else {
+                        continue;
+                    };
+                    if gone.contains(id.as_str()) {
+                        continue;
+                    }
+                    let (date, title) = named(kind, id);
+                    parts.push(serde_json::json!({
+                        "id": id, "kind": kind, "not_shown": says, "date": date,
+                        "title": title, "person": p.id, "person_name": p.name,
+                    }));
+                }
                 for (kind, singular) in [
                     ("events", "event"),
                     ("records", "record"),
@@ -1795,32 +1843,7 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
                         if kind == "events" && event_of(id).is_none() {
                             continue;
                         }
-                        let (date, title) = match kind {
-                            "records" => idx
-                                .records
-                                .iter()
-                                .find(|r| r.id == *id)
-                                .map(|r| (r.date.clone(), r.display.clone())),
-                            "documents" => idx.documents.iter().find(|d| d.id == *id).map(|d| {
-                                (
-                                    d.date.clone(),
-                                    d.title
-                                        .clone()
-                                        .or(d.original_name.clone())
-                                        .unwrap_or_default(),
-                                )
-                            }),
-                            "studies" => idx.studies.iter().find(|s| s.id == *id).map(|s| {
-                                (
-                                    s.date.clone(),
-                                    s.description
-                                        .clone()
-                                        .unwrap_or_else(|| "Imaging study".into()),
-                                )
-                            }),
-                            _ => event_of(id),
-                        }
-                        .unwrap_or_default();
+                        let (date, title) = named(singular, id);
                         let mut row = serde_json::json!({
                             "id": id, "kind": singular, "area": why["area"],
                             "from": why["from"], "date": date, "title": title,
@@ -1840,13 +1863,18 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
                     .get(..10)
                     .map(str::to_string)
             };
-            items.sort_by(|a, b| {
-                day(b)
-                    .cmp(&day(a))
-                    .then(a["id"].as_str().cmp(&b["id"].as_str()))
-            });
+            for rows in [&mut items, &mut parts] {
+                rows.sort_by(|a: &serde_json::Value, b| {
+                    day(b)
+                        .cmp(&day(a))
+                        .then(a["id"].as_str().cmp(&b["id"].as_str()))
+                });
+            }
             let shown = list.take(&items);
             let mut doc = serde_json::json!({ "items": shown });
+            if !parts.is_empty() {
+                doc["parts"] = list.take(&parts).into();
+            }
             if in_error > 0 {
                 let n = medrec::standing::in_error(in_error);
                 note(cli, &n);
@@ -1895,7 +1923,14 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
                         "title",
                         "id",
                     ],
-                )
+                );
+                if v.get("parts").is_some() {
+                    println!();
+                    table(
+                        &serde_json::json!({"items": v["parts"]}),
+                        &["date", "person_name", "kind", "not_shown", "title", "id"],
+                    );
+                }
             });
             return Ok(());
         }

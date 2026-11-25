@@ -174,6 +174,7 @@ pub fn apply(folder: &Folder, plan: Plan) -> Result<Merged, CliError> {
         raw_path: dup.provenance.raw_path,
         organization: dup.organization,
         title: dup.title,
+        name: dup.original_name,
     };
     for g in std::iter::once(called).chain(dup.given) {
         given::keep_paper(kept, g);

@@ -1235,6 +1235,16 @@ fn claims_into_events(cs: &[Claim]) -> Vec<Ev> {
     evs
 }
 
+/// The kind an event's claims make it, where they alone make one event.
+fn kind_of(ev: &Ev, recs: &BTreeMap<&str, &Record>) -> Option<&'static str> {
+    let claims = ev.claims().filter_map(|m| recs.get(m.id.as_str()));
+    let claims: Vec<Claim> = claims.filter_map(|r| classify(r)).collect();
+    match claims_into_events(&claims).as_slice() {
+        [one] => Some(one.kind),
+        _ => None,
+    }
+}
+
 /// The kind of an event a single claim opens on its own (an `apart`).
 fn kind_alone(c: &Claim) -> &'static str {
     match c.ty {
@@ -1849,6 +1859,7 @@ static DIVISION: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
+#[derive(Clone)]
 struct Alias {
     clinician: String,
     organization: String,
@@ -2944,9 +2955,112 @@ pub struct Built {
     /// Where an event would be by what a linked person's sources gave and do
     /// not show ([`crate::given`]): `{id, place}`.
     pub given: Vec<Value>,
+    pub(crate) drawn: Drawn,
+}
+
+/// What the events are drawn from, beside the records: those there are, and
+/// those in error.
+#[derive(Default)]
+pub(crate) struct Drawn {
+    there: (Vec<Ev>, Vec<Alias>),
+    lost: (Vec<Ev>, Vec<Alias>),
+    sources: Vec<crate::model::Source>,
+}
+
+/// What an event's items say of it.
+const SAID: [&str; 9] = [
+    "kind",
+    "title",
+    "what",
+    "what_from",
+    "place",
+    "place_from",
+    "clinicians",
+    "money",
+    "differences",
+];
+
+/// What an event says by some of its items alone.
+pub(crate) struct Open {
+    pub id: String,
+    /// What of [`SAID`] is otherwise, `null` where there is none.
+    pub said: Map<String, Value>,
+    /// Its own items.
+    pub items: Vec<String>,
 }
 
 impl Built {
+    /// What each event says by the items `open` holds of, as `idx` has them:
+    /// now, and those in error as `whole` does.
+    pub(crate) fn open(
+        &self,
+        person: &str,
+        now: &PersonIndex,
+        whole: &PersonIndex,
+        open: &dyn Fn(&str) -> bool,
+        claims: &BTreeMap<String, Record>,
+    ) -> Vec<Open> {
+        let Drawn {
+            there,
+            lost,
+            sources,
+        } = &self.drawn;
+        let mut out = Vec::new();
+        for (idx, (evs, aliases)) in [(now, there), (whole, lost)] {
+            let recs = records_of(idx);
+            let mut left = recs.clone();
+            for (id, r) in left.iter_mut() {
+                *r = claims.get(*id).unwrap_or(*r);
+            }
+            let known = |a: &&Alias| open(&a.document);
+            let said_by: Vec<Alias> = aliases.iter().filter(known).cloned().collect();
+            let from = Sources::of(sources, idx);
+            let (labels, differ) = (Labels::new(), Differ::new());
+            let draw = |ev: &Ev, recs: &BTreeMap<&str, &Record>, aliases: &[Alias]| {
+                render(person, ev, recs, &labels, &differ, aliases, from).map(|(.., e)| e)
+            };
+            for ev in evs {
+                let own = |m: &&Member| m.person.is_none();
+                let private = |m: &&Member| own(m) && !open(&m.id);
+                let mut some = ev.clone();
+                some.members.retain(|m| !private(&m));
+                let mut held = ev.members.iter().filter(private);
+                if held.any(|m| m.kind == "claim" || m.role == "portal") {
+                    some.differences.clear();
+                }
+                if kind_of(ev, &recs) == Some(ev.kind) {
+                    some.kind = kind_of(&some, &left).unwrap_or(ev.kind);
+                }
+                let Some(all) = draw(ev, &recs, aliases) else {
+                    continue;
+                };
+                let other = some.kind != ev.kind;
+                // One with no open item is still what it was called.
+                let some = draw(&some, &left, &said_by).unwrap_or_else(
+                    || json!({"kind": all["kind"], "title": all["title"], "expected": all["expected"]}),
+                );
+                let mut said = Map::new();
+                for k in SAID.into_iter().chain(other.then_some("expected")) {
+                    let (was, is) = (&all[k], &some[k]);
+                    if was != is {
+                        said.insert(k.into(), is.clone());
+                    }
+                }
+                out.push(Open {
+                    id: event_id(person, &ev.anchor),
+                    said,
+                    items: ev
+                        .members
+                        .iter()
+                        .filter(own)
+                        .map(|m| m.id.clone())
+                        .collect(),
+                });
+            }
+        }
+        out
+    }
+
     /// The events that decide what is private.
     pub fn for_private(&self) -> Cow<'_, Value> {
         let list = |v: &Value| v["events"].as_array().cloned().unwrap_or_default();
@@ -2975,6 +3089,7 @@ impl Built {
 /// An event with what is entered in error: the one that has the rest of it
 /// now, and the person's own items in it.
 struct With {
+    ev: Ev,
     at: Option<String>,
     items: Vec<String>,
     event: (Day, Day, String, Value),
@@ -3074,9 +3189,10 @@ pub fn build_both(inp: &Input) -> Built {
     let gone: BTreeSet<&str> = ids_of(inp.index).filter(|id| !left.contains(id)).collect();
     let mut in_error: BTreeMap<&str, Gone> = BTreeMap::new();
     let mut lost: Vec<(Day, Day, String, Value)> = Vec::new();
+    let mut lost_evs: (Vec<Ev>, Vec<Alias>) = Default::default();
     let all = records_of(inp.index);
     let shown: BTreeSet<String> = out.iter().map(|e| e.2.clone()).collect();
-    let with = |linked: &[Linked]| -> Vec<With> {
+    let with = |linked: &[Linked]| -> (Vec<With>, Vec<Alias>) {
         let mut named = Labels::new();
         labels_of(inp.index, &mut named);
         for l in linked {
@@ -3100,13 +3216,15 @@ pub fn build_both(inp: &Input) -> Built {
                 std::iter::once(m.id.as_str()).chain(copies)
             });
             Some(With {
+                ev: ev.clone(),
                 at: now(ev),
                 items: items.map(str::to_string).collect(),
                 event: (start, end, id, event),
                 given: places_given(ev, rendered),
             })
         });
-        each.collect()
+        let each = each.collect();
+        (each, b_all.aliases)
     };
     let mut given: Vec<Value> = Vec::new();
     let mut place = |id: &str, places: Vec<String>| {
@@ -3121,10 +3239,11 @@ pub fn build_both(inp: &Input) -> Built {
         let rendered = |ev: &Ev| render(pid, ev, &recs, &labels, &differ, &b.aliases, from);
         place(&event_id(pid, &ev.anchor), places_given(ev, rendered));
     }
-    let mine = match gone.is_empty() {
-        true => Vec::new(),
+    let (mine, aliases) = match gone.is_empty() {
+        true => Default::default(),
         false => with(&linked),
     };
+    lost_evs.1 = aliases;
     for w in &mine {
         let (.., id, _) = &w.event;
         for x in w.items.iter().filter_map(|x| gone.get(x.as_str())) {
@@ -3132,12 +3251,13 @@ pub fn build_both(inp: &Input) -> Built {
         }
         if w.at.is_none() {
             lost.push(w.event.clone());
+            lost_evs.0.push(w.ev.clone());
         }
     }
     // What is private is judged with a linked person's too, which is named
     // in their own file alone.
     let whole = match theirs.iter().any(|t| matches!(t, Cow::Owned(_))) {
-        true => Some(with(&inp.linked)),
+        true => Some(with(&inp.linked).0),
         false => (!gone.is_empty()).then_some(mine),
     };
     let whole = whole.map(|with| {
@@ -3225,6 +3345,11 @@ pub fn build_both(inp: &Input) -> Built {
         events: Value::Object(doc),
         whole,
         given,
+        drawn: Drawn {
+            there: (b.evs, b.aliases),
+            lost: lost_evs,
+            sources: inp.sources.to_vec(),
+        },
     }
 }
 

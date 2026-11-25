@@ -75,6 +75,11 @@ real record, document, study or provider response.
   report and its paper, a paper named as one, a visit and claims of some of
   those days, and two pharmacy claims. `make.py` writes `index.json`; its
   sources are those of `standing/household.json`.
+- `parts/` is an invented person's claims, procedures, bills and papers, one for
+  each way the contract's "Private" reads a service and each kind of private
+  part. `make.py` writes `index.json` and `text.json`; `parts.json` is what
+  `private.json` says of the parts, an event's under a claim in it. Its sources
+  are those of `standing/household.json`.
 - `bills/` holds invented text in the shapes `pdftotext -layout` gives a
   provider's patient statement and a payment receipt:
   `statement-columns.txt` puts the statement's fields in a header row over a

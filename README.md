@@ -580,10 +580,11 @@ reproductive and fertility care, sexual health or substance use, and the
 medicines tied to them, are private: the app keeps them off shared screens (Home, the
 Everyone calendar, a doctor sheet for someone else) and shows them on that
 person's own pages, and Claude leaves them out of answers about the whole
-household. medrec finds them by their codes, medicines, tests and the
-practice that made them, a document by any private record that links it, a
-bill or receipt by its own words, with its copies and the statements and
-payments before and after it, and a study by its report. A study with no report is left out of answers
+household. medrec finds them by their codes, medicines, tests, services and the
+practice that made them, a document by its title, the name its file came with or
+any private record that links it, a bill or receipt by its own words, with its
+copies and the statements and payments before and after it, and a study by its
+report. A study with no report is left out of answers
 about the whole household too. An item stays private by what any of its sources
 gave of it, then or now, whatever it shows: the list says `given` of one that is
 private only by that. The household has the last word.
@@ -594,6 +595,13 @@ medrec private mark <record, document or event id>     # private, whatever the r
 medrec private unmark <id>                  # not private, whatever the rules say
 medrec private reset <id>                   # back to the rules
 ```
+
+A claim of several services, a bill and an event stay open when only a part of
+them is private. That part (a claim's line, its diagnosis or its payer's note, a
+line of a bill's text, what an event says by them) is left out where private
+items are, with a count such as "1 service not shown", and the amounts stay.
+`medrec private list` lists the items with one, and `medrec private unmark` shows
+all of one.
 
 A request from the app can mark an item private and undo the household's own
 mark. It opens nothing that is private otherwise: that is done at the Mac, with
@@ -858,7 +866,9 @@ supported.
 Private items (above) are left out of an answer about the whole household,
 whose warnings say how many. An answer about one person includes them, and
 so does one that names the item ("sertraline", not "tablets"), each marked
-`private` with its area.
+`private` with its area. The private part of an open item is left out too, and
+`not_shown` says how much; `medrec_document` gives a bill's text without its
+private lines unless `person` names its person.
 
 Claims, events, documents and bills carry `provider_labels` beside the source's
 words: who a printed provider is (Provider labels, above), how sure that is and

@@ -13,6 +13,7 @@ use crate::about;
 use crate::folder::Folder;
 use crate::intake::classify;
 use crate::model::{Document, Household, Note, Person, PersonIndex, PersonText, Record};
+use crate::parts::{Parts, Place};
 use crate::people;
 use crate::sources::Sources;
 use crate::standing::{self, Standings};
@@ -105,7 +106,7 @@ pub fn timeline(
     range: &Range,
     kinds: &[String],
 ) -> Result<(Vec<Event>, Vec<String>), CliError> {
-    let all = everything(folder, h, person, range, kinds)?;
+    let all = everything(folder, h, person, range, kinds, &Parts::default())?;
     let errors = entered_in_error(folder, h, person)?;
     let error = |e: &mut Event| errors.contains(&e.id).then_some(Why::Error);
     let (out, left_out) = LeftOut::split(all, error);
@@ -129,20 +130,22 @@ pub(crate) fn about_another(
     Ok(about::line(n, person))
 }
 
-/// As `timeline`, those entered in error too.
+/// As `timeline`, those entered in error too, without some parts of them.
 pub(crate) fn everything(
     folder: &Folder,
     h: &Household,
     person: Option<&str>,
     range: &Range,
     kinds: &[String],
+    parts: &Parts,
 ) -> Result<Vec<Event>, CliError> {
     range.validate()?;
     validate_kinds(kinds)?;
     let want = |k: &str| kinds.is_empty() || kinds.iter().any(|x| x == k);
     let mut out = Vec::new();
     for p in people::selected(h, person)? {
-        let idx = folder.index(p)?;
+        let mut idx = folder.index(p)?;
+        parts.index(&mut idx);
         let notes = if want("note") {
             folder.notes(p)?
         } else {
@@ -623,7 +626,9 @@ pub fn search(
     range.validate()?;
     let errors = entered_in_error(folder, h, person)?;
     let error = |x: &Hit| errors.contains(&x.id).then_some(Why::Error);
-    let (hits, left_out) = search_leaving_out(folder, h, person, query, range, limit, &error)?;
+    let whole = Parts::default();
+    let (hits, left_out) =
+        search_leaving_out(folder, h, person, query, range, limit, &whole, &error)?;
     Ok((hits, left_out.notes()))
 }
 
@@ -728,8 +733,10 @@ impl LeftOut {
     }
 }
 
-/// As `search`, leaving out the hits `leave_out` names, before the limit:
-/// the hits, and where those left out sat among them.
+/// As `search`, leaving out the hits `leave_out` names, and those that only
+/// the private `parts` hold the words of, before the limit: the hits, and
+/// where those left out sat among them.
+#[allow(clippy::too_many_arguments)]
 pub fn search_leaving_out(
     folder: &Folder,
     h: &Household,
@@ -737,6 +744,7 @@ pub fn search_leaving_out(
     query: &str,
     range: &Range,
     limit: usize,
+    parts: &Parts,
     leave_out: &dyn Fn(&Hit) -> Option<Why>,
 ) -> Result<(Vec<Hit>, LeftOut), CliError> {
     range.validate()?;
@@ -750,32 +758,45 @@ pub fn search_leaving_out(
     }
     let labs = LAB_QUERIES.contains(&terms.join(" ").as_str());
     let mut hits = Vec::new();
+    let mut held: BTreeSet<String> = BTreeSet::new();
     for p in people::selected(h, person)? {
         let idx = folder.index(p)?;
         let texts = folder.text(p)?;
         let notes = folder.notes(p)?;
-        for s in searchables(&idx, &texts, &notes, labs) {
+        for s in searchables(&idx, &texts, &notes, labs, parts) {
             if !range.holds(s.date.as_deref()) {
                 continue;
             }
-            let hay = s.hay();
-            let found = matches(&hay, &terms).or_else(|| s.lab.map(|snippet| (0, snippet)));
-            if let Some((score, snippet)) = found {
-                hits.push(Hit {
-                    person: p.id.clone(),
-                    person_name: p.name.clone(),
-                    kind: s.kind,
-                    id: s.id,
-                    date: s.date,
-                    title: s.title,
-                    snippet,
-                    score,
-                });
+            let found = |hay: &str, lab: &Option<String>| {
+                let lab = || lab.clone().map(|snippet| (0, snippet));
+                matches(hay, &terms).or_else(lab)
+            };
+            let Some(whole) = found(&s.hay(), &s.lab) else {
+                continue;
+            };
+            let open = s.open.as_ref();
+            let part = open.map(|o| found(&o.hay(&s), &o.lab));
+            if part == Some(None) {
+                held.insert(s.id.clone());
             }
+            let (score, snippet) = part.flatten().unwrap_or(whole);
+            hits.push(Hit {
+                person: p.id.clone(),
+                person_name: p.name.clone(),
+                title: open.map_or(s.title, |o| o.title.clone()),
+                kind: s.kind,
+                id: s.id,
+                date: s.date,
+                snippet,
+                score,
+            });
         }
     }
     hits.sort_by(|a, b| b.score.cmp(&a.score).then(b.date.cmp(&a.date)));
-    let (mut hits, left_out) = LeftOut::split(hits, |x| leave_out(x));
+    let (mut hits, left_out) = LeftOut::split(hits, |x| {
+        let held = held.contains(&x.id).then_some(Why::Private);
+        held.or_else(|| leave_out(x))
+    });
     hits.truncate(limit.max(1));
     Ok((hits, left_out))
 }
@@ -790,6 +811,35 @@ pub(crate) struct Searchable {
     /// For a lab record when lab queries are wanted: what a lab query
     /// shows for it (its detail line).
     pub lab: Option<String>,
+    /// What is left of it without its private parts, where it has some.
+    pub open: Option<OpenPart>,
+}
+
+/// What is left of an item to search without its private parts.
+pub(crate) struct OpenPart {
+    pub title: String,
+    /// What is left out of its text, the title's first.
+    pub cuts: Vec<Place>,
+    pub lab: Option<String>,
+}
+
+impl OpenPart {
+    /// The text searched: what is left of the item's, after its title where
+    /// that is another.
+    pub fn hay(&self, whole: &Searchable) -> String {
+        let hay = whole.hay();
+        let mut out = match self.cuts.first() {
+            Some([0, _]) => format!("{}\n", self.title),
+            _ => String::new(),
+        };
+        let mut at = 0;
+        for [start, len] in &self.cuts {
+            out.push_str(&hay[at..*start]);
+            at = start + len;
+        }
+        out.push_str(&hay[at..]);
+        out
+    }
 }
 
 impl Searchable {
@@ -801,12 +851,13 @@ impl Searchable {
 
 /// What `search` looks through in one person's files, in their order:
 /// documents, records, studies, then notes. `labs` fills each lab
-/// record's `lab`.
+/// record's `lab`, `parts` what is left of each that has some.
 pub(crate) fn searchables(
     idx: &PersonIndex,
     texts: &PersonText,
     notes: &[Note],
     labs: bool,
+    parts: &Parts,
 ) -> Vec<Searchable> {
     let mut out = Vec::new();
     for d in &idx.documents {
@@ -821,25 +872,59 @@ pub(crate) fn searchables(
             label(d.doc_type.as_deref())
         );
         let body = texts.texts.get(&d.id).map(String::as_str).unwrap_or("");
+        let at = title.len() + 1 + meta.len() + 1;
+        let cuts: Vec<Place> = parts.places(&d.id);
         out.push(Searchable {
             kind: "document".into(),
             id: d.id.clone(),
             date: d.date.clone(),
+            open: (!cuts.is_empty()).then(|| OpenPart {
+                title: title.clone(),
+                cuts: cuts.into_iter().map(|[s, n]| [at + s, n]).collect(),
+                lab: None,
+            }),
             title,
             body: format!("{meta}\n{body}"),
             lab: None,
         });
     }
     for r in &idx.records {
+        let lab = |r: &Record| (labs && is_lab(r)).then(|| record_detail(r).unwrap_or_default());
+        let left = parts.record(r);
+        let held = |k: &str, i: usize| parts.leaves_out(&r.id, k, i);
         let mut body = String::new();
-        flat_text(&Value::Object(r.fields.clone()), &mut body);
+        let mut cuts: Vec<Place> = vec![[0, r.display.len() + 1]];
+        for (k, v) in &r.fields {
+            let at = r.display.len() + 1;
+            let mut piece = |v: &Value, cut: bool| {
+                let start = body.len();
+                flat_text(v, &mut body);
+                if cut {
+                    cuts.push([at + start, body.len() - start]);
+                }
+            };
+            match v {
+                Value::Array(list) => {
+                    for (i, v) in list.iter().enumerate() {
+                        piece(v, held(k, i));
+                    }
+                }
+                // Without those lines it is another, or there is none.
+                _ => piece(v, left.fields.get(k) != Some(v)),
+            }
+        }
         out.push(Searchable {
             kind: r.kind.clone(),
             id: r.id.clone(),
             date: r.date.clone(),
             title: r.display.clone(),
             body,
-            lab: (labs && is_lab(r)).then(|| record_detail(r).unwrap_or_default()),
+            lab: lab(r),
+            open: parts.has(&r.id).then(|| OpenPart {
+                title: left.display.clone(),
+                cuts,
+                lab: lab(&left),
+            }),
         });
     }
     for s in &idx.studies {
@@ -864,6 +949,7 @@ pub(crate) fn searchables(
                 .unwrap_or_else(|| "Imaging study".into()),
             body,
             lab: None,
+            open: None,
         });
     }
     for n in notes {
@@ -876,6 +962,7 @@ pub(crate) fn searchables(
             title: first_line(&n.text, 80),
             body: format!("{}\n{rest}", n.tags.join(" ")),
             lab: None,
+            open: None,
         });
     }
     out

@@ -2173,6 +2173,7 @@ fn a_document_filed_twice_merges_into_the_one_it_renders_again() {
     let mut copy = summary.clone();
     copy["id"] = "d_copy0001".into();
     copy["title"] = "Psychotherapy summary".into();
+    copy["original_name"] = "psychotherapy_summary.xml".into();
     copy["path"] = copy_path.clone().into();
     copy["sha256"] = medrec::hash::sha256_hex(&bytes).into();
     copy["md5"] = medrec::hash::md5_hex(&bytes).into();
@@ -2250,12 +2251,33 @@ fn a_document_filed_twice_merges_into_the_one_it_renders_again() {
     );
     assert_eq!(index["records"][0]["documents"], serde_json::json!([kept]));
     assert_eq!(index["studies"][0]["report"], kept.as_str());
-    // What the copy was called holds it private.
+    // What the copy was called holds it private, and so does its file's name.
     assert_eq!(kept_doc["title"], summary["title"]);
-    assert_eq!(kept_doc["given"][0]["title"], "Psychotherapy summary");
-    let private = e.ok(&["private", "list"]);
-    let mut rows = private["items"].as_array().unwrap().iter();
-    assert!(rows.any(|r| r["id"] == kept.as_str() && r["given"] == true));
+    assert_eq!(kept_doc["original_name"], summary["original_name"]);
+    let given = serde_json::json!({
+        "title": "Psychotherapy summary",
+        "name": "psychotherapy_summary.xml"
+    });
+    let mut kept_given = kept_doc["given"][0].clone();
+    kept_given.as_object_mut().unwrap().remove("raw_path");
+    assert_eq!(kept_given, given);
+    let held = || {
+        let private = e.ok(&["private", "list"]);
+        let mut rows = private["items"].as_array().unwrap().iter();
+        rows.any(|r| r["id"] == kept.as_str() && r["given"] == true)
+    };
+    assert!(held());
+    for (left, private) in [("name", true), ("raw_path", false)] {
+        let mut index = read("index.json");
+        for d in index["documents"].as_array_mut().unwrap() {
+            let given = d.get_mut("given").and_then(Value::as_array_mut);
+            for g in given.into_iter().flatten() {
+                g.as_object_mut().unwrap().retain(|k, _| k == left);
+            }
+        }
+        std::fs::write(folder.join("index.json"), index.to_string()).unwrap();
+        assert_eq!(held(), private, "{left}");
+    }
     assert!(read("text.json")["texts"].get("d_copy0001").is_none());
     let notes = e.ok(&["note", "list"]);
     assert_eq!(notes["items"][0]["about"], serde_json::json!([kept]));

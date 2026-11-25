@@ -22,7 +22,9 @@ use crate::events::Built;
 use crate::given;
 use crate::marks::{failed, Failed, Marks, LABELS, READ, READ_DECISIONS, RECORDS, WRITE};
 use crate::model::{Document, Household, Person, PersonIndex, PersonText, Record};
+use crate::parts::{self, Parts};
 use crate::questionnaires;
+use crate::services;
 use crate::standing;
 
 pub const SCHEMA: &str = "medrec-private/v1";
@@ -247,6 +249,23 @@ static PAPERS: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
     .collect()
 });
 
+/// The area any words of a text say: of a service, a medicine, a test or a
+/// questionnaire.
+pub(crate) fn words(text: &str) -> Option<&'static str> {
+    let lists = [&*PAPERS, &*MEDICINES, &*TESTS];
+    let by_list = lists.iter().find_map(|list| first_area(list, text));
+    by_list.or_else(|| questionnaires::of(text, None).map(|q| q.area))
+}
+
+/// The area of one of a claim's diagnoses, by its code.
+pub(crate) fn diagnosis(d: &Value) -> Option<&'static str> {
+    let code = d.get("code")?;
+    let text = |k: &str| code.get(k).and_then(Value::as_str);
+    text("code")
+        .filter(|_| is_icd10(text("system")))
+        .and_then(icd10_area)
+}
+
 fn first_area(list: &[(Regex, &'static str)], text: &str) -> Option<&'static str> {
     list.iter()
         .find(|(re, _)| re.is_match(text))
@@ -324,7 +343,11 @@ fn record_why(r: &Record) -> Option<Why> {
                 let area = first_area(&MEDICINES, dispensed(r)?)?;
                 Some(Why::of(area, "medicine"))
             })
-            .or_else(|| by_names(&["provider", "facility"])),
+            .or_else(|| by_names(&["provider", "facility"]))
+            .or_else(|| services::claim(r).map(|area| Why::of(area, "service"))),
+        "procedure" => services::procedure(r)
+            .map(|area| Why::of(area, "service"))
+            .or_else(|| by_names(&["performer", "location"])),
         "encounter" => by_names(&["service_provider", "location", "practitioner"]),
         "medication" => {
             let named = std::iter::once(r.display.as_str())
@@ -344,7 +367,8 @@ fn record_why(r: &Record) -> Option<Why> {
 }
 
 /// Why a document is private by the rules, if it is: its organization, its
-/// title, or what a bill or receipt says on its first page with any text.
+/// title or the name its file came with, or what a bill or receipt says on its
+/// first page with any text.
 fn document_why(d: &Document, text: Option<&str>) -> Option<Why> {
     let place = d
         .organization
@@ -352,8 +376,14 @@ fn document_why(d: &Document, text: Option<&str>) -> Option<Why> {
         .and_then(|o| first_area(&PLACES, o))
         .map(|area| Why::of(area, "provider"));
     let words = || {
-        let title = d.title.as_deref().and_then(|t| {
+        let named = |t: &str| {
             first_area(&PAPERS, t).or_else(|| questionnaires::of(t, None).map(|q| q.area))
+        };
+        let title = d.title.as_deref().and_then(named).or_else(|| {
+            let name = d.original_name.as_deref()?;
+            [&['_', '.'][..], &['_', '.', '-']]
+                .iter()
+                .find_map(|marks| named(&name.replace(*marks, " ")))
         });
         let page = || {
             let page = crate::bill::first_page(d, text?)?;
@@ -485,6 +515,81 @@ pub fn build(
     }
     if !unreported.is_empty() {
         out["unreported_studies"] = unreported.into();
+    }
+    let parts = parts_of(p, idx, &now_index, texts, built, marks, &out);
+    if !parts.is_empty() {
+        out["parts"] = Value::Object(parts);
+    }
+    let clear = clear_events(built, &out);
+    if !clear.is_empty() {
+        out["clear_events"] = clear.into();
+    }
+    out
+}
+
+/// The events another person's link to ([`crate::events`], X1) that are open
+/// and have no private member of their own: the place of one is in the other's.
+fn clear_events(built: &Built, private: &Value) -> Vec<String> {
+    let listed = built.events["events"].as_array().into_iter().flatten();
+    let linked = listed.filter(|e| e["links"].as_array().is_some_and(|l| !l.is_empty()));
+    let clear = linked.filter(|e| {
+        let mut ids = own_members(e);
+        ids.extend(e["id"].as_str().map(str::to_string));
+        let kinds = ["records", "documents", "events"];
+        !ids.iter()
+            .any(|id| kinds.iter().any(|k| private[*k].get(id).is_some()))
+    });
+    clear
+        .filter_map(|e| e["id"].as_str().map(str::to_string))
+        .collect()
+}
+
+/// What is left out of each open item that has a private part
+/// ([`crate::parts`]), of one the household marked not private nothing. An
+/// event is what its open items say.
+fn parts_of(
+    p: &Person,
+    idx: &PersonIndex,
+    now: &PersonIndex,
+    texts: &PersonText,
+    built: &Built,
+    marks: &[Mark],
+    private: &Value,
+) -> serde_json::Map<String, Value> {
+    let mark_of: BTreeMap<&str, bool> =
+        marks.iter().map(|m| (m.item.as_str(), m.private)).collect();
+    let held = |id: &str| {
+        let kinds = ["records", "documents", "events"];
+        kinds.iter().any(|k| private[*k].get(id).is_some())
+    };
+    let judged = |id: &str| !held(id) && mark_of.get(id) != Some(&false);
+    let mut out = serde_json::Map::new();
+    let mut claims: BTreeMap<String, Record> = BTreeMap::new();
+    let mut services: BTreeMap<String, usize> = BTreeMap::new();
+    for r in idx.records.iter().filter(|r| r.kind == "claim") {
+        let of = parts::OfClaim::of(r);
+        if !of.is_empty() && judged(&r.id) {
+            out.insert(r.id.clone(), of.json(r));
+            claims.insert(r.id.clone(), of.without(r));
+            services.insert(r.id.clone(), of.lines.len());
+        }
+    }
+    for d in idx.documents.iter().filter(|d| judged(&d.id)) {
+        let text = texts.texts.get(&d.id).filter(|_| crate::bill::charges(d));
+        let places = text.map(|t| parts::of_text(t)).unwrap_or_default();
+        if !places.is_empty() {
+            out.insert(d.id.clone(), parts::text_json(&places));
+        }
+    }
+    for e in built.open(&p.id, now, idx, &|id| !held(id), &claims) {
+        let services = e.items.iter().filter_map(|id| services.get(id)).sum();
+        let mut said = e.said;
+        if services > 0 {
+            said.insert("says".into(), parts::services_not_shown(services).into());
+        }
+        if !said.is_empty() && !held(&e.id) {
+            out.insert(e.id, Value::Object(said));
+        }
     }
     out
 }
@@ -684,6 +789,7 @@ pub enum Change<'a> {
 /// household's, and the members of each event.
 struct Ruled {
     items: BTreeSet<String>,
+    parts: Parts,
     events: Vec<(String, Vec<String>)>,
 }
 
@@ -713,6 +819,7 @@ pub fn opens(
         let listed = events["events"].as_array().into_iter().flatten();
         let id = |e: &Value| e["id"].as_str().unwrap_or_default().to_string();
         Ok(Ruled {
+            parts: Parts::of(&v),
             items: Private::of(&v).items.into_keys().collect(),
             events: listed.map(|e| (id(e), own_members(e))).collect(),
         })
@@ -725,6 +832,10 @@ pub fn opens(
     let is_event = |id: &str| id.starts_with("e_");
     let mut items = now.items.iter().filter(|id| !is_event(id));
     if items.any(|id| !then.items.contains(id)) {
+        return Ok(true);
+    }
+    let mut parts = now.parts.ids().filter(|id| !is_event(id));
+    if parts.any(|id| !then.items.contains(id) && !then.parts.leave_out(id, &now.parts)) {
         return Ok(true);
     }
     let held = |(id, members): &(String, Vec<String>)| -> Vec<String> {
@@ -911,7 +1022,8 @@ pub fn mark(
     Ok((Some(new), true))
 }
 
-/// Whether an item is private without these of the person's marks.
+/// Whether an item, or something in it, is private without these of the
+/// person's marks.
 fn private_without(
     folder: &crate::folder::Folder,
     h: &Household,
@@ -931,7 +1043,7 @@ fn private_without(
         .private
         .retain(|_| i.next().is_none_or(|i| !without.contains(&i)));
     let v = judged(p, &idx, &texts, &built, &marks, &state);
-    Ok(Private::of(&v).items.contains_key(item))
+    Ok(Private::of(&v).items.contains_key(item) || Parts::of(&v).has(item))
 }
 
 /// What the person's provider labels make private, where that is known.

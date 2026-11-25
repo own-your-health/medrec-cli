@@ -1,0 +1,13 @@
+{
+ "schema": "medrec-text/v1",
+ "person": "p_robinaaaaaaaaaaaaaaa",
+ "texts": {
+  "d_accountaaaaaaaaaaaaa": "Example Pediatrics\nSample visit 20.00\nDepression screening 20.00\nPHQ-9\nEar wax look 20.00\nTotal 60.00\fQuestions? Call us.\nFagerstrom form\nThank you",
+  "d_explainedaaaaaaaaaaa": "Example Health Plan\n99213 Sample visit\n96127 Form\nBehavioral\nhealth hour\nThis is not a bill",
+  "d_paidslipaaaaaaaaaaaa": "Example Pediatrics\nPaid 10.00\nThank you",
+  "d_toldaaaaaaaaaaaaaaaa": "Pat Placeholder MD, a division of Sample Riverside Group.\n",
+  "d_letteraaaaaaaaaaaaaa": "Sample words\n",
+  "d_afterwardaaaaaaaaaaa": "Sample visit\nDepression screening done\n",
+  "d_unnamedaaaaaaaaaaaaa": "Sample words\n"
+ }
+}

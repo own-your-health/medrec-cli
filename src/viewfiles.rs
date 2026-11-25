@@ -24,6 +24,7 @@ use crate::folder::{self, Access, Folder};
 use crate::hash::{hex, md5_hex};
 use crate::intake::classify::Squashed;
 use crate::model::{Household, Person, PersonIndex, PersonText, Record};
+use crate::parts::Parts;
 use crate::store::Location;
 use crate::summary::{self, clip, day, CLIP};
 use crate::views::{self, Range};
@@ -1328,7 +1329,7 @@ pub(crate) fn person(
     // Search items, numbered in the reverse of medrec's order for hits of
     // equal score (newest first, undated last, then as the files hold
     // them): the newest item has the highest number.
-    let listed = views::searchables(idx, texts, &[], true);
+    let listed = views::searchables(idx, texts, &[], true, &Parts::of(&from.private));
     let mut order: Vec<usize> = (0..listed.len()).collect();
     order.sort_by(|&a, &b| listed[b].date.cmp(&listed[a].date));
     order.reverse();
@@ -1339,6 +1340,7 @@ pub(crate) fn person(
     let mut postings: BTreeMap<String, BTreeMap<String, Vec<usize>>> = BTreeMap::new();
     let mut firsts: BTreeMap<String, BTreeMap<String, Vec<usize>>> = BTreeMap::new();
     let mut labs = Vec::new();
+    let mut parts: BTreeMap<String, Value> = BTreeMap::new();
     for (ord, &i) in order.iter().enumerate() {
         let it = &listed[i];
         let text = it.hay();
@@ -1352,6 +1354,9 @@ pub(crate) fn person(
                     words.push((w, 1, at));
                 }
             }
+        }
+        if let Some(open) = &it.open {
+            parts.insert(ord.to_string(), search_part(it, open));
         }
         for (w, count, first) in words {
             for (into, n) in [(&mut postings, 2), (&mut firsts, 1)] {
@@ -1403,6 +1408,9 @@ pub(crate) fn person(
     let lab_files = labs.chunks(LAB_ROWS).count();
     for (k, rows) in labs.chunks(LAB_ROWS).enumerate() {
         put(&format!("search-labs-{k}.json"), json(rows));
+    }
+    if !parts.is_empty() {
+        put("search-parts.json", json(&parts));
     }
 
     let mine = format!("{dir}/");
@@ -1498,6 +1506,35 @@ fn report(r: Result<Synced, CliError>) {
              write`, does it."
         );
     }
+}
+
+/// What a search finds of an item without its private parts: what is cut out
+/// of its text, and each word that is there fewer times, or elsewhere, than
+/// its postings say.
+fn search_part(it: &views::Searchable, open: &views::OpenPart) -> Value {
+    let count = |text: &str| {
+        let mut words: BTreeMap<String, (usize, usize)> = BTreeMap::new();
+        for (w, at) in Squashed::new(text).word_starts() {
+            words.entry(w).or_insert((0, at)).0 += 1;
+        }
+        words
+    };
+    let (hay, left) = (it.hay(), open.hay(it));
+    let now = count(&left);
+    let cut = open.cuts.iter().map(|[at, len]| &hay[*at..at + len]);
+    let named = std::iter::once(open.title.as_str());
+    let touched = cut.chain(named).flat_map(|text| count(text).into_keys());
+    let words: BTreeMap<String, Vec<usize>> = touched
+        .map(|w| {
+            let of = now.get(&w).map_or(vec![0], |(n, at)| vec![*n, *at]);
+            (w, of)
+        })
+        .collect();
+    let mut v = serde_json::json!({"cuts": open.cuts, "words": words});
+    if it.lab.is_some() && open.lab.is_none() {
+        v["lab"] = Value::Bool(false);
+    }
+    v
 }
 
 #[cfg(test)]
