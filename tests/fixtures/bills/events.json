@@ -1,27 +1,173 @@
 {
-  "schema": "medrec-events/v1",
-  "person": "p_test",
-  "events": [
-    {"id": "e_portalaaaaaaaaaaaaaa", "kind": "portal", "start": "2025-12-14", "end": "2025-12-14", "place": "Example Dental Arts",
-     "members": [{"record": "r_dentvisitaaaaaaaaaaa", "kind": "encounter", "role": "portal", "rule": "E3"},
-                 {"document": "d_dentbillaaaaaaaaaaaa", "kind": "bill", "role": "paper", "rule": "D2"}]},
-    {"id": "e_fillaaaaaaaaaaaaaaaa", "kind": "fill", "start": "2025-12-06", "end": "2025-12-06", "money": {"currency": "USD", "you_owe": "8.00"},
-     "members": [{"record": "r_fillaaaaaaaaaaaaaaaa", "kind": "claim", "role": "fill", "rule": "C6", "provider": "Sample Pharmacy", "you_owe": "8.00"}]},
-    {"id": "e_labaaaaaaaaaaaaaaaaa", "kind": "tests", "start": "2025-11-24", "end": "2025-11-24", "money": {"currency": "USD", "you_owe": "24.00"},
-     "members": [{"record": "r_labaaaaaaaaaaaaaaaaa", "kind": "claim", "role": "service", "rule": "C5", "provider": "Sample Laboratory Group", "you_owe": "24.00"},
-                 {"document": "d_labbillaaaaaaaaaaaaa", "kind": "bill", "role": "paper", "rule": "D2"}]},
-    {"id": "e_visitaaaaaaaaaaaaaaa", "kind": "office", "start": "2025-11-12", "end": "2025-11-12", "place": "Example Eye Clinic", "money": {"currency": "USD", "you_owe": "0.00"},
-     "members": [{"record": "r_visitaaaaaaaaaaaaaaa", "kind": "claim", "role": "office", "rule": "C5", "provider": "Example Eye Clinic", "you_owe": "0.00"}]},
-    {"id": "e_eraaaaaaaaaaaaaaaaaa", "kind": "er", "start": "2025-10-18", "end": "2025-10-18", "place": "Example Lakeside Hospital", "money": {"currency": "USD", "you_owe": "264.00"},
-     "members": [{"record": "r_erfacilityaaaaaaaaaa", "kind": "claim", "role": "facility", "rule": "C1", "provider": "Example Lakeside Hospital", "you_owe": "200.00"},
-                 {"record": "r_erdoctoraaaaaaaaaaaa", "kind": "claim", "role": "hospital", "rule": "C2", "provider": "Example Urgent Doctors", "you_owe": "64.00"},
-                 {"document": "d_erbillaaaaaaaaaaaaaa", "kind": "bill", "role": "paper", "rule": "D3s", "matches": "r_erfacilityaaaaaaaaaa", "copies": ["d_erbillcopyaaaaaaaaaa"]},
-                 {"document": "d_doctorbillaaaaaaaaaa", "kind": "bill", "role": "paper", "rule": "D2"}]},
-    {"id": "e_oldaaaaaaaaaaaaaaaaa", "kind": "office", "start": "2024-04-09", "end": "2024-04-09", "money": {"currency": "USD", "you_owe": "12.00"},
-     "members": [{"record": "r_oldaaaaaaaaaaaaaaaaa", "kind": "claim", "role": "office", "rule": "C5", "provider": "Example Eye Clinic", "you_owe": "12.00"}]}
-  ],
-  "pending": [],
-  "aliases": [],
-  "undated": [],
-  "overrides": 0
+ "schema": "medrec-events/v1",
+ "person": "p_test",
+ "events": [
+  {
+   "id": "e_scanaaaaaaaaaaaaaaaa",
+   "kind": "outpatient",
+   "start": "2024-09-17",
+   "end": "2024-09-17",
+   "place": "Sample Imaging House",
+   "money": {
+    "currency": "USD",
+    "you_owe": "112.00"
+   },
+   "members": [
+    {
+     "record": "r_scanroomaaaaaaaaaaaa",
+     "kind": "claim",
+     "role": "facility",
+     "rule": "C1",
+     "provider": "Sample Imaging House",
+     "you_owe": "90.00"
+    },
+    {
+     "record": "r_scanreaderaaaaaaaaaa",
+     "kind": "claim",
+     "role": "ancillary",
+     "rule": "C3",
+     "provider": "Example Image Readers",
+     "you_owe": "22.00"
+    },
+    {
+     "document": "d_scanbillaaaaaaaaaaaa",
+     "kind": "bill",
+     "role": "paper",
+     "rule": "D3s",
+     "matches": "r_scanroomaaaaaaaaaaaa",
+     "copies": [
+      "d_scancopyoneaaaaaaaaa",
+      "d_scancopytwoaaaaaaaaa"
+     ]
+    },
+    {
+     "document": "d_readerbillaaaaaaaaaa",
+     "kind": "bill",
+     "role": "paper",
+     "rule": "D2"
+    }
+   ]
+  },
+  {
+   "id": "e_visionaaaaaaaaaaaaaa",
+   "kind": "office",
+   "start": "2024-08-06",
+   "end": "2024-08-06",
+   "place": "Sample Vision Group",
+   "money": {
+    "currency": "USD",
+    "you_owe": "15.00"
+   },
+   "members": [
+    {
+     "record": "r_visionaaaaaaaaaaaaaa",
+     "kind": "claim",
+     "role": "office",
+     "rule": "C5",
+     "provider": "Sample Vision Group",
+     "you_owe": "15.00"
+    },
+    {
+     "document": "d_visionbillaaaaaaaaaa",
+     "kind": "bill",
+     "role": "paper",
+     "rule": "D2"
+    }
+   ]
+  },
+  {
+   "id": "e_portalaaaaaaaaaaaaaa",
+   "kind": "portal",
+   "start": "2024-07-16",
+   "end": "2024-07-16",
+   "place": "Example Allergy Room",
+   "members": [
+    {
+     "record": "r_skintestaaaaaaaaaaaa",
+     "kind": "encounter",
+     "role": "portal",
+     "rule": "E3"
+    },
+    {
+     "document": "d_allergybillaaaaaaaaa",
+     "kind": "bill",
+     "role": "paper",
+     "rule": "D2"
+    }
+   ]
+  },
+  {
+   "id": "e_rehabaaaaaaaaaaaaaaa",
+   "kind": "service",
+   "start": "2024-06-04",
+   "end": "2024-06-04",
+   "place": "Example Rehab Room",
+   "money": {
+    "currency": "USD",
+    "you_owe": "10.00"
+   },
+   "members": [
+    {
+     "record": "r_rehabaaaaaaaaaaaaaaa",
+     "kind": "claim",
+     "role": "service",
+     "rule": "C5",
+     "provider": "Example Rehab Room",
+     "you_owe": "10.00"
+    }
+   ]
+  },
+  {
+   "id": "e_fillaaaaaaaaaaaaaaaa",
+   "kind": "fill",
+   "start": "2024-05-21",
+   "end": "2024-05-21",
+   "money": {
+    "currency": "USD",
+    "you_owe": "7.50"
+   },
+   "members": [
+    {
+     "record": "r_filloneaaaaaaaaaaaaa",
+     "kind": "claim",
+     "role": "fill",
+     "rule": "C6",
+     "provider": "Sample Corner Pharmacy",
+     "you_owe": "3.00"
+    },
+    {
+     "record": "r_filltwoaaaaaaaaaaaaa",
+     "kind": "claim",
+     "role": "fill",
+     "rule": "C6",
+     "provider": "Sample Corner Pharmacy",
+     "you_owe": "4.50"
+    }
+   ]
+  },
+  {
+   "id": "e_fillingaaaaaaaaaaaaa",
+   "kind": "dental",
+   "start": "2023-02-07",
+   "end": "2023-02-07",
+   "money": {
+    "currency": "USD",
+    "you_owe": "31.00"
+   },
+   "members": [
+    {
+     "record": "r_fillingaaaaaaaaaaaaa",
+     "kind": "claim",
+     "role": "dental",
+     "rule": "C6",
+     "provider": "Sample Dental Studio",
+     "you_owe": "31.00"
+    }
+   ]
+  }
+ ],
+ "pending": [],
+ "aliases": [],
+ "undated": [],
+ "overrides": 0
 }

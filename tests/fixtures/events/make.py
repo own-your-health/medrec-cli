@@ -1,14 +1,14 @@
 """Writes tests/fixtures/events/: an invented household of two (a parent and a
-newborn) whose records give each event rule something to judge. Every story,
-name, date and amount is made up."""
+child) whose records give each event rule of docs/data-contract.md something to
+judge. Every story, name, date and amount is made up from the rule's text."""
 import hashlib, json, os, sys
 
 out = sys.argv[1]
 FORMAT = int(sys.argv[2])
 os.makedirs(out, exist_ok=True)
 PARENT, CHILD = "p_parentaaaaaaaaaaaaaa", "p_childaaaaaaaaaaaaaaa"
-UHC = {"kind": "fhir", "cli": "uhc", "organization_id": "example-plan", "fhir_base": "https://plan.example.test/fhir"}
-PORTAL = {"kind": "fhir", "cli": "mychart", "organization_id": "example-family", "fhir_base": "https://portal.example.test/fhir"}
+PLAN = {"kind": "fhir", "cli": "fakeprov", "organization_id": "example-plan", "fhir_base": "https://plan.example.test/fhir"}
+PORTAL = {"kind": "fhir", "cli": "fakeprov", "organization_id": "example-joint", "fhir_base": "https://portal.example.test/fhir"}
 FILE = {"kind": "file"}
 n = [0]
 
@@ -50,7 +50,7 @@ def claim(tag, ctype, provider, start, end, lines, totals, category=None, displa
         f["results"] = results
     names = [l["service"]["display"] for l in lines if l.get("counted", True)]
     return {"id": rid("r", tag), "kind": "claim", "key": f"claim|example|{tag}|{start}", "date": start,
-            "display": display or f"{names[0] if names else 'Care'} · {provider}", "fields": f, "provenance": prov(UHC)}
+            "display": display or f"{names[0] if names else 'Care'} · {provider}", "fields": f, "provenance": prov(PLAN)}
 
 
 def rec(tag, kind, date, display, fields, src=PORTAL, status=None):
@@ -78,120 +78,133 @@ def doc(tag, doc_type, date, org, title=None, statement=None, src=FILE, near=Non
 # --- the parent ---------------------------------------------------------------
 recs, docs, texts = [], [], {}
 
-# 1. An emergency visit with 4 billers and a replaced line the totals leave out.
-recs.append(claim("handfac", "institutional", "Example Lakeside Hospital", "2025-02-11", "2025-02-12", [
-    line(1, "99285", "Emergency room visit", "visit", {"billed": 5200, "plan_paid": 0, "you_owe": 5200}, revenue="0450", counted=False),
-    line(2, "99284", "Emergency room visit", "visit", {"billed": 5200, "allowed": 640, "plan_paid": 490, "you_owe": 150}, revenue="0450"),
-    line(3, "85025", "Blood cell test", "lab", {"billed": 800, "allowed": 100, "plan_paid": 100, "you_owe": 0}, revenue="0300"),
-], {"billed": 6000, "allowed": 740, "plan_paid": 590, "copay": 150, "you_owe": 150}))
-recs.append(claim("handdoc", "professional", "J SAMPLE", "2025-02-11", "2025-02-11", [
-    line(1, "99284", "Emergency room visit", "visit", {"billed": 900, "allowed": 240, "plan_paid": 192, "you_owe": 48}),
-], {"billed": 900, "allowed": 240, "plan_paid": 192, "coinsurance": 48, "you_owe": 48}, category="visit"))
-recs.append(claim("handrad", "professional", "Example Imaging Partners", "2025-02-11", "2025-02-11", [
-    line(1, "73130", "Hand x-ray", "imaging", {"billed": 100, "allowed": 25, "plan_paid": 25, "you_owe": 0}),
-], {"billed": 100, "allowed": 25, "plan_paid": 25, "you_owe": 0}, category="imaging"))
-recs.append(claim("handlab", "professional", "Sample Laboratory Group", "2025-02-12", "2025-02-12", [
-    line(1, "80053", "Chemistry tests", "lab", {"billed": 60, "allowed": 12, "plan_paid": 12, "you_owe": 0}),
-], {"billed": 60, "allowed": 12, "plan_paid": 12, "you_owe": 0}, category="lab"))
-# Its statement, sent weeks later (D3s).
-docs.append(doc("handbill", "bill", "2025-03-20", "Example Lakeside Hospital", "Statement",
-                statement={"statement_date": "2025-03-20", "amount_due": usd(150)}))
 
-# 2. A birth stay, with a physicians' group's and the anesthesiologists' claims.
-recs.append(claim("stayfac", "institutional", "Example Lakeside Hospital", "2024-08-20", "2024-08-23", [
-    line(1, "59400", "Room and board", "facility", {"billed": 16000, "allowed": 7200, "plan_paid": 6500, "you_owe": 700}, revenue="0120"),
-], {"billed": 16000, "allowed": 7200, "plan_paid": 6500, "deductible": 700, "you_owe": 700}))
-recs.append(claim("staygroup", "professional", "Sample Hospitalist Group", "2024-08-23", "2024-08-23", [
-    line(1, "99238", "Day of discharge", "visit", {"billed": 350, "allowed": 130, "plan_paid": 130, "you_owe": 0}),
-], {"billed": 350, "allowed": 130, "plan_paid": 130, "you_owe": 0}, category="visit"))
-recs.append(claim("stayanes", "professional", "Sample Anesthesia Services", "2024-08-21", "2024-08-21", [
-    line(1, "01967", "Anesthesia for labor", "anesthesia", {"billed": 2100, "allowed": 600, "plan_paid": 600, "you_owe": 0}),
-], {"billed": 2100, "allowed": 600, "plan_paid": 600, "you_owe": 0}, category="anesthesia"))
+def visit(tag, provider, date, code, display, totals, records=None, results=None, category="visit", more=()):
+    """A professional claim of one line with the claim's own amounts."""
+    ln = line(1, code, display, category, totals, records=records)
+    recs.append(claim(tag, "professional", provider, date, date, [ln, *more], totals, category=category, results=results))
 
-# 3. A portal visit with its lab claims, results, a call after it and its summary.
-res1 = rec("tsh", "result", "2025-05-13T15:00:00-04:00", "Thyroid test", {"value": {"value": 2.1, "unit": "mIU/L"}})
-res2 = rec("bloodcount", "result", "2025-05-13T15:00:00-04:00", "Blood count", {"value": {"value": 14, "unit": "g/dL"}})
-recs += [res1, res2]
-recs.append(rec("skincheck", "encounter", "2025-05-13T14:30:00-04:00", "Office Visit", {
-    "class": "AMB", "location": "Example Primary Care Group", "service_provider": "Example Primary Care Group",
-    "practitioner": "Casey Sample, MD", "reason": "Skin check",
-    "period": {"start": "2025-05-13T14:30:00-04:00", "end": "2025-05-13T15:10:00-04:00"}}))
-recs.append(rec("followcall", "encounter", "2025-05-15T09:00:00-04:00", "Telephone", {
-    "class": "Telephone", "service_provider": "Example Primary Care Group", "period": {"start": "2025-05-15T09:00:00-04:00"}}))
-recs.append(claim("skindoc", "professional", "C SAMPLE", "2025-05-13", "2025-05-13", [
-    line(1, "99213", "Office visit", "visit", {"billed": 220, "allowed": 120, "plan_paid": 120, "you_owe": 0}),
-], {"billed": 220, "allowed": 120, "plan_paid": 120, "you_owe": 0}, category="visit"))
-recs.append(claim("skinlab", "professional", "Example Labs", "2025-05-13", "2025-05-13", [
-    line(1, "84443", "Thyroid test", "lab", {"billed": 80, "allowed": 14, "plan_paid": 14, "you_owe": 0}, records=[res1["id"]]),
-    line(2, "85025", "Blood count", "lab", {"billed": 35, "allowed": 4, "plan_paid": 4, "you_owe": 0}, records=[res2["id"]]),
-], {"billed": 115, "allowed": 18, "plan_paid": 18, "you_owe": 0}, category="lab", results=[res1["id"], res2["id"]]))
-docs.append(doc("skinavs", "visit_summary", "2025-05-13", "Example Primary Care Group", "After Visit Summary", src=PORTAL))
 
-# 4. A desk copay the claim says was not owed: the receipt is filed.
-recs.append(claim("eyevisit", "professional", "Example Eye Clinic", "2025-04-08", "2025-04-08", [
-    line(1, "99213", "Office visit", "visit", {"billed": 190, "allowed": 85, "plan_paid": 85, "you_owe": 0}),
-], {"billed": 190, "allowed": 85, "plan_paid": 85, "you_owe": 0}, category="visit"))
-docs.append(doc("eyereceipt", "receipt", "2025-04-08", "Example Eye Clinic", "Payment receipt"))
-docs.append(doc("eyereceiptcopy", "receipt", "2025-04-08", "Example Eye Clinic", "Payment receipt", near=rid("d", "eyereceipt")))
+# C1, C2, D3s: two claims of one facility on one day are one emergency visit, with
+# its doctor's. A statement for one claim's share.
+recs.append(claim("burnroom", "institutional", "Sample Valley Hospital", "2024-10-08", "2024-10-08", [
+    line(1, "99283", "Emergency room visit", "visit", {"billed": 1800, "allowed": 700, "plan_paid": 600, "you_owe": 100}, revenue="0450"),
+], {"billed": 1800, "allowed": 700, "plan_paid": 600, "copay": 100, "you_owe": 100}))
+recs.append(claim("burncare", "institutional", "Sample Valley Hospital", "2024-10-08", "2024-10-08", [
+    line(1, "16020", "Burn dressing", "procedure", {"billed": 320, "allowed": 125, "plan_paid": 100, "you_owe": 25}, revenue="0459"),
+], {"billed": 320, "allowed": 125, "plan_paid": 100, "coinsurance": 25, "you_owe": 25}))
+visit("burndoctor", "T PLACEHOLDER", "2024-10-08", "99283", "Emergency room visit",
+      {"billed": 510, "allowed": 180, "plan_paid": 144, "coinsurance": 36, "you_owe": 36})
+docs.append(doc("burnbill", "bill", "2024-11-19", "Sample Valley Hospital", "Statement",
+                statement={"statement_date": "2024-11-19", "amount_due": usd(100)}))
 
-# 5. A course of therapy over four weeks, and a visit inside it that stays apart.
-recs.append(claim("balance", "institutional", "Example Balance Center", "2025-09-02", "2025-09-30", [
-    line(1, "97112", "Balance exercises", "medicine", {"billed": 1400, "allowed": 560, "plan_paid": 448, "you_owe": 112}, revenue="0420"),
-], {"billed": 1400, "allowed": 560, "plan_paid": 448, "coinsurance": 112, "you_owe": 112}))
-recs.append(claim("balanceeval", "professional", "R EXAMPLE", "2025-09-16", "2025-09-16", [
-    line(1, "99214", "Office visit", "visit", {"billed": 180, "allowed": 80, "plan_paid": 80, "you_owe": 0}),
-], {"billed": 180, "allowed": 80, "plan_paid": 80, "you_owe": 0}, category="visit"))
+# C2, X1: a long stay, with one doctors' claim and one laboratory's inside it.
+recs.append(claim("restroom", "institutional", "Example Harbor Hospital", "2022-03-01", "2022-03-12", [
+    line(1, "00000", "Room and board", "facility", {"billed": 40000, "allowed": 21000, "plan_paid": 20000, "you_owe": 1000}, revenue="0120"),
+], {"billed": 40000, "allowed": 21000, "plan_paid": 20000, "deductible": 1000, "you_owe": 1000}))
+visit("restdoctor", "Example Maternal Medicine", "2022-03-05", "99232", "Hospital visit",
+      {"billed": 240, "allowed": 110, "plan_paid": 110, "you_owe": 0})
+visit("restlab", "Sample Blood Bank", "2022-03-06", "86900", "Blood type",
+      {"billed": 44, "allowed": 9, "plan_paid": 9, "you_owe": 0}, category="lab")
 
-# 6. Pharmacy fills on one day, a vaccine there later, and the prescription.
-for tag, drug in [("fillone", "Naproxen 250 mg"), ("filltwo", "Cetirizine 10 mg")]:
-    recs.append(claim(tag, "pharmacy", "Sample Pharmacy #456", "2025-10-06", "2025-10-06", [
+# C3: an outpatient facility claim with a line its totals leave out, and the
+# surgeon's that day.
+recs.append(claim("kneeroom", "institutional", "Example Day Surgery", "2024-05-14", "2024-05-14", [
+    line(1, "29881", "Knee procedure", "procedure", {"billed": 6400, "allowed": 3000, "plan_paid": 2700, "you_owe": 300}, revenue="0360"),
+    line(2, "29880", "Knee procedure, other part", "procedure", {"billed": 2100, "plan_paid": 0, "you_owe": 2100}, revenue="0360", counted=False),
+], {"billed": 6400, "allowed": 3000, "plan_paid": 2700, "coinsurance": 300, "you_owe": 300}))
+visit("kneesurgeon", "Sample Surgeons", "2024-05-14", "29881", "Knee procedure",
+      {"billed": 1900, "allowed": 900, "plan_paid": 810, "coinsurance": 90, "you_owe": 90}, category="procedure")
+
+# C4: one provider's hospital claims on touching days, with no facility's.
+for tag, date in [("watchone", "2023-10-03"), ("watchtwo", "2023-10-04")]:
+    visit(tag, "Example Heart Doctors", date, "99221", "Hospital visit",
+          {"billed": 400, "allowed": 190, "plan_paid": 190, "you_owe": 0})
+
+# C5, E1, E3, E4, D4: a portal visit, its doctor's claim and another provider's
+# test, the test's report, a message after it, and the portal's note of it.
+report = rec("hipreport", "result", "2023-04-18T11:00:00-04:00", "Hip angle", {"value": {"value": 41, "unit": "deg"}})
+recs.append(report)
+recs.append(rec("hipcheck", "encounter", "2023-04-18T09:15:00-04:00", "Office Visit", {
+    "class": "AMB", "location": "Sample Joint Clinic", "service_provider": "Sample Joint Clinic",
+    "practitioner": "Quinn Placeholder, DO", "reason": "Hip pain",
+    "period": {"start": "2023-04-18T09:15:00-04:00", "end": "2023-04-18T09:50:00-04:00"}}))
+recs.append(rec("hipmessage", "encounter", "2023-04-20T16:00:00-04:00", "Patient Message", {
+    "class": "VR", "service_provider": "Sample Joint Clinic", "period": {"start": "2023-04-20T16:00:00-04:00"}}))
+visit("hipdoctor", "Q PLACEHOLDER", "2023-04-18", "99214", "Office visit",
+      {"billed": 260, "allowed": 140, "plan_paid": 140, "you_owe": 0})
+visit("hipimage", "Example Imaging Readers", "2023-04-18", "73502", "Hip x-ray",
+      {"billed": 95, "allowed": 31, "plan_paid": 31, "you_owe": 0}, records=[report["id"]], results=[report["id"]], category="imaging")
+docs.append(doc("hipnote", "visit_summary", "2023-04-18", "Sample Joint Clinic", "After Visit Summary", src=PORTAL))
+
+# C6, D2, D6: a dental visit, its receipt, and a second scan of that.
+recs.append(claim("cleaning", "oral", "Sample Dental Studio", "2023-08-22", "2023-08-22", [
+    line(1, "D1110", "Teeth cleaning", "dental", {"billed": 130, "allowed": 90, "plan_paid": 45, "you_owe": 45}),
+], {"billed": 130, "allowed": 90, "plan_paid": 45, "coinsurance": 45, "you_owe": 45}, category="dental"))
+docs.append(doc("dentreceipt", "receipt", "2023-08-22", "Sample Dental Studio", "Payment receipt"))
+docs.append(doc("dentrescan", "receipt", "2023-08-22", "Sample Dental Studio", "Payment receipt", near=rid("d", "dentreceipt")))
+
+# C1, C5: a facility claim over several weeks takes no other claims.
+recs.append(claim("wound", "institutional", "Example Wound Center", "2023-01-09", "2023-03-06", [
+    line(1, "97597", "Wound care", "procedure", {"billed": 2600, "allowed": 1100, "plan_paid": 990, "you_owe": 110}, revenue="0519"),
+], {"billed": 2600, "allowed": 1100, "plan_paid": 990, "coinsurance": 110, "you_owe": 110}))
+visit("cough", "R SPECIMEN", "2023-02-13", "99212", "Office visit",
+      {"billed": 120, "allowed": 60, "plan_paid": 60, "you_owe": 0})
+
+# C6, D5: a pharmacy's fills of one day, a vaccine at another that day, and the
+# paper of the day before.
+for tag, drug in [("fillone", "Amlodipine 5 mg"), ("filltwo", "Folic acid 1 mg"), ("fillthree", "Loratadine 10 mg")]:
+    recs.append(claim(tag, "pharmacy", "Sample Corner Pharmacy", "2023-11-14", "2023-11-14", [
         {"sequence": 1, "category": "pharmacy", "service": {"system": "http://hl7.org/fhir/sid/ndc", "code": "00000000000", "display": drug},
-         "amounts": {"billed": usd(24), "plan_paid": usd(16), "you_owe": usd(8)}}],
-        {"billed": 24, "plan_paid": 16, "copay": 8, "you_owe": 8}, category="pharmacy", display=drug))
-recs.append(claim("tetanus", "pharmacy", "Sample Pharmacy #456", "2025-11-03", "2025-11-03", [
-    {"sequence": 1, "category": "pharmacy", "service": {"system": "http://hl7.org/fhir/sid/ndc", "code": "00000000001", "display": "Tetanus vaccine"},
-     "amounts": {"billed": usd(40), "plan_paid": usd(40), "you_owe": usd(0)}}],
-    {"billed": 40, "plan_paid": 40, "you_owe": 0}, category="pharmacy", display="Tetanus vaccine"))
-docs.append(doc("rxpaper", "prescription", "2025-10-05", "Sample Pharmacy", "Prescription"))
+         "amounts": {"billed": usd(18), "plan_paid": usd(12), "you_owe": usd(6)}}],
+        {"billed": 18, "plan_paid": 12, "copay": 6, "you_owe": 6}, category="pharmacy", display=drug))
+recs.append(claim("shot", "pharmacy", "Example Mail Pharmacy", "2023-11-14", "2023-11-14", [
+    {"sequence": 1, "category": "pharmacy", "service": {"system": "http://hl7.org/fhir/sid/ndc", "code": "00000000001", "display": "Pneumonia vaccine"},
+     "amounts": {"billed": usd(150), "plan_paid": usd(150), "you_owe": usd(0)}}],
+    {"billed": 150, "plan_paid": 150, "you_owe": 0}, category="pharmacy", display="Pneumonia vaccine"))
+docs.append(doc("fillpaper", "prescription", "2023-11-13", "Sample Corner Pharmacy", "Prescription"))
 
-# 7. Two office visits on one day and the day's tests: not assigned (C5, unsure).
-recs.append(claim("twoa", "professional", "A SAMPLE", "2025-06-24", "2025-06-24", [
-    line(1, "99213", "Office visit", "visit", {"billed": 160, "allowed": 75, "plan_paid": 75, "you_owe": 0})],
-    {"billed": 160, "allowed": 75, "plan_paid": 75, "you_owe": 0}, category="visit"))
-recs.append(claim("twob", "professional", "B EXAMPLE", "2025-06-24", "2025-06-24", [
-    line(1, "99214", "Office visit", "visit", {"billed": 230, "allowed": 105, "plan_paid": 105, "you_owe": 0})],
-    {"billed": 230, "allowed": 105, "plan_paid": 105, "you_owe": 0}, category="visit"))
-recs.append(claim("twolab", "professional", "Example Labs", "2025-06-24", "2025-06-24", [
-    line(1, "85025", "Blood cell test", "lab", {"billed": 45, "allowed": 7, "plan_paid": 7, "you_owe": 0})],
-    {"billed": 45, "allowed": 7, "plan_paid": 7, "you_owe": 0}, category="lab"))
+# C5: two office visits and two providers' tests on one day: the tests are not
+# assigned.
+visit("earvisit", "Q SPECIMEN", "2024-02-27", "99213", "Office visit",
+      {"billed": 150, "allowed": 72, "plan_paid": 72, "you_owe": 0})
+visit("footvisit", "W TESTPERSON", "2024-02-27", "99212", "Office visit",
+      {"billed": 110, "allowed": 55, "plan_paid": 55, "you_owe": 0})
+visit("daytest", "Sample Blood Bank", "2024-02-27", "80061", "Cholesterol test",
+      {"billed": 60, "allowed": 12, "plan_paid": 12, "you_owe": 0}, category="lab")
+visit("dayimage", "Example Imaging Readers", "2024-02-27", "73630", "Foot x-ray",
+      {"billed": 85, "allowed": 28, "plan_paid": 28, "you_owe": 0}, category="imaging")
 
-# 8. The parent's visit that a paper filed under the child belongs to (X2).
-recs.append(claim("allergy", "professional", "K EXAMPLE", "2024-06-17", "2024-06-17", [
-    line(1, "99203", "Office visit", "visit", {"billed": 260, "allowed": 125, "plan_paid": 90, "you_owe": 35})],
-    {"billed": 260, "allowed": 125, "plan_paid": 90, "copay": 35, "you_owe": 35}, category="visit"))
+# D3, N5: a bill from a practice no claim names, for the only visit that day and
+# its share.
+visit("hearing", "N TESTPERSON", "2023-06-20", "99204", "Office visit",
+      {"billed": 310, "allowed": 150, "plan_paid": 100, "deductible": 50, "you_owe": 50})
+docs.append(doc("hearingbill", "bill", "2023-06-20", "Sample Hearing Center", "Statement",
+                statement={"statement_date": "2023-06-20", "amount_due": usd(50), "due_date": "2023-07-18"}))
 
-# 9. A bill from a practice no claim names, on the only visit that day, for
-# the visit's share: sure (D3), and the clinician is learned to belong to it (N5).
-docs.append(doc("allergybill", "bill", "2024-06-17", "Example Allergy Associates", "Statement",
-                statement={"statement_date": "2024-06-17", "amount_due": usd(35), "due_date": "2024-07-15"}))
+# X2: the parent's only visit on the day of a paper filed under the child.
+visit("shoulder", "Y EXAMPLE", "2021-11-16", "99202", "Office visit",
+      {"billed": 180, "allowed": 88, "plan_paid": 68, "copay": 20, "you_owe": 20})
 
 parent = {"schema": "medrec-index/v1", "person": PARENT, "rev": 1, "documents": docs, "records": recs, "studies": [], "imports": []}
-texts[rid("d", "handbill")] = "Example Lakeside Hospital\nStatement\nAmount due 150.00"
+texts[rid("d", "burnbill")] = "Sample Valley Hospital\nStatement\nAmount due 100.00"
 
-# --- the child: born on the stay's second day -----------------------------------
-crecs = []
-for tag, code, display, d in [("nbone", "99460", "Newborn care", "2024-08-21"), ("nbtwo", "99462", "Newborn care", "2024-08-22"),
-                              ("nbthree", "99238", "Day of discharge", "2024-08-23")]:
-    crecs.append(claim(tag, "professional", "Sample Newborn Care Group", d, d, [
-        line(1, code, display, "visit", {"billed": 280, "allowed": 110, "plan_paid": 110, "you_owe": 0})],
-        {"billed": 280, "allowed": 110, "plan_paid": 110, "you_owe": 0}, category="visit"))
-cdocs = [doc("allergyrx", "prescription", "2024-06-17", "Example Allergy for Kids", "Prescription")]
+# --- the child ------------------------------------------------------------------
+precs, recs = recs, []
+# C4, X1: intensive care during the parent's stay, and a visit after it.
+for tag, code, date in [("intakeone", "99468", "2022-03-09"), ("intaketwo", "99469", "2022-03-10")]:
+    visit(tag, "Example Infant Intensive Care", date, code, "Intensive care day",
+          {"billed": 1500, "allowed": 800, "plan_paid": 800, "you_owe": 0})
+visit("laterchild", "B SPECIMEN", "2022-06-14", "99391", "Checkup",
+      {"billed": 190, "allowed": 95, "plan_paid": 95, "you_owe": 0})
+crecs = recs
+cdocs = [doc("misfiled", "report", "2021-11-16", "Example Sports Clinic", "Report")]
 child = {"schema": "medrec-index/v1", "person": CHILD, "rev": 1, "documents": cdocs, "records": crecs, "studies": [], "imports": []}
-ctexts = {rid("d", "allergyrx"): "Example Allergy for Kids\nKim Example, M.D.\nRx"}
+ctexts = {rid("d", "misfiled"): "Example Sports Clinic\nReport\nShoulder range of motion"}
 
 household = {"schema": "medrec-household/v1", "format": FORMAT, "folder_id": "f_exampleaaaaaaaaaaaaa", "rev": 1, "people": [
     {"id": PARENT, "name": "Alex Example", "folder": "Alex Example", "birth_date": "1990-01-01", "adult": True, "created_at": "2025-01-01T00:00:00Z"},
-    {"id": CHILD, "name": "Robin Example", "folder": "Robin Example", "birth_date": "2024-08-21", "guardians": [PARENT], "created_at": "2025-01-10T00:00:00Z"},
+    {"id": CHILD, "name": "Robin Example", "folder": "Robin Example", "birth_date": "2022-03-09", "guardians": [PARENT], "created_at": "2025-01-10T00:00:00Z"},
 ], "created_at": "2026-01-01T00:00:00Z"}
 
 def dump(name, v):
@@ -204,4 +217,4 @@ dump("parent.index.json", parent)
 dump("parent.text.json", {"schema": "medrec-text/v1", "person": PARENT, "texts": texts})
 dump("child.index.json", child)
 dump("child.text.json", {"schema": "medrec-text/v1", "person": CHILD, "texts": ctexts})
-print(len(recs), len(docs), len(crecs), len(cdocs))
+print(len(precs), len(docs), len(crecs), len(cdocs))

@@ -361,14 +361,14 @@ fn events_answer_what_happened_with_each_members_title_and_date() {
     assert_eq!(
         (&er["you_owe"], &er["date"], &er["end"], &er["status"]),
         (
-            &json!("198.00 USD"),
-            &json!("2025-02-11"),
-            &json!("2025-02-12"),
+            &json!("161.00 USD"),
+            &json!("2024-10-08"),
+            &Value::Null,
             &json!("complete")
         ),
         "{er}"
     );
-    assert_eq!(er["source"], "Example Lakeside Hospital", "{er}");
+    assert_eq!(er["source"], "Sample Valley Hospital", "{er}");
     assert!(er.get("fields").is_none(), "concise leaves the members out");
     let starts: Vec<&str> = items.iter().map(|i| i["date"].as_str().unwrap()).collect();
     assert!(starts.windows(2).all(|w| w[0] >= w[1]), "newest first");
@@ -390,16 +390,12 @@ fn events_answer_what_happened_with_each_members_title_and_date() {
     );
 
     // Words of the event; dates that overlap its days.
-    let v = ev(json!({"name": "naproxen"}));
+    let v = ev(json!({"name": "amlodipine"}));
     assert_eq!(v["returned"], 1, "{v}");
     assert_eq!(v["items"][0]["kind"], "fill", "{v}");
-    let v = ev(json!({"since": "2025-02-12", "until": "2025-02-12"}));
-    assert!(
-        v["items"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|i| i["id"] == er["id"]),
+    let v = ev(json!({"since": "2022-03-04", "until": "2022-03-04"}));
+    assert_eq!(
+        v["items"][0]["source"], "Example Harbor Hospital",
         "an event spanning the day: {v}"
     );
 
@@ -408,7 +404,7 @@ fn events_answer_what_happened_with_each_members_title_and_date() {
     let v = ev(json!({"id": er["id"]}));
     assert_eq!(v["returned"], 1, "{v}");
     let f = &v["items"][0]["fields"];
-    assert_eq!(f["money"]["discount"], "6043.00", "{f}");
+    assert_eq!(f["money"]["discount"], "1625.00", "{f}");
     assert_eq!(f["confidence"], "sure", "{f}");
     let members = f["members"].as_array().unwrap();
     assert!(members.len() >= 4, "{f}");
@@ -449,7 +445,7 @@ fn events_answer_what_happened_with_each_members_title_and_date() {
 
     // A bill past its due date says so until it is paid, then what is left
     // once something is paid, and that it is paid.
-    let bill = "d_allergybillaaaaaaaaa";
+    let bill = "d_hearingbillaaaaaaaaa";
     let detail = || -> String {
         let r = call(&t, RECORDS, json!({"kind": "bills", "person": "Alex"}));
         let v = assert_fits(&t, RECORDS, &r).clone();
@@ -494,7 +490,7 @@ fn events_answer_what_happened_with_each_members_title_and_date() {
         "--on",
         "2026-03-20",
         "--amount",
-        "15.00",
+        "30.00",
     ]);
     assert_eq!(detail(), "Bill, past due, 20.00 left");
     e.ok(&[
@@ -536,19 +532,19 @@ fn linked_letters_and_studies_follow_what_is_private() {
         serde_json::from_str(&std::fs::read_to_string(fixtures.join("adult.index.json")).unwrap())
             .unwrap();
     v["person"] = alex["id"].clone();
-    // A letter in no event, linked by the phobia record alone.
+    // A letter in no event, linked by the smoking record alone.
     let mut letter = v["documents"][0].clone();
     letter["id"] = json!("d_linkedletteraaaaaaaa");
     letter["title"] = json!("Zebrafish letter");
     letter.as_object_mut().unwrap().remove("organization");
     v["documents"].as_array_mut().unwrap().push(letter);
-    let phobia = v["records"]
+    let smoking = v["records"]
         .as_array_mut()
         .unwrap()
         .iter_mut()
-        .find(|r| r["id"] == "r_phobiaaaaaaaaaaaaaaa")
+        .find(|r| r["id"] == "r_smokingaaaaaaaaaaaaa")
         .unwrap();
-    phobia["documents"] = json!(["d_linkedletteraaaaaaaa"]);
+    smoking["documents"] = json!(["d_linkedletteraaaaaaaa"]);
     let study = |id: &str, title: &str, report: Option<&str>| {
         let mut s = json!({"id": id, "study_uid": id, "path": format!("Imaging/{id}/"),
             "date": "2026-10-30", "description": title, "body_part": "kneecap", "series": [], "instances": 0, "size": 0,
@@ -567,7 +563,7 @@ fn linked_letters_and_studies_follow_what_is_private() {
         study(
             "m_openaaaaaaaaaaaaaaaa",
             "Wombat picture",
-            Some("d_physicalavsaaaaaaaaa")
+            Some("d_headsummaryaaaaaaaaa")
         ),
         study("m_unreportedaaaaaaaaaa", "Numbat picture", None),
     ]);
@@ -662,10 +658,10 @@ fn private_items_stay_out_of_household_wide_answers_unless_asked_about() {
         )
         .unwrap();
     }
-    let (phobia, escitalopram, letter) = (
-        "r_phobiaaaaaaaaaaaaaaa",
-        "r_escitalopramaaaaaaaa",
-        "d_counselletteraaaaaaa",
+    let (smoking, varenicline, letter) = (
+        "r_smokingaaaaaaaaaaaaa",
+        "r_vareniclineaaaaaaaaa",
+        "d_quitnoticeaaaaaaaaaa",
     );
     let t = e.tools();
     let ask = |tool: &str, args: Value| {
@@ -701,16 +697,16 @@ fn private_items_stay_out_of_household_wide_answers_unless_asked_about() {
 
     // Household-wide: left out, and the warning says how many.
     let v = ask(RECORDS, json!({"kind": "conditions"}));
-    assert!(!ids(&v).contains(&phobia.to_string()), "{v}");
+    assert!(!ids(&v).contains(&smoking.to_string()), "{v}");
     assert!(
-        ids(&v).contains(&"r_anemiaaaaaaaaaaaaaaa".to_string()),
+        ids(&v).contains(&"r_migraineaaaaaaaaaaaa".to_string()),
         "{v}"
     );
     let warn = left_out(&v).expect("a private-left-out warning");
     assert!(warn.starts_with("1 private item left out"), "{warn}");
     let v = ask(RECORDS, json!({"kind": "medications", "name": "tablet"}));
     assert!(
-        !ids(&v).contains(&escitalopram.to_string()),
+        !ids(&v).contains(&varenicline.to_string()),
         "a form names no medicine: {v}"
     );
     assert!(left_out(&v).is_some(), "{v}");
@@ -720,14 +716,14 @@ fn private_items_stay_out_of_household_wide_answers_unless_asked_about() {
             .as_array()
             .unwrap()
             .iter()
-            .all(|i| i["source"] != "Example Behavioral Health"),
+            .all(|i| i["source"] != "Example Recovery Center"),
         "{v}"
     );
     assert!(left_out(&v).is_some(), "{v}");
-    let v = ask(SEARCH, json!({"query": "session"}));
+    let v = ask(SEARCH, json!({"query": "cedar"}));
     assert!(!ids(&v).contains(&letter.to_string()), "{v}");
     assert!(left_out(&v).is_some(), "{v}");
-    let v = ask(SEARCH, json!({"query": "recheck"}));
+    let v = ask(SEARCH, json!({"query": "diary"}));
     assert!(left_out(&v).is_none(), "nothing private matched: {v}");
 
     // A page counts what was left out between it and the page before; the
@@ -757,28 +753,28 @@ fn private_items_stay_out_of_household_wide_answers_unless_asked_about() {
 
     // About the person, or naming the item: in, and marked.
     let v = ask(RECORDS, json!({"kind": "conditions", "person": "Alex"}));
-    assert_eq!(item(&v, phobia)["private"], "mental_health");
-    assert!(item(&v, "r_anemiaaaaaaaaaaaaaaa").get("private").is_none());
+    assert_eq!(item(&v, smoking)["private"], "substance_use");
+    assert!(item(&v, "r_migraineaaaaaaaaaaaa").get("private").is_none());
     assert!(left_out(&v).is_none(), "{v}");
     let v = ask(
         RECORDS,
-        json!({"kind": "medications", "name": "escitalopram"}),
+        json!({"kind": "medications", "name": "varenicline"}),
     );
-    assert_eq!(item(&v, escitalopram)["private"], "mental_health");
-    let v = ask(SEARCH, json!({"query": "escitalopram"}));
-    assert_eq!(item(&v, escitalopram)["private"], "mental_health");
-    let v = ask(SEARCH, json!({"query": "session", "person": "Alex"}));
-    assert_eq!(item(&v, letter)["private"], "mental_health");
-    let v = ask(RECORDS, json!({"kind": "events", "name": "behavioral"}));
+    assert_eq!(item(&v, varenicline)["private"], "substance_use");
+    let v = ask(SEARCH, json!({"query": "varenicline"}));
+    assert_eq!(item(&v, varenicline)["private"], "substance_use");
+    let v = ask(SEARCH, json!({"query": "cedar", "person": "Alex"}));
+    assert_eq!(item(&v, letter)["private"], "substance_use");
+    let v = ask(RECORDS, json!({"kind": "events", "name": "recovery"}));
     let ev = &v["items"][0];
     assert_eq!(
         (&ev["source"], &ev["private"]),
-        (&json!("Example Behavioral Health"), &json!("mental_health")),
+        (&json!("Example Recovery Center"), &json!("substance_use")),
         "{v}"
     );
     let v = ask(DOCUMENT, json!({"id": letter}));
-    assert_eq!(v["private"], "mental_health");
-    let v = ask(DOCUMENT, json!({"id": "d_physicalavsaaaaaaaaa"}));
+    assert_eq!(v["private"], "substance_use");
+    let v = ask(DOCUMENT, json!({"id": "d_headsummaryaaaaaaaaa"}));
     assert!(v.get("private").is_none(), "{v}");
     let v = ask(SUMMARY, json!({"person": "Alex"}));
     let lines: Vec<&Value> = v["summary"]["sections"]
@@ -789,12 +785,17 @@ fn private_items_stay_out_of_household_wide_answers_unless_asked_about() {
         .collect();
     let marked: Vec<&str> = lines
         .iter()
-        .filter(|l| l["private"] == "mental_health")
+        .filter(|l| l["private"] == "substance_use")
         .map(|l| l["id"].as_str().unwrap())
         .collect();
     assert_eq!(
         marked,
-        vec![escitalopram, phobia, "r_counselvisitaaaaaaaa"],
+        vec![
+            varenicline,
+            smoking,
+            "r_screenaaaaaaaaaaaaaa",
+            "r_quitvisitaaaaaaaaaaa"
+        ],
         "{v}"
     );
     assert!(lines.iter().filter(|l| l.get("private").is_none()).count() >= 3);
@@ -809,12 +810,12 @@ fn private_items_stay_out_of_household_wide_answers_unless_asked_about() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|r| r["id"] == "r_ferritinaaaaaaaaaaaa")
+        .find(|r| r["id"] == "r_magnesiumaaaaaaaaaaa")
         .unwrap()
         .clone();
-    earlier["id"] = json!("r_ferritinearlieraaaaa");
-    earlier["key"] = json!("result|ferritin|2025-03-01");
-    earlier["date"] = json!("2025-03-01T13:20:00Z");
+    earlier["id"] = json!("r_magnesiumearlieraaaa");
+    earlier["key"] = json!("result|magnesium|2024-09-10");
+    earlier["date"] = json!("2024-09-10T15:10:00Z");
     idx["records"].as_array_mut().unwrap().push(earlier);
     std::fs::write(folder.join("index.json"), serde_json::to_vec(&idx).unwrap()).unwrap();
     let series = |v: &Value| -> Option<Value> {
@@ -822,26 +823,24 @@ fn private_items_stay_out_of_household_wide_answers_unless_asked_about() {
             .as_array()
             .unwrap()
             .iter()
-            .find(|i| i["title"] == "Ferritin")
+            .find(|i| i["title"] == "Magnesium")
             .cloned()
     };
     let v = ask(RECORDS, json!({"kind": "tests"}));
     assert_eq!(series(&v).unwrap()["results"], 2, "{v}");
+    let held = count(&v);
     std::fs::write(
         folder.join("marks.json"),
         serde_json::to_vec(&json!({
             "schema": "medrec-marks/v1", "person": alex["id"], "payments": [],
-            "private": [{"id": "o_ferritinmarkaaaaaaa", "item": "r_ferritinearlieraaaaa",
+            "private": [{"id": "o_magnesiummarkaaaaaaa", "item": "r_magnesiumearlieraaaa",
                          "private": true, "at": "2026-11-20T10:00:00Z"}]}))
         .unwrap(),
     )
     .unwrap();
     let v = ask(RECORDS, json!({"kind": "tests"}));
     assert!(series(&v).is_none(), "{v}");
-    let before = left_out(&v).map_or(0, |w| {
-        w.split(' ').next().unwrap().parse::<usize>().unwrap()
-    });
-    assert!(before >= 1, "{v}");
+    assert_eq!(count(&v), held + 1, "{v}");
     // About Alex, the series is there, marked with its private result's
     // area.
     let v = ask(RECORDS, json!({"kind": "tests", "person": "Alex"}));
@@ -852,7 +851,7 @@ fn private_items_stay_out_of_household_wide_answers_unless_asked_about() {
         "{v}"
     );
     // Naming the test includes it too.
-    let v = ask(RECORDS, json!({"kind": "tests", "name": "ferritin"}));
+    let v = ask(RECORDS, json!({"kind": "tests", "name": "magnesium"}));
     assert!(series(&v).is_some(), "{v}");
     std::fs::remove_file(folder.join("marks.json")).unwrap();
 
@@ -883,8 +882,8 @@ fn private_items_stay_out_of_household_wide_answers_unless_asked_about() {
         .collect();
     assert_eq!(unreadable.len(), 1, "{v}");
     let v = ask(RECORDS, json!({"kind": "conditions", "person": "Alex"}));
-    assert_eq!(item(&v, phobia)["private"], "mental_health");
-    assert!(item(&v, "r_anemiaaaaaaaaaaaaaaa").get("private").is_none());
+    assert_eq!(item(&v, smoking)["private"], "substance_use");
+    assert!(item(&v, "r_migraineaaaaaaaaaaaa").get("private").is_none());
 
     // A second Alex Testperson, born another day, whose marks read: only
     // the first one's records and events are held back.
@@ -922,11 +921,11 @@ fn private_items_stay_out_of_household_wide_answers_unless_asked_about() {
     .unwrap();
     let v = ask(RECORDS, json!({"kind": "medications"}));
     assert!(
-        ids(&v).contains(&"r_cetfillaaaaaaaaaaaaa".to_string()),
+        ids(&v).contains(&"r_inhaleraaaaaaaaaaaaa".to_string()),
         "{v}"
     );
     assert!(
-        !ids(&v).contains(&"r_ferrousaaaaaaaaaaaaa".to_string()),
+        !ids(&v).contains(&"r_sumatriptanaaaaaaaaa".to_string()),
         "{v}"
     );
     let v = ask(RECORDS, json!({"kind": "events"}));
@@ -938,7 +937,7 @@ fn private_items_stay_out_of_household_wide_answers_unless_asked_about() {
     assert!(
         shown
             .iter()
-            .all(|i| i["source"] != "Example Family Practice"),
+            .all(|i| i["source"] != "Sample Headache Clinic"),
         "the first Alex's events are held back: {v}"
     );
     let warned = v["warnings"]
@@ -1070,10 +1069,10 @@ fn a_condition_has_its_plain_name_from_the_folders_views() {
         &pid,
         &json!({"schema": "medrec-code-names/v1", "person": pid,
             "table": {"id": "icd10cm", "version": "FY2027", "date": "2026-06-01"},
-            "codes": {"icd10cm|D50.9": {"name": "Sample pressure"}},
-            "private_codes": {"icd10cm|F40.10": {"name": "Sample low mood"}}}),
+            "codes": {"icd10cm|G43.909": {"name": "Sample open name"}},
+            "private_codes": {"icd10cm|F17.210": {"name": "Sample private name"}}}),
     );
-    let (low, pressure) = ("r_phobiaaaaaaaaaaaaaaa", "r_anemiaaaaaaaaaaaaaaa");
+    let (private, open) = ("r_smokingaaaaaaaaaaaaa", "r_migraineaaaaaaaaaaaa");
     let t = e.tools();
     let ask = |tool: &str, args: Value| {
         let r = call(&t, tool, args);
@@ -1093,15 +1092,15 @@ fn a_condition_has_its_plain_name_from_the_folders_views() {
 
     // About one person: both, with the source's own words beside them.
     let v = ask(RECORDS, json!({"kind": "conditions", "person": "Alex"}));
-    assert_eq!(name_of(&v, pressure).as_deref(), Some("Sample pressure"));
-    assert_eq!(name_of(&v, low).as_deref(), Some("Sample low mood"));
+    assert_eq!(name_of(&v, open).as_deref(), Some("Sample open name"));
+    assert_eq!(name_of(&v, private).as_deref(), Some("Sample private name"));
     let row = v["items"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|i| i["id"] == pressure)
+        .find(|i| i["id"] == open)
         .unwrap();
-    assert_eq!(row["title"], "Iron deficiency anemia");
+    assert_eq!(row["title"], "Migraine headache");
     let v = ask(SUMMARY, json!({"person": "Alex"}));
     let lines = v["summary"]["sections"]
         .as_array()
@@ -1115,7 +1114,7 @@ fn a_condition_has_its_plain_name_from_the_folders_views() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|l| l["id"] == pressure && l["plain_name"] == "Sample pressure"),
+            .any(|l| l["id"] == open && l["plain_name"] == "Sample open name"),
         "{lines}"
     );
     assert!(!v.to_string().contains("name_key"), "{v}");
@@ -1123,16 +1122,16 @@ fn a_condition_has_its_plain_name_from_the_folders_views() {
     // About the household: only the codes an open item uses, and a private
     // item the question names keeps the source's words.
     let v = ask(RECORDS, json!({"kind": "conditions"}));
-    assert_eq!(name_of(&v, pressure).as_deref(), Some("Sample pressure"));
+    assert_eq!(name_of(&v, open).as_deref(), Some("Sample open name"));
     let v = ask(
         RECORDS,
-        json!({"kind": "conditions", "name": "social phobia"}),
+        json!({"kind": "conditions", "name": "nicotine dependence"}),
     );
-    assert_eq!(name_of(&v, low), None);
+    assert_eq!(name_of(&v, private), None);
 
     // A name is not a word a question can find: no row, and no private
     // item opened.
-    for q in ["Sample low mood", "Sample pressure"] {
+    for q in ["Sample private name", "Sample open name"] {
         let v = ask(RECORDS, json!({"kind": "conditions", "name": q}));
         assert!(v["items"].as_array().unwrap().is_empty(), "{v}");
         let v = ask(SEARCH, json!({"query": q}));
@@ -1153,9 +1152,9 @@ fn a_condition_has_its_plain_name_from_the_folders_views() {
         )
         .unwrap();
     };
-    mark(pressure);
+    mark(open);
     let v = ask(RECORDS, json!({"kind": "conditions", "person": "Alex"}));
-    assert_eq!(name_of(&v, pressure), None);
+    assert_eq!(name_of(&v, open), None);
 
     // A pass on a machine with no table keeps the names, split by what is
     // private now, and adds none.
@@ -1174,16 +1173,16 @@ fn a_condition_has_its_plain_name_from_the_folders_views() {
     assert_eq!(v["codes"], json!({}));
     assert_eq!(
         v["private_codes"],
-        json!({"icd10cm|F40.10": {"name": "Sample low mood"},
-               "icd10cm|D50.9": {"name": "Sample pressure"}})
+        json!({"icd10cm|F17.210": {"name": "Sample private name"},
+               "icd10cm|G43.909": {"name": "Sample open name"}})
     );
     let v = ask(RECORDS, json!({"kind": "conditions", "person": "Alex"}));
-    assert_eq!(name_of(&v, pressure).as_deref(), Some("Sample pressure"));
+    assert_eq!(name_of(&v, open).as_deref(), Some("Sample open name"));
     let v = ask(
         RECORDS,
-        json!({"kind": "conditions", "name": "iron deficiency anemia"}),
+        json!({"kind": "conditions", "name": "migraine headache"}),
     );
-    assert_eq!(name_of(&v, pressure), None);
+    assert_eq!(name_of(&v, open), None);
 
     // Nobody's views are made again for the table this machine lacks.
     let path = e.records().join("views/views.json");

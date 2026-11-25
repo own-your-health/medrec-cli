@@ -171,12 +171,12 @@ mod tests {
         serde_json::from_value(json!({
             "schema": "medrec-household/v1", "folder_id": "f_exampleaaaaaaaaaaaaa", "format": 1, "rev": 1,
             "created_at": "2026-01-01T00:00:00Z", "people": [], "organizations": [
-                {"id": "g_firstaaaaaaaaaaaaaaa", "name": "Example Family Practice", "fhir_base": BASE},
-                {"id": "g_secondaaaaaaaaaaaaaa", "name": "Sample Foot Clinic", "fhir_base": BASE}],
+                {"id": "g_firstaaaaaaaaaaaaaaa", "name": "Example Eye Center", "fhir_base": BASE},
+                {"id": "g_secondaaaaaaaaaaaaaa", "name": "Sample Skin Studio", "fhir_base": BASE}],
             "sources": [
-                source("s_alexfamilyaaaaaaaaaa", ALEX, "fam-1", "Example Family Practice"),
-                source("s_alexfootaaaaaaaaaaaa", ALEX, "foot-1", "Sample Foot Clinic"),
-                source("s_robinlastaaaaaaaaaaa", ROBIN, "last-1", "Placeholder Skin Clinic")],
+                source("s_alexeyeaaaaaaaaaaaaa", ALEX, "eye-1", "Example Eye Center"),
+                source("s_alexstudioaaaaaaaaaa", ALEX, "studio-1", "Sample Skin Studio"),
+                source("s_robinlastaaaaaaaaaaa", ROBIN, "last-1", "Placeholder Hearing Clinic")],
         }))
         .unwrap()
     }
@@ -207,44 +207,44 @@ mod tests {
         serde_json::from_value(v).unwrap()
     }
 
-    const FAMILY: &str = "2026-02-03T10:00";
-    const FOOT: &str = "2026-02-04T10:00";
+    const EYE: &str = "2026-02-03T10:00";
+    const STUDIO: &str = "2026-02-04T10:00";
 
     #[test]
     fn the_run_that_filed_it_says_which_practice() {
         let h = household();
-        let idx = index(&[(FAMILY, "fam-1"), (FOOT, "foot-1")]);
+        let idx = index(&[(EYE, "eye-1"), (STUDIO, "studio-1")]);
         let s = Sources::of(&h.sources, &idx);
-        let (family, foot) = (
+        let (eye, studio) = (
             pv("2026-02-03T10:00:30Z", None),
             pv("2026-02-04T10:00:30Z", None),
         );
-        assert_eq!(s.place(&family), Some("Example Family Practice"));
-        assert_eq!(s.label(&foot).as_deref(), Some("Sample Foot Clinic"));
-        assert_eq!(s.source(&foot).unwrap().id, "s_alexfootaaaaaaaaaaaa");
-        assert_ne!(s.key(&family), s.key(&foot));
+        assert_eq!(s.place(&eye), Some("Example Eye Center"));
+        assert_eq!(s.label(&studio).as_deref(), Some("Sample Skin Studio"));
+        assert_eq!(s.source(&studio).unwrap().id, "s_alexstudioaaaaaaaaaa");
+        assert_ne!(s.key(&eye), s.key(&studio));
         // One record from both has no place.
-        assert_eq!(s.place_of([&family, &foot]), None);
-        assert_eq!(s.place_of([&foot]), s.place(&foot));
-        assert_eq!(s.place_of([&foot, &foot]), s.place(&foot));
+        assert_eq!(s.place_of([&eye, &studio]), None);
+        assert_eq!(s.place_of([&studio]), s.place(&studio));
+        assert_eq!(s.place_of([&studio, &studio]), s.place(&studio));
         // Nor has one from a practice and from the connection itself, or from
         // a source not known, whichever comes first.
         let unknown = pv("2026-01-01T10:00:30Z", None);
         let mut h = household();
         h.sources[0].organization_name = Some("athenahealth (all practices)".into());
         let named = Sources::of(&h.sources, &idx);
-        for (s, other) in [(&named, &family), (&s, &unknown)] {
+        for (s, other) in [(&named, &eye), (&s, &unknown)] {
             assert_eq!(s.place(other), None);
-            assert_eq!(s.place_of([&foot, other]), None);
-            assert_eq!(s.place_of([other, &foot]), None);
+            assert_eq!(s.place_of([&studio, other]), None);
+            assert_eq!(s.place_of([other, &studio]), None);
         }
         // Read again later, by whichever run: the one that filed it says.
         let again = pv("2026-02-03T10:00:30Z", Some("2026-02-04T10:00:01Z"));
-        assert_eq!(s.place(&again), Some("Example Family Practice"));
-        assert_eq!(s.key(&again), s.key(&family));
+        assert_eq!(s.place(&again), Some("Example Eye Center"));
+        assert_eq!(s.key(&again), s.key(&eye));
         // Filed by none the index holds, read by one.
         let read = pv("2026-01-01T10:00:30Z", Some("2026-02-04T10:00:01Z"));
-        assert_eq!(s.place(&read), Some("Sample Foot Clinic"));
+        assert_eq!(s.place(&read), Some("Sample Skin Studio"));
     }
 
     #[test]
@@ -259,14 +259,14 @@ mod tests {
         assert_eq!(s.label(&unknown).as_deref(), Some("athena"));
         // Two runs of two patients in one second say neither, but for one
         // that read it.
-        let idx = index(&[(FAMILY, "fam-1"), (FAMILY, "foot-1")]);
+        let idx = index(&[(EYE, "eye-1"), (EYE, "studio-1")]);
         let s = Sources::of(&h.sources, &idx);
         assert_eq!(s.place(&unknown), None);
         let mut idx = idx;
         idx.imports[1].pulled_at = "2026-02-03T10:00:09Z".into();
         let s = Sources::of(&h.sources, &idx);
         let read = pv("2026-02-03T10:00:30Z", Some("2026-02-03T10:00:09Z"));
-        assert_eq!(s.place(&read), Some("Sample Foot Clinic"));
+        assert_eq!(s.place(&read), Some("Sample Skin Studio"));
         // Nor does one of them being the connection's own name, or none.
         for other in [Some("athenahealth (all practices)"), None] {
             let mut h = household();
@@ -278,10 +278,10 @@ mod tests {
         }
         // One name twice is the name.
         let mut h = household();
-        h.sources[1].organization_name = Some(" Example Family Practice ".into());
+        h.sources[1].organization_name = Some(" Example Eye Center ".into());
         let idx = index(&[]);
         let s = Sources::of(&h.sources, &idx);
-        assert_eq!(s.place(&unknown), Some("Example Family Practice"));
+        assert_eq!(s.place(&unknown), Some("Example Eye Center"));
         assert!(s.source(&unknown).is_none());
     }
 
@@ -294,7 +294,7 @@ mod tests {
         let idx = index(&[]);
         let s = Sources::of(&h.sources, &idx);
         let one = pv("2026-02-03T10:00:30Z", None);
-        assert_eq!(s.source(&one).unwrap().id, "s_alexfamilyaaaaaaaaaa");
+        assert_eq!(s.source(&one).unwrap().id, "s_alexeyeaaaaaaaaaaaaa");
         assert_eq!(s.place(&one), None);
         assert_eq!(
             s.label(&one).as_deref(),
@@ -307,7 +307,7 @@ mod tests {
         assert_eq!(s.label(&one).as_deref(), Some("athena"));
         // Nor the one a run of another patient filed.
         let h = household();
-        let idx = index(&[(FAMILY, "gone-1")]);
+        let idx = index(&[(EYE, "gone-1")]);
         let s = Sources::of(&h.sources, &idx);
         assert_eq!(s.place(&one), None);
         assert_eq!(s.label(&one).as_deref(), Some("athena"));

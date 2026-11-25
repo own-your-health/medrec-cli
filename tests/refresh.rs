@@ -1556,11 +1556,11 @@ fn a_bill_marked_paid_from_the_app_or_a_terminal_is_settled_in_the_bills_view() 
     let (alex, _) = with_event_fixtures(&e);
     let aid = alex["id"].as_str().unwrap();
     e.ok(&["views", "write"]);
-    let bill = "d_allergybillaaaaaaaaa";
+    let bill = "d_hearingbillaaaaaaaaa";
     let b = bill_row(&bills_view(&e, aid), bill);
     assert_eq!(
         (&b["amount_due"], &b["settled"]),
-        (&json!("35.00"), &json!(false)),
+        (&json!("50.00"), &json!(false)),
         "{b}"
     );
 
@@ -1582,7 +1582,7 @@ fn a_bill_marked_paid_from_the_app_or_a_terminal_is_settled_in_the_bills_view() 
             vec![
                 "bills",
                 "paid",
-                "d_skinavsaaaaaaaaaaaaa",
+                "d_hipnoteaaaaaaaaaaaaa",
                 "--on",
                 "2026-03-20",
                 "--amount",
@@ -1606,7 +1606,7 @@ fn a_bill_marked_paid_from_the_app_or_a_terminal_is_settled_in_the_bills_view() 
             vec![
                 "bills",
                 "paid",
-                "r_skindocaaaaaaaaaaaaa",
+                "r_hipdoctoraaaaaaaaaaa",
                 "--on",
                 "2026-03-20",
                 "--amount",
@@ -1653,7 +1653,7 @@ fn a_bill_marked_paid_from_the_app_or_a_terminal_is_settled_in_the_bills_view() 
         &e,
         "x_paidaaaaaaaaaaaaaaaa",
         "paid",
-        json!({"person": aid, "document": bill, "on": "2026-04-01", "amount": "15.00"}),
+        json!({"person": aid, "document": bill, "on": "2026-04-01", "amount": "30.00"}),
     );
     let v = e.ok(&["refresh", "--scheduled"]);
     drop(held);
@@ -1668,14 +1668,14 @@ fn a_bill_marked_paid_from_the_app_or_a_terminal_is_settled_in_the_bills_view() 
         &e,
         "x_paidbbbbbbbbbbbbbbbb",
         "paid",
-        json!({"person": aid, "document": "d_skinavsaaaaaaaaaaaaa", "on": "2026-04-01", "amount": "20.00"}),
+        json!({"person": aid, "document": "d_hipnoteaaaaaaaaaaaaa", "on": "2026-04-01", "amount": "20.00"}),
     );
     e.ok(&["refresh", "--scheduled"]);
     let done = e.json_at("_requests/done/20261124T120000Z_x_paidaaaaaaaaaaaaaaaa.json");
     assert_eq!(done["handled"]["outcome"], "ok", "{done}");
     assert_eq!(
         done["paid"],
-        json!({"person": aid, "document": bill, "on": "2026-04-01", "amount": "15.00"})
+        json!({"person": aid, "document": bill, "on": "2026-04-01", "amount": "30.00"})
     );
     let refused = e.json_at("_requests/done/20261124T120000Z_x_paidbbbbbbbbbbbbbbbb.json");
     assert_eq!(refused["handled"]["outcome"], "invalid", "{refused}");
@@ -1687,7 +1687,7 @@ fn a_bill_marked_paid_from_the_app_or_a_terminal_is_settled_in_the_bills_view() 
     let b = bill_row(&bills_view(&e, aid), bill);
     assert_eq!(
         (&b["paid_total"], &b["left"], &b["settled"]),
-        (&json!("35.00"), &json!("0.00"), &json!(true)),
+        (&json!("50.00"), &json!("0.00"), &json!(true)),
         "{b}"
     );
     let by: Vec<&str> = b["paid"]
@@ -1712,8 +1712,8 @@ fn a_bill_marked_paid_from_the_app_or_a_terminal_is_settled_in_the_bills_view() 
     e.ok(&[
         "events",
         "apart",
-        "r_skindocaaaaaaaaaaaaa",
-        "r_skinlabaaaaaaaaaaaaa",
+        "r_hipdoctoraaaaaaaaaaa",
+        "r_hipimageaaaaaaaaaaaa",
     ]);
     let p = e.ok(&["bills", "payments"]);
     assert_eq!(p["items"].as_array().unwrap().len(), 2, "{p}");
@@ -1754,7 +1754,7 @@ fn a_bill_marked_paid_from_the_app_or_a_terminal_is_settled_in_the_bills_view() 
     let b = bill_row(&bills_view(&e, aid), bill);
     assert_eq!(
         (&b["left"], &b["paid"].as_array().unwrap().len()),
-        (&json!("30.00"), &1),
+        (&json!("45.00"), &1),
         "{b}"
     );
     let o: Value =
@@ -1774,7 +1774,7 @@ fn a_bill_marked_paid_from_the_app_or_a_terminal_is_settled_in_the_bills_view() 
     e.ok(&["views", "write"]);
     let v = bills_view(&e, aid);
     assert_eq!(v["marks_unreadable"], true, "{v}");
-    assert_eq!(bill_row(&v, bill)["left"], "35.00");
+    assert_eq!(bill_row(&v, bill)["left"], "50.00");
     let listed = e.ok(&["bills", "list", "--person", "Alex"]);
     assert_eq!(listed["marks_unreadable"], json!([aid]), "{listed}");
     let out = e.run(&["bills", "list", "--person", "Alex"]);
@@ -1903,34 +1903,36 @@ fn private_items_follow_the_rules_until_the_household_marks_them() {
         .unwrap()
         .to_string();
     e.ok(&["views", "write"]);
-    let (phobia, escitalopram, visit, letter) = (
-        "r_phobiaaaaaaaaaaaaaaa",
-        "r_escitalopramaaaaaaaa",
-        "r_counselvisitaaaaaaaa",
-        "d_counselletteraaaaaaa",
+    let (smoking, varenicline, visit, screen, letter) = (
+        "r_smokingaaaaaaaaaaaaa",
+        "r_vareniclineaaaaaaaaa",
+        "r_quitvisitaaaaaaaaaaa",
+        "r_screenaaaaaaaaaaaaaa",
+        "d_quitnoticeaaaaaaaaaa",
     );
-    let (anemia, ferrous) = ("r_anemiaaaaaaaaaaaaaaa", "r_ferrousaaaaaaaaaaaaa");
-    let mh = || "mental_health".to_string();
+    let (migraine, sumatriptan) = ("r_migraineaaaaaaaaaaaa", "r_sumatriptanaaaaaaaaa");
+    let area = || "substance_use".to_string();
     let v = private_view(&e, aid);
     assert_eq!(v["schema"], "medrec-private/v1");
     assert_eq!(v["person"], aid);
     assert_eq!(
         private_rows(&v, "records"),
         vec![
-            (visit.into(), mh(), "provider".into()),
-            (escitalopram.into(), mh(), "medicine".into()),
-            (phobia.into(), mh(), "code".into()),
+            (visit.into(), area(), "provider".into()),
+            (screen.into(), area(), "test".into()),
+            (smoking.into(), area(), "code".into()),
+            (varenicline.into(), area(), "medicine".into()),
         ]
     );
     assert_eq!(
         private_rows(&v, "documents"),
-        vec![(letter.into(), mh(), "provider".into())]
+        vec![(letter.into(), area(), "provider".into())]
     );
     let events = private_rows(&v, "events");
-    assert_eq!(events.len(), 1, "the therapy visit's event: {v}");
+    assert_eq!(events.len(), 1, "the group visit's event: {v}");
     assert_eq!(
         (&events[0].1, &events[0].2),
-        (&mh(), &"members".to_string())
+        (&area(), &"members".to_string())
     );
     let visit_event = events[0].0.clone();
     assert!(events_view(&e, aid).get("private").is_none());
@@ -1955,11 +1957,11 @@ fn private_items_follow_the_rules_until_the_household_marks_them() {
 
     let listed = e.ok(&["private", "list"]);
     let items = listed["items"].as_array().unwrap();
-    assert_eq!(items.len(), 5, "{listed}");
+    assert_eq!(items.len(), 6, "{listed}");
     assert_eq!(items[0]["id"], letter.to_string(), "newest first: {listed}");
     assert!(items
         .iter()
-        .all(|i| i["person"] == aid && i["area"] == "mental_health"));
+        .all(|i| i["person"] == aid && i["area"] == "substance_use"));
     assert_eq!(
         items
             .iter()
@@ -1987,25 +1989,28 @@ fn private_items_follow_the_rules_until_the_household_marks_them() {
 
     // A terminal marks one medicine private and another not; the same again
     // is unchanged.
-    let m = e.ok(&["private", "mark", ferrous]);
+    let m = e.ok(&["private", "mark", sumatriptan]);
     assert_eq!(
         (&m["status"], &m["person"]),
         (&json!("recorded"), &json!(aid)),
         "{m}"
     );
-    assert_eq!(e.ok(&["private", "mark", ferrous])["status"], "unchanged");
     assert_eq!(
-        e.ok(&["private", "unmark", escitalopram])["status"],
+        e.ok(&["private", "mark", sumatriptan])["status"],
+        "unchanged"
+    );
+    assert_eq!(
+        e.ok(&["private", "unmark", varenicline])["status"],
         "recorded"
     );
     e.ok(&["views", "write"]);
     let v = private_view(&e, aid);
     let records = private_rows(&v, "records");
     assert!(
-        records.contains(&(ferrous.into(), "household".into(), "household".into())),
+        records.contains(&(sumatriptan.into(), "household".into(), "household".into())),
         "{v}"
     );
-    assert!(!records.iter().any(|r| r.0 == escitalopram), "{v}");
+    assert!(!records.iter().any(|r| r.0 == varenicline), "{v}");
 
     // The app marks a condition private and names an item that is not the
     // person's; an unmarked event's members stay private by the event.
@@ -2013,7 +2018,7 @@ fn private_items_follow_the_rules_until_the_household_marks_them() {
         &e,
         "x_privateaaaaaaaaaaaaa",
         "private",
-        json!({"person": aid, "item": anemia, "private": true}),
+        json!({"person": aid, "item": migraine, "private": true}),
     );
     decision_request(
         &e,
@@ -2032,7 +2037,7 @@ fn private_items_follow_the_rules_until_the_household_marks_them() {
     assert_eq!(done["handled"]["outcome"], "ok", "{done}");
     assert_eq!(
         done["private"],
-        json!({"person": aid, "item": anemia, "private": true})
+        json!({"person": aid, "item": migraine, "private": true})
     );
     let refused = e.json_at("_requests/done/20261124T120000Z_x_privatebbbbbbbbbbbbb.json");
     assert_eq!(refused["handled"]["outcome"], "invalid", "{refused}");
@@ -2046,7 +2051,7 @@ fn private_items_follow_the_rules_until_the_household_marks_them() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|m| m["item"] == anemia)
+        .find(|m| m["item"] == migraine)
         .unwrap();
     assert_eq!(
         (&by_app["private"], &by_app["request"], &by_app["by"]),
@@ -2060,7 +2065,7 @@ fn private_items_follow_the_rules_until_the_household_marks_them() {
     let v = private_view(&e, aid);
     let records = private_rows(&v, "records");
     assert!(
-        records.contains(&(anemia.into(), "household".into(), "household".into())),
+        records.contains(&(migraine.into(), "household".into(), "household".into())),
         "{v}"
     );
     assert!(
@@ -2069,22 +2074,22 @@ fn private_items_follow_the_rules_until_the_household_marks_them() {
     );
     // Its visit is private by its place still.
     assert!(
-        records.contains(&(visit.into(), mh(), "provider".into())),
+        records.contains(&(visit.into(), area(), "provider".into())),
         "{v}"
     );
 
     // Reset gives the rules back.
     assert_eq!(
-        e.ok(&["private", "reset", escitalopram])["status"],
+        e.ok(&["private", "reset", varenicline])["status"],
         "recorded"
     );
     assert_eq!(
-        e.ok(&["private", "reset", escitalopram])["status"],
+        e.ok(&["private", "reset", varenicline])["status"],
         "unchanged"
     );
     e.ok(&["views", "write"]);
     let records = private_rows(&private_view(&e, aid), "records");
-    assert!(records.contains(&(escitalopram.into(), mh(), "medicine".into())));
+    assert!(records.contains(&(varenicline.into(), area(), "medicine".into())));
 
     // A marks.json that does not read is left out, and said so; no mark is
     // written over it.
@@ -2092,10 +2097,10 @@ fn private_items_follow_the_rules_until_the_household_marks_them() {
     e.ok(&["views", "write"]);
     let v = private_view(&e, aid);
     assert_eq!(v["marks_unreadable"], true, "{v}");
-    assert!(!private_rows(&v, "records").iter().any(|r| r.0 == anemia));
+    assert!(!private_rows(&v, "records").iter().any(|r| r.0 == migraine));
     let listed = e.ok(&["private", "list", "--person", "Alex"]);
     assert_eq!(listed["marks_unreadable"], json!([aid]), "{listed}");
-    let (code, _) = e.code(&["private", "mark", ferrous]);
+    let (code, _) = e.code(&["private", "mark", sumatriptan]);
     assert_ne!(code, Some(0));
     assert_eq!(std::fs::read(&file).unwrap(), b"{not json");
 }
@@ -2117,8 +2122,8 @@ fn the_household_says_who_a_printed_name_is() {
     let alex = with_private_fixtures(&e);
     let aid = alex["id"].as_str().unwrap();
     e.ok(&["views", "write"]);
-    let (visit, summary) = ("r_physicalaaaaaaaaaaaa", "d_physicalavsaaaaaaaaa");
-    let practice = "Example Family Practice";
+    let (visit, summary) = ("r_headvisitaaaaaaaaaaa", "d_headsummaryaaaaaaaaa");
+    let practice = "Sample Headache Clinic";
     let file = e
         .records()
         .join(alex["folder"].as_str().unwrap())
@@ -2141,7 +2146,7 @@ fn the_household_says_who_a_printed_name_is() {
                 "--role",
                 "clinic",
                 "--item",
-                "r_ferritinaaaaaaaaaaaa",
+                "r_magnesiumaaaaaaaaaaa",
             ]),
             4,
         ),
@@ -2160,7 +2165,7 @@ fn the_household_says_who_a_printed_name_is() {
             ],
             4,
         ),
-        (vec!["labels", "undo", "r_physicalaaaaaaaaaaaa"], 2),
+        (vec!["labels", "undo", "r_headvisitaaaaaaaaaaa"], 2),
         (vec!["labels", "undo", "o_nosuchidaaaaaaaaaaaa"], 4),
     ] {
         let (got, text) = e.code(&args);
@@ -2172,7 +2177,7 @@ fn the_household_says_who_a_printed_name_is() {
     let said = e.ok(&of(&[
         practice,
         "--name",
-        "Family doctors",
+        "Headache doctors",
         "--phone",
         "555-010-0142",
     ]));
@@ -2185,7 +2190,7 @@ fn the_household_says_who_a_printed_name_is() {
     let again = e.ok(&of(&[
         practice,
         "--name",
-        "Family doctors",
+        "Headache doctors",
         "--phone",
         "555-010-0142",
     ]));
@@ -2200,7 +2205,7 @@ fn the_household_says_who_a_printed_name_is() {
     assert_eq!(
         (&label["name"], &label["phone"], &label["confidence"]),
         (
-            &json!("Family doctors"),
+            &json!("Headache doctors"),
             &json!("555-010-0142"),
             &json!("household")
         ),
@@ -2213,7 +2218,7 @@ fn the_household_says_who_a_printed_name_is() {
         &e,
         "x_providersaaaaaaaaaaa",
         "provider",
-        json!({"person": aid, "printed": [practice], "set": {"role": "Counselor"}, "item": visit}),
+        json!({"person": aid, "printed": [practice], "set": {"role": "Substance use counselor"}, "item": visit}),
     );
     decision_request(
         &e,
@@ -2242,7 +2247,7 @@ fn the_household_says_who_a_printed_name_is() {
         "x_providersccccccccccc",
     ] {
         let text = e.json_at(&at(id)).to_string();
-        for s in ["Invented Name", practice, "Counselor"] {
+        for s in ["Invented Name", practice, "Substance use counselor"] {
             assert!(!text.contains(s), "{s}: {text}");
         }
     }
@@ -2261,7 +2266,7 @@ fn the_household_says_who_a_printed_name_is() {
             &by_app["request"]
         ),
         (
-            &json!({"role": "Counselor"}),
+            &json!({"role": "Substance use counselor"}),
             &json!(visit),
             &json!("Alex Testperson"),
             &json!("x_providersaaaaaaaaaaa")
@@ -2273,14 +2278,14 @@ fn the_household_says_who_a_printed_name_is() {
     let private = private_view(&e, aid);
     assert!(private_rows(&private, "records").contains(&(
         visit.into(),
-        "mental_health".into(),
+        "substance_use".into(),
         "provider".into()
     )));
     assert!(private["documents"].get(summary).is_some(), "{private}");
     let v = provider_view(&e, aid);
     assert!(!json!([v["labels"], v["overrides"]])
         .to_string()
-        .contains("Counselor"));
+        .contains("Substance use counselor"));
     assert_eq!(v["private"]["overrides"][0]["item"], visit, "{v}");
 
     // Listed newest first, with the person's own.
@@ -2292,7 +2297,7 @@ fn the_household_says_who_a_printed_name_is() {
         .all(|i| i["kind"] == "set" && i["person"] == aid));
     let (_, table) = e.code(&["labels", "list"]);
     assert!(
-        table.contains("Family doctors") && table.contains(practice),
+        table.contains("Headache doctors") && table.contains(practice),
         "{table}"
     );
 
@@ -2389,7 +2394,7 @@ fn what_a_provider_request_says_is_as_of_when_it_was_asked() {
         .find(|p| p["name"] == "Robin Testperson")
         .unwrap()["id"]
         .clone();
-    let (practice, center) = ("Example Family Practice", "Example Counseling Center");
+    let (practice, center) = ("Sample Headache Clinic", "Sample Addiction Services");
     let file = e
         .records()
         .join(alex["folder"].as_str().unwrap())
@@ -2610,7 +2615,7 @@ fn an_event_mark_follows_its_members_when_the_event_takes_a_new_id() {
     let alex = with_private_fixtures(&e);
     let aid = alex["id"].as_str().unwrap();
     e.ok(&["views", "write"]);
-    let visit = "r_counselvisitaaaaaaaa";
+    let visit = "r_quitvisitaaaaaaaaaaa";
     let event_of = |e: &Env| -> String {
         events_view(e, aid)["events"]
             .as_array()
@@ -2668,15 +2673,15 @@ fn an_event_mark_follows_its_members_when_the_event_takes_a_new_id() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|r| r["id"] == "r_skindocaaaaaaaaaaaaa")
+        .find(|r| r["id"] == "r_hipdoctoraaaaaaaaaaa")
         .unwrap()
         .clone();
-    claim["id"] = json!("r_therapyclaimaaaaaaaa");
-    claim["key"] = json!("claim|example|therapyclaim|2025-08-12");
-    claim["date"] = json!("2025-08-12");
-    claim["display"] = json!("Office visit · Example Behavioral Health");
-    claim["fields"]["provider"] = json!("Example Behavioral Health");
-    claim["fields"]["billable_period"] = json!({"start": "2025-08-12", "end": "2025-08-12"});
+    claim["id"] = json!("r_quitclaimaaaaaaaaaaa");
+    claim["key"] = json!("claim|example|quitclaim|2025-02-20");
+    claim["date"] = json!("2025-02-20");
+    claim["display"] = json!("Office visit · Example Recovery Center");
+    claim["fields"]["provider"] = json!("Example Recovery Center");
+    claim["fields"]["billable_period"] = json!({"start": "2025-02-20", "end": "2025-02-20"});
     idx["records"].as_array_mut().unwrap().push(claim);
     std::fs::write(&index, serde_json::to_vec(&idx).unwrap()).unwrap();
     e.ok(&["views", "write"]);
@@ -2699,7 +2704,7 @@ fn an_event_mark_follows_its_members_when_the_event_takes_a_new_id() {
         .map(|m| m.as_str().unwrap())
         .collect();
     members.sort();
-    assert_eq!(members, vec![visit, "r_therapyclaimaaaaaaaa"]);
+    assert_eq!(members, vec!["r_quitclaimaaaaaaaaaaa", visit]);
     assert_eq!(e.ok(&["private", "unmark", &second])["status"], "unchanged");
     assert_eq!(e.ok(&["private", "reset", &second])["status"], "recorded");
     assert!(event_marks().is_empty());
@@ -2723,7 +2728,7 @@ fn a_decision_is_kept_replaced_or_undone_and_a_broken_file_never_stops_the_views
         .records()
         .join(alex["folder"].as_str().unwrap())
         .join("overrides.json");
-    let (doc, lab) = ("r_skindocaaaaaaaaaaaaa", "r_skinlabaaaaaaaaaaaaa");
+    let (doc, lab) = ("r_hipdoctoraaaaaaaaaaa", "r_hipimageaaaaaaaaaaaa");
 
     // Mistakes change nothing.
     for (args, code) in [
@@ -2817,7 +2822,7 @@ fn an_event_request_records_the_households_decision_and_the_views_follow() {
         listed["items"].as_array().unwrap().len(),
         before["events"].as_array().unwrap().len()
     );
-    let (doc, lab) = ("r_skindocaaaaaaaaaaaaa", "r_skinlabaaaaaaaaaaaaa");
+    let (doc, lab) = ("r_hipdoctoraaaaaaaaaaa", "r_hipimageaaaaaaaaaaaa");
     let visit = holding(&before, doc)["id"].as_str().unwrap().to_string();
     assert_eq!(holding(&before, lab)["id"], visit.as_str());
     let shown = e.ok(&["events", "show", &visit]);
@@ -2886,27 +2891,27 @@ fn an_event_request_records_the_households_decision_and_the_views_follow() {
     let t = e.ok(&[
         "events",
         "together",
-        "r_twoaaaaaaaaaaaaaaaaa",
-        "r_twolabaaaaaaaaaaaaaa",
+        "r_earvisitaaaaaaaaaaaa",
+        "r_daytestaaaaaaaaaaaaa",
     ]);
     assert_eq!(t["status"], "recorded");
     assert_eq!(
         e.ok(&[
             "events",
             "together",
-            "r_twoaaaaaaaaaaaaaaaaa",
-            "r_twolabaaaaaaaaaaaaaa"
+            "r_earvisitaaaaaaaaaaaa",
+            "r_daytestaaaaaaaaaaaaa"
         ])["status"],
         "unchanged"
     );
     assert_eq!(
-        holding(&events_view(&e, aid), "r_twolabaaaaaaaaaaaaaa")["id"],
-        holding(&events_view(&e, aid), "r_twoaaaaaaaaaaaaaaaaa")["id"]
+        holding(&events_view(&e, aid), "r_daytestaaaaaaaaaaaaa")["id"],
+        holding(&events_view(&e, aid), "r_earvisitaaaaaaaaaaaa")["id"]
     );
     let (code, _) = e.code(&[
         "events",
         "apart",
-        "r_twoaaaaaaaaaaaaaaaaa",
+        "r_earvisitaaaaaaaaaaaa",
         "r_nosucharecordaaaaaaa",
     ]);
     assert_eq!(code, Some(4));
