@@ -292,7 +292,7 @@ medrec meds --active
 medrec note add Robin "Ask about the recheck" --tag question --about <record id>
 
 medrec verify                                   # every indexed file against the index
-medrec reindex                                  # claims shaped again from their raw files, and bills and receipts read again, after an upgrade
+medrec reindex                                  # claims shaped again and providers read again from their raw files, and bills and receipts read again, after an upgrade
 medrec backup --to "/Volumes/Backup/Medical Records"
 ```
 
@@ -590,9 +590,10 @@ that wrote the records still succeeds, and the next write tries again.
 
 A condition's code has an official title, and a portal's own words for it can
 be an abbreviation. `medrec tables` keeps the published titles on this
-machine, so that readers can show "Essential (primary) hypertension" first and
-the source's words beside it. The records keep the source's words, and
-search and filters go by them.
+machine, so that readers can show "Essential (primary) hypertension" where the
+source gives a bare code, an abbreviation or capitals, and beside the source's
+words where those are plain. The records keep the source's words, and search
+and filters go by them.
 
 ```sh
 medrec tables list                      # the tables, and whether each is here

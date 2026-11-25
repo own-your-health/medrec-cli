@@ -21,6 +21,9 @@ use crate::pdfgen::text_pdf;
 
 /// The synthetic records stream, as a provider CLI writes it.
 pub const STREAM: &str = include_str!("../tests/fixtures/stream/synthetic.ndjson");
+/// A stream whose records refer to practitioners, organizations and places
+/// in each way a source does.
+pub const PROVIDERS_STREAM: &str = include_str!("../tests/fixtures/stream/providers.ndjson");
 /// The fake provider's `info --json`.
 pub const PROVIDER_INFO: &str = include_str!("../tests/fixtures/stream/fakeprov-info.json");
 /// The same from before login profiles: it signs in, but lists no

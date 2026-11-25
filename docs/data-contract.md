@@ -192,7 +192,8 @@ only a display.
 fact from two sources is one record; a fill and a claim are keyed by their
 identity instead, below), `date`, `code` (`{system, code,
 display}`), `display`, `status`, `fields` (kind-specific, with FHIR element
-names), `documents` (linked document ids) and `provenance` (one per source).
+names), `providers` (below), `documents` (linked document ids) and
+`provenance` (one per source).
 
 **Fields by kind.** Every name a record's `fields` can hold. A field is
 present only when the source gave it, so a reader takes none for granted.
@@ -274,6 +275,30 @@ The last column is the FHIR element the value comes from.
 | `claim` | `visit` | a record id | its links, below |
 | `claim` | `results` | a list of record ids | its links, below |
 
+**Providers.** A record's `providers` (0.9.6 and later) is what its sources
+say of the people and places its fields print, beyond their names: a list
+of `{field, npi, state}`, with one entry for each field that has either.
+`field` is the field that prints the provider: `practitioner`, `location`
+and `service_provider` of an encounter, `prescriber` and `pharmacy` of a
+medication, `performer` of an immunization, `performer` and `location` of a
+procedure, `provider` and `facility` of a claim. `npi` is a National Provider
+Identifier whose check digit holds, from the identifier of the reference
+that prints the field or from the resource it points at. `state` is two
+letters, from that resource's address. A reference is followed to a resource
+contained in the record's own, served in the same stream, or filed by an
+earlier import of the same source, through a PractitionerRole (the person's
+NPI, the place's state) and a Location's `managingOrganization`. An absolute
+one is followed only under the source's own FHIR base. A name with nothing
+more behind it has no entry. Where two sources state one record, each fills
+what the other lacks of a provider both print, and the value there first
+stands. A provider whose reference leads to something the source does not
+give keeps what the record had where nothing is read in its place. `medrec
+reindex` reads them all again from the raw files, every source of a record in
+turn, and so takes a correction that import, for a record two sources state,
+leaves as it was; it also gives records filed before 0.9.6 theirs. No answer or view shows it. An earlier medrec drops it
+from an index it saves, so run 0.9.6 or later on every machine that writes
+the folder.
+
 A `medication` comes from a MedicationRequest (`source: request`), a
 MedicationStatement (`statement`) or a MedicationDispense (`dispense`, a
 fill). A fill is dated when it was handed over, else when it was prepared;
@@ -287,6 +312,12 @@ under the source, filed by an earlier import). A pharmacy `claim`
 (an ExplanationOfBenefit of type pharmacy) also has `days_supply`,
 `refill_number`, `refills_authorized` and `brand_generic`, from its
 `supportingInfo`. Each of its `items` has a `quantity`.
+
+`medrec reindex --json` counts what it did, for each person and in all:
+`claims` (how many there are), `reshaped`, `unchanged` and `without_raw`
+(claims with no raw file), `statements` (bills and receipts whose statement
+gained fields) and `providers_updated` (0.9.6 and later: records whose
+`providers` changed).
 
 A `claim` (an ExplanationOfBenefit) is shaped for costs (0.5.0 and later).
 An earlier import's claims take this shape when their source serves them
@@ -999,9 +1030,12 @@ what is private now, and adds none.
   item that is private. `medrec mcp` does this with `plain_name` on
   `kind: "conditions"` rows and on the summary's condition lines (Readers,
   below).
-- **A name never replaces the source's words.** It is shown first, with the
-  source's beside it, and filters, search, sorting, cursors and the check of
-  whether a question names a private item use the source's words alone.
+- **A name never replaces the source's words.** A reader leads with the
+  source's words when they are plain, and gives the name second (in Details,
+  or as `plain_name` beside `name`). The name leads only where the source
+  gives no words, a bare code, or wording in capitals or billing
+  abbreviations. Filters, search, sorting, cursors and the check of whether a
+  question names a private item use the source's words alone.
 - **Stale** as `private.json` is. Missing or stale, the source's words stand,
   with no warning. A reader need not check which table made it
   (`code_table` in `views.json`, below).

@@ -865,6 +865,7 @@ mod tests {
             display: id.into(),
             status: None,
             fields: fields.as_object().cloned().unwrap_or_default(),
+            providers: Vec::new(),
             documents: Vec::new(),
             provenance: Vec::new(),
         }

@@ -113,8 +113,10 @@ enum Command {
     /// Check every indexed file is in the folder with the hash the index
     /// recorded.
     Verify(VerifyArgs),
-    /// Shape every claim again from its filed raw resource, as this
-    /// medrec's import does: once after an upgrade that changes claims.
+    /// Shape every claim again and read every record's providers again from
+    /// the filed raw resources, and read bills' and receipts' statements
+    /// again, as this medrec's import does: once after an upgrade that
+    /// changes them.
     Reindex(ReindexArgs),
     /// The views: each person's records cut into small files under views/,
     /// for readers that cannot parse a whole index at once. medrec brings
@@ -819,7 +821,7 @@ struct ViewsWriteArgs {
 
 #[derive(Args, Debug)]
 struct ReindexArgs {
-    /// Only this person's claims (name or id).
+    /// Only this person's records (name or id).
     #[arg(long)]
     person: Option<String>,
 }
@@ -1089,8 +1091,8 @@ fn run(cli: &Cli) -> Result<(), CliError> {
             let r = medrec::reindex::claims(&f, &h, a.person.as_deref())?;
             output::emit(json, "reindex", to_value(&r), |_| {
                 println!(
-                    "{} claims: {} shaped again, {} unchanged, {} with no raw file; {} bills and receipts read again",
-                    r.claims, r.reshaped, r.unchanged, r.without_raw, r.statements
+                    "{} claims: {} shaped again, {} unchanged, {} with no raw file; {} bills and receipts read again; {} records gained or changed what is said of their providers",
+                    r.claims, r.reshaped, r.unchanged, r.without_raw, r.statements, r.providers_updated
                 );
             });
             Ok(())

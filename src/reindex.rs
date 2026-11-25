@@ -1,10 +1,12 @@
 //! `medrec reindex`: every claim shaped again from the raw resource filed
 //! for it, as this medrec's import shapes it, so claims no source serves any
-//! more take the current shape too; and every bill's and receipt's statement
-//! read again from its stored text for the fields it lacks. It reads only
-//! the folder.
+//! more take the current shape too; what the sources' raw files say of the
+//! providers each record prints ([`crate::providers`]); and every bill's and
+//! receipt's statement read again from its stored text for the fields it
+//! lacks. It reads only the folder.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
+use std::path::Path;
 
 use pk_cli_core::CliError;
 use serde::Serialize;
@@ -12,9 +14,10 @@ use serde_json::Value;
 
 use crate::claims::without_links;
 use crate::folder::Folder;
-use crate::model::{Household, Record};
+use crate::model::{Household, PersonIndex, Record};
 use crate::normalize;
 use crate::people;
+use crate::providers::Found;
 
 #[derive(Debug, Default, Serialize)]
 pub struct Reindexed {
@@ -27,6 +30,8 @@ pub struct Reindexed {
     pub without_raw: usize,
     /// Bills and receipts whose statement gained fields from their text.
     pub statements: usize,
+    /// Records whose providers' NPI or state changed.
+    pub providers_updated: usize,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -37,6 +42,7 @@ pub struct PersonReindexed {
     pub unchanged: usize,
     pub without_raw: usize,
     pub statements: usize,
+    pub providers_updated: usize,
 }
 
 /// The claim's own content, links left out.
@@ -104,11 +110,13 @@ pub fn claims(folder: &Folder, h: &Household, person: Option<&str>) -> Result<Re
             r.fields = new.fields;
             row.reshaped += 1;
         }
+        row.providers_updated = providers(folder, &mut idx, tmp.path(), &dirs)?;
         row.statements = crate::bill::backfill(&mut idx, &folder.text(p)?);
-        if row.reshaped > 0 || row.statements > 0 {
+        if row.reshaped > 0 || row.statements > 0 || row.providers_updated > 0 {
             folder.save_index(p, &mut idx)?;
         }
         out.statements += row.statements;
+        out.providers_updated += row.providers_updated;
         out.claims += row.claims;
         out.reshaped += row.reshaped;
         out.unchanged += row.unchanged;
@@ -116,4 +124,111 @@ pub fn claims(folder: &Folder, h: &Household, person: Option<&str>) -> Result<Re
         out.people.push(row);
     }
     Ok(out)
+}
+
+/// What each record's raw file says of the providers it prints, and the
+/// resources its source filed. Records changed, counted.
+fn providers(
+    folder: &Folder,
+    idx: &mut PersonIndex,
+    tmp: &Path,
+    fetched: &BTreeSet<String>,
+) -> Result<usize, CliError> {
+    let sources: BTreeSet<String> = idx
+        .records
+        .iter()
+        .flat_map(|r| &r.provenance)
+        .filter_map(|pr| source_of(pr.raw_path.as_ref()?))
+        .map(str::to_string)
+        .collect();
+    let mut held = Held {
+        tmp,
+        source: String::new(),
+        base: None,
+        read: HashMap::new(),
+    };
+    for source in &sources {
+        for ty in RAW_TYPES {
+            let dir = format!("{source}/{ty}");
+            if !fetched.contains(&dir) && folder.store.exists(&dir)? {
+                folder.store.fetch_tree(&dir, &tmp.join(&dir))?;
+            }
+        }
+    }
+    let mut changed = 0;
+    for r in &mut idx.records {
+        // Every source of the record, in the order it names them, so that
+        // the first to say something of a provider they all print stands.
+        let mut found = Found::default();
+        for pr in &r.provenance {
+            let Some(rel) = &pr.raw_path else { continue };
+            let Some(v) = read(tmp, rel) else {
+                found.unresolved.extend(crate::providers::FIELDS);
+                continue;
+            };
+            held.source = source_of(rel).unwrap_or_default().to_string();
+            held.base = pr.source.fhir_base.clone();
+            found = found.and(crate::providers::of(&v, &r.fields, &mut held)?);
+        }
+        let now = found.over(&r.providers, &r.fields, &r.fields, false);
+        if now != r.providers {
+            r.providers = now;
+            changed += 1;
+        }
+    }
+    Ok(changed)
+}
+
+/// A raw file, when it is there and reads.
+fn read(tmp: &Path, rel: &str) -> Option<Value> {
+    let text = std::fs::read_to_string(tmp.join(rel)).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+/// The source folder of `<source>/<Type>/<file>`.
+fn source_of(rel: &str) -> Option<&str> {
+    let (dir, _) = rel.rsplit_once('/')?;
+    dir.rsplit_once('/').map(|(source, _)| source)
+}
+
+/// The raw files providers come from: the kinds that print one, and what
+/// they point at.
+const RAW_TYPES: &[&str] = &[
+    "Encounter",
+    "MedicationRequest",
+    "MedicationDispense",
+    "Immunization",
+    "Procedure",
+    "ExplanationOfBenefit",
+    "Practitioner",
+    "PractitionerRole",
+    "Organization",
+    "Location",
+];
+
+struct Held<'a> {
+    tmp: &'a Path,
+    source: String,
+    base: Option<String>,
+    read: HashMap<String, Option<Value>>,
+}
+
+impl crate::providers::Resolve for Held<'_> {
+    fn base(&self) -> Option<&str> {
+        self.base.as_deref()
+    }
+
+    fn resource(&mut self, resource_type: &str, id: &str) -> Result<Option<Value>, CliError> {
+        let rel = format!(
+            "{}/{}.json",
+            self.source,
+            crate::import::raw_sub_of(resource_type, id)
+        );
+        if let Some(v) = self.read.get(&rel) {
+            return Ok(v.clone());
+        }
+        let v = read(self.tmp, &rel);
+        self.read.insert(rel, v.clone());
+        Ok(v)
+    }
 }

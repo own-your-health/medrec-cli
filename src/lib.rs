@@ -29,6 +29,7 @@ pub mod plain;
 pub mod private;
 pub mod proc;
 pub mod prompt;
+pub mod providers;
 pub mod refresh;
 pub mod reindex;
 pub mod review;

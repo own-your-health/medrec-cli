@@ -410,9 +410,26 @@ pub struct Record {
     /// Kind-specific fields, named as FHIR names them.
     #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
     pub fields: serde_json::Map<String, Value>,
+    /// What the source says of the providers `fields` print, beyond their
+    /// names.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub providers: Vec<ProviderRef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub documents: Vec<String>,
     pub provenance: Vec<Provenance>,
+}
+
+/// Who a field of a record prints, as its source identifies them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderRef {
+    /// The field that prints the provider.
+    pub field: String,
+    /// The National Provider Identifier, when its check digit holds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub npi: Option<String>,
+    /// The state of the address the source gives, as two letters.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
