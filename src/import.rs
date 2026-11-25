@@ -1687,11 +1687,10 @@ fn merge_fields(
                 true => Some(Filing::Replaces),
                 false => filing,
             };
-            // The first resource from this source on the record writes its
-            // fields; another from it that shares the key keeps only its own
-            // provenance, so the two do not write over each other.
-            let owner = existing.provenance.iter().position(same_source);
-            if let Some(i) = at.filter(|&i| Some(i) != owner) {
+            // Another resource from this source that shares the key keeps
+            // only its own provenance, so the two do not write over each
+            // other.
+            if let Some(i) = at.filter(|&i| !can_write(existing, i)) {
                 return refresh_provenance(existing, i, incoming, filing);
             }
             let of_several = !existing.provenance.iter().all(same_source);
@@ -1761,7 +1760,7 @@ fn merge_fields(
                 }
                 _ => filing,
             };
-            if mine.first() == Some(&i) {
+            if can_write(existing, i) {
                 let of_several = !existing.provenance.iter().all(same_source);
                 if of_several && !writes(existing, word, filing) {
                     return refresh_shared(existing, rec, found, i, incoming, filing);
@@ -1903,20 +1902,40 @@ fn not_read_in(existing: &Record, word: Option<&Word>) -> bool {
 /// was writes nothing over another.
 fn writes(existing: &Record, word: Option<&Word>, filing: Option<Filing>) -> bool {
     let Some(word) = word else { return true };
-    let of = |p: &&str| {
-        existing
-            .provenance
-            .iter()
-            .any(|q| q.raw_path.as_deref() == Some(*p))
-    };
-    let writer = existing.fields_from.as_deref().filter(of);
-    writer.is_none_or(|w| w == word.raw_path) || matches!(filing, None | Some(Filing::Replaces))
+    writer(existing).is_none_or(|w| w == word.raw_path)
+        || matches!(filing, None | Some(Filing::Replaces))
 }
 
-/// Another source's resource joins the record: the one it was of wrote its
-/// fields.
+/// The raw file a record's fields are of, where one that can write them has
+/// it.
+pub(crate) fn writer(r: &Record) -> Option<&str> {
+    let named = r.fields_from.as_deref()?;
+    (0..r.provenance.len())
+        .any(|i| r.provenance[i].raw_path.as_deref() == Some(named) && can_write(r, i))
+        .then_some(named)
+}
+
+/// Whether import lets the resource of a record's provenance write its
+/// fields: the first of its source on the record does, and of those with no
+/// id the first of its type.
+pub(crate) fn can_write(r: &Record, i: usize) -> bool {
+    let p = &r.provenance[i];
+    let same_source = |q: &Provenance| {
+        q.source.fhir_base == p.source.fhir_base
+            && q.source.cli == p.source.cli
+            && q.source.organization_id == p.source.organization_id
+    };
+    let of = |q: &Provenance| q.source_resource.as_ref().map(|s| s.resource_type.clone());
+    let idless = |q: &Provenance| q.source_resource.as_ref().is_none_or(|s| s.id.is_empty());
+    let like = |q: &Provenance| same_source(q) && (!idless(p) || (idless(q) && of(q) == of(p)));
+    r.provenance.iter().position(like) == Some(i)
+}
+
+/// Another resource joins the record: where one source alone stated it, the
+/// first of its own wrote the fields.
 fn joined(existing: &mut Record, word: Option<&Word>) {
-    if word.is_some() && existing.provenance.len() == 1 {
+    let of_one = (0..existing.provenance.len()).filter(|i| can_write(existing, *i));
+    if word.is_some() && existing.fields_from.is_none() && of_one.count() == 1 {
         existing.fields_from = existing.provenance[0].raw_path.clone();
     }
 }
@@ -2907,6 +2926,43 @@ mod tests {
             let one = allergy_of("one", Some("a"), "low");
             assert_eq!(import(one, Filing::Unchanged), "Unchanged high");
         }
+    }
+
+    /// A record whose writer is named as a source's later entry names none:
+    /// the next that can write does.
+    #[test]
+    fn a_sources_later_entry_is_no_writer() {
+        let mut index = PersonIndex::new("p_test");
+        let path = |org: &str, id: &str| format!("Robin Example/Records/{org}/Condition/{id}.json");
+        let mut import = |org: &str, id: &str, status: &str, filing: Option<Filing>| {
+            let rec = condition_of(org, id, status, "problem-list-item");
+            let found = Found::default();
+            merge(&mut index, rec, found, filing, &mut Idless::default());
+            let r = index.records[0].clone();
+            (r.status.clone().unwrap(), r.fields_from.clone())
+        };
+        let again = Some(Filing::Unchanged);
+        import("two", "a", "active", None);
+        import("two", "b", "active", None);
+        let (_, from) = import("one", "c", "active", None);
+        assert_eq!(from, Some(path("two", "a")));
+        let r = &mut index.records[0];
+        assert_eq!([0, 1, 2].map(|i| can_write(r, i)), [true, false, true]);
+        r.fields_from = Some(path("two", "b"));
+        let mut import = |org: &str, id: &str, status: &str, filing: Option<Filing>| {
+            let rec = condition_of(org, id, status, "problem-list-item");
+            let found = Found::default();
+            merge(&mut index, rec, found, filing, &mut Idless::default());
+            let r = index.records[0].clone();
+            (r.status.clone().unwrap(), r.fields_from.clone())
+        };
+        // The later entry's own change is its word alone.
+        let (status, _) = import("two", "b", "resolved", Some(Filing::Replaces));
+        assert_eq!(status, "active");
+        assert_eq!(
+            import("one", "c", "active", again),
+            ("active".into(), Some(path("one", "c")))
+        );
     }
 
     /// Two resources of one source that are one record are two words.

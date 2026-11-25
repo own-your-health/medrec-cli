@@ -15,6 +15,7 @@ use serde_json::Value;
 
 use crate::claims::without_links;
 use crate::folder::Folder;
+use crate::import;
 use crate::model::{Household, PersonIndex, Record, Word};
 use crate::normalize;
 use crate::people;
@@ -193,7 +194,7 @@ fn statuses(idx: &mut PersonIndex, tmp: &Path) -> usize {
         now.words.clear();
         let mut shapes: Vec<(&String, Record)> = Vec::new();
         let mut all_read = true;
-        for pr in &r.provenance {
+        for (i, pr) in r.provenance.iter().enumerate() {
             let Some(rel) = &pr.raw_path else { continue };
             let shaped = read(tmp, rel).and_then(|v| normalize::record(&v, pr.clone()));
             let Some(new) = shaped else {
@@ -207,15 +208,14 @@ fn statuses(idx: &mut PersonIndex, tmp: &Path) -> usize {
                 let version = had.and_then(|h| h.version.clone());
                 Word { version, ..w }
             }));
-            if new.key == r.key {
+            if new.key == r.key && import::can_write(r, i) {
                 shapes.push((rel, new));
             }
         }
         // The one that wrote the fields, where the record says which. Else
-        // the one they agree with; none does where one is shaped otherwise
-        // now, or where one did not read.
-        let of = |p: &String| r.provenance.iter().any(|q| q.raw_path.as_ref() == Some(p));
-        let wrote = match r.fields_from.as_ref().filter(|p| of(p)) {
+        // the one they agree with, of those import lets write; none does
+        // where one is shaped otherwise now, or where one did not read.
+        let wrote = match import::writer(r) {
             Some(path) => shapes.iter().position(|(p, _)| *p == path),
             None => shapes
                 .iter()
@@ -337,5 +337,75 @@ impl crate::providers::Resolve for Held<'_> {
         let v = read(self.tmp, &rel);
         self.read.insert(rel, v.clone());
         Ok(v)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::Provenance;
+    use serde_json::json;
+
+    /// A portal's two entries of one condition, and another portal's, as an
+    /// index from before 0.9.9 has them: the fields of `wrote`.
+    fn earlier(tag: &str, wrote: usize) -> (PersonIndex, std::path::PathBuf) {
+        let tmp = std::env::temp_dir().join(format!("medrec-reindex-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let mut shapes: Vec<Record> = Vec::new();
+        for (org, id, category) in [
+            ("two", "a", "encounter-diagnosis"),
+            ("two", "b", "problem-list-item"),
+            ("one", "c", "problem-list-item"),
+        ] {
+            let v = json!({"resourceType": "Condition", "id": id,
+                "clinicalStatus": {"coding": [{"code": "active"}]},
+                "category": [{"coding": [{"code": category, "display": category}]}],
+                "code": {"text": "Sample stiffness"}, "onsetDateTime": "2020-05-01"});
+            let rel = format!("{org}/Condition/{id}.json");
+            let path = tmp.join(&rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, v.to_string()).unwrap();
+            let p: Provenance = serde_json::from_value(json!({
+                "source": {"kind": "fhir", "cli": "fakeprov", "organization_id": org},
+                "source_resource": {"type": "Condition", "id": id},
+                "method": "fhir-api", "filed_at": "2024-01-02T10:00:00Z",
+                "filed_by": "medrec 0.9.8", "raw_path": rel}))
+            .unwrap();
+            shapes.push(normalize::record(&v, p).unwrap());
+        }
+        let mut r = shapes[wrote].clone();
+        r.provenance = shapes.iter().map(|s| s.provenance[0].clone()).collect();
+        r.words.clear();
+        r.fields.remove("categories");
+        let mut idx = PersonIndex::new("p_test");
+        idx.records.push(r);
+        (idx, tmp)
+    }
+
+    /// The one it names can write by import: a source's first on the record.
+    #[test]
+    fn the_writer_is_one_import_lets_write() {
+        for (wrote, from) in [(0, "two/Condition/a.json"), (2, "one/Condition/c.json")] {
+            let (mut idx, tmp) = earlier(&format!("writer-{wrote}"), wrote);
+            assert_eq!(statuses(&mut idx, &tmp), 1);
+            let r = &idx.records[0];
+            assert_eq!(r.fields_from.as_deref(), Some(from));
+            assert_eq!(r.words.len(), 3);
+            assert_eq!(statuses(&mut idx, &tmp), 0);
+            let _ = std::fs::remove_dir_all(&tmp);
+        }
+    }
+
+    /// One that names a source's later entry names none: the fields are of
+    /// the one they agree with that can write.
+    #[test]
+    fn a_later_entry_of_a_source_is_no_writer() {
+        let (mut idx, tmp) = earlier("later", 2);
+        idx.records[0].fields_from = Some("two/Condition/b.json".into());
+        assert_eq!(import::writer(&idx.records[0]), None);
+        assert_eq!(statuses(&mut idx, &tmp), 1);
+        let from = idx.records[0].fields_from.as_deref();
+        assert_eq!(from, Some("one/Condition/c.json"));
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

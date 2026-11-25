@@ -323,15 +323,17 @@ are two words. No word is changed for another's: a reader that says whether a
 condition is current reads every word. An older version served again changes no
 word. `medrec reindex` reads them all again from the raw files, and the
 record's `status` and `fields` from the one they are of; what a raw file that
-does not read said stays. Where no raw file is said to be the one, it is the
-first that says all the record does, else, where each reads, the first. A
-medrec before 0.9.9 drops `words` from an index it saves, so run 0.9.9 or later
-on every machine that writes the folder; the next import of each source, or
-`medrec reindex`, gives them back.
+does not read said stays. Where no raw file is said to be the one, it is, of
+those that can be, the first that says all the record does, else, where each
+reads, the first. A medrec before 0.9.9 drops `words` from an index it saves,
+so run 0.9.9 or later on every machine that writes the folder; the next import
+of each source, or `medrec reindex`, gives them back.
 
 **Whose fields.** `fields_from` (0.9.9 and later) is the raw path of the
 provenance whose resource a record's `status` and `fields` are of, where the
-record has words and several provenances. A version of that resource writes
+record has words and several provenances. It is a source's first on the record
+(of those with no id, the first of its type); one that names another names
+none. A version of that resource writes
 them each time it is served, so a later medrec's reading of it applies.
 Another's does when it is new to the record (its `version` is another than its
 word's, or with none its word says otherwise: an import cut short after its raw
