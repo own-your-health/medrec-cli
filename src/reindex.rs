@@ -230,13 +230,6 @@ fn fetch_said(folder: &Folder, idx: &PersonIndex, tmp: &Path) -> Result<(), CliE
         if to.exists() {
             continue;
         }
-        // Few: one call each, rather than a copy of all, but of what the
-        // papers read whole.
-        let papers = dir.rsplit('/').next().is_some_and(import::describes_papers);
-        if papers {
-            folder.store.fetch_tree(dir, &to)?;
-            continue;
-        }
         let files: Vec<&str> = files.into_iter().collect();
         fetch_files(folder, tmp, dir, &files)?;
     }
@@ -279,7 +272,8 @@ fn fetch_older(
     Ok(out)
 }
 
-/// A copy of some raw files of one folder: of all of it when they are many.
+/// A copy of some raw files of one folder. Few are one call each; many are a
+/// copy of all of it, and so is what the papers read whole.
 fn fetch_files(
     folder: &Folder,
     tmp: &Path,
@@ -292,7 +286,8 @@ fn fetch_files(
         .map(AsRef::as_ref)
         .filter(|rel| !tmp.join(rel).exists())
         .collect();
-    if missing.len() > FEW {
+    let papers = dir.rsplit('/').next().is_some_and(import::describes_papers);
+    if missing.len() > FEW || (papers && !missing.is_empty()) {
         return folder.store.fetch_tree(dir, &to);
     }
     for rel in missing {

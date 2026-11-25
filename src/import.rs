@@ -1683,7 +1683,7 @@ fn merge(
     idless: &mut Idless,
 ) -> Merge {
     let word = rec.words.pop();
-    let came = Came::of(index, &rec, &found, filing);
+    let came = Came::of(index, &rec, &found, word.as_ref());
     let merged = merge_fields(index, rec, word.as_ref(), found, filing, idless);
     let mut changed = came.keep(index);
     if matches!(merged, Merge::Older) {
@@ -1701,24 +1701,34 @@ fn merge(
 /// ([`crate::given`]).
 struct Came {
     of: Provenance,
+    /// The raw file of the current version of its resource.
+    raw: Option<String>,
     key: String,
     gives: Given,
-    /// Each by its place in the index: what it showed, unless that was the
-    /// same version, and whether the resource was of it.
+    /// Each by its place in the index: what it showed, unless that is known
+    /// to be of the same version, and whether the resource was of it.
     was: Vec<(usize, Option<Given>, bool)>,
 }
 
 impl Came {
-    fn of(index: &PersonIndex, rec: &Record, found: &Found, filing: Option<Filing>) -> Came {
+    fn of(index: &PersonIndex, rec: &Record, found: &Found, word: Option<&Word>) -> Came {
         let of = rec.provenance[0].clone();
+        let raw = current(of.raw_path.as_ref());
         let gives = given::of(&Record {
             providers: found.refs.clone(),
             ..rec.clone()
         });
-        let same = matches!(filing, Some(Filing::Unchanged | Filing::Refreshed));
+        // Its raw file can be this version's and the record not yet: an
+        // import was cut short between them.
+        let read_in = |r: &Record| {
+            let mut said = r.words.iter();
+            let had = word.and_then(|w| said.find(|x| x.raw_path == w.raw_path));
+            let version = had.and_then(|x| x.version.as_ref());
+            version.is_some() && version == word.and_then(|w| w.version.as_ref())
+        };
         let shows = |r: &Record| {
             let was = showed(r);
-            let again = same && was.raw_path.is_some() && was.raw_path == of.raw_path;
+            let again = was.raw_path.is_some() && was.raw_path == raw && read_in(r);
             (!again).then_some(was)
         };
         let has = |r: &Record| r.provenance.iter().any(|p| one_resource(p, &of));
@@ -1730,9 +1740,10 @@ impl Came {
                 .collect(),
             key: rec.key.clone(),
             gives: Given {
-                raw_path: of.raw_path.clone(),
+                raw_path: raw.clone(),
                 ..gives
             },
+            raw,
             of,
         }
     }
@@ -1755,13 +1766,13 @@ impl Came {
         for (i, was, had) in self.was {
             let r = &mut index.records[i];
             if had && i != now {
-                let of = |g: &&Given| g.raw_path.is_some() && g.raw_path == self.of.raw_path;
+                let of = |g: &&Given| g.raw_path.is_some() && g.raw_path == self.raw;
                 moved.extend(r.given.iter().filter(of).cloned());
                 moved.extend(was.iter().filter(of).cloned());
                 let cli = |p: &Provenance| p.source.cli == self.of.source.cli;
                 if !r.provenance.iter().any(cli) {
                     let left = Given {
-                        raw_path: self.of.raw_path.clone(),
+                        raw_path: self.raw.clone(),
                         cli: self.of.source.cli.clone(),
                         ..Given::default()
                     };
@@ -2933,7 +2944,7 @@ impl<'a> Describes<'a> {
 /// it is another than the one that filed the paper, and the title.
 fn paper_given(o: Option<&Owner>, source: Option<&String>, raw: Option<&String>) -> GivenPaper {
     GivenPaper {
-        raw_path: raw.cloned(),
+        raw_path: current(raw),
         organization: source.cloned(),
         title: o.and_then(Owner::says_title),
     }
@@ -3105,6 +3116,11 @@ pub(crate) fn describes_papers(resource_type: &str) -> bool {
 /// Whether a raw file's name is that of a resource's current version.
 fn is_current(name: &str) -> bool {
     name.ends_with(".json") && !name.contains('~')
+}
+
+/// The raw file of the current version of what a raw file keeps.
+fn current(raw: Option<&String>) -> Option<String> {
+    raw.map(|rel| current_of(rel).unwrap_or_else(|| rel.clone()))
 }
 
 /// The raw file of the current version of what a raw file keeps an earlier

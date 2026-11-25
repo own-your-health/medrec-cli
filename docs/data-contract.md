@@ -424,7 +424,9 @@ where that is not known. A document's is `{raw_path, organization, title}`.
 - It decides what is private and nothing else: each rule and provider label
   reads it beside what the item shows (Private items, below). What an item
   shows, in every view and answer, is still of a source that stands. No view or
-  answer has `given`, and a reader of `index.json` shows none of it.
+  answer has any of it, and a reader of `index.json` shows none of it: of it
+  there is only `given: true` on an item of `private.json` and on its row of
+  `medrec private list`.
 - It is never dropped. So nothing that a source gave opens because a later
   version gives something else, a source says the item is entered in error,
   another source's values take its place, or the source takes its resource to
@@ -1650,8 +1652,9 @@ view holds no `imports` to find the patient by: the sources step 2 gives
 with the patient unknown name it, by steps 3 and 4.
 
 A record whose sources differ on whether it is entered in error, or that is, has
-`says` (0.9.9 and later), unless its kind has a standing: what each of its
-provenances says, in their order, as `{source, read, status, verification,
+`says` (0.9.9 and later), unless it is a condition, an allergy or a medicine
+other than a fill, whose words `standing.json` has: what each of its provenances
+says, in their order, as `{source, read, status, verification,
 unheard, household}`. `source` is the source's label, or `null`; `read` the day
 it was last read saying so. `unheard` is `true` for one whose word is not kept,
 and `household` for the household's own file. Each but `source` is absent when
@@ -2207,7 +2210,8 @@ nothing is private.
 - **`given`** (0.9.9 and later): `true` where the item is private only by what a
   source gave, then or now, that no item shows (What a source gave, above): of
   the item, or of the one it is private with. Absent otherwise. A reader shows
-  the area and no more of it.
+  the area and no more of it. A row of `medrec private list` has it too (`yes`
+  in its table's `given`).
 - **What a source takes back still tells** (0.9.9 and later). Nothing opens
   because a record or a paper is entered in error, the person's or one of a
   person their events read (X1, X2): each rule is judged with what is and with

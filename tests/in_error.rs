@@ -980,6 +980,47 @@ fn what_an_earlier_version_gave_stays_private() {
     assert_eq!((shows_place(&e).as_str(), held(&e)), (OPEN, Some(true)));
 }
 
+/// An import cut short after its raw files are written is made good by the
+/// next, which finds them there.
+#[test]
+fn an_import_cut_short_loses_nothing_that_was_given() {
+    let coded = |code: &str, version: u32| {
+        stream("one", |id, v| {
+            if id == "cond-0001" {
+                let at = format!("2026-03-05T1{version}:00:00Z");
+                v["meta"] = json!({"versionId": version.to_string(), "lastUpdated": at});
+                let icd10 = "http://hl7.org/fhir/sid/icd-10-cm";
+                v["code"] = json!({"coding": [{"system": icd10, "code": code}]});
+            }
+            id != "obs-0001"
+        })
+    };
+    let visit = |place: &str, version: u32| visit_at("one", Some(place), "finished", version);
+    // Its source says it is the same version, read later.
+    let read = r#""pulled_at":"2026-03-05T1"#;
+    let again = visit(OPEN, 1).replacen(read, &read.replace("T1", "T2"), 1);
+    assert_ne!(again, visit(OPEN, 1));
+    for (kind, was, is) in [
+        ("encounter", visit(PRIVATE, 1), visit(OPEN, 2)),
+        ("encounter", visit(PRIVATE, 1), again),
+        ("condition", coded("F32.1", 1), coded("J45.909", 2)),
+    ] {
+        let e = Env::new("gave-cut");
+        e.import(&was);
+        let path = e.folder().join("index.json");
+        let before = std::fs::read(&path).unwrap();
+        e.import(&is);
+        std::fs::write(&path, before).unwrap();
+        e.import(&is);
+        let records = e.index().records;
+        let of = records.iter().find(|r| r.kind == kind).unwrap();
+        assert_eq!(e.private()[&of.id]["given"], true, "{kind}");
+        assert_eq!(of.given.len(), 1, "{kind}");
+        // Once: what comes again is kept.
+        assert_eq!(e.import(&is), 0, "{kind}");
+    }
+}
+
 /// What was given before medrec kept it is read from the raw files, every
 /// version of them.
 #[test]
@@ -1011,6 +1052,33 @@ fn reindex_reads_what_was_given_from_every_raw_version() {
     assert_eq!((shows_place(&e).as_str(), held(&e)), (OPEN, Some(true)));
 }
 
+/// The earlier versions of some of a source's reports are not all of them: a
+/// paper is judged by the ones that stand.
+#[test]
+fn reindex_reads_all_that_describes_a_paper() {
+    let with = |doc: &str, version: u32| {
+        stream("one", |id, v| {
+            match id {
+                "doc-0001" => say(v, doc, version),
+                "rep-0001" => {
+                    say(v, "final", version);
+                    v["code"]["text"] = format!("Example panel {version}").into();
+                    v["presentedForm"] =
+                        json!([{"contentType": "application/pdf", "url": "Binary/bin-0001"}]);
+                }
+                _ => {}
+            }
+            true
+        })
+    };
+    let e = Env::new("gave-reports");
+    e.import(&with("current", 1));
+    e.import(&with("entered-in-error", 2));
+    assert!(!document_in_error(&e.paper()));
+    assert_eq!(e.reindex(), (0, 0));
+    assert!(!document_in_error(&e.paper()));
+}
+
 /// What a resource gave goes with it to the record it is of, and the record
 /// it left keeps it too.
 #[test]
@@ -1025,21 +1093,30 @@ fn what_a_resource_gave_goes_with_it() {
             id != "obs-0001"
         })
     };
-    let e = Env::new("gave-moved");
-    e.import(&on("two", OPEN, "03-04", 1));
-    e.import(&on("one", PRIVATE, "03-04", 1));
-    e.import(&on("one", OPEN, "03-11", 2));
-    let visits: Vec<Record> = e
-        .index()
-        .records
-        .into_iter()
-        .filter(|r| r.kind == "encounter")
-        .collect();
-    assert_eq!(visits.len(), 2);
-    let private = e.private();
-    for v in visits {
-        assert_eq!(v.fields["service_provider"], OPEN);
-        assert_eq!(private[&v.id]["given"], true, "{}", v.date.unwrap());
+    // Given before, or by an older version served late.
+    for versions in [[1, 0, 2], [2, 1, 3]] {
+        let e = Env::new("gave-moved");
+        e.import(&on("two", OPEN, "03-04", 1));
+        let [first, late, moved] = versions;
+        if late > 0 {
+            e.import(&on("one", OPEN, "03-04", first));
+        }
+        e.import(&on("one", PRIVATE, "03-04", late.max(1)));
+        e.import(&on("one", OPEN, "03-11", moved));
+        let visits: Vec<Record> = e
+            .index()
+            .records
+            .into_iter()
+            .filter(|r| r.kind == "encounter")
+            .collect();
+        assert_eq!(visits.len(), 2);
+        let private = e.private();
+        for v in visits {
+            assert_eq!(v.fields["service_provider"], OPEN);
+            assert_eq!(private[&v.id]["given"], true, "{}", v.date.unwrap());
+            let paths = v.given.iter().filter_map(|g| g.raw_path.as_ref());
+            assert!(paths.into_iter().all(|p| !p.contains('~')), "{:?}", v.given);
+        }
     }
 }
 

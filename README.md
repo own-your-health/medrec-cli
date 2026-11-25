@@ -582,7 +582,9 @@ household. medrec finds them by their codes, medicines, tests and the
 practice that made them, a document by any private record that links it, a
 bill or receipt by its own words, with its copies and the statements and
 payments before and after it, and a study by its report. A study with no report is left out of answers
-about the whole household too. The household has the last word.
+about the whole household too. An item stays private by what any of its sources
+gave of it, then or now, whatever it shows: the list says `given` of one that is
+private only by that. The household has the last word.
 
 ```sh
 medrec private list --person Robin          # each private item, its area and why
