@@ -539,9 +539,11 @@ fn the_code_tables_need_no_profile_and_start_absent() {
     assert!(out.status.success());
     let v = json_of(&out);
     let rows = v["items"].as_array().unwrap();
-    assert_eq!(rows.len(), 1);
+    assert_eq!(rows.len(), 2);
     assert_eq!(rows[0]["id"], "icd10cm");
     assert_eq!(rows[0]["state"], "absent");
+    assert_eq!(rows[1]["id"], "nppes");
+    assert_eq!(rows[1]["state"], "absent");
     assert_eq!(rows[0]["sha256"].as_str().unwrap().len(), 64);
     for (args, why) in [
         (&["tables", "fetch", "nosuch"][..], "no table `nosuch`"),
@@ -564,6 +566,46 @@ fn the_code_tables_need_no_profile_and_start_absent() {
     }
 }
 
+/// The provider directory is one folder's, and over a gigabyte: it needs a
+/// profile and a yes, and is refused before anything is read or fetched.
+#[test]
+fn the_provider_directory_needs_a_profile_and_a_yes() {
+    let run = with_profile();
+    let out = run(&["tables", "fetch", "nppes"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("home"));
+    let out = run(&[
+        "--profile",
+        "home",
+        "tables",
+        "fetch",
+        "nppes",
+        "--file",
+        "/nonexistent.zip",
+    ]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("--file"));
+    for args in [
+        &["--profile", "home", "tables", "fetch", "nppes"][..],
+        &[
+            "--json",
+            "--profile",
+            "home",
+            "tables",
+            "fetch",
+            "icd10cm",
+            "nppes",
+        ][..],
+    ] {
+        let out = run(args);
+        assert_eq!(out.status.code(), Some(6), "{args:?}");
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains("over a gigabyte"),
+            "{args:?}"
+        );
+    }
+}
+
 #[test]
 fn cache_clear_keeps_the_code_tables() {
     let dir = std::env::temp_dir().join(format!("medrec-surface-tables-{}", std::process::id()));
@@ -572,6 +614,7 @@ fn cache_clear_keeps_the_code_tables() {
     std::fs::create_dir_all(base.join("tables")).unwrap();
     std::fs::create_dir_all(base.join("copies")).unwrap();
     std::fs::write(base.join("tables/icd10cm-FY2027.zip"), b"x").unwrap();
+    std::fs::write(base.join("tables/nppes-f_x.jsonl"), b"x").unwrap();
     std::fs::write(base.join("copies/a.pdf"), b"x").unwrap();
     let run = |args: &[&str]| {
         medrec()
@@ -588,5 +631,6 @@ fn cache_clear_keeps_the_code_tables() {
     // A file that is not the recorded one is there and never read.
     let v = json_of(&run(&["--json", "tables", "list"]));
     assert_eq!(v["items"][0]["state"], "changed");
+    assert_eq!(v["items"][1]["state"], "changed");
     let _ = std::fs::remove_dir_all(&dir);
 }

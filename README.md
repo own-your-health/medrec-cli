@@ -9,7 +9,7 @@ conditions, allergies, immunizations and notes, at the terminal or, through
 
 `medrec` holds no provider credentials and makes no network calls of its
 own, except to Google Drive, through its own sign-in, to GitHub for
-`self-update`, and to a code table's publisher for `tables fetch`. Provider
+`self-update`, and to a table's publisher for `tables fetch`. Provider
 CLIs fetch records; `medrec` files them.
 
 Part of the `piekstra-cli/1` family. It is built on
@@ -125,8 +125,9 @@ named by the household and kept in this machine's config only. Every command
 that reaches a records folder needs `--profile <NAME>`, or `MEDREC_PROFILE`;
 there is no default, and a lone profile is never picked: without one the
 command is exit 2 and lists the configured profiles. `profiles`, `providers
-list`, `tables`, `config path|show`, a machine setting's `config set|unset`, `cache
-clear`, `auth status`, `info`, `completions` and `self-update` take none.
+list`, `tables` (but `tables fetch nppes`), `config path|show`, a machine
+setting's `config set|unset`, `cache clear`, `auth status`, `info`,
+`completions` and `self-update` take none.
 
 `refresh sign-in <source id>` is the one command that may run without
 `--profile`, because the source id already names one choice someone made on
@@ -619,6 +620,43 @@ medrec tables fetch icd10cm --file ZIP  # or keep a zip downloaded by hand
   (docs/data-contract.md). Like any view, they are on the Drive folder.
 
 medrec is not affiliated with or endorsed by the publisher.
+
+### Provider directory
+
+CMS publishes every National Provider Identifier (NPI) with its provider's
+name, practice address and phone: the NPPES file, over a gigabyte, replaced
+every month. medrec reads it once, on request, and keeps the rows a records
+folder's providers can be found in.
+
+```sh
+medrec --profile <NAME> tables fetch nppes          # states the size, asks, downloads
+medrec --profile <NAME> tables fetch nppes --force  # states the size and downloads
+medrec tables list                                  # what is kept, and of which month
+```
+
+- **Only when asked.** `tables fetch` with no name leaves it out, and nothing
+  runs it on a schedule. The size is stated before the download starts. With
+  no terminal, or with `--json`, it needs `--force` (exit 6 without it).
+- **Nothing about the records is sent.** medrec asks `download.cms.gov`, over
+  https, for the page that lists the file, the file's size, and the whole
+  file. No name or number is looked up over the network.
+- **What is kept**, in `~/.cache/medrec/tables` and never in the records
+  folder: the providers whose NPI the records carry, the organizations of the
+  states the records' own provider addresses are in, and the people of those
+  states whose surname and first initial a record prints with no NPI. The zip
+  and the files in it are never on disk: they are read as they arrive.
+- **Checked.** The columns are found by name, every NPI by its check digit, the
+  zip by its size and the checksums inside it, and a file with fewer than
+  9,000,000 rows is refused. A file that fails leaves the last one in use.
+  Each month's file replaces the one before, so there is no hash to record
+  here: its link, month, size, SHA-256 and row count are kept with the rows.
+- Records need their providers' NPI and state: those filed before 0.9.6 get
+  them from `medrec reindex`.
+- The kept rows are public ones, but which people are among them follows from
+  the records. Deleting `nppes-<folder id>.jsonl` removes them.
+
+NPPES gives what providers reported to CMS. medrec is not affiliated with or
+endorsed by CMS.
 
 ### Settings
 

@@ -45,6 +45,10 @@ real record, document, study or provider response.
   `assertedDate`, `Immunization.notGiven` and `date`, `requester.agent`, one
   `DiagnosticReport.category`, and empty strings for absent values. Codes
   are `0000`, names are `Example …`.
+- `nppes/npidata.csv` has the header row of CMS's public NPPES file and
+  invented providers below it: their NPIs start with 0, their phones with 555,
+  and one name holds a quote and one a line break. `nppes/page.html` is a
+  listing page in CMS's shape, with links that must not be taken.
 - `bills/` holds invented text in the shapes `pdftotext -layout` gives a
   provider's patient statement and a payment receipt:
   `statement-columns.txt` puts the statement's fields in a header row over a
