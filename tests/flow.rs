@@ -3652,8 +3652,23 @@ fn an_import_counts_what_is_not_served_and_names_what_changed() {
     import(&at(&more(2), 5), &[]);
     let r = import(&at(&all, 6), &[]);
     assert_eq!(r["not_served"], serde_json::json!({"allergy": 1}), "{r}");
-    // A provider that signs in nowhere reads the files its environment names.
+    // A sign-in through a provider that also reads files is one.
     let stream: String = at(&less, 7).iter().map(|v| format!("{v}\n")).collect();
+    let args = ["--json", "import", "--from", "fakeprov"];
+    let args = [
+        &args[..],
+        &["--from-profile", "adult1", "--patient", "pat-0001"],
+    ]
+    .concat();
+    let out = provider_env(&base, &stream).run_env(&args, &[("FAKEPROV_INFO", "files")]);
+    assert!(out.status.success(), "{:?}", said(&out));
+    let r: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(r["records_not_served"].is_u64(), "{r}");
+    let index: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let last = index["imports"].as_array().unwrap().last().unwrap().clone();
+    assert_eq!(last["from_files"], false);
+    // One that signs in nowhere reads the files its environment names.
+    let stream: String = at(&less, 8).iter().map(|v| format!("{v}\n")).collect();
     let args = ["--json", "import", "--from", "fakeprov"];
     let args = [&args[..], &["--patient", "pat-0001"]].concat();
     let env = [("FAKEPROV_INFO", "files-only"), ("FAKEPROV_FILES", dir)];

@@ -3,8 +3,8 @@
 //! reproductive and fertility care, sexual health or substance use, and
 //! the medicines tied to them. They come from codes (ICD-10), the names of
 //! the places and clinicians, the portal they came from, the medicines and
-//! tests themselves, a bill's own words, and the household's own marks in
-//! `marks.json`.
+//! tests themselves, the words of a visit, a condition with no ICD-10 code, a
+//! report, a result and a bill, and the household's own marks in `marks.json`.
 //!
 //! It is discretion, not access control: a reader keeps such an item off
 //! shared screens and household-wide answers, and shows it on the person's
@@ -136,7 +136,12 @@ pub(crate) fn icd10_area(code: &str) -> Option<&'static str> {
         b'O' if n <= 8 => Some(REPRODUCTIVE),
         b'O' if n == 99 && c.get(3..5) == Some("33") => Some(SUBSTANCE_USE),
         b'N' if n == 46 || (96..=98).contains(&n) => Some(REPRODUCTIVE),
+        b'R' if n == 45 && c.get(3..6) == Some("851") => Some(MENTAL_HEALTH),
+        b'T' if n == 14 && c.get(3..5) == Some("91") => Some(MENTAL_HEALTH),
         b'Z' => match (n, sub) {
+            (13, Some("3")) | (86, Some("5")) | (91, Some("5")) => Some(MENTAL_HEALTH),
+            (81, Some("1" | "2" | "3" | "4")) => Some(SUBSTANCE_USE),
+            (81, _) => Some(MENTAL_HEALTH),
             (21, _) => Some(SEXUAL_HEALTH),
             (11, Some("3" | "4")) | (20, Some("2" | "6")) | (72, Some("5")) => Some(SEXUAL_HEALTH),
             (30..=32, _) | (33, Some("2")) => Some(REPRODUCTIVE),
@@ -204,6 +209,118 @@ static MEDICINES: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
     .collect()
 });
 
+/// The brands of those medicines.
+static BRANDS: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
+    [
+        (
+            "suboxone|subutex|zubsolv|sublocade|brixadi|bunavail|probuphine|vivitrol|revia|methadose|dolophine|antabuse|campral|chantix|zyban|nicorette|nicoderm|nicotrol|habitrol",
+            SUBSTANCE_USE,
+        ),
+        (
+            "zoloft|prozac|sarafem|paxil|pexeva|celexa|lexapro|luvox|effexor|pristiq|khedezla|cymbalta|drizalma|irenka|wellbutrin|aplenzin|forfivo|budeprion|auvelity|remeron|desyrel|oleptro|trintellix|brintellix|viibryd|pamelor|aventyl|eskalith|lithobid|lithotabs|seroquel|zyprexa|symbyax|lybalvi|risperdal|perseris|uzedy|rykindo|abilify|aristada|geodon|latuda|clozaril|fazaclo|versacloz|haldol|invega|vraylar|rexulti|buspar|xanax|niravam|ativan|loreev|ritalin|concerta|metadate|methylin|daytrana|quillivant|quillichew|aptensio|cotempla|jornay|relexxii|adhansia|adderall|mydayis|evekeo|adzenys|dyanavel|dexedrine|zenzedi|procentra|xelstrym|vyvanse|strattera|qelbree|spravato",
+            MENTAL_HEALTH,
+        ),
+        (
+            "clomid|serophene|milophene|gonal-?f|follistim|menopur|bravelle|fyremadel|cetrotide|ovidrel|novarel|pregnyl|mifeprex|mirena|liletta|nexplanon|implanon|nuvaring|eluryng|haloette|safyral|slynd|ocella|gianvi|loryna|sprintec|tri-?sprintec|ortho tri-?cyclen|ortho-?cyclen|ortho-?novum|trinessa|mononessa|estarylla|previfem|desogen|reclipsen|mircette|cyclessa|seasonale|seasonique|loseasonique|ortho micronor|loestrin|junel|microgestin|taytulla",
+            REPRODUCTIVE,
+        ),
+        (
+            "truvada|descovy|biktarvy|tivicay|triumeq|juluca|dovato|apretude|cabenuva|vocabria|edurant|odefsey|complera|genvoya|stribild|symtuza|prezista|prezcobix|atripla|symfi|sustiva|isentress|sunlenca|yeztugo|viagra|cialis|levitra|staxyn|stendra",
+            SEXUAL_HEALTH,
+        ),
+    ]
+    .into_iter()
+    .map(|(words, area)| (Regex::new(&format!(r"(?i)\b(?:{words})\b")).unwrap(), area))
+    .collect()
+});
+
+/// The brands that are people's names too, or words: of what is a medicine, and
+/// of no other text.
+static NAMED_ALIKE: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
+    let words = "yasmin|yaz|beyaz|zarah|syeda|larin|amethyst|camila|errin|heather|jolivette|nora-be|nikki|portia|skyla|kyleena|ella|lutera|levora|apri|aviane|alesse|lessina|kariva|juleber|enskyce|vienva|plan b(?: one-?step)?|my way|next choice";
+    let words = Regex::new(&format!(r"(?i)\b(?:{words})\b")).unwrap();
+    vec![(words, REPRODUCTIVE)]
+});
+
+/// The area of a medicine, by its ingredient or its brand.
+fn medicine(name: &str) -> Option<&'static str> {
+    let lists = [&*MEDICINES, &*BRANDS, &*NAMED_ALIKE];
+    lists.iter().find_map(|list| first_area(list, name))
+}
+
+/// What a condition is called that the areas' codes are of.
+static CONDITIONS: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
+    let used = "alcohol|opioid|opiate|fentanyl|heroin|cannabis|cannabinoid|marijuana|cocaine|stimulant|psychostimulant|amphetamine|methamphetamine|sedative|hypnotic|anxiolytic|benzodiazepine|barbiturate|hallucinogen|inhalant|ketamine|kratom|polysubstance|substance";
+    let of_use = [
+        &format!(r"(?:{used}|drug)s?(?:[- ](?:type|use|related|induced))?[- ](?:use[rs]?|abus\w*|misus\w*|dependen\w*|disorders?|addiction|withdrawal|intoxication|problems?)"),
+        &format!(r"(?:{used})s?[- ](?:related|induced)(?: \w+){{0,3}} disorders?"),
+        &format!(r"(?:abuse|misuse|dependenc[ey]|withdrawal|intoxication|harmful (?:pattern of )?use) (?:of|on|from|by|with|due to) (?:\w+ )?(?:{used}|drug)s?"),
+        r"alcoholi\w*|(?:problem|heavy|binge|excessive|hazardous) (?:alcohol )?drink(?:ers?|ing)|delirium tremens|korsakoff\w*",
+        r"addict\w*|nicotine|tobacco|smok(?:es|ed|ers?|ing)|(?:second[- ]?hand|passive|environmental) smoke|cigarettes?|e-?cig\w*|vap(?:es?|ing)|snuff",
+    ]
+    .join("|");
+    let sexual = [
+        r"syphilis|syphilitic|gonorrh\w*|gonococc\w*|chlamydia\w*|trichomon\w*|mycoplasma genitalium|chancroid|lymphogranuloma|granuloma inguinale|donovanosis|condyloma\w*",
+        r"(?:ano)?genital (?:\w+ )?(?:herpes\w*|hsv|warts?)|herpes\w* (?:\w+ ){0,3}(?:ano)?genital\w*|hsv-?2|herpes simplex (?:virus )?(?:type )?2",
+        r"hiv|human immunodeficiency|acquired immun(?:e|o)?[- ]?deficien\w*|(?-i:AIDS)",
+        r"sexually transmi\w*|sexual (?:mode of )?transmission|st[di]s?|venereal|high[- ]risk (?:hetero|homo|bi)?sexual|un(?:safe|protected) (?:sex|sexual|intercourse)",
+        r"erectile|impotence|premature ejaculation|sexual (?:dysfunction|desire|aversion|arousal)",
+    ]
+    .join("|");
+    let reproductive = [
+        r"infertil\w*|subfertil\w*|fertility|sterility|anovulat\w*|azoosperm\w*|oligo\w*sperm\w*|sperm counts?|semen",
+        r"(?:ectopic|tubal|molar|ovarian|abdominal|cervical|cornual|interstitial|heterotopic|anembryonic) pregnanc(?:y|ies)|hydatidiform|blighted ovum",
+        r"miscarriages?|abort(?:ions?|us|ers?)|pregnancy loss(?:es)?|loss of pregnancy|terminations? of (?:\w+ )?pregnanc(?:y|ies)|pregnancy terminations?|retained products of conception",
+        r"contracept\w*|birth control|intrauterine device|iud|sterili[sz]ation|vasectomy|tubal ligation|family planning|pregnancy (?:examination or )?tests?",
+        r"procreat\w*|preconception\w*|in vitro|ivf|(?:artificial )?insemination|artificial fertili[sz]ation|assisted reproduct\w*|ovarian hyperstimulation|gestational carrier|surroga\w*",
+    ]
+    .join("|");
+    let mental = [
+        r"depressi(?:ons?|ve)|depressed mood|feeling depressed|^depressed$|dysphori\w*|(?:baby|maternity|postpartum) blues|bipolar|mania|manic|hypomani\w*|dysthymi\w*|cyclothymi\w*|mood(?: \[?\w+\]?){0,2} disorders?|affective (?:\w+ )?(?:disorders?|psychos[ei]s)",
+        r"anxiety|anxious|panic|phobi\w*|agoraphobi\w*|obsessive|compulsive|ocd|hoarding|neuros[ei]s|neurotic|ptsd|post[- ]?traumatic stress|acute stress (?:disorders?|reactions?)|reactions? to severe stress|adjustment (?:disorders?|reactions?)|prolonged grief",
+        r"psycho(?:s[ei]s|tic|logic\w*|log(?:y|ist)|genic|somatic|sexual|path\w*)|psychiatr\w*|schizo\w*|delusion\w*|paranoi\w*|catatoni\w*|dissociative|depersonali[sz]ation|pseudobulbar affect",
+        r"mental(?:ly)?(?: and behaviou?ral)? (?:health|ill\w*|disorders?|retardation)|behaviou?r(?:al)? (?:health|disorders?|problems?)|emotional (?:disorders?|disturbances?)|personality disorders?|personality and behaviou?ral|conduct disorders?|oppositional|explosive disorders?|impulse(?:[- ]control)? disorders?|gambling|kleptomania|pyromania|trichotillomania|(?:excoriation|skin[- ]picking) disorders?|paraphili\w*|factitious|munchausen\w*",
+        r"somatoform|somati[sz]ation|somatic symptom|conversion disorders?|hypochondri\w*|dysmorphi\w*|eating disorders?|anorexia nervosa|bulimi\w*|binge[- ]eating|avoidant[ /-]+restrictive|pica|suicid\w*|self[- ](?:harm\w*|injur\w*|inflicted)|(?:intentional|deliberate) (?:self[- ])?(?:\w+ )?(?:overdose|poisoning)",
+        r"adhd|attention[- ]deficit|hyperactivity|hyperkinetic (?:disorders?|syndrome)|autis\w*|asperger\w*|rett'?s?|intellectual disab\w*|(?:neuro)?developmental (?:\w+ ){0,2}disorders?|global developmental delay|(?:speech|language)(?: and language)? (?:delay|disorders?|impairment)|stutter\w*|stammer\w*|fluency disorders?|learning (?:disorders?|disabilit\w*|difficult\w*)|dyslexia|dyscalculia|dyspraxia|tourette\w*|tic disorders?|(?:motor|vocal) tics?|encopresis|mutism|attachment disorders?",
+        r"gender (?:dysphoria|identity|incongruen\w*)|transgender|transsexual\w*|sleep ?walking|somnambulism|(?:night|sleep) terrors?|nightmare disorders?|(?:primary|psychophysiologic\w*) insomnia|dementia|delirium|amnestic|post[- ]?concuss\w*",
+    ]
+    .join("|");
+    [
+        (of_use, SUBSTANCE_USE),
+        (sexual, SEXUAL_HEALTH),
+        (reproductive, REPRODUCTIVE),
+        (mental, MENTAL_HEALTH),
+    ]
+    .into_iter()
+    .map(|(words, area)| {
+        (
+            Regex::new(&format!(r"(?i)\b(?:{words})(?:\b|$)")).unwrap(),
+            area,
+        )
+    })
+    .collect()
+});
+
+/// What has the words of one and is none: what is lower than it was, a liver's
+/// that drink does not explain, and what one hears with.
+static OTHERWISE: LazyLock<Regex> = LazyLock::new(|| {
+    let lower = "st|segment|respiratory|marrow|myocardial|cardiac|cns|nervous system";
+    Regex::new(&format!(
+        r"(?i)\b(?:(?:{lower}) depression|non[- ]alcoholic|hearing[- ]aids?)\b"
+    ))
+    .unwrap()
+});
+
+/// The area of a condition by what it is called.
+fn condition_name(text: &str) -> Option<&'static str> {
+    first_area(&CONDITIONS, &OTHERWISE.replace_all(text, " "))
+}
+
+/// The area of a paper by its title.
+fn title(text: &str) -> Option<&'static str> {
+    first_area(&PAPERS, text).or_else(|| questionnaires::of(text, None).map(|q| q.area))
+}
+
 /// Tests that are about the areas themselves.
 static TESTS: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
     [
@@ -259,12 +376,52 @@ fn parts_say(r: &Record) -> impl Iterator<Item = &str> {
     values.filter_map(|p| p.get("value")?.as_str())
 }
 
+/// What a record's own words say: the part of it each is, and its area. A
+/// condition's name says it where no ICD-10 code of it does, a visit's name
+/// and its reason, a report's conclusion, and a result's value that is a text.
+pub(crate) fn said(r: &Record) -> Vec<(&'static str, &'static str)> {
+    let of = |part: &'static str, text: Option<&str>, area: fn(&str) -> Option<&'static str>| {
+        Some((part, area(text?)?))
+    };
+    let visit: fn(&str) -> Option<&'static str> = |t| title(t).or_else(|| condition_name(t));
+    let name = Some(r.display.as_str());
+    let each = match r.kind.as_str() {
+        "condition" => [
+            of(
+                "display",
+                name.filter(|_| icd10(r).is_none()),
+                condition_name,
+            ),
+            None,
+        ],
+        "encounter" => [
+            of("display", name, visit),
+            of("reason", field(r, "reason"), visit),
+        ],
+        "report" => [of("conclusion", field(r, "conclusion"), words), None],
+        "result" => [of("value", field(r, "value"), words), None],
+        _ => [None, None],
+    };
+    each.into_iter().flatten().collect()
+}
+
+/// A condition's ICD-10 code.
+fn icd10(r: &Record) -> Option<&str> {
+    let code = r.code.as_ref();
+    let code = code.filter(|c| is_icd10(c.system.as_deref()))?;
+    code.code.as_deref()
+}
+
 /// The area any words of a text say: of a service, a medicine, a test or a
 /// questionnaire.
 pub(crate) fn words(text: &str) -> Option<&'static str> {
-    let lists = [&*PAPERS, &*MEDICINES, &*TESTS];
-    let by_list = lists.iter().find_map(|list| first_area(list, text));
-    by_list.or_else(|| questionnaires::of(text, None).map(|q| q.area))
+    page(text).or_else(|| questionnaires::of(text, None).map(|q| q.area))
+}
+
+/// The same of a bill's page, which a questionnaire's name is one line of.
+fn page(text: &str) -> Option<&'static str> {
+    let lists = [&*PAPERS, &*MEDICINES, &*BRANDS, &*TESTS];
+    lists.iter().find_map(|list| first_area(list, text))
 }
 
 /// The area of one of a claim's diagnoses, by its code.
@@ -337,20 +494,23 @@ fn record_why(r: &Record) -> Option<Why> {
             .find_map(|n| first_area(&PLACES, n))
             .map(|area| Why::of(area, "provider"))
     };
+    let said_area = || said(r).first().map(|(_, area)| *area);
     match r.kind.as_str() {
-        "condition" => r
-            .code
-            .as_ref()
-            .filter(|c| is_icd10(c.system.as_deref()))
-            .and_then(|c| c.code.as_deref())
-            .and_then(icd10_area)
-            .map(|area| Why::of(area, "code")),
+        "condition" => {
+            let code_name = r.code.as_ref().and_then(|c| c.display.as_deref());
+            let code_name = code_name.filter(|_| icd10(r).is_none());
+            let by_name = || said_area().or_else(|| condition_name(code_name?));
+            icd10(r)
+                .and_then(icd10_area)
+                .map(|area| Why::of(area, "code"))
+                .or_else(|| Some(Why::of(by_name()?, "words")))
+        }
         "claim" => principal_diagnosis(r)
             .filter(|(system, _)| is_icd10(*system))
             .and_then(|(_, code)| icd10_area(code))
             .map(|area| Why::of(area, "code"))
             .or_else(|| {
-                let area = first_area(&MEDICINES, dispensed(r)?)?;
+                let area = medicine(dispensed(r)?)?;
                 Some(Why::of(area, "medicine"))
             })
             .or_else(|| by_names(&["provider", "facility"]))
@@ -358,22 +518,20 @@ fn record_why(r: &Record) -> Option<Why> {
         "procedure" => services::procedure(r)
             .map(|area| Why::of(area, "service"))
             .or_else(|| by_names(&["performer", "location"])),
-        "encounter" => by_names(&["service_provider", "location", "practitioner"]),
-        "medication" => {
-            let named = std::iter::once(r.display.as_str())
-                .chain(r.code.as_ref().and_then(|c| c.display.as_deref()));
-            named
-                .filter_map(|n| first_area(&MEDICINES, n))
-                .next()
-                .map(|area| Why::of(area, "medicine"))
-                .or_else(|| by_names(&["prescriber"]))
-        }
+        "encounter" => by_names(&["service_provider", "location", "practitioner"])
+            .or_else(|| Some(Why::of(said_area()?, "words"))),
+        "medication" => std::iter::once(r.display.as_str())
+            .chain(r.code.as_ref().and_then(|c| c.display.as_deref()))
+            .find_map(medicine)
+            .map(|area| Why::of(area, "medicine"))
+            .or_else(|| by_names(&["prescriber"])),
         // A reading is, by any of its parts.
         "result" | "report" => questionnaires::told_by(r)
             .iter()
             .find_map(|(name, _)| first_area(&TESTS, name))
             .or_else(|| questionnaires::asked_by(r).first().map(|q| q.area))
             .or_else(|| parts_say(r).find_map(words))
+            .or_else(said_area)
             .map(|area| Why::of(area, "test"))
             .or_else(|| by_names(&["performer"])),
         _ => None,
@@ -390,22 +548,14 @@ fn document_why(d: &Document, text: Option<&str>) -> Option<Why> {
         .and_then(|o| first_area(&PLACES, o))
         .map(|area| Why::of(area, "provider"));
     let words = || {
-        let named = |t: &str| {
-            first_area(&PAPERS, t).or_else(|| questionnaires::of(t, None).map(|q| q.area))
-        };
-        let title = d.title.as_deref().and_then(named).or_else(|| {
+        let titled = d.title.as_deref().and_then(title).or_else(|| {
             let name = d.original_name.as_deref()?;
             [&['_', '.'][..], &['_', '.', '-']]
                 .iter()
-                .find_map(|marks| named(&name.replace(*marks, " ")))
+                .find_map(|marks| title(&name.replace(*marks, " ")))
         });
-        let page = || {
-            let page = crate::bill::first_page(d, text?)?;
-            [&*PAPERS, &*MEDICINES, &*TESTS]
-                .iter()
-                .find_map(|list| first_area(list, &page))
-        };
-        title.or_else(page).map(|area| Why::of(area, "words"))
+        let first = || page(&crate::bill::first_page(d, text?)?);
+        titled.or_else(first).map(|area| Why::of(area, "words"))
     };
     place.or_else(words)
 }
@@ -520,6 +670,8 @@ pub fn build(
 
     let mut out = json!({"schema": SCHEMA, "person": p.id,
         "records": {}, "documents": {}, "events": {}, "studies": {}});
+    let heads = idx.records.iter().filter(|r| crate::panels::heads(r));
+    let heads: BTreeSet<&str> = heads.map(|r| r.id.as_str()).collect();
     for (id, w) in items {
         let kind = match id.get(..2) {
             Some("r_") => "records",
@@ -528,7 +680,11 @@ pub fn build(
             Some("m_") => "studies",
             _ => continue,
         };
-        out[kind][id] = w.json();
+        let mut v = w.json();
+        if heads.contains(id.as_str()) {
+            v["heading"] = true.into();
+        }
+        out[kind][id] = v;
     }
     if !unreported.is_empty() {
         out["unreported_studies"] = unreported.into();
@@ -1270,11 +1426,324 @@ mod tests {
             ("Z11.59", None),
             ("Z71.41", Some(SUBSTANCE_USE)),
             ("Z71.3", None),
+            ("Z13.31", Some(MENTAL_HEALTH)),
+            ("Z13.6", None),
+            ("R45.851", Some(MENTAL_HEALTH)),
+            ("R45.89", None),
+            ("T14.91XA", Some(MENTAL_HEALTH)),
+            ("T14.90XA", None),
+            ("Z91.51", Some(MENTAL_HEALTH)),
+            ("Z91.19", None),
+            ("Z86.59", Some(MENTAL_HEALTH)),
+            ("Z86.73", None),
+            ("Z81.0", Some(MENTAL_HEALTH)),
+            ("Z81.1", Some(SUBSTANCE_USE)),
+            ("Z81.2", Some(SUBSTANCE_USE)),
+            ("Z81.8", Some(MENTAL_HEALTH)),
+            ("Z82.49", None),
             ("I10", None),
             ("", None),
             ("F", None),
         ] {
             assert_eq!(icd10_area(code), area, "{code}");
+        }
+    }
+
+    fn why_of(kind: &str, display: &str, code: Value, fields: Value) -> Option<(String, String)> {
+        let mut r = record("r_ownwordsaaaaaaaaaaaa", kind, display, fields);
+        if !code.is_null() {
+            r["code"] = code;
+        }
+        let w = record_why(&serde_json::from_value(r).unwrap())?;
+        Some((w.area.to_string(), w.from.to_string()))
+    }
+
+    /// A condition with no ICD-10 code is of what it is called; one with a code
+    /// is of its code.
+    #[test]
+    fn a_condition_with_no_icd10_code_is_private_by_its_name() {
+        let snomed =
+            |name: &str| json!({"system": "http://snomed.info/sct", "code": "1", "display": name});
+        let icd10 =
+            |code: &str| json!({"system": "http://hl7.org/fhir/sid/icd-10-cm", "code": code});
+        for (name, area) in [
+            ("Generalized anxiety disorder", MENTAL_HEALTH),
+            ("Major depressive disorder, single episode", MENTAL_HEALTH),
+            ("History of suicidal thoughts", MENTAL_HEALTH),
+            ("Attention deficit disorder", MENTAL_HEALTH),
+            ("Post-traumatic stress disorder", MENTAL_HEALTH),
+            ("Alcohol use disorder, mild", SUBSTANCE_USE),
+            ("Opioid dependence", SUBSTANCE_USE),
+            ("Former smoker", SUBSTANCE_USE),
+            ("Genital herpes", SEXUAL_HEALTH),
+            ("Exposure to an STI", SEXUAL_HEALTH),
+            ("Female infertility", REPRODUCTIVE),
+            ("Contraceptive management", REPRODUCTIVE),
+            // By the forms its name can have.
+            ("Alcohol-related disorder", SUBSTANCE_USE),
+            ("Alcohol related disorders", SUBSTANCE_USE),
+            ("Opioid related disorders", SUBSTANCE_USE),
+            ("Substance-related disorders", SUBSTANCE_USE),
+            (
+                "Alcohol-induced persisting amnestic disorder",
+                SUBSTANCE_USE,
+            ),
+            ("Opioid type dependence", SUBSTANCE_USE),
+            ("Dependence on opioids", SUBSTANCE_USE),
+            ("Abuse of cannabis", SUBSTANCE_USE),
+            ("Harmful use of alcohol", SUBSTANCE_USE),
+            ("Benzodiazepine dependence", SUBSTANCE_USE),
+            ("Injection drug user", SUBSTANCE_USE),
+            ("Smokes tobacco daily", SUBSTANCE_USE),
+            ("Second hand smoke exposure", SUBSTANCE_USE),
+            ("Problem drinker", SUBSTANCE_USE),
+            ("Personality disorders", MENTAL_HEALTH),
+            ("Eating disorders", MENTAL_HEALTH),
+            ("Adjustment disorders", MENTAL_HEALTH),
+            ("Conduct disorders", MENTAL_HEALTH),
+            ("Tic disorders", MENTAL_HEALTH),
+            ("Mental disorders", MENTAL_HEALTH),
+            ("Mental and behavioral disorders", MENTAL_HEALTH),
+            ("Persistent mood [affective] disorder", MENTAL_HEALTH),
+            ("Seasonal affective disorder", MENTAL_HEALTH),
+            ("Premenstrual dysphoric disorder", MENTAL_HEALTH),
+            ("Pervasive developmental disorders", MENTAL_HEALTH),
+            ("Developmental coordination disorder", MENTAL_HEALTH),
+            ("Trichotillomania", MENTAL_HEALTH),
+            ("Delirium", MENTAL_HEALTH),
+            ("Depressed", MENTAL_HEALTH),
+            ("Recurrent miscarriages", REPRODUCTIVE),
+            ("Termination of pregnancy", REPRODUCTIVE),
+            ("Elective termination of pregnancy", REPRODUCTIVE),
+            ("Female sterility", REPRODUCTIVE),
+            ("Habitual aborter", REPRODUCTIVE),
+            ("Procreative management", REPRODUCTIVE),
+            ("Ectopic pregnancies", REPRODUCTIVE),
+            ("Presence of intrauterine device", REPRODUCTIVE),
+            ("Acquired immunodeficiency syndrome", SEXUAL_HEALTH),
+            ("Acquired immune deficiency syndrome", SEXUAL_HEALTH),
+            ("AIDS", SEXUAL_HEALTH),
+            ("Anogenital herpesviral infection", SEXUAL_HEALTH),
+            ("Herpesviral infection of genitalia", SEXUAL_HEALTH),
+            ("Herpes simplex infection of genitalia", SEXUAL_HEALTH),
+            (
+                "Contact with infections with a predominantly sexual mode of transmission",
+                SEXUAL_HEALTH,
+            ),
+            ("Sexually transmissible infection", SEXUAL_HEALTH),
+            ("High risk sexual behavior", SEXUAL_HEALTH),
+            ("High risk heterosexual behavior", SEXUAL_HEALTH),
+            ("High-risk homosexual behavior", SEXUAL_HEALTH),
+            ("High risk bisexual behavior", SEXUAL_HEALTH),
+        ] {
+            let want = Some((area.to_string(), "words".to_string()));
+            let why = |code: Value| why_of("condition", name, code, json!({}));
+            assert_eq!(why(Value::Null), want, "{name}");
+            assert_eq!(why(snomed("Example finding")), want, "{name}");
+            // Its code decides, where it has one.
+            assert_eq!(why(icd10("I10")), None, "{name}");
+            let by_code = Some((MENTAL_HEALTH.to_string(), "code".to_string()));
+            assert_eq!(why(icd10("F41.1")), by_code, "{name}");
+            // By what its other code calls it too.
+            let why = why_of("condition", "Example finding", snomed(name), json!({}));
+            assert_eq!(why, want, "{name}");
+        }
+        for name in [
+            "ST segment depression",
+            "ST-segment depression",
+            "Respiratory depression",
+            "Stress reaction of bone",
+            "Drug allergy",
+            "Loss of appetite",
+            "Ear pain",
+            "Non-alcoholic fatty liver disease",
+            "Nonalcoholic steatohepatitis",
+            "Hearing aids",
+            "HEARING AIDS",
+            "Walking aids",
+            "Depressed skull fracture",
+            "Drug-induced movement disorder",
+            "Opioid-induced constipation",
+            "Long-term use of opioid analgesic",
+            "Smoke inhalation",
+            "Skin excoriation",
+            "Altered mental status",
+            "Developmental dysplasia of the hip",
+            "Photophobia",
+            "Sterile pyuria",
+            "Pregnancy",
+            "Language barrier",
+        ] {
+            assert_eq!(
+                why_of("condition", name, Value::Null, json!({})),
+                None,
+                "{name}"
+            );
+        }
+    }
+
+    /// A visit is of its name and its reason, a report of its conclusion, and a
+    /// result of a value that is a text.
+    #[test]
+    fn a_visit_a_report_and_a_result_are_private_by_their_own_words() {
+        let words = |area: &str, from: &str| Some((area.to_string(), from.to_string()));
+        let visit = |name: &str, reason: &str| {
+            why_of("encounter", name, Value::Null, json!({"reason": reason}))
+        };
+        assert_eq!(visit("Sample visit", "Ear pain"), None);
+        for (name, reason) in [
+            ("Sample visit", "Anxiety"),
+            ("Sample visit", "Psychotherapy"),
+            ("Behavioral health visit", "Follow up"),
+            ("Sample visit", "PHQ-9"),
+        ] {
+            assert_eq!(
+                visit(name, reason),
+                words(MENTAL_HEALTH, "words"),
+                "{name}, {reason}"
+            );
+        }
+        let told = |text: &str| {
+            why_of(
+                "report",
+                "Example report",
+                Value::Null,
+                json!({"conclusion": text}),
+            )
+        };
+        assert_eq!(told("ST depression seen"), None);
+        // As a line of a bill's text is judged, a questionnaire's name included.
+        assert_eq!(told("PHQ-9 of 3"), words(MENTAL_HEALTH, "test"));
+        assert_eq!(
+            told("A smoker, 20 pack-years"),
+            words(SUBSTANCE_USE, "test")
+        );
+        assert_eq!(told("HIV antibody not seen"), words(SEXUAL_HEALTH, "test"));
+        assert_eq!(told("Started Zoloft"), words(MENTAL_HEALTH, "test"));
+        let value = |v: Value| why_of("result", "Example smear", Value::Null, json!({"value": v}));
+        assert_eq!(value("Not seen".into()), None);
+        assert_eq!(value(json!({"value": 3, "unit": "hiv"})), None);
+        assert_eq!(
+            value("Chlamydia not seen".into()),
+            words(SEXUAL_HEALTH, "test")
+        );
+    }
+
+    /// A medicine is of its brand too. A brand that is a name is of a medicine
+    /// only, and not of a text that has the name.
+    #[test]
+    fn a_medicines_brand_says_its_area() {
+        let of = |name: &str| why_of("medication", name, Value::Null, json!({})).map(|w| w.0);
+        let area = |area: &str| Some(area.to_string());
+        for (name, want) in [
+            ("Zoloft 50 MG", area(MENTAL_HEALTH)),
+            ("CONCERTA 18 mg ER", area(MENTAL_HEALTH)),
+            ("Chantix starting pack", area(SUBSTANCE_USE)),
+            ("Gonal-F", area(REPRODUCTIVE)),
+            ("Yasmin 28", area(REPRODUCTIVE)),
+            ("Plan B One-Step", area(REPRODUCTIVE)),
+            ("Biktarvy", area(SEXUAL_HEALTH)),
+            ("Loratadine 10 MG", None),
+            ("Celebrex", None),
+        ] {
+            assert_eq!(of(name), want, "{name}");
+        }
+        let fill = |name: &str| {
+            let fields = json!({"type": "pharmacy", "category": "pharmacy"});
+            why_of(
+                "claim",
+                &format!("{name} \u{b7} Example Pharmacy"),
+                Value::Null,
+                fields,
+            )
+        };
+        assert_eq!(fill("Lexapro").unwrap().1, "medicine");
+        assert_eq!(fill("Heather").unwrap().1, "medicine");
+        assert_eq!(words("Started Lexapro"), Some(MENTAL_HEALTH));
+        for text in [
+            "Seen by Heather Example",
+            "Yasmin Placeholder",
+            "Plan B deductible",
+        ] {
+            assert_eq!(words(text), None, "{text}");
+        }
+    }
+
+    /// What a source takes back of a record's own words still tells, and its
+    /// other words are not kept.
+    #[test]
+    fn own_words_a_source_took_back_still_tell() {
+        let of = |kind: &str, display: &str, code: Value, fields: Value| -> Record {
+            let mut r = record("r_ownwordsaaaaaaaaaaaa", kind, display, fields);
+            if !code.is_null() {
+                r["code"] = code;
+            }
+            serde_json::from_value(r).unwrap()
+        };
+        let icd10 = json!({"system": "http://hl7.org/fhir/sid/icd-10-cm", "code": "I10"});
+        let none = Value::Null;
+        let each = [
+            (
+                of("condition", "Anxiety", none.clone(), json!({})),
+                of("condition", "Anxiety", icd10, json!({})),
+            ),
+            (
+                of(
+                    "encounter",
+                    "Sample visit",
+                    none.clone(),
+                    json!({"reason": "Anxiety"}),
+                ),
+                of(
+                    "encounter",
+                    "Sample visit",
+                    none.clone(),
+                    json!({"reason": "Ear pain"}),
+                ),
+            ),
+            (
+                of("encounter", "Psychotherapy", none.clone(), json!({})),
+                of("encounter", "Sample visit", none.clone(), json!({})),
+            ),
+            (
+                of(
+                    "report",
+                    "Example report",
+                    none.clone(),
+                    json!({"conclusion": "HIV not seen"}),
+                ),
+                of(
+                    "report",
+                    "Example report",
+                    none.clone(),
+                    json!({"conclusion": "Not seen"}),
+                ),
+            ),
+            (
+                of(
+                    "result",
+                    "Example smear",
+                    none.clone(),
+                    json!({"value": "Chlamydia seen"}),
+                ),
+                of("result", "Example smear", none.clone(), json!({"value": 2})),
+            ),
+        ];
+        for (before, mut now) in each {
+            let kind = now.kind.clone();
+            assert!(record_why(&before).is_some(), "{kind}");
+            assert!(record_why(&now).is_none(), "{kind}");
+            assert!(given::keep(&mut now, given::gives(&before)), "{kind}");
+            let gave = given::as_given(&now).find_map(|x| record_why(&x));
+            assert!(gave.is_some(), "{kind}");
+            // The other way round nothing is kept that the rules do not read.
+            let mut then = before.clone();
+            given::keep(&mut then, given::gives(&now));
+            let kept = then
+                .given
+                .iter()
+                .all(|g| g.fields.is_empty() && g.display.is_none());
+            assert!(kept || kind == "condition", "{kind}: {:?}", then.given);
         }
     }
 

@@ -492,17 +492,23 @@ there.
 sources gave of it, then or now, that the rules of what is private read and
 that the record does not show: a list of `{raw_path, cli, display, code,
 fields, npis, lists}`, each with the parts that are other than those shown. `display`
-is a medication's, a result's, a report's, a procedure's or a claim's, and `code`
+is a medication's, a result's, a report's, a procedure's or a claim's, and (0.9.10
+and later) a visit's, or a condition's with no ICD-10 code, where it says an area, and `code`
 a condition's, a medication's, a result's, a report's or a procedure's; `fields`
 are a claim's `diagnoses`, its `payer_notes` and its `items` (of each line
 `service`, `revenue`, `payer_notes` and `counted`), a result's `about`, its
 `components` (0.9.10 and later: of each part its `code`, of those with no value
-too, and its `value` where that is a text that says an area), and the fields that print a provider (Providers, below); `npis` has the NPI of the provider a field prints,
+too, and its `value` where that is a text that says an area), and (0.9.10 and later)
+a result's `value`, a report's `conclusion` and a visit's `reason`, each a text that
+says one, and the fields that print a provider (Providers, below); `npis` has the NPI of the provider a field prints,
 by that field; `lists` (0.9.10 and later) is what a panel or a report listed
 otherwise, as its `lists` has it, each raw file's whole; `cli` is that of a source that no longer has the record.
 `raw_path` is the raw file of the current version of what gave it, absent
 where that is not known. A document's is `{raw_path, organization, title,
-name}`: `name` is the `original_name` of a copy that was folded into it.
+name}`: `name` is the `original_name` of a copy that was folded into it. A
+condition's entry with a `display` is judged with that entry's `code` alone, and
+as one with no code where it has none, whatever code the item shows now (0.9.10
+and later): a name that said an area while there was no ICD-10 code still says it.
 
 - It decides what is private and what is about another person (below), and
   nothing else: each rule and provider label reads it beside what the item
@@ -2439,14 +2445,14 @@ nothing is private.
   |---|---|
   | `source` | came from a portal whose records are all of one area: a behavioral health or a fertility clinic's record system |
   | `service` | is a claim each line of which that its totals count is of a service in an area (the first line's), or one with no such line whose own name says it; or a procedure that is one (0.9.9 and later; Services, below) |
-  | `code` | is a condition whose ICD-10 code is in an area, or a claim whose principal diagnosis (the lowest `sequence`) is: F10–F19 and Z71.4–Z71.5 substance use, and (0.9.9 and later) Z71.6, Z72.0, Z77.22, Z87.891 and O99.33; the other F codes mental health; Z30–Z32, Z33.2, O00–O08, N46 and N96–N98 reproductive; A50–A64, B20, Z21, Z11.3–Z11.4, Z20.2, Z20.6 and Z72.5 sexual health |
+  | `code` | is a condition whose ICD-10 code is in an area, or a claim whose principal diagnosis (the lowest `sequence`) is: F10–F19 and Z71.4–Z71.5 substance use, and (0.9.9 and later) Z71.6, Z72.0, Z77.22, Z87.891 and O99.33, and (0.9.10 and later) Z81.1–Z81.4; the other F codes mental health, and (0.9.10 and later) Z13.3, R45.851, T14.91, Z91.5, Z86.5 and the rest of Z81; Z30–Z32, Z33.2, O00–O08, N46 and N96–N98 reproductive; A50–A64, B20, Z21, Z11.3–Z11.4, Z20.2, Z20.6 and Z72.5 sexual health |
   | `provider` | was made by a practice or clinician whose name or credential says its area: a claim's provider or facility, a visit's place, location or clinician, a medicine's prescriber, a result's performer, a document's organization; or is a record that prints a provider with a sure label (Provider labels, above) whose name, practice or role does, or a record, document or event that prints one the household calls so (0.9.7 and later) |
   | `clinician` | is a claim (0.9.10 and later) whose `provider` prints, by surname and first initial, a clinician that a paper of the person names: in its `organization`, where that says an area as `provider` has it, or in its `title`, where that or the organization does; or one whose practice by an alias (N5, above) says an area. A surname cut to 8 letters or more is the one it begins. A name with no initial, no degree and no comma can be a place's, and is looked for in an organization alone. The paper, the alias and the claim are each read as shown and as a source gave them, then or now, and an alias with what is entered in error too; a claim that is private only by what is not shown of any of them has `given`. A likely match: it holds the claim back, and names, joins and settles nothing |
-  | `medicine` | is a medicine of an area by its name or code, or (0.9.9 and later) a pharmacy claim its `display` names as one: antidepressants, antipsychotics, anxiolytics, stimulants and lithium; fertility drugs and contraceptives; HIV medicines and those for erectile dysfunction; medicines for substance use and smoking |
-  | `test` | is a result or report of a test of an area: sexually transmitted infections, pregnancy and fertility, drug screens; or (0.9.9 and later) of a questionnaire of one, or of tobacco use (Questionnaires, below); by its own name and code or those of any of its parts, or by a text that is the value of a part (0.9.10 and later) |
+  | `medicine` | is a medicine of an area by its name, its brand (0.9.10 and later; Brands, below) or code, or (0.9.9 and later) a pharmacy claim its `display` names as one: antidepressants, antipsychotics, anxiolytics, stimulants and lithium; fertility drugs and contraceptives; HIV medicines and those for erectile dysfunction; medicines for substance use and smoking |
+  | `test` | is a result or report of a test of an area: sexually transmitted infections, pregnancy and fertility, drug screens; or (0.9.9 and later) of a questionnaire of one, or of tobacco use (Questionnaires, below); by its own name and code or those of any of its parts, or (0.9.10 and later) by a text that is its value or the value of a part, or a report's `conclusion`, as a line of a bill's text is (Private parts, below): by the words of a service, a medicine, a test or a questionnaire |
   | `members` | is an event with a private claim or portal visit, or whose own members are all private, or (0.9.10 and later) a panel or a report all of what one source lists of which (Panels, above), now or before, is private, with what is entered in error or without it |
   | `event` | is a member of a private event |
-  | `words` | is a bill or receipt whose first page that has any text says an area, by a service, a medicine or a test, or any document whose title does (0.9.6 and later), or whose title is a questionnaire's, or with an `original_name` that says either (0.9.9 and later; `_`, `.` and `-` read as spaces) |
+  | `words` | is a bill or receipt whose first page that has any text says an area, by a service, a medicine or a test, or any document whose title does (0.9.6 and later), or whose title is a questionnaire's, or with an `original_name` that says either (0.9.9 and later; `_`, `.` and `-` read as spaces); or (0.9.10 and later) a condition with no ICD-10 code whose name, or its code's, is of a condition of an area, or a visit whose name or `reason` is, or says one as a paper's title does |
   | `record` | is a document that a private record links (`documents` in `records`), whatever else links it (0.9.5 and later) |
   | `report` | is an imaging study whose `report`, a document or record, is private (0.9.5 and later) |
   | `paper` | is a document tied to a private one, either way: its copy (`same_statement_as`, `near_duplicates`), the bill that supersedes it or one it supersedes (`superseded_by` in `bills.json`), or the receipt that pays it or the bill it pays (0.9.6 and later) |
@@ -2457,6 +2463,8 @@ nothing is private.
   the item, or of the one it is private with. Absent otherwise. A reader shows
   the area and no more of it. A row of `medrec private list` has it too (`yes`
   in its table's `given`).
+- **`heading`** (0.9.10 and later): `true` on a private record that is a heading
+  (Panels, above): it has no entry in `tests.json`. Absent otherwise.
 - **What a source takes back still tells** (0.9.9 and later). Nothing opens
   because a record or a paper is entered in error, the person's or one of a
   person their events read (X1, X2): each rule is judged with what is and with
@@ -2464,6 +2472,11 @@ nothing is private.
   `events_in_error` can be here. A study with no report, with what is
   entered in error or without it, is in `unreported_studies`; so one whose only
   report is, which is in `studies` too when that report was private.
+- **Brands** (0.9.10 and later). Wherever a text is judged by a medicine's words,
+  its brands are among them: a bill's page and lines, a service, a payer note, a
+  text value and a conclusion. A brand that is a person's name too, or a word
+  ("Camila", "Plan B"), is one only as a medicine's name or code, or in a pharmacy
+  claim's `display`, and in no other text.
 - **Questionnaires** (0.9.9 and later). A result or a report is a
   questionnaire's by the LOINC code it has, else by the words of its name or of
   its code's, and (0.9.10 and later) a result by the same of any of its parts, for
@@ -2639,9 +2652,11 @@ readers ship with medrec:
       on it says how many of its own are, of those the answer may show, in its
       `detail` ("1 entered in error, not shown"), and has `in_error` and
       `not_applied` in its `fields` when those are in the answer, each absent
-      when nothing is left of it. So with an event asked for by its id in a call
-      that names no person (0.9.10 and later; 0.9.9 named them all). One that is
-      private itself, asked for by its id or named, has all of its own.
+      when nothing is left of it (0.9.10 and later; 0.9.9 could give an empty
+      list). So with an event asked for by its id in a call that names no person
+      (0.9.10 and later; 0.9.9 named them all). One that is private itself, asked
+      for by its id or named, has all of its own (one named, 0.9.10 and later;
+      0.9.9 left out what was held back).
     - any other item its sources differ on has `standing` `sources differ` and
       `says`, as `standing.json`'s words are said; the household's own file is
       `the household's own file`. It keeps its `status`.
@@ -2954,8 +2969,9 @@ characters and the invisible format characters that reorder or hide text
 
 `records_not_served` is of an export through a sign-in of all the source has: it is
 `null` with `--since`, where the export's header has `since`, with `--from-files`,
-where the source's folder has imports of another patient, and where a skip names
-neither a type nor a search. A record is not counted while any of its resources
+with neither `--from-profile` nor `--from-files` for a provider that reads files
+(`records-files`), where the source's folder has imports of another patient, and
+where a skip names neither a type nor a search. A record is not counted while any of its resources
 from this source is in the export, or may be among those it left out (its type was
 withheld or cut short, it is itself among the skips, or it is a `MedicationRequest`
 and a `MedicationDispense` is), nor when it is about another person. Nor is it
