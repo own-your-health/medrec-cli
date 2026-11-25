@@ -367,9 +367,15 @@ struct Owner {
     status: Option<String>,
     /// A DocumentReference's, of the paper itself.
     doc_status: Option<String>,
+    /// Not later than the version filed, which is the current one.
+    older: bool,
 }
 
 impl Owner {
+    fn resource_key(&self) -> (&str, &str) {
+        (self.kind.as_str(), &self.id)
+    }
+
     fn word(&self, raw_path: &str, read: Option<String>) -> Word {
         Word {
             raw_path: raw_path.into(),
@@ -781,9 +787,6 @@ fn file_streamed(
     };
     for r in &resources {
         let Ok(v) = r.value() else { continue };
-        if let Some(o) = owner(&r.resource_type, &v) {
-            owners.push(o);
-        }
         let mut prov = base_prov.clone();
         prov.source_resource = source_resource(&v);
         let sub = raw_sub(r);
@@ -792,6 +795,10 @@ fn file_streamed(
             .filings
             .get(&format!("{source_dir}/{sub}.json"))
             .copied();
+        if let Some(mut o) = owner(&r.resource_type, &v) {
+            o.older = filing == Some(Filing::Older);
+            owners.push(o);
+        }
         if let Some(mut rec) = normalize::record(&v, prov) {
             for w in &mut rec.words {
                 w.version = Some(version::content_digest(r)[..16].into());
@@ -1369,11 +1376,19 @@ fn write_raw(
                 };
                 // A file no record was filed from (a Binary, a Practitioner)
                 // has no time in the index: unknown, so other content
-                // replaces it.
+                // replaces it. One that describes papers stays current over
+                // what is older than its own time.
                 let held_prov = filed.get(&rel).cloned().unwrap_or_else(|| {
                     let mut p = base.clone();
-                    p.source_resource = None;
                     p.fetched_at = None;
+                    p.source_resource = held
+                        .as_ref()
+                        .filter(|_| describes_papers(&r.resource_type))
+                        .and_then(|h| source_resource(&h.value().ok()?));
+                    let (its, new) = (p.current_at(), served.current_at());
+                    if !matches!((its, new), (Some(its), Some(new)) if its > new) {
+                        p.source_resource = None;
+                    }
                     p
                 });
                 Some(match &held {
@@ -2688,15 +2703,20 @@ struct Describes<'a> {
 }
 
 impl<'a> Describes<'a> {
-    fn new(owners: &'a [Owner], source_dir: &str) -> Self {
+    fn new(owners: impl Iterator<Item = &'a Owner> + Clone, source_dir: &str) -> Self {
         let mut out = Describes {
             by_file: HashMap::new(),
             by_resource: HashMap::new(),
         };
+        // A stream carries each once; if it repeats one, the last copy wins.
+        // One with no id is known by the Binary it names only.
+        for o in owners.clone().filter(|o| !o.id.is_empty()) {
+            out.by_resource.insert(o.resource_key(), o);
+        }
         for o in owners {
-            // One with no id is known by the Binary it names only.
-            if !o.id.is_empty() {
-                out.by_resource.insert((o.kind.as_str(), &o.id), o);
+            let last = out.by_resource.get(&o.resource_key());
+            if last.is_some_and(|last| !std::ptr::eq(*last, o)) {
+                continue;
             }
             for id in o.urls.iter().filter_map(|u| reference_id(u, "Binary")) {
                 let file = binary_file(source_dir, id);
@@ -2747,8 +2767,8 @@ pub(crate) struct Papers {
 /// What the stream says of the papers of its source, those whose Binary it
 /// does not carry included. A source says a paper is entered in error, by one
 /// of its Binaries, when everything it has that describes it there does: what
-/// earlier imports filed counts where the stream does not carry it. Counts
-/// those it says so of and did not.
+/// earlier imports filed counts where the stream does not carry it, or carries
+/// an older version of it. Counts those it says so of and did not.
 fn paper_words(
     folder: &Folder,
     index: &mut PersonIndex,
@@ -2757,24 +2777,30 @@ fn paper_words(
     source_dir: &str,
 ) -> Result<Papers, CliError> {
     let read = first_read(base);
-    let carried = Describes::new(owners, source_dir);
+    let carried = Describes::new(owners.iter().filter(|o| !o.older), source_dir);
+    let older = Describes::new(owners.iter().filter(|o| o.older), source_dir);
     let mut earlier: Option<FiledOwners> = None;
     let mut out = Papers::default();
     for d in &mut index.documents {
         let ours: Vec<Provenance> = papers_of(d, source_dir).cloned().collect();
         for p in ours {
-            let Some(mut first) = carried.first(&p) else {
-                continue;
+            let mut first = carried.first(&p);
+            let ask = match first {
+                Some(o) => o.in_error(),
+                None => older.first(&p).is_some(),
             };
-            if first.in_error() {
+            if ask {
                 let filed = match &mut earlier {
                     Some(filed) => filed,
                     none => none.insert(filed_owners(folder, source_dir, owners)?),
                 };
                 out.unread = filed.unread;
-                let also = Describes::new(&filed.owners, source_dir).first(&p);
-                first = first_owner([first].into_iter().chain(also)).unwrap_or(first);
+                let also = Describes::new(filed.owners.iter(), source_dir).first(&p);
+                first = first_owner(first.into_iter().chain(also));
             }
+            let Some(first) = first else {
+                continue;
+            };
             let path = p.raw_path.as_deref().unwrap_or_default();
             let word = first.word(path, Some(read.clone()));
             if newly_in_error(d, &word) {
@@ -2814,7 +2840,8 @@ struct FiledOwners {
 }
 
 /// What earlier imports of a source filed that describes papers, but for what
-/// the stream carries. A resource with no id is never the same as another.
+/// the stream carries the current version of. A resource with no id is never
+/// the same as another.
 fn filed_owners(
     folder: &Folder,
     source_dir: &str,
@@ -2824,11 +2851,10 @@ fn filed_owners(
     let mut out = owners_in(folder, source_dir, tmp.path())?;
     let here: HashSet<(&str, &str)> = carried
         .iter()
-        .filter(|o| !o.id.is_empty())
-        .map(|o| (o.kind.as_str(), o.id.as_str()))
+        .filter(|o| !o.id.is_empty() && !o.older)
+        .map(Owner::resource_key)
         .collect();
-    out.owners
-        .retain(|o| !here.contains(&(o.kind.as_str(), o.id.as_str())));
+    out.owners.retain(|o| !here.contains(&o.resource_key()));
     Ok(out)
 }
 
@@ -2889,13 +2915,13 @@ pub(crate) fn papers_again(
     let now = now_rfc3339();
     let mut changed: BTreeSet<String> = BTreeSet::new();
     let mut unread = 0;
-    let mut sources: Vec<(String, FiledOwners)> = Vec::new();
+    let mut sources: Vec<(String, Option<String>, FiledOwners)> = Vec::new();
     for (dir, mut of) in papers_sources(household, person, index) {
         if of.filed_at.is_empty() {
             of.filed_at = now.clone();
         }
         let filed = owners_in(folder, &dir, tmp)?;
-        let describes = Describes::new(&filed.owners, &dir);
+        let describes = Describes::new(filed.owners.iter(), &dir);
         let binaries = unknown_binaries(folder, index, &dir, &of)?;
         unread += filed.unread + binaries.unread;
         for (sha, mut p) in binaries.found {
@@ -2908,10 +2934,10 @@ pub(crate) fn papers_again(
             d.also_from.push(p);
             changed.insert(d.id.clone());
         }
-        sources.push((dir, filed));
+        sources.push((dir, of.fetched_at, filed));
     }
-    for (dir, filed) in sources {
-        let describes = Describes::new(&filed.owners, &dir);
+    for (dir, latest, filed) in sources {
+        let describes = Describes::new(filed.owners.iter(), &dir);
         for d in &mut index.documents {
             let ours: Vec<Provenance> = papers_of(d, &dir).cloned().collect();
             for p in ours {
@@ -2920,10 +2946,10 @@ pub(crate) fn papers_again(
                 };
                 let path = p.raw_path.as_deref().unwrap_or_default();
                 let had = d.words.iter().find(|w| w.raw_path == path);
-                // One found again was read when its source last was.
+                // One not kept was read when its source last was.
                 let read = match had {
                     Some(w) => w.read.clone(),
-                    None => p.fetched_at.clone(),
+                    None => latest.clone(),
                 };
                 let at = read.as_ref().filter(|_| had.is_none()).unwrap_or(&now);
                 let word = o.word(path, read.clone());

@@ -385,12 +385,12 @@ there.
   same bytes is in no `also_from`. The next import from that source adds it,
   and files nothing again. So does `medrec reindex`, and the import that first
   reads a source saying a paper is entered in error, for every source at once:
-  a raw Binary that no paper is of has the bytes. Its times are those of its
-  source's latest import, and not known (no `fetched_at`, no `read`) where that
-  is none or imports of several patients went into one folder. One whose raw
-  Binary is gone cannot be told, and until its next import the other's word
-  alone ends the paper. Nor can a file of the household's taken in before
-  0.9.9: taking it in again notes it.
+  a raw Binary that no paper is of has the bytes. Its times, and when a word
+  that was not kept was read, are those of its source's latest import, and not
+  known (no `fetched_at`, no `read`) where that is none or imports of several
+  patients went into one folder. One whose raw Binary is gone cannot be told,
+  and until its next import the other's word alone ends the paper. Nor can a
+  file of the household's taken in before 0.9.9: taking it in again notes it.
 - A raw file that does not read tells nothing, and an import and `reindex` count
   it (`papers_unread`). While one of a resource that describes papers does not,
   no paper of its source's is newly entered in error.
@@ -892,7 +892,8 @@ and a field or count that is missing as unknown, not as zero or false.
           "records_added": 2, "records_updated": 0, "records_unchanged": 41,
           "records_older": 0, "resources_written": 2, "resources_unchanged": 41,
           "documents_added": 0, "documents_duplicate": 0, "documents_unchanged": 3,
-          "documents_same_statement": 0
+          "documents_same_statement": 0,
+          "papers_unread": 0
         },
         "withheld_types": []
       }
@@ -943,7 +944,7 @@ the month (UTC) the attempt started.
 | `exit_code` | The import's exit code (Import, below); `null` for a skip, and for a `needs_person` found before the import ran. |
 | `error` | `null`, or `{"code", "message", "remedy"[, "provider_message"]}` from the failing command's `--json` error (the family's error shape). `message` is at most 300 characters. When the provider's export answered that its sign-in ended (exit 3), `code` is `needs_person`, `message` and `remedy` are medrec's own (the remedy runs `medrec refresh sign-in <source>`), and the provider's own words, which can name the provider's own sign-in command, are in `provider_message` (0.7.0 and later; before 0.9.9 after `<cli> needs a sign-in`, which was there where the provider gave no text). `provider_message` is present only then, always (an empty string when the provider gave no text), and is at most 300 characters too. Show `remedy` as the one thing to do, and `provider_message` at most as detail. A profile name in `message`, `remedy` or `provider_message` is replaced, a provider profile's by `<provider profile>` and a medrec profile's by `<profile>`, so the folder holds none. medrec's own codes are `timeout` (a call outlived its limit), `interrupted` (the pass running it stopped before it finished) and `needs_person`. |
 | `import` | The `ImportRun` id in the person's `index.json`, when `ok`. |
-| `counts` | When `ok`, the import report's counts: `records_added`, `records_updated`, `records_unchanged`, `records_older`, `resources_written`, `resources_unchanged`, `documents_added`, `documents_duplicate`, `documents_unchanged`, `documents_same_statement`. A count the import report gains later is added here too. |
+| `counts` | When `ok`, the import report's counts: `records_added`, `records_updated`, `records_unchanged`, `records_older`, `resources_written`, `resources_unchanged`, `documents_added`, `documents_duplicate`, `documents_unchanged`, `documents_same_statement`, `papers_unread` (0.9.9 and later). A count the import report gains later is added here too. |
 
 A scheduled pass records nothing for a source that is not due. A skip is
 recorded only when a request or a terminal command asked for that source.
@@ -2375,13 +2376,15 @@ profile. Its standard output is NDJSON:
    | other | no | older | keeps it beside the current one as `<id>~<md5>.json`; its record stays as filed, and the import counts it `records_older` |
 
    So a site read again that stamps each resource with its read time adds no
-   file, and a version dated between two reads is older than the second. A
-   raw file no record was filed from (a Binary, a Practitioner) has no time
-   in the index, so other content replaces it; a Binary keeps the rendering
-   rule above. A record is normalized again from each version filed, so a
-   later medrec's reading applies on the next import. `lastUpdated`
-   measures when content was current, not how complete it is. The raw
-   layer keeps every version either way.
+   file, and a version dated between two reads is older than the second. A raw
+   file no record was filed from (a Binary, a Practitioner) has no time in the
+   index, so other content replaces it; a Binary keeps the rendering rule
+   above, and a DocumentReference or a Media stays current over a version
+   older than its own `meta.lastUpdated` (0.9.9 and later). A record is
+   normalized again from each version filed, so a later medrec's reading
+   applies on the next import. `lastUpdated` measures when content was
+   current, not how complete it is. The raw layer keeps every version either
+   way.
 3. A trailer: `{"schema": "records-stream-end/v1", "complete", "counts":
    {<type>: n}, "skipped": [{resource_type, id, search, reason, code}],
    "finished_at", "error"}`.
@@ -2423,6 +2426,7 @@ characters and the invisible format characters that reorder or hide text
 | `documents_duplicate` | Binaries with the bytes of a document or rendering already filed |
 | `documents_unchanged` | renderings of a document already filed |
 | `documents_same_statement` | bills filed that are the same statement as a bill filed before (0.2.9 and later) |
+| `papers_unread` | raw files that describe papers, or are the bytes of one, and do not read (0.9.9 and later): the source's, where the stream says that something describing a paper is entered in error or carries an older version of it, and those of the person's other sources, where a paper is newly entered in error; otherwise 0 |
 
 A field added to `import/v1` is additive: a script reads a missing one as
 absent, never as an error.

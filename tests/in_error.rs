@@ -593,6 +593,94 @@ fn a_source_found_again_among_several_patients_has_no_time() {
     assert_eq!(p.words[1].read, None);
 }
 
+/// A word an earlier medrec did not keep was read when its source last was,
+/// whenever the paper was filed.
+#[test]
+fn a_word_not_kept_is_dated_by_its_sources_latest_import() {
+    let e = Env::new("dated");
+    let pulled = |stream: &str, at: &str| {
+        let (head, rest) = stream.split_once('\n').unwrap();
+        let mut head: Value = serde_json::from_str(head).unwrap();
+        head["pulled_at"] = at.into();
+        format!("{head}\n{rest}")
+    };
+    let (filed, said) = ("2026-01-10T09:00:00Z", "2026-06-10T09:00:00Z");
+    e.import(&pulled(&stream("one", |_, _| true), filed));
+    let error = saying("one", "doc-0001", "entered-in-error", 2);
+    e.import(&pulled(&error, said));
+    let kept = e.paper();
+    assert_eq!(kept.provenance.fetched_at.as_deref(), Some(filed));
+    assert_eq!(kept.errors[0].from, said);
+    e.edit(|v| {
+        for d in v["documents"].as_array_mut().unwrap() {
+            d.as_object_mut().unwrap().remove("errors");
+            d.as_object_mut().unwrap().remove("words");
+        }
+    });
+    assert_eq!(e.reindex(), (0, 1));
+    let p = e.paper();
+    assert_eq!(p.words[0].read.as_deref(), Some(said));
+    assert_eq!((p.words, p.errors), (kept.words, kept.errors));
+}
+
+/// What an older version of a resource says of a paper is not said: the
+/// version filed speaks, in an import as in `reindex`.
+#[test]
+fn an_older_version_of_what_describes_a_paper_says_nothing() {
+    for by in ["doc-0001", "rep-0001"] {
+        let with = |statuses: (&str, &str), version: u32, binary: bool| {
+            let fine = if by == "doc-0001" { "current" } else { "final" };
+            let is = if version == 1 { statuses.0 } else { statuses.1 };
+            let status = if is.is_empty() { fine } else { is };
+            stream("one", |id, v| {
+                if id == by {
+                    say(v, status, version);
+                    if by == "rep-0001" {
+                        v["presentedForm"] =
+                            json!([{"contentType": "application/pdf", "url": "Binary/bin-0001"}]);
+                    }
+                }
+                let other = id == "doc-0001" && by != id;
+                !other && (binary || id != "bin-0001")
+            })
+        };
+        let paper = |e: &Env| -> Document {
+            let path = e.raw("one", "Binary/bin-0001.json");
+            let of = |d: &Document| {
+                let raw = d.provenance.raw_path.as_deref().unwrap();
+                path.to_string_lossy().ends_with(raw)
+            };
+            e.index().documents.into_iter().find(of).unwrap()
+        };
+        let error = "entered-in-error";
+        // The later one says so, and the older one after it does not.
+        let e = Env::new(&format!("older-error-{by}"));
+        e.import(&with(("", error), 1, true));
+        for version in [2, 1] {
+            e.import(&with(("", error), version, true));
+            let p = paper(&e);
+            assert!(document_in_error(&p), "{by} {version}");
+            assert_eq!(ended(&p.errors), [false]);
+            assert_eq!(e.reindex(), (0, 0));
+        }
+        // The older one says so, and the later one before it does not.
+        let e = Env::new(&format!("older-fine-{by}"));
+        e.import(&with((error, ""), 2, true));
+        e.import(&with((error, ""), 1, true));
+        let p = paper(&e);
+        assert!(!document_in_error(&p) && p.errors.is_empty(), "{by}");
+        assert_eq!(e.reindex(), (0, 0));
+        // A paper first filed beside the older one is as the later one says.
+        let e = Env::new(&format!("older-first-{by}"));
+        e.import(&with(("", error), 2, false));
+        e.import(&with(("", error), 1, true));
+        let p = paper(&e);
+        assert!(document_in_error(&p), "{by}");
+        assert_eq!(ended(&p.errors), [false]);
+        assert_eq!(e.reindex(), (0, 0));
+    }
+}
+
 /// While a resource that may describe a paper does not read, its source says
 /// of none that it is entered in error.
 #[test]

@@ -2966,7 +2966,6 @@ fn import_cmd(cli: &Cli, a: &ImportArgs, store: &ConfigStore) -> Result<(), CliE
     Ok(())
 }
 
-/// One import's lines for a person reading the terminal.
 /// What a run says of the papers' raw files that do not read.
 fn papers_unread(n: usize) -> Option<String> {
     (n > 0).then(|| {
@@ -2977,6 +2976,7 @@ fn papers_unread(n: usize) -> Option<String> {
     })
 }
 
+/// One import's lines for a person reading the terminal.
 fn print_import(r: &import::Report) {
     let organization = medrec::printable(&r.organization);
     {

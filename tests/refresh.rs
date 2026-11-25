@@ -327,6 +327,24 @@ fn refresh_imports_on_request_and_never_waits_on_a_person() {
     let st = e.json_at("_status/status.json");
     assert_eq!(st["schema"], "medrec-status/v1");
     assert_eq!(st["format"], 1);
+    let counts = st["sources"][0]["last_success"]["counts"]
+        .as_object()
+        .unwrap();
+    let counted: Vec<&str> = counts.keys().map(String::as_str).collect();
+    let in_contract = [
+        "documents_added",
+        "documents_duplicate",
+        "documents_same_statement",
+        "documents_unchanged",
+        "papers_unread",
+        "records_added",
+        "records_older",
+        "records_unchanged",
+        "records_updated",
+        "resources_unchanged",
+        "resources_written",
+    ];
+    assert_eq!(counted, in_contract);
     assert!(st["refresher"]["machine"]
         .as_str()
         .unwrap()
