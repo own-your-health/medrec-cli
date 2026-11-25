@@ -13,7 +13,7 @@ use std::cell::OnceCell;
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use pk_cli_core::CliError;
@@ -751,7 +751,17 @@ pub(crate) fn preview(
         Pass::Made(made) => Ok(Preview {
             h: made.h,
             files: made.files,
-            last: made.old.filter(|o| o.schema == SCHEMA),
+            last: match (made.old_text, made.old) {
+                (None, _) => None,
+                (_, Some(o)) if o.schema == SCHEMA => Some(o),
+                // Those had none of the views this counts by.
+                (_, Some(o)) if o.schema == SCHEMA_V1 => None,
+                _ => {
+                    return Err(CliError::Other(format!(
+                        "{INDEX} is there and does not read as this medrec's, so there is nothing to count against: `medrec views write` makes it again"
+                    )))
+                }
+            },
         }),
         // Of nobody.
         Pass::Stands(_) => Ok(Preview {
@@ -765,7 +775,7 @@ pub(crate) fn preview(
 impl Preview {
     /// A person's views, as a pass would make them.
     pub fn after(&self, p: &Person) -> Result<Views, CliError> {
-        Views::read(|name| {
+        Views::read(&format!("{DIR}/{}", p.id), |name| {
             let rel = format!("{DIR}/{}/{name}", p.id);
             let bytes = self.files.get(&rel);
             let read = bytes.and_then(|b| serde_json::from_slice(b).ok());
@@ -785,7 +795,7 @@ impl Preview {
         let md5 = |rel: &str| f.store.md5(rel);
         let current = md5(folder::HOUSEHOLD)?.as_ref() == Some(&last.household)
             && stands(v, &self.h, p, md5)?;
-        let views = Views::read(|name| {
+        let views = Views::read(&format!("{DIR}/{}", p.id), |name| {
             if !v.files.contains_key(name) {
                 return Ok(None);
             }
@@ -1592,8 +1602,9 @@ pub(crate) fn person(
 
 /// Holds open while a command writes the folder several times.
 static HOLDS: AtomicUsize = AtomicUsize::new(0);
-/// A folder was written while held, so its views are owed.
-static OWED: AtomicBool = AtomicBool::new(false);
+/// The views owed by what closed while held: none (0), those of what changed
+/// (1), or every person's (2).
+static OWED: AtomicU8 = AtomicU8::new(0);
 
 /// The views of every folder written while this lives are brought up to
 /// date once, when it drops, rather than as each one closes: for a command
@@ -1614,27 +1625,28 @@ pub fn hold(location: &Location, budget: Duration) -> Hold {
 
 impl Drop for Hold {
     fn drop(&mut self) {
-        if HOLDS.fetch_sub(1, Ordering::SeqCst) != 1 || !OWED.swap(false, Ordering::SeqCst) {
+        if HOLDS.fetch_sub(1, Ordering::SeqCst) != 1 {
             return;
         }
-        if std::thread::panicking() {
+        let owed = OWED.swap(0, Ordering::SeqCst);
+        if owed == 0 || std::thread::panicking() {
             return;
         }
         match Folder::open_at(&self.location, Access::Write, self.budget) {
-            Ok(f) => report(sync(&f, false)),
+            Ok(f) => report(sync(&f, owed > 1)),
             Err(e) => report(Err(e)),
         }
     }
 }
 
-/// A folder this command wrote is closing, still under its lock: its views
-/// now, or when the [`Hold`] drops.
-pub(crate) fn written(f: &Folder) {
+/// A folder this command wrote, or asked every person's views of (`all`), is
+/// closing, still under its lock: its views now, or when the [`Hold`] drops.
+pub(crate) fn written(f: &Folder, all: bool) {
     if HOLDS.load(Ordering::SeqCst) > 0 {
-        OWED.store(true, Ordering::SeqCst);
+        OWED.fetch_max(1 + u8::from(all), Ordering::SeqCst);
         return;
     }
-    report(sync(f, false));
+    report(sync(f, all));
 }
 
 /// A failure leaves the views stale, which readers see from the MD5s; the

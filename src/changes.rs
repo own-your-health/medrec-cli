@@ -36,17 +36,26 @@ pub(crate) struct Views {
 }
 
 impl Views {
-    /// By what `read` says each of the person's views is.
-    pub fn read(read: impl Fn(&str) -> Result<Option<Value>, CliError>) -> Result<Views, CliError> {
+    /// By what `read` says each of the person's views, in the directory `at`,
+    /// is.
+    pub fn read(
+        at: &str,
+        read: impl Fn(&str) -> Result<Option<Value>, CliError>,
+    ) -> Result<Views, CliError> {
         let view = |name: &str| Ok::<Value, CliError>(read(name)?.unwrap_or_default());
         let standing = read(standing::FILE)?.map(serde_json::from_value);
+        // Not what the parser says: that can quote the view.
+        let standing = standing.transpose().map_err(|_| {
+            CliError::Other(format!(
+                "{at}/{} has another shape than this medrec reads: run this again after `medrec views write --all`",
+                standing::FILE
+            ))
+        })?;
         Ok(Views {
             events: view("events.json")?,
             bills: view("bills.json")?,
             private: view("private.json")?,
-            standing: standing
-                .transpose()
-                .map_err(|e| CliError::Other(format!("{} is not readable: {e}", standing::FILE)))?,
+            standing,
         })
     }
 }

@@ -559,8 +559,7 @@ under the source, filed by an earlier import). A pharmacy `claim`
 
 `medrec reindex --json` counts what it did, for each person and in all
 (`--dry-run`, 0.9.9 and later, counts what it would do, writes nothing and adds
-`dry_run: true` and what is in "A dry run", below). From 0.9.9 a run brings the
-views up to date even when no record changes:
+`dry_run: true` and what is in "A dry run", below):
 `claims` (how many there are), `reshaped`, `unchanged` and `without_raw`
 (claims with no raw file), `statements` (bills and receipts whose statement
 gained fields), `providers_updated` (0.9.6 and later: records whose
@@ -571,7 +570,8 @@ changed), `given_updated` (0.9.9 and later: records whose `given` gained
 something), `results_split` (0.9.9 and later: results about somebody else that
 were filed as the person's own, or in one record with it), `papers_updated` (0.9.9 and later: papers whose `also_from`,
 `words`, `errors` or `given` changed) and `papers_unread` (0.9.9 and later: raw files of
-papers that do not read).
+papers that do not read). From 0.9.9 a run makes every person's views again, even
+when no record changes.
 
 **A dry run** (0.9.9 and later) makes the records and the views in memory as a run
 would, writes nothing, and counts what would change. It has no name, date, amount
@@ -584,8 +584,8 @@ or id of an item, and names no kind of questionnaire that there is one of.
 - Each person's `views` is against the views the last pass made. `against` is that
   medrec's version, null where the folder has none (then every private item, event
   and bill is counted as added), and `stale` is whether those were made from
-  other files than the folder has. A dry run that cannot read a view `views.json`
-  names ends with an error and counts nothing.
+  other files than the folder has. A dry run that cannot read `views.json`, or a
+  view it names, ends with an error and counts nothing.
 
   | Field | Counts |
   |---|---|
@@ -1639,7 +1639,9 @@ removes and no reader reads. It never writes over a later
   `index.json` or a `text.json` brings the views up to date before it
   releases the folder lock. A refresh pass, and an import of several
   members, does it once, after the last filing. `medrec views write` does
-  it on demand, and `--all` makes every person's again.
+  it on demand, and `--all` makes every person's again. `medrec reindex` (0.9.9
+  and later; not with `--dry-run`) makes every person's again too, whether or not
+  it writes any of them.
 - **Only what changed.** A person keeps their views when their `index.json`,
   `text.json`, `overrides.json` and `marks.json` and their linked people's
   `index.json` and `text.json` have the MD5s `views.json` recorded, under the same `household.json` and

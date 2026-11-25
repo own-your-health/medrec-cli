@@ -231,7 +231,7 @@ pub fn claims(
         out.fresh = Some(true);
     } else {
         // What another medrec's rules made of the same files is made again too.
-        folder.views_too();
+        folder.every_view();
     }
     Ok(out)
 }

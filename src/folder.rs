@@ -58,10 +58,11 @@ pub enum Access {
 pub struct Folder {
     pub store: Store,
     pub folder_id: String,
-    /// `household.json`, an `index.json` or a `text.json` was written, or a
-    /// command asked for it ([`Folder::views_too`]), so the views are brought
-    /// up to date as this closes.
+    /// `household.json`, an `index.json` or a `text.json` was written, so the
+    /// views are brought up to date as this closes.
     written: std::cell::Cell<bool>,
+    /// A command asked for every person's views ([`Folder::every_view`]).
+    every_view: std::cell::Cell<bool>,
     /// What one that only reads has read of each person, so that all of an
     /// answer is of the same files: what is private in an item is told by
     /// places in it ([`crate::parts`]).
@@ -78,8 +79,10 @@ struct Held {
 impl Drop for Folder {
     fn drop(&mut self) {
         // Still under the lock: the lock is dropped after this.
-        if self.written.get() && self._lock.is_some() && !std::thread::panicking() {
-            crate::viewfiles::written(self);
+        let all = self.every_view.get();
+        let owed = self.written.get() || all;
+        if owed && self._lock.is_some() && !std::thread::panicking() {
+            crate::viewfiles::written(self, all);
         }
     }
 }
@@ -145,6 +148,7 @@ impl Folder {
             store,
             folder_id: h.folder_id,
             written: std::cell::Cell::new(false),
+            every_view: std::cell::Cell::new(false),
             held: (access == Access::Read).then(Held::default),
             _lock: lock,
         })
@@ -184,9 +188,9 @@ impl Folder {
         self.write_json(HOUSEHOLD, h)
     }
 
-    /// Bring the views up to date as this closes, whatever it writes.
-    pub fn views_too(&self) {
-        self.written.set(true);
+    /// Make every person's views again as this closes, whatever it writes.
+    pub fn every_view(&self) {
+        self.every_view.set(true);
     }
 
     /// A person's index, without what is about somebody else

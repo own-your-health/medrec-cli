@@ -1315,7 +1315,11 @@ fn run(cli: &Cli) -> Result<(), CliError> {
                         (Some(m), true) => format!("against medrec {m}'s, of older files"),
                     };
                     println!("{}: in the views ({against})", p.person);
-                    for line in views.lines() {
+                    let lines = views.lines();
+                    if lines.is_empty() {
+                        println!("  nothing counted");
+                    }
+                    for line in lines {
                         println!("  {line}");
                     }
                 }

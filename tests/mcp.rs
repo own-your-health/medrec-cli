@@ -3886,10 +3886,15 @@ fn folder_files(dir: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
 
 /// One of a person's views as an earlier medrec made it: changed, or not there.
 fn view_before(e: &Env, pid: &str, name: &str, change: impl FnOnce(&mut Value) -> bool) {
+    view_by("0.9.5", e, pid, name, change);
+}
+
+/// The same of any medrec.
+fn view_by(medrec: &str, e: &Env, pid: &str, name: &str, change: impl FnOnce(&mut Value) -> bool) {
     let views = e.records().join("views");
     let read = |p: &Path| -> Value { serde_json::from_slice(&std::fs::read(p).unwrap()).unwrap() };
     let mut all = read(&views.join("views.json"));
-    all["medrec"] = "0.9.5".into();
+    all["medrec"] = medrec.into();
     let (stem, ext) = name.split_once('.').unwrap();
     let stored = |md5: &str| views.join(pid).join(format!("{stem}.{}.{ext}", &md5[..12]));
     let files = all["people"][pid]["files"].as_object_mut().unwrap();
@@ -4003,6 +4008,20 @@ fn a_dry_run_counts_what_would_be_private() {
     assert_eq!(v["against"], env!("CARGO_PKG_VERSION"), "{v}");
     let private = v["private"].as_object().unwrap();
     assert!(private.values().all(nothing), "{v}");
+    let out = e.run(&["reindex", "--dry-run"]);
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.contains("\n  nothing counted\n"), "{text}");
+    // A build of the same version whose rules are others', and the same files:
+    // what is counted is made.
+    view_by(env!("CARGO_PKG_VERSION"), &e, &alex, "private.json", |v| {
+        v["records"]["r_sunlightaaaaaaaaaaaa"] = json!({"area": "household", "from": "household"});
+        true
+    });
+    let v = changes_of(&e, &alex);
+    assert_eq!(v["private"]["opened"], json!({"result": 1}), "{v}");
+    e.ok(&["reindex"]);
+    let v = changes_of(&e, &alex);
+    assert_eq!(v["private"]["opened"], json!({}), "{v}");
     // A file the views were not made from.
     e.ok(&["private", "mark", "r_sunlightaaaaaaaaaaaa"]);
     view_before(&e, &alex, "private.json", |_| true);
@@ -4044,10 +4063,25 @@ fn a_dry_run_counts_what_would_be_private() {
     let out = e.run(&["reindex", "--dry-run"]);
     let said = String::from_utf8(out.stderr).unwrap();
     assert!(
-        !out.status.success() && said.contains("standing.json is not readable"),
+        !out.status.success()
+            && said.contains(&format!("views/{alex}/standing.json has another shape"))
+            && said.contains("views write --all"),
         "{said}"
     );
     assert!(out.stdout.is_empty(), "nothing is counted");
+    // Nor is an index of the views that does not read, or is no medrec's.
+    let kept = std::fs::read(views.join("views.json")).unwrap();
+    for torn in [&b"{"[..], br#"{"schema": "another/v1"}"#] {
+        std::fs::write(views.join("views.json"), torn).unwrap();
+        let out = e.run(&["reindex", "--dry-run"]);
+        let said = String::from_utf8(out.stderr).unwrap();
+        assert!(
+            !out.status.success() && said.contains("views/views.json is there"),
+            "{said}"
+        );
+        assert!(out.stdout.is_empty(), "nothing is counted");
+    }
+    std::fs::write(views.join("views.json"), kept).unwrap();
     // A folder with no views: all there is would be added.
     std::fs::remove_dir_all(e.records().join("views")).unwrap();
     let v = changes_of(&e, &alex);
