@@ -133,8 +133,8 @@ fn links(r: &Record) -> Value {
         return json!([r.fields.get(panels::MEMBERS), r.listed_by]);
     }
     let lines = r.fields.get("items").and_then(Value::as_array);
-    let lines = lines.into_iter().flatten().filter_map(|l| l.get("records"));
-    let lines: Vec<&Value> = lines.collect();
+    let lines = lines.into_iter().flatten().map(|l| l.get("records"));
+    let lines: Vec<Option<&Value>> = lines.collect();
     json!([r.fields.get("visit"), r.fields.get("results"), lines])
 }
 

@@ -369,8 +369,9 @@ none is left.
 A result with no value whose `lists` is not empty is a heading, whether what it
 lists is filed or not: no latest result and no test (`latest_results`,
 `kind: "tests"`, `tests.json`), and where a list has it its `detail` is `panel`.
-With an `interpretation` that is `panel (H)` in the lists of the command line and in
-`timeline-<n>.json`, and `panel` beside the `flag` in a tool's answer. `heading:
+With an `interpretation` that is `panel (H)` in the lists of the command line, in
+`timeline-<n>.json` and in a tool's `timeline` answer, and `panel` beside the `flag`
+in a tool's other answers. `heading:
 true` on it in a view's records says so. `results` of a report stays the number of
 results it refers to, filed or not.
 

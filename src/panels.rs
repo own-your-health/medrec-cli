@@ -181,7 +181,8 @@ pub fn none_but(lists: &[List], in_error: &BTreeSet<&str>, so: &dyn Fn(&str) -> 
         let is = |l: &&&List| of(l).iter().all(|so| *so);
         let each = own.iter().all(|l| {
             let mut its = own.iter().filter(|x| x.path == l.path);
-            its.clone().any(|x| is(&x)) || !its.any(|x| x.now)
+            // One before that names nothing says nothing.
+            its.clone().any(|x| is(&x) && (x.now || !of(x).is_empty())) || !its.any(|x| x.now)
         });
         each && own.iter().any(|l| is(&l) && !of(l).is_empty())
     };
@@ -507,6 +508,27 @@ mod tests {
                     list("a", &["o1"], true),
                     list("a", &["t1"], false),
                     list("b", &["o2"], true),
+                ],
+                false,
+            ),
+            // One all in error names nothing of anybody's.
+            (
+                vec![list("a", &["t1"], true), list("b", &["e"], true)],
+                true,
+            ),
+            (
+                vec![
+                    list("a", &["t1"], true),
+                    list("b", &["o1"], true),
+                    list("b", &["e"], false),
+                ],
+                false,
+            ),
+            (
+                vec![
+                    list("a", &["t1"], true),
+                    list("b", &["o1"], true),
+                    list("b", &[], false),
                 ],
                 false,
             ),
