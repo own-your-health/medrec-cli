@@ -607,7 +607,7 @@ struct PrivateItems {
     /// What is entered in error, which no list shows.
     errors: BTreeSet<String>,
     /// The bills entered in error the household marked a payment on.
-paid_errors: BTreeSet<String>,
+    paid_errors: BTreeSet<String>,
     /// Whether the list is of bills.
     bills: bool,
     /// The people these are the items of.
