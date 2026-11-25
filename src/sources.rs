@@ -91,11 +91,15 @@ impl<'a> Sources<'a> {
         named(&self.can_be(pv)).filter(|n| !crate::plain::is_connection(n))
     }
 
-    /// The place of what came from all of these: the only one they give.
+    /// The place of what came from all of these: the one each gives. One
+    /// that gives none is another place than the rest.
     pub fn place_of<'p>(&self, p: impl IntoIterator<Item = &'p Provenance>) -> Option<&'a str> {
-        let mut places = p.into_iter().filter_map(|pv| self.place(pv));
-        let first = places.next()?;
-        places.all(|n| n == first).then_some(first)
+        let mut places = p
+            .into_iter()
+            .filter(|pv| pv.source.cli.is_some())
+            .map(|pv| self.place(pv));
+        let first = places.next()??;
+        places.all(|n| n == Some(first)).then_some(first)
     }
 
     /// The name it came through: its source's, else its CLI. Nothing else
@@ -222,6 +226,18 @@ mod tests {
         // One record from both has no place.
         assert_eq!(s.place_of([&family, &foot]), None);
         assert_eq!(s.place_of([&foot]), s.place(&foot));
+        assert_eq!(s.place_of([&foot, &foot]), s.place(&foot));
+        // Nor has one from a practice and from the connection itself, or from
+        // a source not known, whichever comes first.
+        let unknown = pv("2026-01-01T10:00:30Z", None);
+        let mut h = household();
+        h.sources[0].organization_name = Some("athenahealth (all practices)".into());
+        let named = Sources::of(&h.sources, &idx);
+        for (s, other) in [(&named, &family), (&s, &unknown)] {
+            assert_eq!(s.place(other), None);
+            assert_eq!(s.place_of([&foot, other]), None);
+            assert_eq!(s.place_of([other, &foot]), None);
+        }
         // Read again later, by whichever run: the one that filed it says.
         let again = pv("2026-02-03T10:00:30Z", Some("2026-02-04T10:00:01Z"));
         assert_eq!(s.place(&again), Some("Example Family Practice"));
