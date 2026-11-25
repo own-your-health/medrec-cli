@@ -2428,6 +2428,35 @@ fn a_request_marks_nothing_not_private() {
     assert!(a.is_private(varenicline));
 }
 
+/// While the person's provider labels do not read, what a request would open
+/// is not known: it is not granted, and not said to be refused.
+#[test]
+fn a_request_that_cannot_be_judged_fails() {
+    let e = Env::new("private-labels-lost");
+    let a = Asking::new(&e);
+    let migraine = "r_migraineaaaaaaaaaaaa";
+    let event = a.event_of(QUIT);
+    let state = a.file.with_file_name("provider-state.json");
+    std::fs::write(&state, "{").unwrap();
+    let before = a.decided();
+    for (key, body) in [
+        ("private", json!({"item": migraine, "private": false})),
+        ("private", json!({"item": event, "private": false})),
+        ("event", json!({"apart": [QUIT, LEVEL]})),
+    ] {
+        let h = a.ask(key, body.clone());
+        assert_eq!(h["outcome"], "failed", "{body}: {h}");
+        assert!(h.get("reason").is_none(), "{body}: {h}");
+        assert_eq!(a.decided(), before, "{body}");
+    }
+    // A mark that makes one private is judged by nothing.
+    a.granted("private", json!({"item": migraine, "private": true}));
+    a.granted("private", json!({"item": migraine, "private": null}));
+    // Nor is one of what the household opened at the Mac.
+    e.ok(&["private", "unmark", migraine]);
+    a.granted("private", json!({"item": migraine, "private": false}));
+}
+
 /// A result only its visit's event makes private is not taken out of it, not
 /// even when the household marked it private first; at the Mac it is.
 #[test]

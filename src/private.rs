@@ -683,11 +683,7 @@ pub fn opens(
     let texts = folder.text(p).map_err(failed(RECORDS))?;
     let overrides = folder.overrides(p).map_err(failed(READ_DECISIONS))?;
     let marks = folder.marks(p).map_err(failed(READ))?;
-    let state = crate::viewfiles::provider_state(folder, p).map_err(failed(LABELS))?;
-    if state.lost() {
-        let lost = CliError::Other("the person's provider labels do not read".into());
-        return Err(failed(LABELS)(lost));
-    }
+    let state = known_labels(folder, p)?;
     let ruled = |overrides: &crate::events::Overrides, marks: &Marks| -> Result<Ruled, Failed> {
         let built =
             crate::events::both_by(folder, h, p, Some(overrides)).map_err(failed(RECORDS))?;
@@ -908,7 +904,7 @@ fn private_without(
     let idx = folder.index(p).map_err(failed(RECORDS))?;
     let texts = folder.text(p).map_err(failed(RECORDS))?;
     let overrides = folder.overrides(p).map_err(failed(READ_DECISIONS))?;
-    let state = crate::viewfiles::provider_state(folder, p).map_err(failed(LABELS))?;
+    let state = known_labels(folder, p)?;
     let built = crate::events::both_by(folder, h, p, Some(&overrides)).map_err(failed(RECORDS))?;
     let mut marks = marks.clone();
     let mut i = 0..;
@@ -916,8 +912,20 @@ fn private_without(
         .private
         .retain(|_| i.next().is_none_or(|i| !without.contains(&i)));
     let v = judged(p, &idx, &texts, &built, &marks, &state);
-    // What cannot be judged is held.
-    Ok(state.lost() || Private::of(&v).items.contains_key(item))
+    Ok(Private::of(&v).items.contains_key(item))
+}
+
+/// What the person's provider labels make private, where that is known.
+fn known_labels(
+    folder: &crate::folder::Folder,
+    p: &Person,
+) -> Result<crate::labels::State, Failed> {
+    let state = crate::viewfiles::provider_state(folder, p).map_err(failed(LABELS))?;
+    if state.lost() {
+        let lost = CliError::Other("the person's provider labels do not read".into());
+        return Err(failed(LABELS)(lost));
+    }
+    Ok(state)
 }
 
 /// Words that name no item on their own: forms, units, kinds of record and

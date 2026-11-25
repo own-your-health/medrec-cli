@@ -1126,7 +1126,7 @@ does not read past the limit) and `handled`. A `done/` file is at most 8 KiB.
 
 | Field | Meaning |
 |---|---|
-| `outcome` | From the sources' outcomes. `ok`: at least one `ok`, none `failed` or `needs_person`. `partial`: at least one `ok`, and at least one `failed` or `needs_person`. `needs_person`: none `ok` or `failed`, at least one `needs_person`. `failed`: none `ok`, at least one `failed`. `skipped`: every source skipped. `invalid`: refused by rule 1, with `sources` empty and `message` saying why. |
+| `outcome` | From the sources' outcomes. `ok`: at least one `ok`, none `failed` or `needs_person`. `partial`: at least one `ok`, and at least one `failed` or `needs_person`. `needs_person`: none `ok` or `failed`, at least one `needs_person`. `failed`: none `ok`, at least one `failed`. `skipped`: every source skipped. `invalid`: refused by rule 1, or because it would open something the rules hold private (`reason`), with `sources` empty and `message` saying why. |
 | `sources[]` | Each source the request covered: its outcome (an attempt outcome), the attempt that served it (`null` for a skip found without one), and `next_allowed_at`, the earliest time a request may import it again (rule 3). |
 | `message` | One line for a person, with no record content. |
 | `reason` | `kept_private` when the request was refused because it would open something the rules hold private (Private requests, below; 0.9.9 and later). Absent otherwise. A reader goes by this, never by `message`. |
@@ -1246,7 +1246,9 @@ The app's "Keep private" and its undo are a request with `private` in place of
     `message` is "something in it is kept off shared screens, and that can be
     changed at the Mac": everyone's outcomes show together, so it does not say
     which item. While the person's provider labels are not known
-    (`labels_unreadable`), one that has to be judged cannot be read, and fails.
+    (`labels_unreadable`), one that has to be judged cannot be: its outcome is
+    `failed`, and a provider request is tried again first, as any it could not
+    record.
   - Marks, decisions and corrections recorded before stay as they are.
 
 ### Provider requests (0.9.7 and later)
