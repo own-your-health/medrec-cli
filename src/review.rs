@@ -286,6 +286,7 @@ pub fn file(folder: &Folder, req: &FileRequest) -> Result<Filed, CliError> {
         also_from: Vec::new(),
         words: Vec::new(),
         errors: Vec::new(),
+        given: Vec::new(),
     };
     let mut texts = folder.text(&person)?;
     crate::bill::annotate(&mut doc, &item.text, &mut index, &texts);

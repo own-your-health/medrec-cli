@@ -3,7 +3,7 @@
 
 use medrec::corrections::Correction;
 use medrec::events::{self, Built, Decision, Input, Linked, Overrides};
-use medrec::labels::{Last, Said, State};
+use medrec::labels::{self, Last, State};
 use medrec::model::{Household, Person, PersonIndex, PersonText};
 use medrec::private;
 use serde_json::{json, Value};
@@ -818,18 +818,21 @@ fn an_item_its_sources_differ_on_stays_and_says_so() {
 
 /// The items of the child that the household's word for a name makes private.
 fn child_private(w: &World, name: &str) -> Vec<String> {
+    let v = child_judged(w, name);
+    let kinds = ["events", "records", "documents"].iter();
+    let items = kinds.flat_map(|k| v[*k].as_object().unwrap());
+    items.map(|(id, _)| id.clone()).collect()
+}
+
+fn child_judged(w: &World, name: &str) -> Value {
     let both = both_of(w, 1, None);
     let said: Vec<Correction> = serde_json::from_value(json!([{"id": "o_aaaaaaaaaaaaaaaaaaaa",
         "printed": [name], "set": {"role": "fertility doctor"}, "at": "2026-05-04T12:00:00Z"}]))
     .unwrap();
     let state = State::last(Last::None, &w.child.person);
-    let whole = both.for_private();
-    let areas = Said::of(&w.child, &whole, &state, &said).areas();
+    let areas = labels::areas(&w.child, &both, &state, &said);
     let person = &w.h.people[1];
-    let v = private::build(person, &w.child, &w.child_text, &both, &[], &areas);
-    let kinds = ["events", "records", "documents"].iter();
-    let items = kinds.flat_map(|k| v[*k].as_object().unwrap());
-    items.map(|(id, _)| id.clone()).collect()
+    private::build(person, &w.child, &w.child_text, &both, &[], &areas)
 }
 
 /// What a linked person's record named an event for still tells what is
@@ -862,6 +865,44 @@ fn nothing_of_a_newborns_opens_because_the_parents_claim_is_in_error() {
     assert!(!v.to_string().contains(claim));
     let held = child_private(&w, hospital);
     assert!(private.iter().all(|id| held.contains(id)), "{held:?}");
+}
+
+/// Nor because the parent's claim prints another name now, or is in error
+/// with it.
+#[test]
+fn nothing_of_a_newborns_opens_because_the_parents_claim_gives_another_name() {
+    let (hospital, other) = ("Example Harbor Hospital", "Sample Sound Hospital");
+    let private = child_private(&world(), hospital);
+    let mut w = world();
+    let printing = w.parent.records.iter_mut().filter(|r| r.kind == "claim");
+    for r in printing.filter(|r| r.fields["provider"] == hospital) {
+        let gave = json!({"fields": {"provider": hospital}});
+        r.given = vec![serde_json::from_value(gave).unwrap()];
+        r.fields["provider"] = json!(other);
+    }
+    let v = events_of(&w, 1, None);
+    let newborn = holding(&v, "r_intakeoneaaaaaaaaaaa");
+    assert_eq!(
+        (newborn["place"].as_str(), newborn["place_from"].as_str()),
+        (Some(other), Some("linked"))
+    );
+    assert!(!v.to_string().contains(hospital));
+    assert_eq!(child_private(&w, hospital), private);
+    let judged = child_judged(&w, hospital);
+    let id = newborn["id"].as_str().unwrap();
+    assert_eq!(judged["events"][id]["given"], true, "{judged}");
+    // By the name it shows, as before.
+    assert_eq!(child_private(&w, other), private);
+    assert!(child_judged(&w, other)["events"][id].get("given").is_none());
+
+    let parent = events_of(&w, 0, None);
+    let stay = holding(&parent, "r_restroomaaaaaaaaaaaa");
+    let mut claims = stay["members"].as_array().unwrap().iter();
+    let claim = claims.find(|m| m["role"] == "facility").unwrap()["record"].as_str();
+    record_in_error(&mut w.parent, claim.unwrap());
+    for name in [hospital, other] {
+        assert_eq!(child_private(&w, name), private, "{name}");
+    }
 }
 
 /// Another person's paper (X2) is named in its own person's file alone.

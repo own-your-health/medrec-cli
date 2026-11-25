@@ -302,7 +302,7 @@ medrec meds --active
 medrec note add Robin "Ask about the recheck" --tag question --about <record id>
 
 medrec verify                                   # every indexed file against the index
-medrec reindex                                  # claims shaped again, providers, statuses and what else served a paper read again from the raw files, and bills and receipts read again, after an upgrade
+medrec reindex                                  # claims shaped again, providers, statuses, what each source gave and what else served a paper read again from the raw files, and bills and receipts read again, after an upgrade
 medrec backup --to "/Volumes/Backup/Medical Records"
 ```
 
@@ -556,7 +556,9 @@ no source's word wins:
   you marked a payment on a bill entered in error, the bills list says so:
   money may be owed back. What you decided of it is kept, shown as not
   applied, and applies again when it comes back. Nothing private opens
-  because a source takes an item back.
+  because a source takes an item back, or gives it another provider, code or
+  title later: what a source gave once still decides what is private, and only
+  `medrec private unmark` opens it.
 - A source's word that medrec does not keep yet never lets the others end a
   record: its line says `not every source heard`. After upgrading to 0.9.9 run
   `medrec reindex`, which reads them from the raw files.
@@ -580,7 +582,9 @@ household. medrec finds them by their codes, medicines, tests and the
 practice that made them, a document by any private record that links it, a
 bill or receipt by its own words, with its copies and the statements and
 payments before and after it, and a study by its report. A study with no report is left out of answers
-about the whole household too. The household has the last word.
+about the whole household too. An item stays private by what any of its sources
+gave of it, then or now, whatever it shows: the list says `given` of one that is
+private only by that. The household has the last word.
 
 ```sh
 medrec private list --person Robin          # each private item, its area and why

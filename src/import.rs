@@ -39,6 +39,7 @@ use sha2::{Digest, Sha256};
 
 use crate::config::Config;
 use crate::folder::{self, Folder};
+use crate::given::{self, Given, GivenPaper};
 use crate::hash;
 use crate::ids;
 use crate::intake::{self, classify, filetype, text};
@@ -388,6 +389,11 @@ impl Owner {
 
     fn in_error(&self) -> bool {
         self.word("", None).in_error()
+    }
+
+    /// The title it gives a paper.
+    fn says_title(&self) -> Option<String> {
+        self.title.clone().or_else(|| self.type_text.clone())
     }
 
     fn resource(&self) -> SourceResource {
@@ -853,7 +859,13 @@ fn file_streamed(
         &written.paths,
     )?;
     let mut papers = paper_words(folder, &mut index, &owners, &base_prov, &source_dir)?;
-    if papers.changed > 0 {
+    // Before its raw files are read again, as one of the person's.
+    record_source(&mut household, &person.id, &req.from, &header);
+    if written.cut_short {
+        // Versions were filed that no import read in.
+        crate::reindex::given_by(folder, &mut index, &source_dir)?;
+    }
+    if papers.changed > 0 || written.cut_short {
         // Its other sources' words, and those an earlier medrec did not keep.
         let tmp = pk_cli_drive::private_temp_dir("medrec-papers")?;
         papers = papers_again(folder, &household, &person, &mut index, tmp.path())?;
@@ -887,9 +899,11 @@ fn file_streamed(
     });
     folder.save_index(&person, &mut index)?;
     folder.save_text(&person, &texts)?;
-
-    record_source(&mut household, &person.id, &req.from, &header);
     folder.save_household(&mut household)?;
+    if written.written > 0 || written.cut_short {
+        // One that stays has the next import read the raw files again.
+        let _ = folder.store.delete(&unfinished(&source_dir));
+    }
 
     Ok(Report {
         import: import_id,
@@ -1216,6 +1230,14 @@ struct Written {
     filings: HashMap<String, Filing>,
     written: usize,
     unchanged: usize,
+    /// Whether an earlier import of the source did not finish.
+    cut_short: bool,
+}
+
+/// What marks that an import of a source files raw files, until what they give
+/// is in the person's index.
+fn unfinished(source_dir: &str) -> String {
+    format!("{source_dir}/importing.json")
 }
 
 /// A resource's raw file under its source, without `.json`: its type and
@@ -1317,6 +1339,8 @@ fn write_raw(
         folder.store.move_no_clobber(&left, &current)?;
         existing.insert(current, md5);
     }
+    let mark = unfinished(source_dir);
+    let cut_short = existing.contains_key(&mark);
     let staging = pk_cli_drive::private_temp_dir("medrec-import")?;
     let mut paths = HashMap::new();
     let mut filings = HashMap::new();
@@ -1461,6 +1485,10 @@ fn write_raw(
         staged.push((rel, md5));
     }
     if !staged.is_empty() {
+        if !cut_short {
+            let at = serde_json::json!({"started_at": base.filed_at});
+            folder.store.write_text(&mark, &format!("{at}\n"))?;
+        }
         folder.store.put_tree(staging.path(), source_dir)?;
         let after: HashMap<String, Option<String>> = folder
             .store
@@ -1488,6 +1516,7 @@ fn write_raw(
         filings,
         written: staged.len(),
         unchanged,
+        cut_short,
     })
 }
 
@@ -1677,14 +1706,137 @@ fn merge(
     idless: &mut Idless,
 ) -> Merge {
     let word = rec.words.pop();
+    let came = Came::of(index, &rec, &found, word.as_ref());
     let merged = merge_fields(index, rec, word.as_ref(), found, filing, idless);
+    let mut changed = came.keep(index);
     if matches!(merged, Merge::Older) {
         return merged;
     }
-    let changed = word.is_some_and(|w| said(index, &w));
+    changed |= word.is_some_and(|w| said(index, &w));
     match merged {
         Merge::Unchanged if changed => Merge::Updated,
         m => m,
+    }
+}
+
+/// What a resource gives, and what the records it can be of showed before it
+/// is merged: what of both a record then does not show is kept with it
+/// ([`crate::given`]).
+struct Came {
+    of: Provenance,
+    /// The raw file of the current version of its resource.
+    raw: Option<String>,
+    key: String,
+    gives: Given,
+    /// Each by its place in the index: what it showed, unless that is known
+    /// to be of the same version, and whether the resource was of it.
+    was: Vec<(usize, Option<Given>, bool)>,
+}
+
+impl Came {
+    fn of(index: &PersonIndex, rec: &Record, found: &Found, word: Option<&Word>) -> Came {
+        let of = rec.provenance[0].clone();
+        let raw = current(of.raw_path.as_ref());
+        let gives = given::of(&Record {
+            providers: found.refs.clone(),
+            ..rec.clone()
+        });
+        // Its raw file can be this version's and the record not yet: an
+        // import was cut short between them.
+        let read_in = |r: &Record| {
+            let mut said = r.words.iter();
+            let had = word.and_then(|w| said.find(|x| x.raw_path == w.raw_path));
+            let version = had.and_then(|x| x.version.as_ref());
+            version.is_some() && version == word.and_then(|w| w.version.as_ref())
+        };
+        let shows = |r: &Record| {
+            let was = showed(r);
+            let again = was.raw_path.is_some() && was.raw_path == raw && read_in(r);
+            (!again).then_some(was)
+        };
+        let has = |r: &Record| r.provenance.iter().any(|p| one_resource(p, &of));
+        let records = index.records.iter().enumerate();
+        Came {
+            was: records
+                .filter(|(_, r)| r.key == rec.key || has(r))
+                .map(|(i, r)| (i, shows(r), has(r)))
+                .collect(),
+            key: rec.key.clone(),
+            gives: Given {
+                raw_path: raw.clone(),
+                ..gives
+            },
+            raw,
+            of,
+        }
+    }
+
+    /// The record the resource is of now.
+    fn place(&self, index: &PersonIndex) -> Option<usize> {
+        let at = |of: &dyn Fn(&Record) -> bool| index.records.iter().position(of);
+        let has = |r: &Record| r.provenance.iter().any(|p| one_resource(p, &self.of));
+        at(&has).or_else(|| at(&|r| r.key == self.key))
+    }
+
+    /// Whether a record keeps something more.
+    fn keep(self, index: &mut PersonIndex) -> bool {
+        let Some(now) = self.place(index) else {
+            return false;
+        };
+        let mut changed = false;
+        // What it gave moves with it to the record it is of now.
+        let mut moved: Vec<Given> = vec![self.gives];
+        for (i, was, had) in self.was {
+            let r = &mut index.records[i];
+            if had && i != now {
+                let of = |g: &&Given| g.raw_path.is_some() && g.raw_path == self.raw;
+                moved.extend(r.given.iter().filter(of).cloned());
+                moved.extend(was.iter().filter(of).cloned());
+                let cli = |p: &Provenance| p.source.cli == self.of.source.cli;
+                if !r.provenance.iter().any(cli) {
+                    let left = Given {
+                        raw_path: self.raw.clone(),
+                        cli: self.of.source.cli.clone(),
+                        ..Given::default()
+                    };
+                    changed |= given::keep(r, left);
+                }
+            }
+            if let Some(was) = was {
+                changed |= given::keep(r, was);
+            }
+        }
+        let r = &mut index.records[now];
+        for g in moved {
+            changed |= given::keep(r, g);
+        }
+        changed
+    }
+}
+
+/// Whether two provenances are of one resource: by its id, or, of those with
+/// none, by its raw file.
+fn one_resource(a: &Provenance, b: &Provenance) -> bool {
+    fn of(p: &Provenance) -> Option<&SourceResource> {
+        p.source_resource.as_ref().filter(|r| !r.id.is_empty())
+    }
+    let same = match (of(a), of(b)) {
+        (Some(x), Some(y)) => x.id == y.id && x.resource_type == y.resource_type,
+        (None, None) => a.raw_path.is_some() && a.raw_path == b.raw_path,
+        _ => false,
+    };
+    let (s, t) = (&a.source, &b.source);
+    same && s.fhir_base == t.fhir_base && s.cli == t.cli && s.organization_id == t.organization_id
+}
+
+/// What a record shows, with the raw file it is of, where that is known.
+pub(crate) fn showed(r: &Record) -> Given {
+    Given {
+        raw_path: match r.provenance.as_slice() {
+            [only] => only.raw_path.clone(),
+            _ => r.fields_from.clone(),
+        },
+        ..given::of(r)
     }
 }
 
@@ -1808,6 +1960,7 @@ fn merge_fields(
             .filter(|r| in_error || r.key == rec.key || r.provenance.iter().all(same_resource))
         {
             let at = existing.provenance.iter().position(same_resource);
+            let (rec, found) = withdrawn(existing, rec, found, in_error);
             let filing = match not_read_in(existing, word) {
                 true => Some(Filing::Replaces),
                 false => filing,
@@ -1902,6 +2055,7 @@ fn merge_fields(
                     return refresh_shared(existing, rec, found, i, incoming, filing);
                 }
                 let worded = word.is_some();
+                let (rec, found) = withdrawn(existing, rec, found, in_error);
                 return rewrite(existing, rec, found, incoming, Some(i), filing, worded);
             }
             refresh_provenance(existing, i, incoming, filing)
@@ -2012,6 +2166,34 @@ fn request_id(reference: &str) -> Option<&str> {
 struct Idless {
     incoming: HashSet<String>,
     claimed: HashSet<(String, usize)>,
+}
+
+/// A version that says a record is entered in error takes no value from it:
+/// it can come with little of what it was of. Its fields stand over the same
+/// of the record's.
+fn withdrawn(had: &Record, rec: Record, found: Found, in_error: bool) -> (Record, Found) {
+    if !in_error {
+        return (rec, found);
+    }
+    let found = Found {
+        refs: had.providers.clone(),
+        ..Found::default()
+    };
+    (over(had, rec), found)
+}
+
+/// What `rec`, entered in error, gives over what the record had.
+pub(crate) fn over(had: &Record, rec: Record) -> Record {
+    let mut fields = had.fields.clone();
+    fields.extend(rec.fields);
+    Record {
+        key: had.key.clone(),
+        date: had.date.clone().or(rec.date),
+        code: had.code.clone().or(rec.code),
+        display: had.display.clone(),
+        fields,
+        ..rec
+    }
 }
 
 /// Whether a version is another than the one last read into the record,
@@ -2126,12 +2308,14 @@ pub(crate) fn take_from_another(
         if let Some(of) = r.fields.get("prescriber") {
             new.fields.entry("prescriber").or_insert(of.clone());
         }
+        let was = showed(r);
         r.fields = new.fields;
         r.display = new.display;
         r.status = new.status;
         r.code = new.code;
         r.date = new.date;
         r.fields_from = p.raw_path;
+        given::keep(r, was);
         return Ok(true);
     }
     Ok(false)
@@ -2180,6 +2364,7 @@ fn take_from_others(folder: &Folder, index: &mut PersonIndex) -> Result<(), CliE
         if r.errors.is_empty() || r.provenance.len() == 1 {
             continue;
         }
+        let was = showed(r);
         r.providers = providers_again(r, &mut |p| {
             let Some(v) = read(p)? else { return Ok(None) };
             let dir = p.raw_path.as_deref().and_then(source_dir_of);
@@ -2193,6 +2378,7 @@ fn take_from_others(folder: &Folder, index: &mut PersonIndex) -> Result<(), CliE
             };
             crate::providers::of(&v, &r.fields, &mut held).map(Some)
         })?;
+        given::keep(r, was);
     }
     Ok(())
 }
@@ -2277,7 +2463,10 @@ fn replace(existing: &mut Record, i: usize, incoming: Provenance) {
     };
     let errors = existing.errors.iter_mut().map(|e| &mut e.raw_path);
     let words = existing.words.iter_mut().map(|w| &mut w.raw_path);
-    for path in errors.chain(words).chain(existing.fields_from.as_mut()) {
+    let given = existing.given.iter_mut();
+    let given = given.filter_map(|g| g.raw_path.as_mut());
+    let from = existing.fields_from.as_mut();
+    for path in errors.chain(words).chain(given).chain(from) {
         if *path == had {
             path.clone_from(&now);
         }
@@ -2579,6 +2768,8 @@ fn file_binaries(
         // noted (a portal that serves its last rendering again).
         if let Some(d) = index.documents.iter_mut().find(|d| has_bytes(d, &sha)) {
             filed.duplicate += 1;
+            let of = Some(&header.organization.name);
+            given::keep_paper(d, paper_given(dr, of, prov.raw_path.as_ref()));
             if !d.provenances().any(|p| p.raw_path == prov.raw_path) {
                 d.also_from.push(prov);
             }
@@ -2614,7 +2805,7 @@ fn file_binaries(
             .and_then(|d| d.date.clone())
             .unwrap_or_else(|| header.pulled_at.chars().take(10).collect());
         let ext = kind.map(|k| k.extension()).unwrap_or("bin");
-        let title = dr.and_then(|d| d.title.clone().or_else(|| d.type_text.clone()));
+        let title = dr.and_then(Owner::says_title);
         let name = folder::filed_name(
             &date,
             &doc_type,
@@ -2631,7 +2822,10 @@ fn file_binaries(
             None => text::Extracted::default(),
         };
         if let Some(kept) = rendered_again(index, texts, &prov, &media_type, &extracted.text) {
-            index.documents[kept].renderings.push(Rendering {
+            let d = &mut index.documents[kept];
+            let of = Some(&header.organization.name);
+            given::keep_paper(d, paper_given(dr, of, prov.raw_path.as_ref()));
+            d.renderings.push(Rendering {
                 sha256: sha,
                 size: b.bytes.len() as u64,
                 fetched_at: prov.fetched_at.clone(),
@@ -2681,6 +2875,7 @@ fn file_binaries(
             also_from: Vec::new(),
             words: Vec::new(),
             errors: Vec::new(),
+            given: Vec::new(),
         };
         crate::bill::annotate(&mut doc, &extracted.text, index, texts);
         if doc.same_statement_as.is_some() {
@@ -2749,16 +2944,32 @@ impl<'a> Describes<'a> {
         out
     }
 
-    /// The first ([`first_owner`]) of what describes a paper by one of its
-    /// Binaries: the resource it was filed by, and those that name the Binary.
-    fn first(&self, p: &Provenance) -> Option<&'a Owner> {
+    /// What describes a paper by one of its Binaries: the resource it was
+    /// filed by, and those that name the Binary.
+    fn all(&self, p: &Provenance) -> Vec<&'a Owner> {
         let resource = p.source_resource.as_ref();
         let by = resource.and_then(|r| {
             let key = (r.resource_type.as_str(), r.id.as_str());
             self.by_resource.get(&key)
         });
         let naming = p.raw_path.as_ref().and_then(|f| self.by_file.get(f));
-        first_owner(by.into_iter().chain(naming.into_iter().flatten()).copied())
+        let naming = naming.into_iter().flatten();
+        by.into_iter().chain(naming).copied().collect()
+    }
+
+    /// The first of them ([`first_owner`]).
+    fn first(&self, p: &Provenance) -> Option<&'a Owner> {
+        first_owner(self.all(p).into_iter())
+    }
+}
+
+/// What a source gives of a paper by one of its Binaries: its own name, where
+/// it is another than the one that filed the paper, and the title.
+fn paper_given(o: Option<&Owner>, source: Option<&String>, raw: Option<&String>) -> GivenPaper {
+    GivenPaper {
+        raw_path: current(raw),
+        organization: source.cloned(),
+        title: o.and_then(Owner::says_title),
     }
 }
 
@@ -2807,6 +3018,9 @@ fn paper_words(
     for d in &mut index.documents {
         let ours: Vec<Provenance> = papers_of(d, source_dir).cloned().collect();
         for p in ours {
+            for o in carried.all(&p).into_iter().chain(older.all(&p)) {
+                given::keep_paper(d, paper_given(Some(o), None, p.raw_path.as_ref()));
+            }
             let mut first = carried.first(&p);
             let ask = match first {
                 Some(o) => o.in_error(),
@@ -2858,6 +3072,8 @@ fn papers_of<'a>(d: &'a Document, source_dir: &'a str) -> impl Iterator<Item = &
 #[derive(Default)]
 struct FiledOwners {
     owners: Vec<Owner>,
+    /// Earlier versions.
+    before: Vec<Owner>,
     /// Those that do not read.
     unread: usize,
 }
@@ -2881,8 +3097,8 @@ fn filed_owners(
     Ok(out)
 }
 
-/// The current versions of a source's resources that describe a paper, by
-/// their raw files, which `tmp` takes a copy of.
+/// A source's resources that describe a paper, by their raw files, which
+/// `tmp` takes a copy of.
 fn owners_in(folder: &Folder, source_dir: &str, tmp: &Path) -> Result<FiledOwners, CliError> {
     let copied = |e| CliError::Other(format!("reading a copy of the raw files: {e}"));
     let mut out = FiledOwners::default();
@@ -2899,16 +3115,16 @@ fn owners_in(folder: &Folder, source_dir: &str, tmp: &Path) -> Result<FiledOwner
         for f in std::fs::read_dir(&to).map_err(copied)? {
             files.push(f.map_err(copied)?.path());
         }
-        files.retain(|f| {
-            f.file_name()
-                .is_some_and(|n| is_current(&n.to_string_lossy()))
-        });
+        files.retain(|f| f.extension().is_some_and(|x| x == "json"));
         files.sort();
         for f in files {
+            let name = f.file_name().map(|n| n.to_string_lossy());
+            let current = name.is_some_and(|n| is_current(&n));
             let v: Option<Value> = serde_json::from_slice(&std::fs::read(f).map_err(copied)?).ok();
             match v {
-                Some(v) => out.owners.extend(owner(kind.as_str(), &v)),
-                None => out.unread += 1,
+                Some(v) if current => out.owners.extend(owner(kind.as_str(), &v)),
+                Some(v) => out.before.extend(owner(kind.as_str(), &v)),
+                None => out.unread += usize::from(current),
             }
         }
     }
@@ -2923,6 +3139,19 @@ pub(crate) fn describes_papers(resource_type: &str) -> bool {
 /// Whether a raw file's name is that of a resource's current version.
 fn is_current(name: &str) -> bool {
     name.ends_with(".json") && !name.contains('~')
+}
+
+/// The raw file of the current version of what a raw file keeps.
+fn current(raw: Option<&String>) -> Option<String> {
+    raw.map(|rel| current_of(rel).unwrap_or_else(|| rel.clone()))
+}
+
+/// The raw file of the current version of what a raw file keeps an earlier
+/// one of.
+pub(crate) fn current_of(rel: &str) -> Option<String> {
+    let (dir, name) = rel.rsplit_once('/')?;
+    let (id, _) = name.strip_suffix(".json")?.split_once('~')?;
+    Some(format!("{dir}/{id}.json"))
 }
 
 /// What the raw files say of every paper of a person; and the Binaries with a
@@ -2961,9 +3190,31 @@ pub(crate) fn papers_again(
     }
     for (dir, latest, filed) in sources {
         let describes = Describes::new(filed.owners.iter(), &dir);
+        let before: Vec<(Describes, &Owner)> = filed
+            .before
+            .iter()
+            .map(|o| (Describes::new(std::iter::once(o), &dir), o))
+            .collect();
+        let called = household.sources.iter().find_map(|s| {
+            let of = source_slug(s.cli.as_deref()?, s.organization.as_deref()?);
+            let here = s.person == person.id && folder::records_dir(person, &of) == dir;
+            s.organization_name.as_ref().filter(|_| here)
+        });
         for d in &mut index.documents {
             let ours: Vec<Provenance> = papers_of(d, &dir).cloned().collect();
             for p in ours {
+                let raw = p.raw_path.as_ref();
+                let of = called.filter(|_| d.provenance.raw_path != p.raw_path);
+                let mut gave = vec![paper_given(None, of, raw)];
+                let earlier = before.iter().filter(|(by, _)| by.first(&p).is_some());
+                let described = describes.all(&p).into_iter();
+                let described = described.chain(earlier.map(|(_, o)| *o));
+                gave.extend(described.map(|o| paper_given(Some(o), None, raw)));
+                for g in gave {
+                    if given::keep_paper(d, g) {
+                        changed.insert(d.id.clone());
+                    }
+                }
                 let Some(o) = describes.first(&p) else {
                     continue;
                 };

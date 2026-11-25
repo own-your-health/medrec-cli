@@ -66,6 +66,10 @@ real record, document, study or provider response.
   and ones their sources differ on, with what the household decided of them
   (`marks.json`, `overrides.json`). `make.py` writes the files; their sources
   are those of `standing/household.json`.
+- `given/` is an invented person's claim, stated by one source and given by
+  another at a place of a private area, as the contract's "What a source gave"
+  keeps it, beside one that is not private. `make.py` writes `index.json`; its
+  sources are those of `standing/household.json`.
 - `bills/` holds invented text in the shapes `pdftotext -layout` gives a
   provider's patient statement and a payment receipt:
   `statement-columns.txt` puts the statement's fields in a header row over a

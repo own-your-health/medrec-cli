@@ -1278,8 +1278,8 @@ fn run(cli: &Cli) -> Result<(), CliError> {
                     println!("nothing was written; a run would do this:");
                 }
                 println!(
-                    "{} claims: {} shaped again, {} unchanged, {} with no raw file; {} bills and receipts read again; {} records gained or changed what is said of their providers; {} records and {} papers what their sources say of them",
-                    r.claims, r.reshaped, r.unchanged, r.without_raw, r.statements, r.providers_updated, r.statuses_updated, r.papers_updated
+                    "{} claims: {} shaped again, {} unchanged, {} with no raw file; {} bills and receipts read again; {} records gained or changed what is said of their providers; {} records and {} papers what their sources say of them; {} records keep more of what their sources gave",
+                    r.claims, r.reshaped, r.unchanged, r.without_raw, r.statements, r.providers_updated, r.statuses_updated, r.papers_updated, r.given_updated
                 );
                 if let Some(n) = papers_unread(r.papers_unread) {
                     println!("{n}");
@@ -1800,11 +1800,15 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
                             _ => event_of(id),
                         }
                         .unwrap_or_default();
-                        items.push(serde_json::json!({
+                        let mut row = serde_json::json!({
                             "id": id, "kind": singular, "area": why["area"],
                             "from": why["from"], "date": date, "title": title,
                             "person": p.id, "person_name": p.name,
-                        }));
+                        });
+                        if why["given"] == true {
+                            row["given"] = true.into();
+                        }
+                        items.push(row);
                     }
                 }
             }
@@ -1852,9 +1856,24 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
                 doc["labels_unreadable"] = labels.into();
             }
             output::emit(json, "private-list", doc, |v| {
+                let mut v = v.clone();
+                for i in v["items"].as_array_mut().into_iter().flatten() {
+                    if i["given"] == true {
+                        i["given"] = "yes".into();
+                    }
+                }
                 table(
-                    v,
-                    &["date", "person_name", "kind", "area", "from", "title", "id"],
+                    &v,
+                    &[
+                        "date",
+                        "person_name",
+                        "kind",
+                        "area",
+                        "from",
+                        "given",
+                        "title",
+                        "id",
+                    ],
                 )
             });
             return Ok(());

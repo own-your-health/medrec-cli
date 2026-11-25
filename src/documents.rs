@@ -6,6 +6,7 @@ use pk_cli_core::CliError;
 use serde::Serialize;
 
 use crate::folder::Folder;
+use crate::given::{self, GivenPaper};
 use crate::import::not_a_rendering_of;
 use crate::model::{Household, Person, PersonIndex, PersonText, Rendering};
 
@@ -102,7 +103,7 @@ pub fn plan(folder: &Folder, h: &Household, duplicate: &str, into: &str) -> Resu
 
 /// Merge as `plan` checked. `duplicate`'s hash, size and fetch time, and
 /// its own renderings, go on `into`'s `renderings`, each distinct one once,
-/// and what else served its bytes and said of it, on `into`;
+/// and what else served its bytes, said and gave of it, on `into`;
 /// everything that named it names `into`; its text and index entry go, and
 /// then its file. Each step leaves the folder consistent if the next one
 /// fails: notes name `into` beside `duplicate` before the index loses
@@ -168,6 +169,14 @@ pub fn apply(folder: &Folder, plan: Plan) -> Result<Merged, CliError> {
         if !kept.errors.contains(&e) {
             kept.errors.push(e);
         }
+    }
+    let called = GivenPaper {
+        raw_path: dup.provenance.raw_path,
+        organization: dup.organization,
+        title: dup.title,
+    };
+    for g in std::iter::once(called).chain(dup.given) {
+        given::keep_paper(kept, g);
     }
     let moved = repoint(&mut index, &duplicate, &into) + named.len();
     texts.texts.remove(&duplicate);

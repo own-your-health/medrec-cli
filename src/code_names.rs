@@ -260,7 +260,7 @@ mod tests {
         idx.records = records.into_iter().map(record).collect();
         let events = crate::events::Built {
             events: json!({"schema": crate::events::SCHEMA, "events": []}),
-            whole: None,
+            ..Default::default()
         };
         let mut private = private::build(
             &p,

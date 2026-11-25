@@ -345,6 +345,10 @@ pub struct Document {
     /// When a source said it is entered in error (0.9.9 and later).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub errors: Vec<InError>,
+    /// What its sources gave, then or now, that the rules of what is private
+    /// read and it does not show (0.9.9 and later).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub given: Vec<crate::given::GivenPaper>,
 }
 
 impl Document {
@@ -477,6 +481,10 @@ pub struct Record {
     /// several provenances.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fields_from: Option<String>,
+    /// What its sources gave, then or now, that the rules of what is private
+    /// read and it does not show (0.9.9 and later).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub given: Vec<crate::given::Given>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub documents: Vec<String>,
     pub provenance: Vec<Provenance>,

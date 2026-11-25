@@ -16,6 +16,7 @@ use serde_json::Value;
 
 use crate::claims::without_links;
 use crate::folder::Folder;
+use crate::given::{self, Given};
 use crate::import;
 use crate::model::{Household, InError, PersonIndex, Provenance, Record, Word};
 use crate::normalize;
@@ -40,7 +41,10 @@ pub struct Reindexed {
     /// Records whose fields by another source, or what a source says of them,
     /// changed, and conditions, allergies and medicines whose fields did.
     pub statuses_updated: usize,
-    /// Papers whose sources, or what one says of them, changed.
+    /// Records that keep something more that a source gave and they do not
+    /// show.
+    pub given_updated: usize,
+    /// Papers whose sources, or what one says or gave of them, changed.
     pub papers_updated: usize,
     /// Raw files of papers that do not read.
     pub papers_unread: usize,
@@ -56,6 +60,7 @@ pub struct PersonReindexed {
     pub statements: usize,
     pub providers_updated: usize,
     pub statuses_updated: usize,
+    pub given_updated: usize,
     pub papers_updated: usize,
     pub papers_unread: usize,
 }
@@ -106,9 +111,12 @@ pub fn claims(
             person: p.id.clone(),
             ..PersonReindexed::default()
         };
-        fetch(folder, &idx, tmp.path(), &dirs, normalize::WORD_TYPES)?;
-        fetch(folder, &idx, tmp.path(), &dirs, RAW_TYPES)?;
+        let sources = sources(&idx);
+        fetch(folder, &sources, tmp.path(), &dirs, normalize::WORD_TYPES)?;
+        fetch(folder, &sources, tmp.path(), &dirs, RAW_TYPES)?;
         fetch_said(folder, &idx, tmp.path())?;
+        let older = fetch_older(folder, &idx, &sources, tmp.path())?;
+        let showed: Vec<Given> = idx.records.iter().map(import::showed).collect();
         row.statuses_updated = statuses(&mut idx, tmp.path())?;
         for r in idx.records.iter_mut().filter(|r| r.kind == "claim") {
             row.claims += 1;
@@ -140,6 +148,7 @@ pub fn claims(
         }
         // After the fields they are of.
         row.providers_updated = providers(&mut idx, tmp.path())?;
+        row.given_updated = given(&mut idx, &showed, &older, tmp.path())?;
         let papers = import::papers_again(folder, h, p, &mut idx, tmp.path())?;
         row.papers_updated = papers.changed;
         row.papers_unread = papers.unread;
@@ -149,6 +158,7 @@ pub fn claims(
             row.statements,
             row.providers_updated,
             row.statuses_updated,
+            row.given_updated,
             row.papers_updated,
         ];
         if !dry_run && changed.iter().any(|n| *n > 0) {
@@ -157,6 +167,7 @@ pub fn claims(
         out.statements += row.statements;
         out.providers_updated += row.providers_updated;
         out.statuses_updated += row.statuses_updated;
+        out.given_updated += row.given_updated;
         out.papers_updated += row.papers_updated;
         out.papers_unread += row.papers_unread;
         out.claims += row.claims;
@@ -168,21 +179,21 @@ pub fn claims(
     Ok(out)
 }
 
-/// A copy of the raw files of these types, of every source, where there is
-/// none yet.
+/// The folders of raw files the records are of, one per source.
+fn sources(idx: &PersonIndex) -> BTreeSet<String> {
+    let of = |pr: &Provenance| import::source_dir_of(pr.raw_path.as_ref()?).map(str::to_string);
+    let records = idx.records.iter();
+    records.flat_map(|r| &r.provenance).filter_map(of).collect()
+}
+
+/// A copy of these sources' raw files of these types, where there is none yet.
 fn fetch(
     folder: &Folder,
-    idx: &PersonIndex,
+    sources: &BTreeSet<String>,
     tmp: &Path,
     fetched: &BTreeSet<String>,
     types: &[&str],
 ) -> Result<(), CliError> {
-    let sources: BTreeSet<&str> = idx
-        .records
-        .iter()
-        .flat_map(|r| &r.provenance)
-        .filter_map(|pr| import::source_dir_of(pr.raw_path.as_ref()?))
-        .collect();
     for source in sources {
         for ty in types {
             let dir = format!("{source}/{ty}");
@@ -220,25 +231,154 @@ fn fetch_said(folder: &Folder, idx: &PersonIndex, tmp: &Path) -> Result<(), CliE
         if to.exists() {
             continue;
         }
-        // Few: one call each, rather than a copy of all, but of what the
-        // papers read whole.
-        let papers = dir.rsplit('/').next().is_some_and(import::describes_papers);
-        if papers || files.len() > FEW {
-            folder.store.fetch_tree(dir, &to)?;
-            continue;
-        }
-        for rel in files {
-            if let Some(text) = folder.store.read_text(rel)? {
-                crate::store::private_dirs(&to)?;
-                crate::write_private(&tmp.join(rel), text.as_bytes())?;
-            }
-        }
+        let files: Vec<&str> = files.into_iter().collect();
+        fetch_files(folder, tmp, dir, &files)?;
     }
     Ok(())
 }
 
 /// How many files of one folder are read one by one.
 const FEW: usize = 20;
+
+/// The raw files of these sources that earlier versions of the records'
+/// resources are kept in, by the current one's, and a copy of them.
+fn fetch_older(
+    folder: &Folder,
+    idx: &PersonIndex,
+    sources: &BTreeSet<String>,
+    tmp: &Path,
+) -> Result<BTreeMap<String, Vec<String>>, CliError> {
+    let of = idx.records.iter().flat_map(|r| &r.provenance);
+    let known: BTreeSet<&str> = of.filter_map(|p| p.raw_path.as_deref()).collect();
+    let mut out: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for source in sources {
+        let mut wanted: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for h in folder.store.hashes(source)? {
+            let rel = h.rel;
+            let Some(current) = import::current_of(&rel).filter(|c| known.contains(c.as_str()))
+            else {
+                continue;
+            };
+            let dir = rel
+                .rsplit_once('/')
+                .map_or(source.as_str(), |(d, _)| d)
+                .to_string();
+            wanted.entry(dir).or_default().push(rel.clone());
+            out.entry(current).or_default().push(rel);
+        }
+        for (dir, files) in wanted {
+            fetch_files(folder, tmp, &dir, &files)?;
+        }
+    }
+    Ok(out)
+}
+
+/// A copy of some raw files of one folder. Few are one call each; many are a
+/// copy of all of it, and so is what the papers read whole.
+fn fetch_files(
+    folder: &Folder,
+    tmp: &Path,
+    dir: &str,
+    files: &[impl AsRef<str>],
+) -> Result<(), CliError> {
+    let to = tmp.join(dir);
+    let missing: Vec<&str> = files
+        .iter()
+        .map(AsRef::as_ref)
+        .filter(|rel| !tmp.join(rel).exists())
+        .collect();
+    let papers = dir.rsplit('/').next().is_some_and(import::describes_papers);
+    if missing.len() > FEW || (papers && !missing.is_empty()) {
+        return folder.store.fetch_tree(dir, &to);
+    }
+    for rel in missing {
+        if let Some(text) = folder.store.read_text(rel)? {
+            crate::store::private_dirs(&to)?;
+            crate::write_private(&tmp.join(rel), text.as_bytes())?;
+        }
+    }
+    Ok(())
+}
+
+/// What a source gave of the records it states, by every version of its raw
+/// files: those filed by an import that did not finish were never read in.
+/// Records changed, counted.
+pub(crate) fn given_by(
+    folder: &Folder,
+    idx: &mut PersonIndex,
+    source_dir: &str,
+) -> Result<usize, CliError> {
+    let tmp = pk_cli_drive::private_temp_dir("medrec-given")?;
+    let sources = BTreeSet::from([source_dir.to_string()]);
+    let mut wanted: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    let of = idx.records.iter().flat_map(|r| &r.provenance);
+    for rel in of.filter_map(|p| p.raw_path.as_deref()) {
+        if import::source_dir_of(rel) != Some(source_dir) {
+            continue;
+        }
+        if let Some((dir, _)) = rel.rsplit_once('/') {
+            wanted.entry(dir).or_default().insert(rel);
+        }
+    }
+    for (dir, files) in wanted {
+        let files: Vec<&str> = files.into_iter().collect();
+        fetch_files(folder, tmp.path(), dir, &files)?;
+    }
+    fetch(folder, &sources, tmp.path(), &BTreeSet::new(), RAW_TYPES)?;
+    let older = fetch_older(folder, idx, &sources, tmp.path())?;
+    let showed: Vec<Given> = idx.records.iter().map(import::showed).collect();
+    given(idx, &showed, &older, tmp.path())
+}
+
+/// What the sources gave of each record that it does not show: by every
+/// version of its raw files that is kept, and what it showed before this when
+/// one of its sources' does not read. Records changed, counted.
+fn given(
+    idx: &mut PersonIndex,
+    showed: &[Given],
+    older: &BTreeMap<String, Vec<String>>,
+    tmp: &Path,
+) -> Result<usize, CliError> {
+    let mut held = Held::new(tmp);
+    let mut changed = 0;
+    for (r, was) in idx.records.iter_mut().zip(showed) {
+        let mut gave: Vec<Given> = Vec::new();
+        let mut all_read = true;
+        for pr in &r.provenance {
+            let Some(rel) = &pr.raw_path else {
+                all_read = false;
+                continue;
+            };
+            let versions = older.get(rel).into_iter().flatten();
+            for file in std::iter::once(rel).chain(versions) {
+                let shaped = read(tmp, file).and_then(|v| {
+                    let new = normalize::record(&v, pr.clone())?;
+                    Some((v, new))
+                });
+                let Some((v, mut new)) = shaped.filter(|(_, n)| n.kind == r.kind) else {
+                    all_read &= file != rel;
+                    continue;
+                };
+                held.source = import::source_dir_of(rel).unwrap_or_default().to_string();
+                held.base = pr.source.fhir_base.clone();
+                new.providers = crate::providers::of(&v, &new.fields, &mut held)?.refs;
+                gave.push(Given {
+                    raw_path: Some(rel.clone()),
+                    ..given::of(&new)
+                });
+            }
+        }
+        if !all_read {
+            gave.push(was.clone());
+        }
+        let mut more = false;
+        for g in gave {
+            more |= given::keep(r, g);
+        }
+        changed += usize::from(more);
+    }
+    Ok(changed)
+}
 
 /// What each raw file says of the records that keep it, with its history, and
 /// the fields of each condition, allergy and medicine again from the raw file
@@ -296,8 +436,13 @@ fn statuses(idx: &mut PersonIndex, tmp: &Path) -> Result<usize, CliError> {
             let several = r.provenance.len() > 1 && !now.words.is_empty();
             now.fields_from = several.then(|| (*path).clone());
             if stands {
-                now.status = new.status.clone();
-                now.fields = new.fields.clone();
+                let in_error = new.words.iter().any(|w| w.in_error());
+                let new = match in_error {
+                    true => import::over(r, new.clone()),
+                    false => new.clone(),
+                };
+                now.status = new.status;
+                now.fields = new.fields;
                 // A fill's is its prescription's.
                 if let Some(p) = r.fields.get("prescriber") {
                     now.fields.entry("prescriber").or_insert(p.clone());
@@ -332,12 +477,7 @@ fn agrees(shape: &Record, r: &Record) -> bool {
 /// What each record's raw file says of the providers it prints, and the
 /// resources its source filed. Records changed, counted.
 fn providers(idx: &mut PersonIndex, tmp: &Path) -> Result<usize, CliError> {
-    let mut held = Held {
-        tmp,
-        source: String::new(),
-        base: None,
-        read: HashMap::new(),
-    };
+    let mut held = Held::new(tmp);
     let mut changed = 0;
     for r in &mut idx.records {
         let now = import::providers_again(r, &mut |pr| {
@@ -385,6 +525,17 @@ struct Held<'a> {
     source: String,
     base: Option<String>,
     read: HashMap<String, Option<Value>>,
+}
+
+impl<'a> Held<'a> {
+    fn new(tmp: &'a Path) -> Held<'a> {
+        Held {
+            tmp,
+            source: String::new(),
+            base: None,
+            read: HashMap::new(),
+        }
+    }
 }
 
 impl crate::providers::Resolve for Held<'_> {

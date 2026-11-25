@@ -13,6 +13,7 @@
 //! (`provider-state.json`), so a machine with no directory, or an older one,
 //! judges and labels as the one that has it.
 
+use std::borrow::Cow;
 use std::cell::OnceCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
@@ -22,7 +23,8 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use crate::corrections::{Correction, Kind, Set};
-use crate::events;
+use crate::events::{self, Built};
+use crate::given;
 use crate::model::{Document, Person, PersonIndex, PersonText, Record};
 use crate::nppes::{self, Provider, Stored};
 use crate::private;
@@ -395,21 +397,18 @@ impl State {
         if !older {
             now.directory = Some(table);
         }
-        for r in &idx.records {
-            for p in &r.providers {
-                let (Some(npi), Some(_)) = (p.npi.as_deref(), printed(r, &p.field)) else {
-                    continue;
-                };
-                if older && now.by_npi.contains_key(npi) {
-                    continue;
-                }
-                if let Some(l) = d.provider(npi).and_then(|p| sure(&p, &d.stored.about.date)) {
-                    now.by_npi.insert(npi.to_string(), l);
-                }
-            }
-            if older {
+        // What a source gave and no record shows any longer decides what is
+        // private too.
+        let given = given::index(idx);
+        for npi in npis(&given) {
+            if older && now.by_npi.contains_key(npi) {
                 continue;
             }
+            if let Some(l) = d.provider(npi).and_then(|p| sure(&p, &d.stored.about.date)) {
+                now.by_npi.insert(npi.to_string(), l);
+            }
+        }
+        for r in idx.records.iter().filter(|_| !older) {
             for (field, text) in people_printed(r) {
                 // Only of names and states the kept file is whole in; of
                 // others what the last state says stays.
@@ -434,7 +433,7 @@ impl State {
         }
         now.matched.retain(|_, m| !m.is_empty());
         now.first_names.retain(|_, m| !m.is_empty());
-        now.lost &= later || !npis(idx).all(|n| now.by_npi.contains_key(n) || d.asked(n));
+        now.lost &= later || !npis(&given).all(|n| now.by_npi.contains_key(n) || d.asked(n));
         if now.by_npi.is_empty() && now.matched.is_empty() && now.first_names.is_empty() {
             now.directory = None;
         }
@@ -1403,7 +1402,7 @@ impl<'a> Said<'a> {
 
     /// The items a sure label or the household's makes private, with their
     /// area.
-    pub fn areas(&self) -> BTreeMap<String, &'static str> {
+    fn areas(&self) -> BTreeMap<String, &'static str> {
         let of_group: Vec<Option<&'static str>> = (0..self.corrections.len())
             .map(|g| self.group(g).find_map(|i| self.rulings[i].area))
             .collect();
@@ -1423,6 +1422,27 @@ impl<'a> Said<'a> {
         }
         out
     }
+}
+
+/// The items a sure label or the household's makes private, with their area,
+/// and whether only a name does that a source gave and the item does not show
+/// ([`given`]).
+pub fn areas(
+    idx: &PersonIndex,
+    events: &Built,
+    state: &State,
+    corrections: &[Correction],
+) -> BTreeMap<String, (&'static str, bool)> {
+    let of = |idx: &PersonIndex, events: &Value| Said::of(idx, events, state, corrections).areas();
+    let shown = of(idx, &events.for_private());
+    let given = match given::index(idx) {
+        Cow::Borrowed(_) if events.given.is_empty() => BTreeMap::new(),
+        all => of(&all, &events.for_given()),
+    };
+    let given = given.into_iter().map(|(id, area)| (id, (area, true)));
+    let mut out: BTreeMap<_, _> = given.collect();
+    out.extend(shown.into_iter().map(|(id, area)| (id, (area, false))));
+    out
 }
 
 impl<'a> Ruling<'a> {
@@ -2120,6 +2140,49 @@ mod tests {
             let _ = std::fs::remove_dir_all(&self.root);
             let _ = std::fs::remove_dir_all(self.directories());
         }
+    }
+
+    /// An NPI a source gave and the record no longer has holds it private, on
+    /// a machine with the directory and on one without it, and says nothing.
+    #[test]
+    fn an_npi_a_source_gave_holds_an_item_private() {
+        let talk = "r_talkaaaaaaaaaaaaaaaa";
+        let mut c = Case::new();
+        c.sync(true);
+        assert!(c.private(talk));
+        let r = c.index.records.iter_mut().find(|r| r.id == talk).unwrap();
+        let npi = r.providers[0].npi.take().unwrap();
+        let shown = std::mem::replace(&mut r.fields["provider"], json!("Sample Walk-in Room"));
+        c.sync(true);
+        assert!(!c.private(talk));
+        let mut given = vec![
+            json!({"fields": {"provider": shown}, "npis": {"provider": npi}}),
+            json!({"npis": {"provider": npi}}),
+        ];
+        for g in given.drain(..) {
+            let r = c.index.records.iter_mut().find(|r| r.id == talk).unwrap();
+            r.given = serde_json::from_value(json!([g])).unwrap();
+            for directory in [true, false] {
+                c.sync(directory);
+                assert!(c.private(talk), "{g}");
+                assert_eq!(
+                    c.view("private.json")["records"][talk],
+                    json!({"area": "mental_health", "from": "provider", "given": true})
+                );
+            }
+            // Where the state is lost, the directory says it again.
+            std::fs::remove_file(c.state_path()).unwrap();
+            c.sync(true);
+            assert!(
+                c.private(talk) && c.judged().get("labels_unreadable").is_none(),
+                "{g}"
+            );
+        }
+        let printed = c.labels().to_string();
+        assert!(!printed.contains("Sample Walk-in Room"), "{printed}");
+        c.mark(talk, Some(false));
+        c.sync(true);
+        assert!(!c.private(talk));
     }
 
     /// Every kind of label, where each is kept, and what is not labelled:
