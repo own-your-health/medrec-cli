@@ -669,8 +669,10 @@ medrec tables list                                  # what is kept, and of which
 - `tables list --json` has one row for each records folder it was read for,
   with `folder` (the folder's id) and `kept` (how many rows), and one row with
   neither, and null `version`, `date`, `bytes`, `rows` and `sha256`, when there
-  is none. `changed` is a file that does not read as it was written; it is
-  not used.
+  is none. `changed` is a file that does not read as it was written, and
+  `other_version` one that another version of medrec kept: neither is used.
+  medrec 0.9.7 does not use what 0.9.6 kept, so fetch it again after that
+  upgrade; a write says so on stderr until then.
 
 NPPES gives what providers reported to CMS. medrec is not affiliated with or
 endorsed by CMS.

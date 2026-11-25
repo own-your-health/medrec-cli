@@ -120,8 +120,9 @@ pub struct PersonViews {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub directory: Option<String>,
     /// The MD5 of the person's `provider-state.json`, absent when there is
-    /// none (0.9.7 and later). A reader need not check it: the pass that
-    /// writes it makes the views it changes.
+    /// none (0.9.7 and later). `private.json`, `code-names.json` and
+    /// `providers.json` are stale when it differs: a pass writes the file
+    /// before the views, and one cut short between them leaves these.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_state: Option<String>,
     pub row: Row,
@@ -282,8 +283,21 @@ pub(crate) fn sync_with(
     };
 
     let code_table = titles.as_ref().map(|_| crate::tables::Titles::identity());
-    let directory = directories
-        .and_then(|d| crate::labels::Directory::open(&crate::nppes::path(d, &h.folder_id)));
+    let directory = match directories
+        .map(|d| crate::labels::Directory::open(&crate::nppes::path(d, &h.folder_id)))
+    {
+        Some(Err(crate::nppes::Unused::OtherVersion)) => {
+            if !QUIET.load(Ordering::SeqCst) {
+                eprintln!(
+                    "note: the provider directory on this machine was kept by another version \
+                     of medrec, so this one does without it: `medrec tables fetch nppes` \
+                     replaces it"
+                );
+            }
+            None
+        }
+        d => d.and_then(Result::ok),
+    };
     let directory_made = directory.as_ref().map(|d| d.made());
 
     // Whose views stand: their files have the MD5s the views were made from.

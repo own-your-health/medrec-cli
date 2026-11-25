@@ -1163,7 +1163,8 @@ records carry or carried (`by_npi`), shown or not, and those of the printed
 names only one provider can be (`matched`, by record and text), with the newest
 directory's `directory`. It is not split: it holds private providers' names
 and roles with the rest. medrec judges what is private by it, in its own
-answers too. No other reader reads it or serves it. Nothing else in the folder
+answers too. No other reader reads it or serves it: one compares its MD5
+(When they are written, below). Nothing else in the folder
 says it again, so it stays when the views are removed, and an earlier medrec
 leaves it alone. `people.<id>.provider_state` in `views.json` is its MD5. A
 write is read back. When another machine wrote the file since it was read, the
@@ -1230,10 +1231,17 @@ A reader decides freshness by MD5, as Drive reports it (`md5Checksum`):
   | `overrides.json`'s MD5 from `overrides` | `events.json`, `bills.json`, `private.json`, `code-names.json`, `providers.json` |
   | a linked person's `index.json` or `text.json` MD5 from `linked` | `events.json`, `bills.json`, `private.json`, `code-names.json`, `providers.json` |
   | `marks.json`'s MD5 from `marks` (0.9.1 and later) | `bills.json`, `private.json`, `code-names.json`, `providers.json` |
+  | `provider-state.json`'s MD5 from `provider_state` (0.9.7 and later) | `private.json`, `code-names.json`, `providers.json` |
 
   No other view reads those files: `summary.json` and `documents.json`
   say nothing of payments or privacy, and a reader applies `bills.json`
-  and `private.json` to them as it answers (Readers, below).
+  and `private.json` to them as it answers (Readers, below). A pass writes
+  `provider-state.json` before the views, so one cut short between them
+  leaves these three stale. A reader compares its MD5 and does not read it,
+  so it cannot judge from the files what a label makes private: while the
+  person's `private.json` is missing or stale, one whose own rules judge the
+  files counts as having none for a person with a `provider-state.json`
+  (`private-not-prepared`, Readers, below).
 - `events.json`'s dates are those of the zone of the machine that wrote
   it (Events, below). That zone is no input `views.json` records: a
   change of it makes nothing stale, and the dates change with the next
@@ -1261,7 +1269,7 @@ A reader decides freshness by MD5, as Drive reports it (`md5Checksum`):
 | `people.<id>.linked` | For each person linked to this one (Events, below), the MD5s of their `index.json` and `text.json` as read, as `{"index", "text"}`, each `null` when the file is absent; `{}` when no one is linked (0.9.0 and later). |
 | `people.<id>.code_table` | The code table the person's names were made with (`icd10cm FY2027`); absent when the pass that made the views had none, whatever names it carried over (0.9.4 and later). A pass on a machine with another table makes the person's views again, which fills in the names; one on a machine with none leaves them. |
 | `people.<id>.directory` | Which provider directory the pass that made the views had: the last day it covers and when it was fetched, so that a newer one sorts after (0.9.7 and later). Absent when it had none. A pass on a machine with a newer one makes the person's views again; one with an older one or none leaves them. |
-| `people.<id>.provider_state` | The MD5 of the person's `provider-state.json`, absent when there is none (0.9.7 and later). A reader need not check it: the pass that writes the file makes the views it changes. |
+| `people.<id>.provider_state` | The MD5 of the person's `provider-state.json`, absent when there is none (0.9.7 and later). Another one makes three of the person's views stale (above). |
 | `row` | `documents`, `records`, `studies`, and `newest` and `last_import` when there are any: the person's line in `medrec_summary`'s people list, without `notes`. |
 | `records` | For each record kind, `{"shards": [[newest day, oldest day, count], …], "undated": count}`: its dated shards by number, and how many records its undated file holds. |
 | `timeline` | The timeline's shards, the same way. |
@@ -1752,7 +1760,8 @@ readers ship with medrec:
   - a reader that answers from the views without a current `private.json`
     for a person cannot tell which of their items are private: theirs is
     stale or absent (views from 0.9.0 or earlier), or the reader falls
-    back to the files and has no rules of its own. It holds back all of
+    back to the files and has no rules of its own, or rules that cannot
+    judge the person's provider labels. It holds back all of
     that person's items from answers about the whole household, with a
     `private-not-prepared` warning naming them, and includes them
     unmarked, with the same warning, in an answer about that person.

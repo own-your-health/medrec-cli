@@ -1038,7 +1038,7 @@ fn fetch_directory(
     }
     let offer = nppes::offer(&nppes::CMS)?;
     let path = nppes::path(dir, &h.folder_id);
-    if let Some(have) = nppes::Directory::load(&path) {
+    if let Ok(have) = nppes::Directory::load(&path) {
         if have.about.is_current(&offer, &wanted) {
             return Ok(have.about.fetched("unchanged"));
         }

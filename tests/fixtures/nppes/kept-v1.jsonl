@@ -1,0 +1,3 @@
+{"schema":"medrec-nppes/v1","url":"https://download.cms.gov/nppes/NPPES_Data_Dissemination_March_2026_V2.zip","month":"2026-03","date":"2026-03-08","bytes":1000,"sha256":"eba658d81814ab6f200c81373a7ddf9a8ea0588d0a6c5e349bee954004413055","rows":10,"fetched_at":"2026-03-20T12:00:00Z","wanted_sha256":"6e47fc5889e954dd6373b51e9ca1b7ee79c5f4e414ed3495e37e63b162bf74c5","kept":2,"kept_sha256":"025a721b3ddfae845b9da735da3ff89f4d9f40fe09e67967ae3c7a812615e159"}
+{"npi":"0000000006","organization":"EXAMPLE CLINIC LLC","other_organization":"EXAMPLE CARE","city":"SAMPLE CITY","state":"FL","phone":"5550100006","taxonomy":"000000000X"}
+{"npi":"0000000014","last":"SAMPLE","first":"TEST","city":"SAMPLE CITY","state":"FL","phone":"5550100014","taxonomy":"000000000X"}

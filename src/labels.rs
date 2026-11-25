@@ -189,9 +189,8 @@ struct Rows {
 }
 
 impl Directory {
-    /// None when nothing is kept, or the file is not as it was written.
-    pub fn open(path: &Path) -> Option<Directory> {
-        Some(Directory {
+    pub fn open(path: &Path) -> Result<Directory, nppes::Unused> {
+        Ok(Directory {
             stored: Stored::open(path)?,
             rows: OnceCell::new(),
         })
@@ -1291,7 +1290,7 @@ mod tests {
             c.put("Robin Example/text.json", fixture!("text.json"));
             let h: Household = serde_json::from_str(fixture!("household.json")).unwrap();
             c.keep(&Wanted::of([&c.index]), fixture!("directory.jsonl"));
-            assert!(Directory::open(&nppes::path(&c.directories(), &h.folder_id)).is_some());
+            assert!(Directory::open(&nppes::path(&c.directories(), &h.folder_id)).is_ok());
             c.put(
                 "views/views.json",
                 &json!({"schema": "medrec-views/v2", "medrec": "0.0.0", "household": "",

@@ -28,7 +28,10 @@ use crate::providers::npi_holds;
 pub const ID: &str = "nppes";
 pub const TITLE: &str = "Provider directory (NPPES)";
 pub const PUBLISHER: &str = "Centers for Medicare & Medicaid Services";
-const SCHEMA: &str = "medrec-nppes/v1";
+/// v1 is 0.9.6's, which says neither what it was asked for nor some of
+/// what is kept of a provider.
+const SCHEMA: &str = "medrec-nppes/v2";
+const FORMAT: &str = "medrec-nppes/";
 
 /// Where the file comes from, and the fewest rows it can have.
 #[derive(Debug, Clone, Copy)]
@@ -515,8 +518,8 @@ pub fn path(dir: &Path, folder_id: &str) -> PathBuf {
 
 /// Every kept file in `dir`: the folder it is for, and its first line, or
 /// `None` when it does not read.
-pub fn list(dir: &Path) -> Vec<(String, Option<Kept>)> {
-    let mut found: Vec<(String, Option<Kept>)> = std::fs::read_dir(dir)
+pub fn list(dir: &Path) -> Vec<(String, Result<Kept, Unused>)> {
+    let mut found: Vec<(String, Result<Kept, Unused>)> = std::fs::read_dir(dir)
         .into_iter()
         .flatten()
         .filter_map(|e| {
@@ -534,6 +537,16 @@ pub fn list(dir: &Path) -> Vec<(String, Option<Kept>)> {
     found
 }
 
+/// Why there is no directory to use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Unused {
+    Absent,
+    /// Another medrec's: whole, perhaps, and not in this one's format.
+    OtherVersion,
+    /// Not as it was written.
+    Changed,
+}
+
 /// A kept file as it was written, its rows not read yet.
 pub struct Stored {
     pub about: Kept,
@@ -542,16 +555,27 @@ pub struct Stored {
 }
 
 impl Stored {
-    /// None when nothing is kept, or the file is not as it was written.
-    pub fn open(path: &Path) -> Option<Stored> {
-        let file = std::fs::read(path).ok()?;
-        let at = file.iter().position(|b| *b == b'\n')? + 1;
-        let about: Kept = serde_json::from_slice(&file[..at]).ok()?;
-        (about.schema == SCHEMA && sha256_hex(&file[at..]) == about.kept_sha256).then_some(Stored {
-            about,
-            file,
-            at,
-        })
+    pub fn open(path: &Path) -> Result<Stored, Unused> {
+        let file = std::fs::read(path).map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => Unused::Absent,
+            _ => Unused::Changed,
+        })?;
+        let at = file
+            .iter()
+            .position(|b| *b == b'\n')
+            .ok_or(Unused::Changed)?
+            + 1;
+        let first: Value = serde_json::from_slice(&file[..at]).map_err(|_| Unused::Changed)?;
+        match first["schema"].as_str() {
+            Some(SCHEMA) => {}
+            Some(s) if s.starts_with(FORMAT) => return Err(Unused::OtherVersion),
+            _ => return Err(Unused::Changed),
+        }
+        let about: Kept = serde_json::from_value(first).map_err(|_| Unused::Changed)?;
+        if sha256_hex(&file[at..]) != about.kept_sha256 {
+            return Err(Unused::Changed);
+        }
+        Ok(Stored { about, file, at })
     }
 
     /// Where each row is, with its NPI and whether it is a person's: as
@@ -578,14 +602,17 @@ impl Stored {
 }
 
 impl Directory {
-    /// None when nothing is kept, or the file is not as it was written.
-    pub fn load(path: &Path) -> Option<Directory> {
+    pub fn load(path: &Path) -> Result<Directory, Unused> {
         let s = Stored::open(path)?;
         let providers: Vec<Provider> = s
             .lines()
             .map(|(at, _, _)| s.provider(at))
-            .collect::<Option<_>>()?;
-        (providers.len() as u64 == s.about.kept).then_some(Directory {
+            .collect::<Option<_>>()
+            .ok_or(Unused::Changed)?;
+        if providers.len() as u64 != s.about.kept {
+            return Err(Unused::Changed);
+        }
+        Ok(Directory {
             about: s.about,
             providers,
         })
@@ -954,6 +981,7 @@ mod tests {
 
     /// CMS's columns and invented providers.
     const ROWS: &str = include_str!("../tests/fixtures/nppes/npidata.csv");
+    const KEPT_V1: &str = include_str!("../tests/fixtures/nppes/kept-v1.jsonl");
     const PAGE_HTML: &str = include_str!("../tests/fixtures/nppes/page.html");
 
     /// How a zip's descriptors give their sizes.
@@ -1309,7 +1337,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let path = path(&dir, "f_aaaaaaaaaaaaaaaaaaaa");
         let w = wanted(&["0000000006"], &["FL"], &[]);
-        assert!(Directory::load(&path).is_none());
+        assert_eq!(Directory::load(&path).unwrap_err(), Unused::Absent);
         assert!(list(&dir).is_empty());
 
         let file = whole(ROWS);
@@ -1333,7 +1361,7 @@ mod tests {
         assert!(d.about.is_current(&offer_, &w));
         assert!(!d.about.is_current(&offer_, &Wanted::default()));
         let folder = "f_aaaaaaaaaaaaaaaaaaaa".to_string();
-        assert_eq!(list(&dir), [(folder.clone(), Some(d.about.clone()))]);
+        assert_eq!(list(&dir), [(folder.clone(), Ok(d.about.clone()))]);
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -1371,8 +1399,15 @@ mod tests {
         let last = changed.len() - 3;
         changed[last] ^= 1;
         std::fs::write(&path, changed).unwrap();
-        assert!(Directory::load(&path).is_none());
-        assert_eq!(list(&dir), [(folder, None)]);
+        assert_eq!(Directory::load(&path).unwrap_err(), Unused::Changed);
+        assert_eq!(list(&dir), [(folder.clone(), Err(Unused::Changed))]);
+
+        // One 0.9.6 kept is not one that was changed, and a fetch replaces it.
+        std::fs::write(&path, KEPT_V1).unwrap();
+        assert_eq!(Directory::load(&path).unwrap_err(), Unused::OtherVersion);
+        assert_eq!(list(&dir), [(folder.clone(), Err(Unused::OtherVersion))]);
+        fetch(&source, &offer_, &w, &path, &mut |_| {}).unwrap();
+        assert_eq!(list(&dir)[0].1.as_ref().unwrap().kept, 3);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
