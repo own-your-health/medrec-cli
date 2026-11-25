@@ -1828,11 +1828,19 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
             let mut parts = Vec::new();
             let mut unreadable: Vec<String> = Vec::new();
             let mut labels: Vec<String> = Vec::new();
+            let mut opened: Vec<serde_json::Value> = Vec::new();
             let mut in_error = 0;
             for p in medrec::people::selected(&h, person.as_deref())? {
                 let idx = f.index(p)?;
                 let gone: BTreeSet<&str> = medrec::standing::errors(&idx).collect();
                 let (v, events) = medrec::private::with_events(&f, &h, p, &idx)?;
+                // The clinicians the household opened, as it said them.
+                for o in f.marks(p).map(|m| m.clinicians).unwrap_or_default() {
+                    opened.push(serde_json::json!({
+                        "id": o.id, "clinician": format!("{} {}", o.initial, o.surname),
+                        "item": o.item, "at": o.at, "person": p.id, "person_name": p.name,
+                    }));
+                }
                 if v.get("labels_unreadable").is_some() {
                     labels.push(p.id.clone());
                 } else if v.get("marks_unreadable").is_some() {
@@ -1944,6 +1952,9 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
             }
             let shown = list.take(&items);
             let mut doc = serde_json::json!({ "items": shown, "parts": list.take(&parts) });
+            if !opened.is_empty() {
+                doc["clinicians_opened"] = opened.into();
+            }
             if in_error > 0 {
                 let n = medrec::standing::in_error(in_error);
                 note(cli, &n);
@@ -2001,6 +2012,13 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
                     table(
                         &serde_json::json!({"items": v["parts"]}),
                         &["date", "person_name", "kind", "not_shown", "title", "id"],
+                    );
+                }
+                if v.get("clinicians_opened").is_some() {
+                    println!();
+                    table(
+                        &serde_json::json!({"items": v["clinicians_opened"]}),
+                        &["at", "person_name", "clinician", "item", "id"],
                     );
                 }
             });

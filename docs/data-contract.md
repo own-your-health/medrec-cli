@@ -2481,7 +2481,10 @@ nothing is private.
   ties them to the area where no paper names them: `day` (the item is of the day
   of a practice's paper, and no more) or `linked` (the clinician is linked to
   such a practice). Absent where a paper names them, and on every other item. A
-  row of `medrec private list` has it, and its table says it in `from`.
+  row of `medrec private list` has it, and its table says it in `from`. The
+  list's `clinicians_opened` (absent when there are none) has the household's
+  clinician marks: `id`, `clinician` (initial and surname), `item`, `at`,
+  `person` and `person_name`.
 - **`heading`** (0.9.10 and later): `true` on a private record that is a heading
   (Panels, above): it has no entry in `tests.json`. Absent otherwise.
 - **What a source takes back still tells** (0.9.9 and later). Nothing opens

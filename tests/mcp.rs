@@ -3308,6 +3308,18 @@ fn a_clinician_a_paper_names_makes_claims_private_everywhere() {
     let marks: Value = serde_json::from_str(&marks).unwrap();
     assert_eq!(marks["clinicians"][0]["surname"], "SAMPLETON");
     assert_eq!(marks["clinicians"][0]["item"], later);
+    let list = e.ok(&["private", "list"]);
+    assert_eq!(list["clinicians_opened"][0]["clinician"], "E SAMPLETON");
+    assert_eq!(list["clinicians_opened"][0]["item"], later);
+    let row = |id: &str| {
+        list["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|i| i["id"] == id)
+            .cloned()
+    };
+    assert_eq!(row(HELD[4].0).unwrap()["learned"], "day");
     let again = e.ok(&["private", "unmark", later, "--clinician"]);
     assert_eq!(again["status"], "unchanged");
     let back = e.ok(&["private", "reset", billed, "--clinician"]);
@@ -4511,6 +4523,9 @@ fn a_dry_run_counts_what_would_be_private() {
         "opened": {"result": 1},
         "gone": {"event": 1, "record": 1},
         "given": {},
+        "clinician": {},
+        "clinician_day": 0,
+        "clinician_linked": 0,
         "parts": {},
     });
     assert_eq!(v["private"], want);
