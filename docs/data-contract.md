@@ -224,7 +224,7 @@ The last column is the FHIR element the value comes from.
 | `condition` | `abatement` | as written | `abatementDateTime` |
 | `medication` | `when` | as written | `authoredOn`; a fill's `whenHandedOver` or `whenPrepared`; a statement's `effectiveDateTime`, `effectivePeriod.start` or `dateAsserted` |
 | `medication` | `dosage` | text | first `dosageInstruction.text`, or a statement's `dosage.text` |
-| `medication` | `prescriber` | text | `requester.display`; on a fill, above |
+| `medication` | `prescriber` | text | `requester.display`; on a fill, its prescription's `requester`, below |
 | `medication` | `intent` | text | a request's `intent` |
 | `medication` | `quantity` | `{value, unit}` | a fill's `quantity` |
 | `medication` | `days_supply` | a number | a fill's `daysSupply.value` |
