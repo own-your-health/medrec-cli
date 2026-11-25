@@ -22,6 +22,9 @@ use crate::providers::Found;
 
 #[derive(Debug, Default, Serialize)]
 pub struct Reindexed {
+    /// Nothing was written.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub dry_run: bool,
     pub people: Vec<PersonReindexed>,
     pub claims: usize,
     pub reshaped: usize,
@@ -66,10 +69,18 @@ fn content(r: &Record) -> impl PartialEq + '_ {
 /// `key` is left as it is: re-keying is an import's to do. Bills and
 /// receipts gain the statement fields their text gives and they lack
 /// ([`crate::bill::backfill`]). The index is written only when something
-/// changed.
-pub fn claims(folder: &Folder, h: &Household, person: Option<&str>) -> Result<Reindexed, CliError> {
+/// changed, and never when `dry_run`: then this counts what it would do.
+pub fn claims(
+    folder: &Folder,
+    h: &Household,
+    person: Option<&str>,
+    dry_run: bool,
+) -> Result<Reindexed, CliError> {
     let tmp = pk_cli_drive::private_temp_dir("medrec-reindex")?;
-    let mut out = Reindexed::default();
+    let mut out = Reindexed {
+        dry_run,
+        ..Reindexed::default()
+    };
     for p in people::selected(h, person)? {
         let mut idx = folder.index(p)?;
         let raw_of = |r: &Record| r.provenance.iter().find_map(|pr| pr.raw_path.clone());
@@ -126,7 +137,7 @@ pub fn claims(folder: &Folder, h: &Household, person: Option<&str>) -> Result<Re
             row.providers_updated,
             row.statuses_updated,
         ];
-        if changed.iter().any(|n| *n > 0) {
+        if !dry_run && changed.iter().any(|n| *n > 0) {
             folder.save_index(p, &mut idx)?;
         }
         out.statements += row.statements;
@@ -180,7 +191,7 @@ fn statuses(idx: &mut PersonIndex, tmp: &Path) -> usize {
         }
         let mut now = r.clone();
         now.words.clear();
-        let mut shapes: Vec<Record> = Vec::new();
+        let mut shapes: Vec<(&String, Record)> = Vec::new();
         let mut all_read = true;
         for pr in &r.provenance {
             let Some(rel) = &pr.raw_path else { continue };
@@ -193,16 +204,23 @@ fn statuses(idx: &mut PersonIndex, tmp: &Path) -> usize {
             };
             now.words.extend(new.words.iter().cloned());
             if new.key == r.key {
-                shapes.push(new);
+                shapes.push((rel, new));
             }
         }
-        // The one the record's fields agree with wrote them. None does where
-        // one is shaped otherwise now, or where one did not read.
-        let wrote = shapes
-            .iter()
-            .position(|n| agrees(n, r))
-            .or_else(|| (all_read && !shapes.is_empty()).then_some(0));
-        if let Some(new) = wrote.map(|i| shapes.swap_remove(i)) {
+        // The one that wrote the fields, where the record says which. Else
+        // the one they agree with; none does where one is shaped otherwise
+        // now, or where one did not read.
+        let of = |p: &String| r.provenance.iter().any(|q| q.raw_path.as_ref() == Some(p));
+        let wrote = match r.fields_from.as_ref().filter(|p| of(p)) {
+            Some(path) => shapes.iter().position(|(p, _)| *p == path),
+            None => shapes
+                .iter()
+                .position(|(_, n)| agrees(n, r))
+                .or_else(|| (all_read && !shapes.is_empty()).then_some(0)),
+        };
+        if let Some((path, new)) = wrote.map(|i| shapes.swap_remove(i)) {
+            let several = r.provenance.len() > 1 && !new.words.is_empty();
+            now.fields_from = several.then(|| path.clone());
             now.status = new.status;
             now.fields = new.fields;
             // A fill's is its prescription's.

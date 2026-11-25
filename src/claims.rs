@@ -861,6 +861,7 @@ mod tests {
             fields: fields.as_object().cloned().unwrap_or_default(),
             providers: Vec::new(),
             words: Vec::new(),
+            fields_from: None,
             documents: Vec::new(),
             provenance: Vec::new(),
         }

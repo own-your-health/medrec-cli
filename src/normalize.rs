@@ -59,7 +59,7 @@ pub const FIELDS: &[(&str, &[&str])] = &[
             "category",
             "categories",
             "abatement",
-            "recorder",
+            "abatement_text",
         ],
     ),
     (
@@ -92,7 +92,6 @@ pub const FIELDS: &[(&str, &[&str])] = &[
             "verification_status",
             "criticality",
             "reaction",
-            "recorder",
         ],
     ),
     (
@@ -283,7 +282,10 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
                 first(r, "category").map(concept_text),
             );
             put(&mut fields, "categories", categories(r));
-            put(&mut fields, "abatement", when_text(r, "abatement"));
+            put_str(&mut fields, "abatement", path_str(r, "abatementDateTime"));
+            if !fields.contains_key("abatement") {
+                put(&mut fields, "abatement_text", when_text(r, "abatement"));
+            }
         }
         "MedicationRequest" => {
             let (start, end) = dosage_bounds(r);
@@ -549,6 +551,7 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
         fields,
         providers: Vec::new(),
         words: words.into_iter().collect(),
+        fields_from: None,
         documents: Vec::new(),
         provenance: vec![provenance],
     })
@@ -578,7 +581,7 @@ fn word(
             .flatten()
             .filter_map(|c| c.as_str().map(str::to_string))
             .collect(),
-        abatement: text("abatement"),
+        abatement: text("abatement").or_else(|| text("abatement_text")),
         end: text("end"),
         end_of: text("end_of"),
     })
@@ -592,8 +595,8 @@ pub const WORD_TYPES: &[&str] = &[
     "MedicationStatement",
 ];
 
-/// What a condition and an allergy say alike: when it began, when and by whom
-/// it was written down, and how sure they are.
+/// What a condition and an allergy say alike: when it began, when it was
+/// written down, and how sure they are.
 fn stated(fields: &mut Map<String, Value>, r: &Value) {
     put(fields, "onset", when_text(r, "onset"));
     put_str(
@@ -605,11 +608,6 @@ fn stated(fields: &mut Map<String, Value>, r: &Value) {
         fields,
         "verification_status",
         r.get("verificationStatus").map(code_or_concept_text),
-    );
-    put_str(
-        fields,
-        "recorder",
-        path_str(r, "recorder.display").or_else(|| path_str(r, "asserter.display")),
     );
 }
 
@@ -687,7 +685,8 @@ fn categories(r: &Value) -> Option<Value> {
 }
 
 /// The first start of a prescription's dosages, and the last end when each
-/// that has a period has an end.
+/// that has a period has an end: by their days, since times as written do not
+/// sort.
 fn dosage_bounds(r: &Value) -> (Option<&str>, Option<&str>) {
     let periods: Vec<&Value> = r
         .get("dosageInstruction")
@@ -696,9 +695,13 @@ fn dosage_bounds(r: &Value) -> (Option<&str>, Option<&str>) {
         .flatten()
         .filter_map(|d| path(d, "timing.repeat.boundsPeriod"))
         .collect();
-    let start = periods.iter().filter_map(|p| path_str(p, "start")).min();
+    let day = |s: &&str| s.get(..10).unwrap_or(s).to_string();
+    let starts = periods.iter().filter_map(|p| path_str(p, "start"));
     let ends: Option<Vec<&str>> = periods.iter().map(|p| path_str(p, "end")).collect();
-    (start, ends.and_then(|e| e.into_iter().max()))
+    (
+        starts.min_by_key(day),
+        ends.and_then(|e| e.into_iter().max_by_key(day)),
+    )
 }
 
 /// The first end a medicine's source gives, and what of it ends.
@@ -1273,31 +1276,41 @@ mod tests {
             "verification_status",
             "categories",
             "abatement",
-            "recorder",
+            "abatement_text",
         ];
         assert_eq!(
             fields("cond-period", CONDITION),
             json!({"onset": "2019-04 – 2019-06", "recorded": "2020-01-15",
-                "verification_status": "Confirmed", "recorder": "Example Recorder",
+                "verification_status": "Confirmed",
                 "categories": ["problem-list-item", "health-concern", "Example words"],
-                "abatement": "until 2021-02-03"})
+                "abatement_text": "until 2021-02-03"})
         );
         assert_eq!(
             fields("cond-age", CONDITION),
-            json!({"onset": "12 years", "recorded": "2020-01-15", "recorder": "Example Asserter",
-                "categories": ["encounter-diagnosis"], "abatement": "14 years – 15 years"})
+            json!({"onset": "12 years", "recorded": "2020-01-15",
+                "categories": ["encounter-diagnosis"], "abatement_text": "14 years – 15 years"})
         );
         assert_eq!(
             fields("cond-words", CONDITION),
             json!({"onset": "some years ago", "recorded": "2018-03-04",
                 "verification_status": "entered-in-error",
-                "categories": ["problem-list-item"], "abatement": "yes"})
+                "categories": ["problem-list-item"], "abatement_text": "yes"})
         );
         assert_eq!(
             fields("allergy-refuted", CONDITION),
-            json!({"onset": "5 years", "recorded": "2017-05-06",
-                "verification_status": "refuted", "recorder": "Example Recorder"})
+            json!({"onset": "5 years", "recorded": "2017-05-06", "verification_status": "refuted"})
         );
+        // Who wrote it down is no field: a provider a record prints is one its
+        // privacy is judged by.
+        for r in ["cond-period", "cond-age", "allergy-refuted"] {
+            let text = serde_json::to_string(&rec(r).fields).unwrap();
+            assert!(!text.contains("Example Recorder") && !text.contains("Example Asserter"));
+        }
+        let mut dated = all[0].clone();
+        dated["abatementDateTime"] = json!("2021-02-03");
+        let dated = record(&dated, prov()).unwrap().fields;
+        assert_eq!(dated["abatement"], "2021-02-03");
+        assert!(!dated.contains_key("abatement_text"));
         const MEDICINE: &[&str] = &[
             "start",
             "end",
@@ -1311,6 +1324,17 @@ mod tests {
             json!({"start": "2024-01-10", "end": "2024-03-11T09:30:00Z", "end_of": "dosage",
                 "categories": ["community"], "status_reason": "Sample reason", "reported": true})
         );
+        // Written with and without a time, the days decide.
+        let mut mixed = all[4].clone();
+        let bounds = |m: &mut Value, i: usize, start: &str, end: &str| {
+            m["dosageInstruction"][i]["timing"]["repeat"]["boundsPeriod"] =
+                json!({"start": start, "end": end});
+        };
+        bounds(&mut mixed, 0, "2024-01-10T23:00:00-05:00", "2024-03-11");
+        bounds(&mut mixed, 1, "2024-01-11", "2024-03-10T23:30:00-05:00");
+        let mixed = record(&mixed, prov()).unwrap().fields;
+        assert_eq!(mixed["start"], "2024-01-10T23:00:00-05:00");
+        assert_eq!(mixed["end"], "2024-03-11");
         // One dosage goes on: the prescription's own end is the one there is.
         assert_eq!(
             fields("med-prescription", MEDICINE),

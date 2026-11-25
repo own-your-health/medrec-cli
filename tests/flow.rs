@@ -2894,8 +2894,16 @@ fn a_record_keeps_what_each_source_says_of_its_status() {
     // A change at one is its word, and writes the record.
     let newer = stream("two", 2, "inactive", "stopped");
     let changed = ["inactive", "fakeprov-one resolved", "fakeprov-two inactive"];
+    let before = std::fs::read(&path).unwrap();
     import(&newer);
     assert_eq!(said("Sample stiffness"), changed);
+    // An import cut short after its raw files, and run again.
+    std::fs::write(&path, before).unwrap();
+    assert_eq!(said("Sample stiffness"), condition);
+    import(&newer);
+    assert_eq!(said("Sample stiffness"), changed);
+    let r = import(&newer);
+    assert_eq!(r["records_updated"], 0, "{r}");
     import(&one);
     assert_eq!(said("Sample stiffness"), changed);
     assert_eq!(base.ok(&["reindex"])["statuses_updated"], 0);
@@ -2906,13 +2914,14 @@ fn a_record_keeps_what_each_source_says_of_its_status() {
     let mut old = full.clone();
     for r in old["records"].as_array_mut().unwrap() {
         r.as_object_mut().unwrap().remove("words");
+        r.as_object_mut().unwrap().remove("fields_from");
         let kind = r["kind"].as_str().unwrap().to_string();
         let f = r["fields"].as_object_mut().unwrap();
         for k in [
             "onset",
             "recorded",
             "categories",
-            "recorder",
+            "abatement_text",
             "start",
             "end",
             "end_of",
@@ -2921,23 +2930,45 @@ fn a_record_keeps_what_each_source_says_of_its_status() {
         ] {
             f.remove(k);
         }
-        if kind == "condition" {
-            f.remove("abatement");
-        }
         if kind == "allergy" {
             f.remove("verification_status");
         }
     }
     std::fs::write(&path, serde_json::to_string(&old).unwrap()).unwrap();
+    let kept = std::fs::read(&path).unwrap();
+    let r = base.ok(&["reindex", "--dry-run"]);
+    assert_eq!(
+        (r["statuses_updated"].as_u64(), r["dry_run"].as_bool()),
+        (Some(7), Some(true)),
+        "{r}"
+    );
+    assert_eq!(
+        std::fs::read(&path).unwrap(),
+        kept,
+        "a dry run writes nothing"
+    );
     let r = base.ok(&["reindex"]);
     assert_eq!(r["statuses_updated"], 7, "{r}");
+    assert!(r.get("dry_run").is_none());
     assert_eq!(read()["records"], full["records"]);
     assert_eq!(base.ok(&["reindex"])["statuses_updated"], 0);
-    // Or the next import of each, which serves the same versions.
+    // Or the next import of each, which serves the same versions: with no
+    // writer named, the first to come writes, and then none changes it.
     std::fs::write(&path, serde_json::to_string(&old).unwrap()).unwrap();
-    import(&one);
     import(&newer);
-    assert_eq!(read()["records"], full["records"]);
+    import(&one);
+    let words = |v: &Value| -> Vec<Value> {
+        let records = v["records"].as_array().unwrap();
+        records.iter().map(|r| r["words"].clone()).collect()
+    };
+    assert_eq!(words(&read()), words(&full));
+    assert_eq!(said("Sample stiffness"), changed);
+    for s in [&newer, &one, &newer] {
+        let r = import(s);
+        assert_eq!(r["records_updated"], 0, "{r}");
+    }
+    assert_eq!(base.ok(&["reindex"])["statuses_updated"], 0);
+    let full = read();
 
     // What was said stays where its raw file no longer reads.
     let raw = base.records().join("Robin Testperson/Records/fakeprov-two");

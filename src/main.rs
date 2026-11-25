@@ -118,10 +118,11 @@ enum Command {
     /// Check every indexed file is in the folder with the hash the index
     /// recorded.
     Verify(VerifyArgs),
-    /// Shape every claim again and read every record's providers again from
-    /// the filed raw resources, and read bills' and receipts' statements
-    /// again, as this medrec's import does: once after an upgrade that
-    /// changes them.
+    /// Shape every claim again, and read every record's providers and every
+    /// condition's, allergy's and medicine's fields and what each source says
+    /// of it again, from the filed raw resources, and read bills' and
+    /// receipts' statements again, as this medrec's import does: once after
+    /// an upgrade that changes them.
     Reindex(ReindexArgs),
     /// The views: each person's records cut into small files under views/,
     /// for readers that cannot parse a whole index at once. medrec brings
@@ -904,6 +905,9 @@ struct ReindexArgs {
     /// Only this person's records (name or id).
     #[arg(long)]
     person: Option<String>,
+    /// Count what would change, and write nothing.
+    #[arg(long)]
+    dry_run: bool,
 }
 
 #[derive(Args, Debug)]
@@ -1246,10 +1250,19 @@ fn run(cli: &Cli) -> Result<(), CliError> {
         }
         Command::Reindex(a) => {
             let cfg = load(&store, cli)?;
-            let f = Folder::open(&cfg, Access::Write)?;
+            // A dry run reads what a run would, and takes no lock.
+            let access = if a.dry_run {
+                Access::Fresh
+            } else {
+                Access::Write
+            };
+            let f = Folder::open(&cfg, access)?;
             let h = f.household()?;
-            let r = medrec::reindex::claims(&f, &h, a.person.as_deref())?;
+            let r = medrec::reindex::claims(&f, &h, a.person.as_deref(), a.dry_run)?;
             output::emit(json, "reindex", to_value(&r), |_| {
+                if r.dry_run {
+                    println!("nothing was written; a run would do this:");
+                }
                 println!(
                     "{} claims: {} shaped again, {} unchanged, {} with no raw file; {} bills and receipts read again; {} records gained or changed what is said of their providers; {} conditions, allergies and medicines what is said of their status",
                     r.claims, r.reshaped, r.unchanged, r.without_raw, r.statements, r.providers_updated, r.statuses_updated

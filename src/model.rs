@@ -418,6 +418,10 @@ pub struct Record {
     /// that can differ between them. A fill has none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub words: Vec<Word>,
+    /// The raw file its status and fields are of, where it has words and
+    /// several provenances.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fields_from: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub documents: Vec<String>,
     pub provenance: Vec<Provenance>,
