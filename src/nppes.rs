@@ -181,6 +181,8 @@ pub struct Kept {
     pub rows: u64,
     pub fetched_at: String,
     pub wanted_sha256: String,
+    /// Those it was asked for, whether CMS's file has them or not.
+    pub npis: BTreeSet<String>,
     /// The states every organization was kept of, and with the people below
     /// every person of those names.
     pub states: BTreeSet<String>,
@@ -466,6 +468,7 @@ pub fn fetch(
         month: offer.month.clone(),
         fetched_at: crate::model::now_rfc3339(),
         wanted_sha256: wanted.sha256(),
+        npis: wanted.npis.clone(),
         states: wanted.states.clone(),
         people: wanted.people.clone(),
         ..about
@@ -728,6 +731,7 @@ fn read_zip(
         rows,
         fetched_at: String::new(),
         wanted_sha256: String::new(),
+        npis: BTreeSet::new(),
         states: BTreeSet::new(),
         people: BTreeSet::new(),
         kept,
@@ -930,6 +934,7 @@ pub(crate) fn keep_rows(path: &Path, date: &str, wanted: &Wanted, rows: &str) {
         rows: 1,
         fetched_at: format!("{date}T12:00:00Z"),
         wanted_sha256: wanted.sha256(),
+        npis: wanted.npis.clone(),
         states: wanted.states.clone(),
         people: wanted.people.clone(),
         kept: rows.lines().count() as u64,

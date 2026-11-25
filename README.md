@@ -642,7 +642,7 @@ medrec tables list                                  # what is kept, and of which
   https, for the page that lists the file, the file's size, and the whole
   file. No name or number is looked up over the network.
 - **What is kept**, in `~/.cache/medrec/directory` and never in the records
-  folder: the providers whose NPI the records carry, the organizations of the
+  folder: the rows of the providers whose NPI the records carry, the organizations of the
   states the records' own provider addresses are in, and the people of those
   states whose surname and first initial a record prints with no NPI. The zip
   and the files in it are never on disk: they are read as they arrive.
@@ -660,7 +660,9 @@ medrec tables list                                  # what is kept, and of which
   write`, or let the next write do it. A machine with no directory keeps the
   labels another wrote, and adds none.
 - The kept rows are public ones, but which people are among them follows from
-  the records. `medrec cache clear` removes them.
+  the records. `medrec cache clear` removes them. The labels taken from them
+  stay in the records folder: in `views/`, and by NPI, private providers' with
+  the rest, in each person's `provider-state.json`.
 - `tables list --json` has one row for each records folder it was read for,
   with `folder` (the folder's id) and `kept` (how many rows), and one row with
   neither, and null `version`, `date`, `bytes`, `rows` and `sha256`, when there

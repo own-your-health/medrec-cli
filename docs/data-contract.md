@@ -24,6 +24,8 @@ views/                        each person's records cut into small files, for re
   index.json                  the person's index (documents, records, studies, imports)
   text.json                   extracted text per document
   overrides.json              the household's decisions on events (0.9.0 and later)
+  marks.json                  the household's payments and private marks (0.9.1 and later)
+  provider-state.json         what a provider directory gave (0.9.6 and later)
   Documents/<YYYY>/<YYYY-MM-DD>_<type>_<org>_<details>_<original name>
   Claims/<YYYY>/              EOBs, bills and receipts, named the same way
   Imaging/<YYYY-MM-DD>_<modality>_<body part>_<facility>/
@@ -984,7 +986,6 @@ views/<person id>/bills.json             0.9.1 and later
 views/<person id>/private.json           0.9.1 and later
 views/<person id>/code-names.json        0.9.4 and later, when there are any
 views/<person id>/providers.json         0.9.6 and later, when there are any
-views/<person id>/provider-state.json    0.9.6 and later, when there are any
 ```
 
 A person's directory is named by their id in `household.json`, not their
@@ -1119,7 +1120,8 @@ provider has no `providers.json`.
   about that person, and never in one about the whole household.
 - **Machines** (README, "Provider directory"). What a directory gave is kept
   in `provider-state.json` (below), so what is labelled and what is private do
-  not depend on which machine wrote last. One with no directory, or an older
+  not depend on which machine wrote last. Every machine that writes the folder
+  needs 0.9.6 or later, as for `providers` in an index. One with no directory, or an older
   one than the last, keeps what is there for the NPIs and names still printed,
   and splits it by what is private now; the older one adds providers whose NPI
   nothing is known of. A newer one replaces what it has, and takes away only
@@ -1129,16 +1131,20 @@ provider has no `providers.json`.
   no warning. Nothing of it is in `events.json`, `bills.json` or
   `documents.json`.
 
-**`provider-state.json`** (`medrec-provider-state/v1`) is medrec's own: the
-label of each NPI the person's records carry (`by_npi`), shown or not, and
-those of the printed names only one provider can be (`matched`, by record and
-text), with the newest directory's `directory`. medrec judges what is private
-by it, in its own answers too. No other reader uses it. When `files` has it
-and it does not read, a pass with no directory says so
-(`labels_unreadable`, Private, below) and keeps a state that says it is
-`lost`, until a machine with a directory writes. Removing `views/` removes it:
-fetch the directory before the next pass, or what labels made private is open
-until a machine with one writes.
+**`provider-state.json`** (`medrec-provider-state/v1`), in the person's folder
+rather than in `views/`, is medrec's own: the label of each NPI the person's
+records carry (`by_npi`), shown or not, and those of the printed names only
+one provider can be (`matched`, by record and text), with the newest
+directory's `directory`. It is not split: it holds private providers' names
+and roles with the rest. medrec judges what is private by it, in its own
+answers too. No other reader reads it or serves it. Nothing else in the folder
+says it again, so it stays when the views are removed, and an earlier medrec
+leaves it alone. `people.<id>.provider_state` in `views.json` is its MD5. When
+it does not read, or is gone and the views were made with one, what labels
+make private is not known: `private.json` and medrec's own answers say
+`labels_unreadable` (Private, below), and the state says `lost`, until a pass
+has a directory that was asked of every NPI the records carry (`medrec tables
+fetch nppes`, then `medrec views write`).
 
 ### When they are written
 
@@ -1223,6 +1229,7 @@ A reader decides freshness by MD5, as Drive reports it (`md5Checksum`):
 | `people.<id>.linked` | For each person linked to this one (Events, below), the MD5s of their `index.json` and `text.json` as read, as `{"index", "text"}`, each `null` when the file is absent; `{}` when no one is linked (0.9.0 and later). |
 | `people.<id>.code_table` | The code table the person's names were made with (`icd10cm FY2027`); absent when the pass that made the views had none, whatever names it carried over (0.9.4 and later). A pass on a machine with another table makes the person's views again, which fills in the names; one on a machine with none leaves them. |
 | `people.<id>.directory` | Which provider directory the pass that made the views had: the last day it covers and when it was fetched, so that a newer one sorts after (0.9.6 and later). Absent when it had none. A pass on a machine with a newer one makes the person's views again; one with an older one or none leaves them. |
+| `people.<id>.provider_state` | The MD5 of the person's `provider-state.json`, absent when there is none (0.9.6 and later). A reader need not check it: the pass that writes the file makes the views it changes. |
 | `row` | `documents`, `records`, `studies`, and `newest` and `last_import` when there are any: the person's line in `medrec_summary`'s people list, without `notes`. |
 | `records` | For each record kind, `{"shards": [[newest day, oldest day, count], …], "undated": count}`: its dated shards by number, and how many records its undated file holds. |
 | `timeline` | The timeline's shards, the same way. |
@@ -1630,8 +1637,8 @@ nothing is private.
 - **`labels_unreadable`** (0.9.6 and later): `true` when what a provider label
   makes private is not known (`provider-state.json`, above). Absent otherwise.
   `marks_unreadable` is `true` with it, so a reader that does not know it
-  holds everything back too. It ends with the next pass on a machine with the
-  provider directory.
+  holds everything back too. It ends when a pass has a provider directory that
+  was asked of every NPI the person's records carry.
 
 ## Readers
 

@@ -9,9 +9,9 @@
 //! What private items say stays with them: a label in a private area, and
 //! what only private items give, are in the file's `private` part.
 //!
-//! What the directory gave is kept beside it (`provider-state.json`), so a
-//! machine with no directory, or an older one, judges and labels as the one
-//! that has it.
+//! What the directory gave is kept in the person's folder
+//! (`provider-state.json`), so a machine with no directory, or an older one,
+//! judges and labels as the one that has it.
 
 use std::cell::OnceCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -29,7 +29,6 @@ use crate::roles::{self, Service};
 
 pub const FILE: &str = "providers.json";
 pub const SCHEMA: &str = "medrec-providers/v1";
-pub const STATE: &str = "provider-state.json";
 pub const STATE_SCHEMA: &str = "medrec-provider-state/v1";
 
 /// The papers a label gives as its evidence, at most.
@@ -230,6 +229,12 @@ impl Directory {
         self.stored.provider(self.rows().at.get(npi)?.clone())
     }
 
+    /// Whether it was fetched for this NPI: without a row, CMS's file has
+    /// none.
+    fn asked(&self, npi: &str) -> bool {
+        self.stored.about.npis.contains(npi)
+    }
+
     fn table(&self) -> Table {
         let a = &self.stored.about;
         Table {
@@ -242,9 +247,10 @@ impl Directory {
 
 // ---------------------------------------------------------------- what the directory gave
 
-/// What a directory said of the providers a person's records name, as the
-/// last pass to write it had it: the labels of their NPIs, and those of the
-/// printed names only one provider can be. medrec's own; no reader uses it.
+/// A person's `provider-state.json`: what a directory said of the providers
+/// their records name, the labels of their NPIs and those of the printed
+/// names only one provider can be. Nothing else in the folder says it again,
+/// so it is not one of the views. medrec's own; no reader uses it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct State {
     schema: String,
@@ -257,8 +263,9 @@ pub struct State {
     /// By record, then by the text it prints.
     #[serde(default)]
     matched: BTreeMap<String, BTreeMap<String, Label>>,
-    /// The state before this one did not read and no directory replaced it:
-    /// which of the records a label makes private is not known.
+    /// The state before this one did not read, and no directory has been
+    /// asked of every NPI since: which of the records a label makes private is
+    /// not known.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     lost: bool,
 }
@@ -266,10 +273,10 @@ pub struct State {
 /// The state the last pass left.
 #[derive(Debug, Clone)]
 pub enum Last {
-    /// None, and there never was one.
+    /// None, and the views were made with none.
     None,
     State(State),
-    /// There is one, and it does not read.
+    /// It does not read, or is gone.
     Unreadable,
 }
 
@@ -317,7 +324,6 @@ impl State {
             .as_ref()
             .is_some_and(|b| b.date > table.date);
         let mut now = before.still(idx);
-        now.lost = false;
         if !older {
             now.directory = Some(table);
         }
@@ -350,6 +356,7 @@ impl State {
             }
         }
         now.matched.retain(|_, m| !m.is_empty());
+        now.lost &= !npis(idx).all(|n| now.by_npi.contains_key(n) || d.asked(n));
         if now.by_npi.is_empty() && now.matched.is_empty() {
             now.directory = None;
         }
@@ -358,13 +365,7 @@ impl State {
 
     /// What of it the records still print.
     fn still(mut self, idx: &PersonIndex) -> State {
-        let npis: BTreeSet<&str> = idx
-            .records
-            .iter()
-            .flat_map(|r| r.providers.iter().map(move |p| (r, p)))
-            .filter(|(r, p)| printed(r, &p.field).is_some())
-            .filter_map(|(_, p)| p.npi.as_deref())
-            .collect();
+        let npis: BTreeSet<&str> = npis(idx).collect();
         self.by_npi.retain(|npi, _| npis.contains(npi.as_str()));
         let records: HashMap<&str, &Record> =
             idx.records.iter().map(|r| (r.id.as_str(), r)).collect();
@@ -384,9 +385,15 @@ impl State {
         self.by_npi.is_empty() && self.matched.is_empty() && !self.lost
     }
 
-    /// Its view, none when there is nothing to keep.
-    pub fn view(&self) -> Option<Value> {
-        (!self.is_empty()).then(|| serde_json::to_value(self).expect("labels are plain JSON"))
+    /// Its file, none when there is nothing to keep.
+    pub fn text(&self) -> Option<String> {
+        (!self.is_empty()).then(|| serde_json::to_string(self).expect("labels are plain JSON"))
+    }
+
+    /// The file of a person none of whose records name a provider any more.
+    pub fn empty(&self) -> String {
+        let s = State::new(&self.person);
+        serde_json::to_string(&s).expect("labels are plain JSON")
     }
 
     /// Whether which records a label makes private is not known.
@@ -423,8 +430,21 @@ impl State {
     }
 }
 
+pub fn state_rel(p: &Person) -> String {
+    format!("{}/provider-state.json", p.folder)
+}
+
 fn printed<'a>(r: &'a Record, field: &str) -> Option<&'a str> {
     r.fields.get(field).and_then(Value::as_str)
+}
+
+/// The NPIs of the names the records print.
+fn npis(idx: &PersonIndex) -> impl Iterator<Item = &str> {
+    idx.records
+        .iter()
+        .flat_map(|r| r.providers.iter().map(move |p| (r, p)))
+        .filter(|(r, p)| printed(r, &p.field).is_some())
+        .filter_map(|(_, p)| p.npi.as_deref())
 }
 
 /// The texts of a record that print a person, each with the first field that
@@ -1337,6 +1357,14 @@ mod tests {
             ))
         }
 
+        fn state_path(&self) -> PathBuf {
+            self.root.join("Robin Example/provider-state.json")
+        }
+
+        fn state(&self) -> Value {
+            serde_json::from_str(&std::fs::read_to_string(self.state_path()).unwrap()).unwrap()
+        }
+
         /// What an answer judges private now.
         fn judged(&self) -> Value {
             let f = self.folder();
@@ -1414,7 +1442,7 @@ mod tests {
         // No NPI is anywhere in it. medrec keeps those beside it.
         assert!(!got.to_string().contains("00000000"));
         let want: Value = serde_json::from_str(fixture!("provider-state.json")).unwrap();
-        let state = c.view(STATE);
+        let state = c.state();
         assert_eq!(
             state,
             want,
@@ -1521,18 +1549,21 @@ mod tests {
     }
 
     /// The state is all that says which records a label made private. When
-    /// it is there and does not read, nothing of the person's is open.
+    /// it does not read, or is gone, nothing of the person's is open.
     #[test]
     fn a_state_that_does_not_read_holds_the_person_back() {
         type Damage = fn(&Case);
-        let remove: Damage = |c| std::fs::remove_file(c.stored(STATE)).unwrap();
-        let alter: Damage = |c| {
-            let p = c.stored(STATE);
-            let text = std::fs::read_to_string(&p).unwrap();
-            std::fs::write(p, text.replace("psychologist", "family doctor")).unwrap();
+        let remove: Damage = |c| std::fs::remove_file(c.state_path()).unwrap();
+        let cut: Damage = |c| {
+            let text = std::fs::read_to_string(c.state_path()).unwrap();
+            std::fs::write(c.state_path(), &text[..text.len() / 2]).unwrap();
         };
-        let index: Damage = |c| c.put("views/views.json", "{");
-        for (n, damage) in [remove, alter, index].into_iter().enumerate() {
+        let another: Damage = |c| {
+            let text = std::fs::read_to_string(c.state_path()).unwrap();
+            let text = text.replace(PERSON, "p_otheraaaaaaaaaaaaaaa");
+            std::fs::write(c.state_path(), text).unwrap();
+        };
+        for (n, damage) in [remove, cut, another].into_iter().enumerate() {
             let mut c = Case::new();
             c.sync(true);
             assert!(c.judged().get("labels_unreadable").is_none());
@@ -1543,7 +1574,7 @@ mod tests {
             // A pass without the directory says so too, and the next.
             for day in ["2026-04-01", "2026-04-02"] {
                 c.index.records[0].date = Some(day.into());
-                c.sync(false);
+                assert_eq!(c.sync(false), 1, "{n}");
                 let v = c.view("private.json");
                 assert_eq!(v["labels_unreadable"], true, "{n}");
                 assert_eq!(v["marks_unreadable"], true, "{n}");
@@ -1562,8 +1593,81 @@ mod tests {
         let c = Case::new();
         c.sync(false);
         assert!(c.judged().get("labels_unreadable").is_none());
-        c.put("views/views.json", "{");
-        assert!(c.judged().get("labels_unreadable").is_none());
+    }
+
+    /// Only a directory asked of every NPI the records print ends it.
+    #[test]
+    fn a_directory_not_asked_of_every_npi_leaves_a_lost_state_lost() {
+        let c = Case::new();
+        c.sync(true);
+        std::fs::write(c.state_path(), "{").unwrap();
+        let mut narrow = Wanted::of([&c.index]);
+        narrow.npis.remove("0000000014");
+        let without: String = fixture!("directory.jsonl")
+            .lines()
+            .filter(|l| !l.contains("0000000014"))
+            .map(|l| format!("{l}\n"))
+            .collect();
+        c.keep_of("2026-04-12", &narrow, &without);
+        assert_eq!(c.sync(true), 1);
+        assert_eq!(c.view("private.json")["labels_unreadable"], true);
+        assert!(c.labels()["private"].to_string().contains("Jordan Sample"));
+        assert_eq!(c.labels()["labels"], json!({}));
+        assert_eq!(c.sync(true), 0);
+        // Asked of it, and CMS's file has none: there is no more to know.
+        c.keep_of("2026-05-10", &Wanted::of([&c.index]), &without);
+        assert_eq!(c.sync(true), 1);
+        assert!(c.view("private.json").get("labels_unreadable").is_none());
+    }
+
+    /// The views are made from the state, not the state from the views.
+    #[test]
+    fn losing_the_views_loses_no_label() {
+        type Damage = fn(&Case);
+        let index: Damage = |c| c.put("views/views.json", "{");
+        let all: Damage = |c| std::fs::remove_dir_all(c.root.join("views")).unwrap();
+        // As a medrec before 0.9.6 leaves them.
+        let earlier: Damage = |c| {
+            let path = c.root.join("views/views.json");
+            let mut v: Value =
+                serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            v["medrec"] = "0.9.5".into();
+            v.as_object_mut().unwrap().remove("label_salt");
+            let p = v["people"][PERSON].as_object_mut().unwrap();
+            p.remove("provider_state");
+            p.remove("directory");
+            p["files"].as_object_mut().unwrap().remove(FILE);
+            std::fs::write(path, v.to_string()).unwrap();
+        };
+        for (n, damage) in [index, all, earlier].into_iter().enumerate() {
+            let c = Case::new();
+            c.sync(true);
+            let state = c.state();
+            damage(&c);
+            assert!(
+                c.judged()["records"]
+                    .get("r_talkaaaaaaaaaaaaaaaa")
+                    .is_some(),
+                "{n}"
+            );
+            assert_eq!(c.sync(false), 1, "{n}");
+            assert!(c.private("r_talkaaaaaaaaaaaaaaaa"), "{n}");
+            assert_eq!(c.state(), state, "{n}");
+            assert!(c.labels()["directory"].is_object(), "{n}");
+        }
+    }
+
+    /// A pass that was cut short after it wrote the state: the next makes
+    /// the views it is ahead of.
+    #[test]
+    fn views_behind_the_state_are_made_again() {
+        let c = Case::new();
+        c.sync(true);
+        let text = std::fs::read_to_string(c.state_path()).unwrap();
+        std::fs::write(c.state_path(), text.replace("0101", "0199")).unwrap();
+        assert_eq!(c.sync(false), 1);
+        assert!(c.labels().to_string().contains("555-010-0199"));
+        assert_eq!(c.sync(false), 0);
     }
 
     /// A view of another content than it was written with is made again, as

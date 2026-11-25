@@ -956,18 +956,17 @@ fn put_code_names(e: &Env, pid: &str, v: &Value) {
     put_view(e, pid, "code-names.json", v);
 }
 
-/// Puts one of a person's views there, and where it is.
-fn put_view(e: &Env, pid: &str, name: &str, v: &Value) -> std::path::PathBuf {
+/// Puts one of a person's views there.
+fn put_view(e: &Env, pid: &str, name: &str, v: &Value) {
     let bytes = serde_json::to_vec(v).unwrap();
     let md5 = medrec::hash::md5_hex(&bytes);
     let stored = medrec::viewfiles::stored_name(name, &md5);
     let at = e.records().join("views").join(pid).join(stored);
-    std::fs::write(&at, &bytes).unwrap();
+    std::fs::write(at, &bytes).unwrap();
     let path = e.records().join("views/views.json");
     let mut index: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
     index["people"][pid]["files"][name] = json!(md5);
     std::fs::write(path, serde_json::to_vec(&index).unwrap()).unwrap();
-    at
 }
 
 /// A label decides what is private: while a person's do not read, an answer
@@ -986,7 +985,6 @@ fn labels_that_do_not_read_hold_a_person_back() {
         .find(|p| p["name"] == "Alex Testperson")
         .unwrap()
         .clone();
-    let pid = alex["id"].as_str().unwrap();
     let folder = e.records().join(alex["folder"].as_str().unwrap());
     let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/labels");
     let mut idx: Value =
@@ -1010,12 +1008,13 @@ fn labels_that_do_not_read_hold_a_person_back() {
         serde_json::from_slice(&std::fs::read(fixtures.join("provider-state.json")).unwrap())
             .unwrap();
     state["person"] = alex["id"].clone();
-    let at = put_view(&e, pid, "provider-state.json", &state);
+    let at = folder.join("provider-state.json");
+    std::fs::write(&at, serde_json::to_vec(&state).unwrap()).unwrap();
     let v = ask(claims.clone());
     assert!(!shown(&v, talk), "{v}");
     assert!(shown(&v, "r_officevisitaaaaaaaaa"), "{v}");
 
-    std::fs::remove_file(at).unwrap();
+    std::fs::write(&at, "{").unwrap();
     let v = ask(claims);
     for r in ["r_talkaaaaaaaaaaaaaaaa", "r_officevisitaaaaaaaaa"] {
         assert!(!shown(&v, r), "{v}");

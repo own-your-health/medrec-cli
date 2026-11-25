@@ -119,6 +119,11 @@ pub struct PersonViews {
     /// `code_table` is (0.9.6 and later). A reader need not check it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub directory: Option<String>,
+    /// The MD5 of the person's `provider-state.json`, absent when there is
+    /// none (0.9.6 and later). A reader need not check it: the pass that
+    /// writes it makes the views it changes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_state: Option<String>,
     pub row: Row,
     pub records: BTreeMap<String, Run>,
     pub timeline: Run,
@@ -306,6 +311,7 @@ pub(crate) fn sync_with(
                 && (code_table.is_none() || was.code_table == code_table)
                 // An older directory's pass leaves what a newer one's made.
                 && was.directory >= directory_made
+                && store.md5(&crate::labels::state_rel(p))? == was.provider_state
                 && EVERY_PERSON.iter().all(|f| was.files.contains_key(*f))
             {
                 kept.insert(p.id.clone(), was.clone());
@@ -337,6 +343,7 @@ pub(crate) fn sync_with(
 
     let mut people = BTreeMap::new();
     let mut files = BTreeMap::new();
+    let mut states: Vec<(String, String)> = Vec::new();
     // Each person's files read once, whoever's events need them.
     let mut loaded: BTreeMap<String, Loaded> = BTreeMap::new();
     fn load(
@@ -438,11 +445,16 @@ pub(crate) fn sync_with(
             .filter(|o| o.schema == SCHEMA)
             .and_then(|o| o.people.get(&p.id));
         // A machine without the directory keeps what another's gave.
-        let state = crate::labels::State::of(
-            &me.idx,
-            directory.as_ref(),
-            last_state(store, old_text.as_deref(), p)?,
-        );
+        let had = last.is_some_and(|v| v.provider_state.is_some());
+        let before = last_state(store, p, had)?;
+        let state = crate::labels::State::of(&me.idx, directory.as_ref(), before);
+        let srel = crate::labels::state_rel(p);
+        let was = store.md5(&srel)?;
+        let text = state.text().or_else(|| was.as_ref().map(|_| state.empty()));
+        let provider_state = text.as_ref().map(|t| md5_hex(t.as_bytes()));
+        if let Some(t) = text.filter(|_| provider_state != was) {
+            states.push((srel, t));
+        }
         let mut private =
             crate::private::build(p, &me.idx, &events, private_marks, &state.areas(&me.idx));
         if state.lost() {
@@ -480,7 +492,7 @@ pub(crate) fn sync_with(
             events,
             code_names,
             providers,
-            provider_state: state.view(),
+            provider_state,
             directory: directory_made.clone(),
             // Absent without the table: the names carried are not all a
             // table would give, so a machine with one makes them again.
@@ -539,6 +551,11 @@ pub(crate) fn sync_with(
             uploads.len(),
             store.display_path(DIR)
         );
+    }
+    // Before the views made with them: a pass cut short here leaves views
+    // the next one makes again.
+    for (rel, text) in &states {
+        store.write_text(rel, text)?;
     }
     out.files_written = upload(store, &uploads)?;
     let index_bytes = json(&index);
@@ -676,42 +693,41 @@ fn last_code_names(
         .and_then(|t| crate::code_names::previous(&t, &p.id)))
 }
 
-/// What the last pass kept of the directory for the person, from the text of
-/// `views.json`.
+/// What the last pass kept of the directory for the person. `had` is whether
+/// its views were made with any: a file gone since is not one that never was.
 fn last_state(
     store: &crate::store::Store,
-    index: Option<&str>,
     p: &Person,
+    had: bool,
 ) -> Result<crate::labels::Last, CliError> {
-    use crate::labels::{Last, State, STATE};
-    let Some(index) = index else {
-        return Ok(Last::None);
+    use crate::labels::{Last, State};
+    let rel = crate::labels::state_rel(p);
+    let text = match store.read_text(&rel)? {
+        // The cache may be from before it was first written.
+        None if had => store.read_text_fresh(&rel)?,
+        t => t,
     };
-    let Ok(index) = serde_json::from_str::<ViewsIndex>(index) else {
-        // Nothing says which is the last: whether there was one at all.
-        let mark = format!("{}.", STATE.trim_end_matches(".json"));
-        let any = store
-            .list_here(&format!("{DIR}/{}", p.id))?
-            .iter()
-            .any(|e| e.rel.rsplit('/').next().unwrap_or("").starts_with(&mark));
-        return Ok(if any { Last::Unreadable } else { Last::None });
-    };
-    let named = index
-        .people
-        .get(&p.id)
-        .filter(|v| index.schema == SCHEMA && v.files.contains_key(STATE));
-    let Some(v) = named else {
-        return Ok(Last::None);
-    };
-    Ok(last_view(store, p, v, STATE)?
-        .and_then(|t| State::parse(&t, &p.id))
-        .map_or(Last::Unreadable, Last::State))
+    Ok(match text {
+        Some(t) => State::parse(&t, &p.id).map_or(Last::Unreadable, Last::State),
+        None if had => Last::Unreadable,
+        None => Last::None,
+    })
 }
 
 /// What is kept of the directory for the person, as the last pass wrote it.
 pub fn provider_state(f: &Folder, p: &Person) -> Result<crate::labels::State, CliError> {
-    let index = f.store.read_text(INDEX)?;
-    let last = last_state(&f.store, index.as_deref(), p)?;
+    let had = || -> Result<bool, CliError> {
+        Ok(f.store
+            .read_text(INDEX)?
+            .and_then(|t| serde_json::from_str::<ViewsIndex>(&t).ok())
+            .filter(|i| i.schema == SCHEMA)
+            .and_then(|i| Some(i.people.get(&p.id)?.provider_state.is_some()))
+            .unwrap_or(false))
+    };
+    let last = match last_state(&f.store, p, false)? {
+        crate::labels::Last::None if had()? => last_state(&f.store, p, true)?,
+        last => last,
+    };
     Ok(crate::labels::State::last(last, &p.id))
 }
 
@@ -942,7 +958,8 @@ pub(crate) struct EventsFrom {
     /// `providers.json`, when any provider of theirs has a label, and the
     /// provider directory on this machine it was made with.
     pub providers: Option<Value>,
-    pub provider_state: Option<Value>,
+    /// The MD5 of the person's `provider-state.json`.
+    pub provider_state: Option<String>,
     pub directory: Option<String>,
     pub overrides: Option<String>,
     pub marks: Option<String>,
@@ -974,9 +991,6 @@ pub(crate) fn person(
     }
     if let Some(v) = &from.providers {
         put(crate::labels::FILE, json(v));
-    }
-    if let Some(v) = &from.provider_state {
-        put(crate::labels::STATE, json(v));
     }
 
     let s = summary::of_index(
@@ -1272,6 +1286,7 @@ pub(crate) fn person(
         linked: from.linked,
         code_table: from.code_table,
         directory: from.directory,
+        provider_state: from.provider_state,
         row: Row {
             documents: row.documents,
             records: row.records,

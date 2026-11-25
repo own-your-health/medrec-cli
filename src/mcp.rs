@@ -549,10 +549,10 @@ enum Unreadable {
 struct PrivateItems {
     /// By id, with their area.
     areas: std::collections::BTreeMap<String, String>,
-    /// The people whose `marks.json` does not read, or whose provider labels
-    /// (`labels::STATE`) do not, by name as shown. Any of their items may be
-    /// one the household marked private or a label makes private, so an
-    /// answer about the whole household holds all of them back (`held`).
+    /// The people whose `marks.json` or `provider-state.json` does not read,
+    /// by name as shown. Any of their items may be one the household marked
+    /// private or a label makes private, so an answer about the whole
+    /// household holds all of them back (`held`).
     unreadable: Vec<(String, Unreadable)>,
     /// The record, document, event and study ids of those people, and
     /// every study with no report, which nothing judges.
@@ -646,7 +646,7 @@ impl PrivateItems {
                 Unreadable::Labels => (
                     "private-labels-unreadable",
                     format!(
-                        "{name}'s provider labels do not read, so which items they make private is not known: {name}'s items are left out of household-wide answers until medrec views write --all runs on a machine with the provider directory (medrec tables fetch nppes)"
+                        "{name}'s provider-state.json does not read, so which items provider labels make private is not known: {name}'s items are left out of household-wide answers until medrec tables fetch nppes, then medrec views write, run on one machine"
                     ),
                 ),
             };

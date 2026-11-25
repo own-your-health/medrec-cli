@@ -1683,7 +1683,7 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
                     note(
                         cli,
                         &format!(
-                            "{}'s provider labels do not read: what they make private is left out until `medrec views write --all` on a machine with the provider directory (`medrec tables fetch nppes`)",
+                            "{}'s provider-state.json does not read: what provider labels make private is left out until `medrec tables fetch nppes`, then `medrec views write`, on one machine",
                             medrec::printable(&p.name)
                         ),
                     );
