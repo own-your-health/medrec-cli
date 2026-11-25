@@ -3488,6 +3488,78 @@ fn a_results_parts_and_categories_come_with_an_import_and_by_reindex() {
     let _ = std::fs::remove_dir_all(&base.root);
 }
 
+/// An import says how many of the records its source gave before it does not
+/// have, and the names of what changed in those it updated.
+#[test]
+fn an_import_counts_what_is_not_served_and_names_what_changed() {
+    let base = Env::new("not-served");
+    setup(&base);
+    let import = |stream: &[Value], more: &[&str]| -> Value {
+        let stream: String = stream.iter().map(|v| format!("{v}\n")).collect();
+        let args = ["import", "--from", "fakeprov", "--from-profile", "adult1"];
+        let who = ["--patient", "pat-0001", "--person", "Robin"];
+        let args: Vec<&str> = args.iter().chain(&who).chain(more).copied().collect();
+        provider_env(&base, &stream).ok(&args)
+    };
+    let all: Vec<Value> = medrec::testdata::STREAM
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    let first = import(&all, &[]);
+    assert_eq!(first["records_not_served"], 0, "{first}");
+    assert_eq!(first["not_served"], serde_json::json!({}));
+    assert_eq!(first["updated"], serde_json::json!([]));
+
+    // Without its claim, and with a later word of its condition.
+    let is = |v: &Value, t: &str| v["resourceType"] == t;
+    let mut less: Vec<Value> = all.clone();
+    less.retain(|v| !is(v, "ExplanationOfBenefit"));
+    for v in &mut less {
+        if is(v, "Condition") {
+            v["clinicalStatus"] = serde_json::json!({"coding": [{"code": "resolved"}]});
+            v["meta"]["lastUpdated"] = "2026-03-06T00:00:00Z".into();
+        }
+        if let Some(n) = v.get_mut("counts") {
+            n.as_object_mut().unwrap().remove("ExplanationOfBenefit");
+        }
+    }
+    let second = import(&less, &[]);
+    assert_eq!(second["records_not_served"], 1, "{second}");
+    assert_eq!(second["not_served"], serde_json::json!({"claim": 1}));
+    let updated = second["updated"].as_array().unwrap();
+    assert_eq!(updated.len(), 1, "{second}");
+    assert_eq!(updated[0]["kind"], "condition");
+    let changed: Vec<&str> = updated[0]["changed"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert_eq!(changed, ["status", "words"]);
+    // It is kept, and counted by each import from then on.
+    let path = base.records().join("Robin Testperson/index.json");
+    let index: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let kept = index["records"].as_array().unwrap();
+    assert!(kept.iter().any(|r| r["kind"] == "claim"));
+    let runs = index["imports"].as_array().unwrap();
+    assert_eq!(runs.last().unwrap()["records_not_served"], 1);
+    let third = import(&less, &[]);
+    assert_eq!(third["records_not_served"], 1);
+    assert_eq!(third["updated"], serde_json::json!([]));
+
+    // Where a type was withheld none of it is counted, and an export of what
+    // changed since a day tells nothing.
+    let mut withheld = less.clone();
+    withheld.last_mut().unwrap()["skipped"] = serde_json::json!([
+        {"resource_type": "ExplanationOfBenefit", "reason": "withheld", "code": "forbidden"}]);
+    assert_eq!(import(&withheld, &[])["records_not_served"], 0);
+    let since = import(&less, &["--since", "2024-01-01"]);
+    assert!(since["records_not_served"].is_null(), "{since}");
+    assert!(since["not_served"].is_null());
+    assert_eq!(import(&all, &[])["records_not_served"], 0);
+    let _ = std::fs::remove_dir_all(&base.root);
+}
+
 #[test]
 fn a_claim_line_its_totals_leave_out_is_marked_and_kept_through_reindex() {
     let base = Env::new("claim-lines");

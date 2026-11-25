@@ -825,7 +825,8 @@ filed file's MD5 by its path in the study folder, for `verify`), `filed_at`,
 `pulled_at`, `imported_at`, `counts`, `skipped`, and the counts the import
 report gives (below): `resources_written`, `resources_unchanged`,
 `records_added`, `records_updated`, `records_unchanged`, `records_older`
-(0.2.7 and later; 0 in a run filed before), `documents_added`,
+(0.2.7 and later; 0 in a run filed before), `records_not_served` (0.9.10 and
+later; absent where it cannot be told), `documents_added`,
 `documents_duplicate` and `documents_unchanged`.
 
 **Provenance** (the `provenance/v1` fields of medical-common's
@@ -1133,7 +1134,7 @@ the month (UTC) the attempt started.
 | `exit_code` | The import's exit code (Import, below); `null` for a skip, and for a `needs_person` found before the import ran. |
 | `error` | `null`, or `{"code", "message", "remedy"[, "provider_message"]}` from the failing command's `--json` error (the family's error shape). `message` is at most 300 characters. When the provider's export answered that its sign-in ended (exit 3), `code` is `needs_person`, `message` and `remedy` are medrec's own (the remedy runs `medrec refresh sign-in <source>`), and the provider's own words, which can name the provider's own sign-in command, are in `provider_message` (0.7.0 and later; before 0.9.9 after `<cli> needs a sign-in`, which was there where the provider gave no text). `provider_message` is present only then, always (an empty string when the provider gave no text), and is at most 300 characters too. Show `remedy` as the one thing to do, and `provider_message` at most as detail. A profile name in `message`, `remedy` or `provider_message` is replaced, a provider profile's by `<provider profile>` and a medrec profile's by `<profile>`, so the folder holds none. medrec's own codes are `timeout` (a call outlived its limit), `interrupted` (the pass running it stopped before it finished) and `needs_person`. |
 | `import` | The `ImportRun` id in the person's `index.json`, when `ok`. |
-| `counts` | When `ok`, the import report's counts: `records_added`, `records_updated`, `records_unchanged`, `records_older`, `resources_written`, `resources_unchanged`, `documents_added`, `documents_duplicate`, `documents_unchanged`, `documents_same_statement`, `papers_unread` (0.9.9 and later). A count the import report gains later is added here too. |
+| `counts` | When `ok`, the import report's counts: `records_added`, `records_updated`, `records_unchanged`, `records_older`, `resources_written`, `resources_unchanged`, `documents_added`, `documents_duplicate`, `documents_unchanged`, `documents_same_statement`, `papers_unread` (0.9.9 and later) and `records_not_served` (0.9.10 and later; absent where it cannot be told). A count the import report gains later is added here too. |
 
 A scheduled pass records nothing for a source that is not due. A skip is
 recorded only when a request or a terminal command asked for that source.
@@ -2885,11 +2886,29 @@ characters and the invisible format characters that reorder or hide text
 | `records_updated` | records whose content or version changed |
 | `records_unchanged` | records the same as filed, a refresh included |
 | `records_older` | versions not later than the one filed, which stayed (0.2.7 and later) |
+| `records_not_served` | records this source gave before that this export does not have (0.9.10 and later), which are kept; `null` where that cannot be told |
 | `documents_added` | documents filed |
 | `documents_duplicate` | Binaries with the bytes of a document or rendering already filed |
 | `documents_unchanged` | renderings of a document already filed |
 | `documents_same_statement` | bills filed that are the same statement as a bill filed before (0.2.9 and later) |
 | `papers_unread` | raw files that describe papers, or are the bytes of one, and do not read (0.9.9 and later): the source's, where the stream says that something describing a paper is entered in error or carries an older version of it, and those of the person's other sources, where a paper is newly entered in error; otherwise 0 |
+
+`records_not_served` is of an export of all the source has: it is `null` with
+`--since`, where the source's folder has imports of another patient, and where a
+skip names neither a type nor a search. A record is not counted while any of
+its resources from this source is in the export, or may be among those it
+left out (its type was withheld or cut short, or it is itself among the skips),
+nor when it is about another person. So a record the source stopped giving is in
+the count of every import from then on. `not_served` (0.9.10 and later) has the
+count of each kind, `{<kind>: n}`, and is `null` when the count is.
+
+`updated` (0.9.10 and later) is a list of the records updated, `{id, kind,
+changed}`: `changed` has the names of what is other than it was, a member of the
+record (`status`, `code`, `display`, `date`, `words`, `errors`, `providers`,
+`documents`) or a field as `fields.<name>`, and no value. It is empty for a
+version that differs in nothing medrec reads, or only in what no reader shows
+(`given`). Several resources of one record make one entry, and a record about
+another person has none.
 
 A field added to `import/v1` is additive: a script reads a missing one as
 absent, never as an error.

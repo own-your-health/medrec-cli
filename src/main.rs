@@ -2738,6 +2738,9 @@ fn refresh_cmd(cli: &Cli, a: &RefreshArgs, store: &ConfigStore) -> Result<(), Cl
                 if let (Some(a), Some(u)) = (x.records_added, x.records_updated) {
                     line.push_str(&format!(" records +{a} ~{u}"));
                 }
+                if let Some(n) = x.records_not_served.filter(|n| *n > 0) {
+                    line.push_str(&format!(" ({n} not served any more)"));
+                }
                 if let Some(d) = x.documents_added {
                     line.push_str(&format!(" documents +{d}"));
                 }
@@ -3163,6 +3166,17 @@ fn papers_unread(n: usize) -> Option<String> {
     })
 }
 
+/// The names of what changed in records an import updated, with how many each
+/// did in.
+fn changed_names(updated: &[medrec::served::Updated]) -> Option<String> {
+    let mut each: BTreeMap<&str, usize> = BTreeMap::new();
+    for name in updated.iter().flat_map(|u| &u.changed) {
+        *each.entry(name.as_str()).or_default() += 1;
+    }
+    let names: Vec<String> = each.iter().map(|(k, n)| format!("{k} ({n})")).collect();
+    (!names.is_empty()).then(|| names.join(", "))
+}
+
 /// One import's lines for a person reading the terminal.
 fn print_import(r: &import::Report) {
     let organization = medrec::printable(&r.organization);
@@ -3185,6 +3199,17 @@ fn print_import(r: &import::Report) {
         }
         if let Some(n) = papers_unread(r.papers_unread) {
             println!("{n}");
+        }
+        if let Some(n) = r.records_not_served.filter(|n| *n > 0) {
+            let kinds = r.not_served.iter().flatten();
+            let kinds: Vec<String> = kinds.map(|(k, n)| format!("{n} {k}")).collect();
+            println!(
+                "{n} records {organization} gave before are not in this export ({}); they were kept",
+                kinds.join(", ")
+            );
+        }
+        if let Some(names) = changed_names(&r.updated) {
+            println!("changed in the updated records: {names}");
         }
         if r.records_older > 0 {
             println!(

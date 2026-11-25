@@ -82,6 +82,8 @@ pub struct AttemptRow {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub records_updated: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub records_not_served: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub documents_added: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
@@ -1495,6 +1497,7 @@ impl AttemptRow {
             error: a.error.as_ref().map(|x| x.code.clone()),
             records_added: count("records_added"),
             records_updated: count("records_updated"),
+            records_not_served: count("records_not_served"),
             documents_added: count("documents_added"),
             command: e.sign_in.needs_person.as_ref().map(|n| n.command.clone()),
         }

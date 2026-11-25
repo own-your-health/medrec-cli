@@ -683,6 +683,10 @@ pub struct ImportRun {
     /// 0 in a run filed before).
     #[serde(default)]
     pub records_older: usize,
+    /// Records the source gave before and did not now (0.9.10 and later),
+    /// where that can be told.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub records_not_served: Option<usize>,
     pub resources_written: usize,
     pub resources_unchanged: usize,
     pub documents_added: usize,

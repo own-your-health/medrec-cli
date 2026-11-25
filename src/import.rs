@@ -53,6 +53,7 @@ use crate::normalize;
 use crate::people;
 use crate::proc::{which, Bounded};
 use crate::providers::Found;
+use crate::served;
 use crate::stream::{self, Header, Item, RawResource, RecordsReader, Skip};
 use crate::version::{self, Filing};
 
@@ -299,6 +300,13 @@ pub struct Report {
     /// Versions of records older (`meta.lastUpdated`) than the ones filed,
     /// which stayed.
     pub records_older: usize,
+    /// Records the source gave before and not now, and how many of each kind
+    /// ([`served::not_served`]). `None` where that cannot be told, as of an
+    /// export of what changed since a day.
+    pub records_not_served: Option<usize>,
+    pub not_served: Option<BTreeMap<String, usize>>,
+    /// The records updated, and the names of what changed in each.
+    pub updated: Vec<served::Updated>,
     pub documents_added: usize,
     pub documents_duplicate: usize,
     /// Documents the source served again with other bytes but the same text
@@ -775,6 +783,8 @@ fn file_streamed(
 
     let mut owners = Vec::new();
     let (mut added, mut updated, mut unchanged, mut older) = (0, 0, 0, 0);
+    let before = index.records.clone();
+    let mut updated_ids = HashSet::new();
     let mut idless = Idless {
         incoming: resources
             .iter()
@@ -835,9 +845,15 @@ fn file_streamed(
                 }
             }
             let found = crate::providers::of(&v, &rec.fields, &mut held)?;
+            let of = rec.provenance[0].clone();
             match merge(&mut index, rec, found, filing, &mut idless) {
                 Merge::Added => added += 1,
-                Merge::Updated => updated += 1,
+                Merge::Updated => {
+                    updated += 1;
+                    let mut records = index.records.iter();
+                    let has = |r: &&Record| r.provenance.iter().any(|p| one_resource(p, &of));
+                    updated_ids.extend(records.find(has).map(|r| r.id.clone()));
+                }
                 Merge::Unchanged => unchanged += 1,
                 Merge::Older => older += 1,
             }
@@ -886,6 +902,18 @@ fn file_streamed(
     let import_id = ids::new("i");
     let mut skipped = trailer.skipped.clone();
     skipped.extend(skipped_large);
+    let whole = req.since.is_none() && header.since.is_none();
+    let here = written
+        .paths
+        .values()
+        .map(|p| current_of(p).unwrap_or_else(|| p.clone()));
+    let here: HashSet<String> = here.collect();
+    let not_served = whole.then(|| {
+        let patient = &header.patient.id;
+        served::not_served(&person, &index, &source_dir, patient, &here, &skipped)
+    });
+    let not_served = not_served.flatten();
+    let records_not_served = not_served.as_ref().map(|n| n.values().sum());
     index.imports.push(ImportRun {
         id: import_id.clone(),
         source_dir: source_dir.clone(),
@@ -903,6 +931,7 @@ fn file_streamed(
         records_updated: updated,
         records_unchanged: unchanged,
         records_older: older,
+        records_not_served,
         resources_written: written.written,
         resources_unchanged: written.unchanged,
         documents_added: filed.added,
@@ -936,6 +965,9 @@ fn file_streamed(
         records_updated: updated,
         records_unchanged: unchanged,
         records_older: older,
+        records_not_served,
+        not_served,
+        updated: served::updated(&person, &before, &index.records, &updated_ids),
         documents_added: filed.added,
         documents_duplicate: filed.duplicate,
         documents_unchanged: filed.unchanged,
