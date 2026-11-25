@@ -41,8 +41,8 @@ pub struct Correction {
     /// An event's own members when it was said, as a private mark's.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub members: Vec<String>,
-    /// When it was said: for a request, when it was asked. The list is in
-    /// this order.
+    /// When it was said: for a request, [`Request::at`]. The list is in this
+    /// order.
     pub at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub by: Option<String>,
@@ -87,6 +87,23 @@ pub enum Kind {
     Wrong,
 }
 
+impl Kind {
+    fn word(self) -> &'static str {
+        match self {
+            Kind::Set => "set",
+            Kind::Same => "same",
+            Kind::Different => "different",
+            Kind::Wrong => "wrong",
+        }
+    }
+
+    /// Whether it says what one label is: the latest such for a name and an
+    /// item is the one that counts.
+    fn says_what(self) -> bool {
+        matches!(self, Kind::Set | Kind::Wrong)
+    }
+}
+
 impl Correction {
     /// None for a kind only a later medrec knows.
     pub fn kind(&self) -> Option<Kind> {
@@ -99,10 +116,8 @@ impl Correction {
         }
     }
 
-    /// Whether it says what one label is: the latest such for a name and an
-    /// item is the one that counts.
     fn says_what(&self) -> bool {
-        matches!(self.kind(), Some(Kind::Set | Kind::Wrong))
+        self.kind().is_some_and(Kind::says_what)
     }
 
     fn names(&self) -> BTreeSet<&str> {
@@ -134,7 +149,8 @@ pub struct Undone {
     pub printed: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub item: Option<String>,
-    pub kind: Kind,
+    /// A [`Kind`]'s word, or one only a later medrec knows.
+    pub kind: String,
     pub at: String,
     /// What a later medrec writes here, kept as it is.
     #[serde(flatten)]
@@ -142,10 +158,17 @@ pub struct Undone {
 }
 
 impl Undone {
+    fn kind(&self) -> Option<Kind> {
+        [Kind::Set, Kind::Same, Kind::Different, Kind::Wrong]
+            .into_iter()
+            .find(|k| k.word() == self.kind)
+    }
+
     /// Whether what was taken back is of the same names and item as `c`,
     /// and of the same sort.
     fn was_of_the_same(&self, c: &Correction) -> bool {
-        matches!(self.kind, Kind::Set | Kind::Wrong) == c.says_what()
+        self.kind().map(Kind::says_what) == c.kind().map(Kind::says_what)
+            && c.kind().is_some()
             && self.item == c.item
             && self
                 .printed
@@ -164,12 +187,12 @@ fn secs(at: &str) -> i64 {
     time::parse(at).unwrap_or(0)
 }
 
-/// The request a correction came from, and when it was asked. No part of it
-/// is trusted.
+/// The request a correction came from. No part of it is trusted.
 #[derive(Debug, Clone, Copy)]
 pub struct Request<'a> {
     pub id: &'a str,
     pub by: Option<&'a str>,
+    /// When it was asked, the same each time it is served.
     pub at: i64,
 }
 
@@ -439,11 +462,11 @@ pub fn decide(
     let last = m.providers.iter().map(|c| c.said_at());
     let last = last.chain(m.providers_undone.iter().map(|u| secs(&u.at)));
     let said = match request {
-        Some(r) => r.at.clamp(0, now),
+        Some(r) => r.at.max(0),
         None => last.max().unwrap_or(now).max(now),
     };
     m.providers_undone
-        .retain(|u| now - secs(&u.at) < UNDONE_KEEP_SECS);
+        .retain(|u| u.kind().is_none() || now - secs(&u.at) < UNDONE_KEEP_SECS);
     let (printed, what, item) = match ask {
         Ask::Undo(id) => {
             let Some(i) = m.providers.iter().position(|c| c.id == *id) else {
@@ -459,7 +482,7 @@ pub fn decide(
                     at: time::fmt(said.max(c.said_at())),
                     printed: c.printed,
                     item: c.item,
-                    kind,
+                    kind: kind.word().into(),
                     other: Map::new(),
                 });
             }

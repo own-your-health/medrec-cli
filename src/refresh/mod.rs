@@ -538,6 +538,7 @@ fn provider_request(
     v: &requests::Valid,
     person: &str,
     ask: &crate::corrections::Ask,
+    at: i64,
 ) -> Decided {
     use crate::corrections::{decide, Done, Failed, Request};
     let Some(p) = h.person(person) else {
@@ -547,7 +548,7 @@ fn provider_request(
     let request = Request {
         id: &v.id,
         by: by.as_deref(),
-        at: v.requested_at().unwrap_or_else(time::now),
+        at,
     };
     match decide(folder, h, p, ask, Some(&request)) {
         Ok(Done::Recorded(c)) => Decided::new("ok", format!("recorded it as {}", c.id)),
@@ -1279,7 +1280,15 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
                         continue;
                     }
                     (Scope::Provider { person, ask }, Some(Ok(f))) => {
-                        provider_request(f, &h, v, person, ask)
+                        // The store's time for its file, which is the same at
+                        // each try and is not the asking device's clock. Never
+                        // later than the first try.
+                        let file = listing.iter().find(|e| e.rel == v.name);
+                        let asked = file.and_then(|e| e.modified).or(v.requested_at());
+                        let tried = local.failing.get(&v.id).copied();
+                        let tried = tried.unwrap_or_else(time::now);
+                        let at = asked.map_or(tried, |t| t.min(tried));
+                        provider_request(f, &h, v, person, ask, at)
                     }
                     (Scope::Provider { .. }, Some(Err(e))) => Decided::failed(
                         "the folder could not be opened to write",

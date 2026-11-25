@@ -1451,15 +1451,21 @@ fn decision_request(e: &Env, id: &str, key: &str, body: Value) {
 }
 
 fn decision_request_at(e: &Env, id: &str, key: &str, body: Value, at: &str) {
+    decision_request_by(e, id, key, body, at, at);
+}
+
+/// One whose device's clock says `clock` when the store's says `at`.
+fn decision_request_by(e: &Env, id: &str, key: &str, body: Value, at: &str, clock: &str) {
     let dir = e.records().join("_requests");
     std::fs::create_dir_all(&dir).unwrap();
-    let stamp: String = at.chars().filter(|c| *c != '-' && *c != ':').collect();
+    let stamp: String = clock.chars().filter(|c| *c != '-' && *c != ':').collect();
+    let path = dir.join(format!("{stamp}_{id}.json"));
     std::fs::write(
-        dir.join(format!("{stamp}_{id}.json")),
+        &path,
         serde_json::to_vec(&json!({
             "schema": "medrec-request/v1",
             "id": id,
-            "requested_at": at,
+            "requested_at": clock,
             "requested_by": {"email": "alex@example.com", "name": "Alex Testperson"},
             key: body,
             "app": {"name": "own-your-health-app", "version": "0.1.0"},
@@ -1467,6 +1473,14 @@ fn decision_request_at(e: &Env, id: &str, key: &str, body: Value, at: &str) {
         .unwrap(),
     )
     .unwrap();
+    let secs = medrec::refresh::time::parse(at).unwrap() as u64;
+    let modified = std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs);
+    std::fs::File::options()
+        .write(true)
+        .open(path)
+        .unwrap()
+        .set_modified(modified)
+        .unwrap();
 }
 
 /// A person's events view, by the name views.json gives it.
@@ -2470,6 +2484,50 @@ fn what_a_provider_request_says_is_as_of_when_it_was_asked() {
     let marks: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
     assert!(marks.get("providers_undone").is_none(), "{marks}");
     assert_eq!(names().last().unwrap(), "Asked last");
+
+    // The order is the store's. A device whose clock is ahead has no last word
+    // when it is tried again, and one whose clock is behind is heard.
+    let (ahead, behind) = ("x_lategggggggggggggggg", "x_latehhhhhhhhhhhhhhhh");
+    let of = |name: &str| json!({"person": aid, "printed": [practice], "set": {"name": name}});
+    let held = std::fs::read(&file).unwrap();
+    let soon = "2099-01-01T00:00:00Z";
+    let now = medrec::model::now_rfc3339();
+    decision_request_by(&e, ahead, "provider", of("Clock ahead"), &now, soon);
+    std::fs::write(&file, b"{not json").unwrap();
+    let pass = e.ok(&["refresh", "--scheduled"]);
+    assert_eq!(rows(&pass), [row(ahead, "retrying")]);
+    std::fs::write(&file, &held).unwrap();
+    let tried = medrec::refresh::time::now();
+    while medrec::refresh::time::now() <= tried {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    say("Said since", practice);
+    let pass = e.ok(&["refresh", "--scheduled"]);
+    assert_eq!(rows(&pass), [row(ahead, "skipped")]);
+    assert_eq!(names().last().unwrap(), "Said since");
+    let now = medrec::model::now_rfc3339();
+    decision_request_by(
+        &e,
+        behind,
+        "provider",
+        of("Clock behind"),
+        &now,
+        "2026-11-24T09:00:00Z",
+    );
+    let pass = e.ok(&["refresh", "--scheduled"]);
+    assert_eq!(rows(&pass), [row(behind, "ok")]);
+    assert_eq!(names().last().unwrap(), "Clock behind");
+
+    // What a later medrec took back is kept, and reads.
+    let mut marks: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    let later = json!([{"printed": [practice], "kind": "moved", "at": "2026-01-01T00:00:00Z",
+        "to": "Example"}]);
+    marks["providers_undone"] = later.clone();
+    std::fs::write(&file, serde_json::to_vec(&marks).unwrap()).unwrap();
+    say("Said last", practice);
+    let marks: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    assert_eq!(marks["providers_undone"], later);
+    assert_eq!(names().last().unwrap(), "Said last");
 }
 
 #[test]
