@@ -1,0 +1,1346 @@
+{
+ "schema": "medrec-index/v1",
+ "person": "p_robinaaaaaaaaaaaaaaa",
+ "rev": 1,
+ "studies": [],
+ "imports": [],
+ "records": [
+  {
+   "id": "r_mixedaaaaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|mixed|2024-08-05",
+   "date": "2024-08-05",
+   "display": "Sample visit, Quick feelings form and 1 more \u00b7 Example Pediatrics",
+   "status": "active",
+   "fields": {
+    "provider": "Example Pediatrics",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2024-08-05",
+     "end": "2024-08-05"
+    },
+    "type": "professional",
+    "amounts": {
+     "billed": {
+      "amount": "60.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "10.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "category": "visit",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "99213",
+       "display": "Sample visit"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "20.00",
+        "currency": "USD"
+       }
+      },
+      "sequence": 1
+     },
+     {
+      "category": "medicine",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "96127",
+       "display": "Quick feelings form"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "20.00",
+        "currency": "USD"
+       }
+      },
+      "sequence": 2
+     },
+     {
+      "category": "medicine",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "92550",
+       "display": "Ear wax look"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "20.00",
+        "currency": "USD"
+       }
+      },
+      "sequence": 3
+     }
+    ],
+    "category": "mixed"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/mixed.json"
+    }
+   ]
+  },
+  {
+   "id": "r_checksaaaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|checks|2024-08-12",
+   "date": "2024-08-12",
+   "display": "Ear wax look and Depression screening \u00b7 Example Pediatrics",
+   "status": "active",
+   "fields": {
+    "provider": "Example Pediatrics",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2024-08-12",
+     "end": "2024-08-12"
+    },
+    "type": "professional",
+    "amounts": {
+     "billed": {
+      "amount": "40.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "10.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "category": "medicine",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "92550",
+       "display": "Ear wax look"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "20.00",
+        "currency": "USD"
+       }
+      },
+      "sequence": 1
+     },
+     {
+      "category": "medicine",
+      "service": {
+       "display": "Depression screening"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "20.00",
+        "currency": "USD"
+       }
+      },
+      "sequence": 2
+     }
+    ],
+    "category": "medicine"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/checks.json"
+    }
+   ]
+  },
+  {
+   "id": "r_notedaaaaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|noted|2024-08-19",
+   "date": "2024-08-19",
+   "display": "Sample visit and Form \u00b7 Example Pediatrics",
+   "status": "active",
+   "fields": {
+    "provider": "Example Pediatrics",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2024-08-19",
+     "end": "2024-08-19"
+    },
+    "type": "professional",
+    "amounts": {
+     "billed": {
+      "amount": "40.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "10.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "category": "visit",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "99213",
+       "display": "Sample visit"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "20.00",
+        "currency": "USD"
+       }
+      },
+      "sequence": 1
+     },
+     {
+      "category": "visit",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "00000",
+       "display": "Form"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "20.00",
+        "currency": "USD"
+       }
+      },
+      "payer_notes": [
+       "Psychotherapy is paid apart"
+      ],
+      "sequence": 2
+     }
+    ],
+    "category": "visit"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/noted.json"
+    }
+   ]
+  },
+  {
+   "id": "r_roomsaaaaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|rooms|2024-08-26",
+   "date": "2024-08-26",
+   "display": "Facility \u00b7 Example Pediatrics",
+   "status": "active",
+   "fields": {
+    "provider": "Example Pediatrics",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2024-08-26",
+     "end": "2024-08-26"
+    },
+    "type": "professional",
+    "amounts": {
+     "billed": {
+      "amount": "40.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "10.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "category": "facility",
+      "revenue": {
+       "code": "0300",
+       "display": "Bench work"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "20.00",
+        "currency": "USD"
+       }
+      },
+      "sequence": 1
+     },
+     {
+      "category": "facility",
+      "revenue": {
+       "code": "0900",
+       "display": "Group hour"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "20.00",
+        "currency": "USD"
+       }
+      },
+      "sequence": 2
+     }
+    ],
+    "category": "facility"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/rooms.json"
+    }
+   ]
+  },
+  {
+   "id": "r_uncountedaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|uncounted|2024-09-02",
+   "date": "2024-09-02",
+   "display": "Sample visit \u00b7 Example Pediatrics",
+   "status": "active",
+   "fields": {
+    "provider": "Example Pediatrics",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2024-09-02",
+     "end": "2024-09-02"
+    },
+    "type": "professional",
+    "amounts": {
+     "billed": {
+      "amount": "40.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "10.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "category": "visit",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "99213",
+       "display": "Sample visit"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "20.00",
+        "currency": "USD"
+       }
+      },
+      "sequence": 1
+     },
+     {
+      "category": "visit",
+      "service": {
+       "display": "Tobacco counseling"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "20.00",
+        "currency": "USD"
+       }
+      },
+      "counted": false,
+      "sequence": 2
+     }
+    ],
+    "category": "visit"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/uncounted.json"
+    }
+   ]
+  },
+  {
+   "id": "r_secondaaaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|second|2024-09-09",
+   "date": "2024-09-09",
+   "display": "Sample visit \u00b7 Example Pediatrics",
+   "status": "active",
+   "fields": {
+    "provider": "Example Pediatrics",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2024-09-09",
+     "end": "2024-09-09"
+    },
+    "type": "professional",
+    "amounts": {
+     "billed": {
+      "amount": "20.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "10.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "category": "visit",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "99213",
+       "display": "Sample visit"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "20.00",
+        "currency": "USD"
+       }
+      },
+      "sequence": 1
+     }
+    ],
+    "category": "visit",
+    "diagnoses": [
+     {
+      "sequence": 1,
+      "code": {
+       "system": "http://hl7.org/fhir/sid/icd-10-cm",
+       "code": "J02.9",
+       "display": "Example finding J02.9"
+      }
+     },
+     {
+      "sequence": 2,
+      "code": {
+       "system": "http://hl7.org/fhir/sid/icd-10-cm",
+       "code": "F41.1",
+       "display": "Example finding F41.1"
+      }
+     }
+    ],
+    "payer_notes": [
+     "Paid in full",
+     "Behavioral health is paid apart"
+    ]
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/second.json"
+    }
+   ]
+  },
+  {
+   "id": "r_beforeaaaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|before|2024-09-16",
+   "date": "2024-09-16",
+   "display": "Sample visit and Form \u00b7 Example Pediatrics",
+   "status": "active",
+   "fields": {
+    "provider": "Example Pediatrics",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2024-09-16",
+     "end": "2024-09-16"
+    },
+    "type": "professional",
+    "amounts": {
+     "billed": {
+      "amount": "40.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "10.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "category": "visit",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "99213",
+       "display": "Sample visit"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "20.00",
+        "currency": "USD"
+       }
+      },
+      "sequence": 1
+     },
+     {
+      "category": "visit",
+      "service": {
+       "display": "Form"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "20.00",
+        "currency": "USD"
+       }
+      },
+      "sequence": 2
+     }
+    ],
+    "category": "visit"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/before.json"
+    }
+   ],
+   "given": [
+    {
+     "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/before.json",
+     "fields": {
+      "items": [
+       {
+        "service": {
+         "system": "http://www.ama-assn.org/go/cpt",
+         "code": "99213",
+         "display": "Sample visit"
+        }
+       },
+       {
+        "service": {
+         "display": "Alcohol use screening"
+        }
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "r_everyaaaaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|every|2024-09-23",
+   "date": "2024-09-23",
+   "display": "Quick feelings form and Yearly form \u00b7 Example Pediatrics",
+   "status": "active",
+   "fields": {
+    "provider": "Example Pediatrics",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2024-09-23",
+     "end": "2024-09-23"
+    },
+    "type": "professional",
+    "amounts": {
+     "billed": {
+      "amount": "40.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "10.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "category": "medicine",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "96127",
+       "display": "Quick feelings form"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "20.00",
+        "currency": "USD"
+       }
+      },
+      "sequence": 1
+     },
+     {
+      "category": "visit",
+      "service": {
+       "system": "https://bluebutton.cms.gov/resources/codesystem/hcpcs",
+       "code": "G0444",
+       "display": "Yearly form"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "20.00",
+        "currency": "USD"
+       }
+      },
+      "sequence": 2
+     }
+    ],
+    "category": "medicine"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/every.json"
+    }
+   ]
+  },
+  {
+   "id": "r_waseveryaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|wasevery|2024-09-30",
+   "date": "2024-09-30",
+   "display": "Form \u00b7 Example Pediatrics",
+   "status": "active",
+   "fields": {
+    "provider": "Example Pediatrics",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2024-09-30",
+     "end": "2024-09-30"
+    },
+    "type": "professional",
+    "amounts": {
+     "billed": {
+      "amount": "20.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "10.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "category": "visit",
+      "service": {
+       "display": "Form"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "20.00",
+        "currency": "USD"
+       }
+      },
+      "sequence": 1
+     }
+    ],
+    "category": "visit"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/wasevery.json"
+    }
+   ],
+   "given": [
+    {
+     "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/wasevery.json",
+     "fields": {
+      "items": [
+       {
+        "service": {
+         "display": "Anxiety screening"
+        }
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "r_nolinesaaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|nolines|2024-10-07",
+   "date": "2024-10-07",
+   "display": "Depression screening \u00b7 Example Pediatrics",
+   "status": "active",
+   "fields": {
+    "provider": "Example Pediatrics",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2024-10-07",
+     "end": "2024-10-07"
+    },
+    "type": "professional",
+    "amounts": {
+     "billed": {
+      "amount": "0.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "10.00",
+      "currency": "USD"
+     }
+    },
+    "items": [],
+    "category": "visit"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/nolines.json"
+    }
+   ],
+   "documents": [
+    "d_letteraaaaaaaaaaaaaa"
+   ]
+  },
+  {
+   "id": "r_labbedaaaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|labbed|2024-10-08",
+   "date": "2024-10-08",
+   "display": "Sample visit and Drug screen \u00b7 Example Pediatrics",
+   "status": "active",
+   "fields": {
+    "provider": "Example Pediatrics",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2024-10-08",
+     "end": "2024-10-08"
+    },
+    "type": "professional",
+    "amounts": {
+     "billed": {
+      "amount": "40.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "10.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "category": "visit",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "99213",
+       "display": "Sample visit"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "20.00",
+        "currency": "USD"
+       }
+      },
+      "sequence": 1
+     },
+     {
+      "category": "lab",
+      "service": {
+       "display": "Drug screen"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "20.00",
+        "currency": "USD"
+       }
+      },
+      "sequence": 2
+     }
+    ],
+    "category": "lab"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/labbed.json"
+    }
+   ]
+  },
+  {
+   "id": "r_labbothaaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|labboth|2024-10-09",
+   "date": "2024-10-09",
+   "display": "Example blood count and Drug screen \u00b7 Example Pediatrics",
+   "status": "active",
+   "fields": {
+    "provider": "Example Pediatrics",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2024-10-09",
+     "end": "2024-10-09"
+    },
+    "type": "professional",
+    "amounts": {
+     "billed": {
+      "amount": "40.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "10.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "category": "lab",
+      "service": {
+       "display": "Example blood count"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "20.00",
+        "currency": "USD"
+       }
+      },
+      "sequence": 1
+     },
+     {
+      "category": "lab",
+      "service": {
+       "display": "Drug screen"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "20.00",
+        "currency": "USD"
+       }
+      },
+      "sequence": 2
+     }
+    ],
+    "category": "lab"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/labboth.json"
+    }
+   ]
+  },
+  {
+   "id": "r_plainaaaaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|plain|2024-10-14",
+   "date": "2024-10-14",
+   "display": "Sample visit \u00b7 Example Pediatrics",
+   "status": "active",
+   "fields": {
+    "provider": "Example Pediatrics",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2024-10-14",
+     "end": "2024-10-14"
+    },
+    "type": "professional",
+    "amounts": {
+     "billed": {
+      "amount": "20.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "10.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "category": "visit",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "99213",
+       "display": "Sample visit"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "20.00",
+        "currency": "USD"
+       }
+      },
+      "sequence": 1
+     }
+    ],
+    "category": "visit"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/plain.json"
+    }
+   ]
+  },
+  {
+   "id": "r_doctoraaaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|doctor|2024-10-21",
+   "date": "2024-10-21",
+   "display": "Sample visit \u00b7 PAT PLACEHOLDER MD",
+   "status": "active",
+   "fields": {
+    "provider": "PAT PLACEHOLDER MD",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2024-10-21",
+     "end": "2024-10-21"
+    },
+    "type": "professional",
+    "amounts": {
+     "billed": {
+      "amount": "20.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "10.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "category": "visit",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "99213",
+       "display": "Sample visit"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "20.00",
+        "currency": "USD"
+       }
+      },
+      "sequence": 1
+     }
+    ],
+    "category": "visit"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/doctor.json"
+    }
+   ]
+  },
+  {
+   "id": "r_talkaaaaaaaaaaaaaaaa",
+   "kind": "procedure",
+   "key": "procedure|talk|2024-10-28",
+   "date": "2024-10-28",
+   "display": "Sample hour",
+   "status": "active",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/talk.json"
+    }
+   ],
+   "code": {
+    "system": "http://www.ama-assn.org/go/cpt",
+    "code": "90837",
+    "display": "Sample hour"
+   }
+  },
+  {
+   "id": "r_implantaaaaaaaaaaaaa",
+   "kind": "procedure",
+   "key": "procedure|implant|2024-11-04",
+   "date": "2024-11-04",
+   "display": "Contraceptive implant",
+   "status": "active",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/implant.json"
+    }
+   ]
+  },
+  {
+   "id": "r_stitchesaaaaaaaaaaaa",
+   "kind": "procedure",
+   "key": "procedure|stitches|2024-11-11",
+   "date": "2024-11-11",
+   "display": "Sample stitches",
+   "status": "active",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/stitches.json"
+    }
+   ],
+   "code": {
+    "system": "http://www.ama-assn.org/go/cpt",
+    "code": "12001",
+    "display": "Sample stitches"
+   }
+  }
+ ],
+ "documents": [
+  {
+   "id": "d_accountaaaaaaaaaaaaa",
+   "path": "Robin Example/Papers/2024/account.pdf",
+   "sha256": "account",
+   "md5": "account",
+   "size": 10,
+   "media_type": "application/pdf",
+   "doc_type": "bill",
+   "date": "2024-09-01",
+   "organization": "Example Pediatrics",
+   "text": {
+    "chars": 10
+   },
+   "filed_at": "2024-12-04T10:00:00Z",
+   "origin": {
+    "kind": "file",
+    "action": "copied"
+   },
+   "provenance": {
+    "source": {
+     "kind": "fhir",
+     "cli": "fakeprov",
+     "organization_id": "north",
+     "fhir_base": "https://north.example.test/fhir"
+    },
+    "method": "fhir-api",
+    "fetched_at": "2024-12-02T10:00:00Z",
+    "filed_at": "2024-12-04T10:00:00Z",
+    "filed_by": "medrec 0.9.9",
+    "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/account.json"
+   },
+   "title": "Account summary"
+  },
+  {
+   "id": "d_explainedaaaaaaaaaaa",
+   "path": "Robin Example/Papers/2024/explained.pdf",
+   "sha256": "explained",
+   "md5": "explained",
+   "size": 10,
+   "media_type": "application/pdf",
+   "doc_type": "eob",
+   "date": "2024-09-02",
+   "organization": "Example Pediatrics",
+   "text": {
+    "chars": 10
+   },
+   "filed_at": "2024-12-04T10:00:00Z",
+   "origin": {
+    "kind": "file",
+    "action": "copied"
+   },
+   "provenance": {
+    "source": {
+     "kind": "fhir",
+     "cli": "fakeprov",
+     "organization_id": "north",
+     "fhir_base": "https://north.example.test/fhir"
+    },
+    "method": "fhir-api",
+    "fetched_at": "2024-12-02T10:00:00Z",
+    "filed_at": "2024-12-04T10:00:00Z",
+    "filed_by": "medrec 0.9.9",
+    "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/explained.json"
+   },
+   "title": "How it was paid"
+  },
+  {
+   "id": "d_paidslipaaaaaaaaaaaa",
+   "path": "Robin Example/Papers/2024/paidslip.pdf",
+   "sha256": "paidslip",
+   "md5": "paidslip",
+   "size": 10,
+   "media_type": "application/pdf",
+   "doc_type": "receipt",
+   "date": "2024-09-03",
+   "organization": "Example Pediatrics",
+   "text": {
+    "chars": 10
+   },
+   "filed_at": "2024-12-04T10:00:00Z",
+   "origin": {
+    "kind": "file",
+    "action": "copied"
+   },
+   "provenance": {
+    "source": {
+     "kind": "fhir",
+     "cli": "fakeprov",
+     "organization_id": "north",
+     "fhir_base": "https://north.example.test/fhir"
+    },
+    "method": "fhir-api",
+    "fetched_at": "2024-12-02T10:00:00Z",
+    "filed_at": "2024-12-04T10:00:00Z",
+    "filed_by": "medrec 0.9.9",
+    "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/paidslip.json"
+   },
+   "title": "Paid"
+  },
+  {
+   "id": "d_toldaaaaaaaaaaaaaaaa",
+   "path": "Robin Example/Papers/2024/told.pdf",
+   "sha256": "told",
+   "md5": "told",
+   "size": 10,
+   "media_type": "application/pdf",
+   "doc_type": "letter",
+   "date": "2024-10-22",
+   "organization": "Example Pediatrics",
+   "text": {
+    "chars": 10
+   },
+   "filed_at": "2024-12-04T10:00:00Z",
+   "origin": {
+    "kind": "file",
+    "action": "copied"
+   },
+   "provenance": {
+    "source": {
+     "kind": "fhir",
+     "cli": "fakeprov",
+     "organization_id": "north",
+     "fhir_base": "https://north.example.test/fhir"
+    },
+    "method": "fhir-api",
+    "fetched_at": "2024-12-02T10:00:00Z",
+    "filed_at": "2024-12-04T10:00:00Z",
+    "filed_by": "medrec 0.9.9",
+    "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/told.json"
+   },
+   "title": "Psychotherapy letter"
+  },
+  {
+   "id": "d_letteraaaaaaaaaaaaaa",
+   "path": "Robin Example/Papers/2024/letter.pdf",
+   "sha256": "letter",
+   "md5": "letter",
+   "size": 10,
+   "media_type": "application/pdf",
+   "doc_type": "letter",
+   "date": "2024-10-07",
+   "organization": "Example Pediatrics",
+   "text": {
+    "chars": 10
+   },
+   "filed_at": "2024-12-04T10:00:00Z",
+   "origin": {
+    "kind": "file",
+    "action": "copied"
+   },
+   "provenance": {
+    "source": {
+     "kind": "fhir",
+     "cli": "fakeprov",
+     "organization_id": "north",
+     "fhir_base": "https://north.example.test/fhir"
+    },
+    "method": "fhir-api",
+    "fetched_at": "2024-12-02T10:00:00Z",
+    "filed_at": "2024-12-04T10:00:00Z",
+    "filed_by": "medrec 0.9.9",
+    "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/letter.json"
+   },
+   "title": "Letter"
+  },
+  {
+   "id": "d_afterwardaaaaaaaaaaa",
+   "path": "Robin Example/Papers/2024/afterward.pdf",
+   "sha256": "afterward",
+   "md5": "afterward",
+   "size": 10,
+   "media_type": "application/pdf",
+   "doc_type": "visit_summary",
+   "date": "2024-10-15",
+   "organization": "Example Pediatrics",
+   "text": {
+    "chars": 10
+   },
+   "filed_at": "2024-12-04T10:00:00Z",
+   "origin": {
+    "kind": "file",
+    "action": "copied"
+   },
+   "provenance": {
+    "source": {
+     "kind": "fhir",
+     "cli": "fakeprov",
+     "organization_id": "north",
+     "fhir_base": "https://north.example.test/fhir"
+    },
+    "method": "fhir-api",
+    "fetched_at": "2024-12-02T10:00:00Z",
+    "filed_at": "2024-12-04T10:00:00Z",
+    "filed_by": "medrec 0.9.9",
+    "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/afterward.json"
+   },
+   "title": "After your visit"
+  },
+  {
+   "id": "d_unnamedaaaaaaaaaaaaa",
+   "path": "Robin Example/Papers/2024/unnamed.pdf",
+   "sha256": "unnamed",
+   "md5": "unnamed",
+   "size": 10,
+   "media_type": "application/pdf",
+   "doc_type": "other",
+   "date": "2024-10-16",
+   "organization": "Example Pediatrics",
+   "text": {
+    "chars": 10
+   },
+   "filed_at": "2024-12-04T10:00:00Z",
+   "origin": {
+    "kind": "file",
+    "action": "copied"
+   },
+   "provenance": {
+    "source": {
+     "kind": "fhir",
+     "cli": "fakeprov",
+     "organization_id": "north",
+     "fhir_base": "https://north.example.test/fhir"
+    },
+    "method": "fhir-api",
+    "fetched_at": "2024-12-02T10:00:00Z",
+    "filed_at": "2024-12-04T10:00:00Z",
+    "filed_by": "medrec 0.9.9",
+    "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/unnamed.json"
+   },
+   "original_name": "Psychotherapy_session-notes.pdf"
+  }
+ ]
+}

@@ -2438,6 +2438,63 @@ fn a_request_marks_nothing_not_private() {
     assert!(a.is_private(varenicline));
 }
 
+/// Nor does it open a private part of an open claim, paper or event, whatever
+/// the household marked first. At the Mac it is opened, and a request closes it.
+#[test]
+fn a_request_opens_no_private_part() {
+    let e = Env::new("private-parts");
+    let a = Asking::new(&e);
+    let (mixed, account) = ("r_mixedaaaaaaaaaaaaaaa", "d_accountaaaaaaaaaaaaa");
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/parts");
+    let read = |p: &Path| -> Value { serde_json::from_slice(&std::fs::read(p).unwrap()).unwrap() };
+    let path = a.file.with_file_name("index.json");
+    let (mut index, more) = (read(&path), read(&fixtures.join("index.json")));
+    for (list, id) in [("records", mixed), ("documents", account)] {
+        let mut of = more[list].as_array().unwrap().iter();
+        let item = of.find(|r| r["id"] == id).unwrap().clone();
+        index[list].as_array_mut().unwrap().push(item);
+    }
+    std::fs::write(&path, index.to_string()).unwrap();
+    let path = a.file.with_file_name("text.json");
+    let mut texts = match path.exists() {
+        true => read(&path),
+        false => json!({"schema": "medrec-text/v1", "person": a.aid, "texts": {}}),
+    };
+    texts["texts"][account] = read(&fixtures.join("text.json"))["texts"][account].clone();
+    std::fs::write(&path, texts.to_string()).unwrap();
+
+    let item = |item: &str, private: Value| json!({"item": item, "private": private});
+    let part = |id: &str| a.private()["parts"][id].clone();
+    let event = a.event_of(mixed);
+    for id in [mixed, account, &event] {
+        let was = part(id);
+        assert!(
+            was["says"].as_str().unwrap().ends_with(" not shown"),
+            "{was}"
+        );
+        assert!(!a.is_private(id), "{id}");
+        a.refused("private", item(id, false.into()));
+        a.granted("private", item(id, true.into()));
+        assert!(part(id).is_null(), "{id}");
+        a.refused("private", item(id, false.into()));
+        a.granted("private", item(id, Value::Null));
+        assert_eq!(part(id), was);
+    }
+    for id in [mixed, account] {
+        let was = part(id);
+        e.ok(&["private", "unmark", id]);
+        assert!(part(id).is_null(), "{id}");
+        let marks = a.decided();
+        a.granted("private", item(id, false.into()));
+        assert_eq!(a.decided(), marks);
+        a.granted("private", item(id, Value::Null));
+        assert_eq!(part(id), was);
+    }
+    // One with none is marked as before.
+    let plain = a.event_of(PLAIN);
+    a.granted("private", item(&plain, false.into()));
+}
+
 /// While the person's provider labels do not read, what a request would open
 /// is not known: it is not granted, and not said to be refused.
 #[test]

@@ -11,9 +11,12 @@ use serde_json::{Map, Value};
 
 use crate::model::{Code, Document, PersonIndex, ProviderRef, Record};
 use crate::providers::FIELDS;
+use crate::services;
 
-/// The field of a claim that is read beside the names.
+/// The fields of a claim that are read beside the names.
 const DIAGNOSES: &str = "diagnoses";
+const NOTES: &str = "payer_notes";
+const LINES: &str = "items";
 
 /// What the rules read of a record, as a source gave it: the parts that were
 /// other than those shown.
@@ -45,21 +48,27 @@ pub struct GivenPaper {
     pub organization: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// The name a file it was merged with came with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 /// What the rules read of a record.
 pub fn of(r: &Record) -> Given {
     let coded = matches!(
         r.kind.as_str(),
-        "medication" | "result" | "report" | "condition"
+        "medication" | "result" | "report" | "condition" | "procedure"
     );
-    // A pharmacy claim is named by its medicine.
-    let named = (coded && r.kind != "condition") || crate::private::dispensed(r).is_some();
+    // A claim is named by what it paid for.
+    let named = (coded && r.kind != "condition") || r.kind == "claim";
     let mut fields = Map::new();
-    for f in FIELDS.iter().chain(&[DIAGNOSES, crate::about::FIELD]) {
+    for f in (FIELDS.iter()).chain(&[DIAGNOSES, NOTES, crate::about::FIELD]) {
         if let Some(v) = r.fields.get(*f) {
             fields.insert(f.to_string(), v.clone());
         }
+    }
+    if let Some(lines) = r.fields.get(LINES).filter(|_| r.kind == "claim") {
+        fields.insert(LINES.into(), services::read_of(lines));
     }
     let npi = |p: &ProviderRef| Some((p.field.clone(), p.npi.clone()?));
     Given {
@@ -131,11 +140,14 @@ pub fn keep_paper(d: &mut Document, mut given: GivenPaper) -> bool {
         .organization
         .filter(|o| d.organization.as_ref() != Some(o));
     given.title = given.title.filter(|t| d.title.as_ref() != Some(t));
-    let same = |a: &Option<String>, b: &Option<String>| a.is_none() || a == b;
-    let mut kept = d.given.iter();
-    let known =
-        kept.any(|g| same(&given.organization, &g.organization) && same(&given.title, &g.title));
-    let known = known || (given.organization.is_none() && given.title.is_none());
+    given.name = given.name.filter(|n| d.original_name.as_ref() != Some(n));
+    let is_in = |a: &Option<String>, b: &Option<String>| a.is_none() || a == b;
+    let known = [GivenPaper::default()];
+    let known = d.given.iter().chain(&known).any(|g| {
+        is_in(&given.organization, &g.organization)
+            && is_in(&given.title, &g.title)
+            && is_in(&given.name, &g.name)
+    });
     if !known {
         d.given.push(given);
     }
@@ -184,6 +196,9 @@ pub fn papers_as_given(d: &Document) -> impl Iterator<Item = Document> + '_ {
         }
         if let Some(t) = &g.title {
             x.title = Some(t.clone());
+        }
+        if let Some(n) = &g.name {
+            x.original_name = Some(n.clone());
         }
         x
     })

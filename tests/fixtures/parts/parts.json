@@ -1,0 +1,145 @@
+{
+ "r_mixedaaaaaaaaaaaaaaa": {
+  "display": "Sample visit and Ear wax look · Example Pediatrics",
+  "says": "1 service not shown",
+  "date": "2024-08-05",
+  "lines": [
+   1
+  ]
+ },
+ "r_checksaaaaaaaaaaaaaa": {
+  "display": "Ear wax look · Example Pediatrics",
+  "says": "1 service not shown",
+  "date": "2024-08-12",
+  "lines": [
+   1
+  ]
+ },
+ "r_notedaaaaaaaaaaaaaaa": {
+  "display": "Sample visit · Example Pediatrics",
+  "says": "1 service not shown",
+  "date": "2024-08-19",
+  "lines": [
+   1
+  ]
+ },
+ "r_roomsaaaaaaaaaaaaaaa": {
+  "display": "Facility · Example Pediatrics",
+  "says": "1 service not shown",
+  "date": "2024-08-26",
+  "lines": [
+   1
+  ]
+ },
+ "r_uncountedaaaaaaaaaaa": {
+  "display": "Sample visit · Example Pediatrics",
+  "says": "1 service not shown",
+  "date": "2024-09-02",
+  "lines": [
+   1
+  ]
+ },
+ "r_secondaaaaaaaaaaaaaa": {
+  "display": "Sample visit · Example Pediatrics",
+  "says": "1 diagnosis and 1 payer note not shown",
+  "date": "2024-09-09",
+  "diagnoses": [
+   1
+  ],
+  "payer_notes": [
+   1
+  ]
+ },
+ "r_beforeaaaaaaaaaaaaaa": {
+  "display": "Sample visit · Example Pediatrics",
+  "says": "1 service not shown",
+  "date": "2024-09-16",
+  "lines": [
+   1
+  ]
+ },
+ "r_labbedaaaaaaaaaaaaaa": {
+  "display": "Sample visit · Example Pediatrics",
+  "says": "1 service not shown",
+  "date": "2024-10-08",
+  "category": "visit",
+  "lines": [
+   1
+  ]
+ },
+ "r_labbothaaaaaaaaaaaaa": {
+  "display": "Example blood count · Example Pediatrics",
+  "says": "1 service not shown",
+  "date": "2024-10-09",
+  "lines": [
+   1
+  ]
+ },
+ "d_accountaaaaaaaaaaaaa": {
+  "text": [
+   [
+    38,
+    26
+   ],
+   [
+    65,
+    5
+   ],
+   [
+    122,
+    15
+   ]
+  ],
+  "says": "3 lines not shown"
+ },
+ "d_explainedaaaaaaaaaaa": {
+  "text": [
+   [
+    39,
+    10
+   ],
+   [
+    50,
+    10
+   ],
+   [
+    61,
+    11
+   ]
+  ],
+  "says": "3 lines not shown"
+ },
+ "event of r_labbothaaaaaaaaaaaaa": {
+  "what": "Example blood count",
+  "says": "1 service not shown"
+ },
+ "event of r_mixedaaaaaaaaaaaaaaa": {
+  "says": "1 service not shown"
+ },
+ "event of r_checksaaaaaaaaaaaaaa": {
+  "what": "Ear wax look",
+  "says": "1 service not shown"
+ },
+ "event of r_notedaaaaaaaaaaaaaaa": {
+  "says": "1 service not shown"
+ },
+ "event of r_roomsaaaaaaaaaaaaaaa": {
+  "says": "1 service not shown"
+ },
+ "event of r_uncountedaaaaaaaaaaa": {
+  "says": "1 service not shown"
+ },
+ "event of r_beforeaaaaaaaaaaaaaa": {
+  "says": "1 service not shown"
+ },
+ "event of r_labbedaaaaaaaaaaaaaa": {
+  "kind": "office",
+  "title": "Office visit",
+  "what": "Follow-up visit",
+  "says": "1 service not shown"
+ },
+ "event of r_doctoraaaaaaaaaaaaaa": {
+  "place": null,
+  "place_from": null
+ }
+}

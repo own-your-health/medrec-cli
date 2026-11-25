@@ -3082,6 +3082,7 @@ fn paper_given(o: Option<&Owner>, source: Option<&String>, raw: Option<&String>)
         raw_path: current(raw),
         organization: source.cloned(),
         title: o.and_then(Owner::says_title),
+        name: None,
     }
 }
 

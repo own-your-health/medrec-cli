@@ -24,6 +24,7 @@ use crate::folder::{self, Access, Folder};
 use crate::hash::{hex, md5_hex};
 use crate::intake::classify::Squashed;
 use crate::model::{Household, Person, PersonIndex, PersonText, Record};
+use crate::parts::Parts;
 use crate::store::Location;
 use crate::summary::{self, clip, day, CLIP};
 use crate::views::{self, Range};
@@ -49,7 +50,11 @@ const EVERY_PERSON: &[&str] = &[
     "bills.json",
     "private.json",
     crate::standing::FILE,
+    SEARCH_PARTS,
 ];
+
+/// What a search finds of each open item without its private parts.
+const SEARCH_PARTS: &str = "search-parts.json";
 
 /// A records or timeline shard closes once it holds this many bytes, never
 /// inside a day.
@@ -100,12 +105,13 @@ pub struct PersonViews {
     /// The MD5 of the person's `overrides.json`, null when there is none;
     /// and those of the index and text of each guardian or child whose
     /// records their events read, by person id. Both make only
-    /// `events.json`, `bills.json` and `private.json` stale.
+    /// `events.json`, `bills.json`, `private.json`, `search-parts.json`,
+    /// `code-names.json` and `providers.json` stale.
     #[serde(default)]
     pub overrides: Option<String>,
     /// The MD5 of the person's `marks.json`, null when there is none
-    /// (0.9.1 and later); it makes only `bills.json` and `private.json`
-    /// stale.
+    /// (0.9.1 and later); it makes only `bills.json`, `private.json`,
+    /// `search-parts.json`, `code-names.json` and `providers.json` stale.
     #[serde(default)]
     pub marks: Option<String>,
     #[serde(default)]
@@ -121,9 +127,10 @@ pub struct PersonViews {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub directory: Option<String>,
     /// The MD5 of the person's `provider-state.json`, absent when there is
-    /// none (0.9.7 and later). `private.json`, `code-names.json` and
-    /// `providers.json` are stale when it differs: a pass writes the file
-    /// before the views, and one cut short between them leaves these.
+    /// none (0.9.7 and later). `private.json`, `search-parts.json`,
+    /// `code-names.json` and `providers.json` are stale when it differs: a
+    /// pass writes the file before the views, and one cut short between them
+    /// leaves these.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_state: Option<String>,
     /// `standing.json`'s `in_error`: the ids of their records entered in
@@ -1328,7 +1335,7 @@ pub(crate) fn person(
     // Search items, numbered in the reverse of medrec's order for hits of
     // equal score (newest first, undated last, then as the files hold
     // them): the newest item has the highest number.
-    let listed = views::searchables(idx, texts, &[], true);
+    let listed = views::searchables(idx, texts, &[], true, &Parts::of(&from.private));
     let mut order: Vec<usize> = (0..listed.len()).collect();
     order.sort_by(|&a, &b| listed[b].date.cmp(&listed[a].date));
     order.reverse();
@@ -1339,6 +1346,7 @@ pub(crate) fn person(
     let mut postings: BTreeMap<String, BTreeMap<String, Vec<usize>>> = BTreeMap::new();
     let mut firsts: BTreeMap<String, BTreeMap<String, Vec<usize>>> = BTreeMap::new();
     let mut labs = Vec::new();
+    let mut parts: BTreeMap<String, Value> = BTreeMap::new();
     for (ord, &i) in order.iter().enumerate() {
         let it = &listed[i];
         let text = it.hay();
@@ -1352,6 +1360,9 @@ pub(crate) fn person(
                     words.push((w, 1, at));
                 }
             }
+        }
+        if let Some(open) = &it.open {
+            parts.insert(ord.to_string(), search_part(it, open));
         }
         for (w, count, first) in words {
             for (into, n) in [(&mut postings, 2), (&mut firsts, 1)] {
@@ -1404,6 +1415,7 @@ pub(crate) fn person(
     for (k, rows) in labs.chunks(LAB_ROWS).enumerate() {
         put(&format!("search-labs-{k}.json"), json(rows));
     }
+    put(SEARCH_PARTS, json(&parts));
 
     let mine = format!("{dir}/");
     let files = out
@@ -1498,6 +1510,36 @@ fn report(r: Result<Synced, CliError>) {
              write`, does it."
         );
     }
+}
+
+/// What a search finds of an item without its private parts: what is cut out
+/// of its text, and each word that is there fewer times, or elsewhere, than
+/// its postings say.
+fn search_part(it: &views::Searchable, open: &views::OpenPart) -> Value {
+    let count = |text: &str| {
+        let mut words: BTreeMap<String, (usize, usize)> = BTreeMap::new();
+        for (w, at) in Squashed::new(text).word_starts() {
+            words.entry(w).or_insert((0, at)).0 += 1;
+        }
+        words
+    };
+    let (hay, left) = (it.hay(), open.hay(it));
+    let now = count(&left);
+    let cut = open.cuts.iter();
+    let cut = cut.filter_map(|[at, len]| hay.get(*at..at.checked_add(*len)?));
+    let named = std::iter::once(open.title.as_str());
+    let touched = cut.chain(named).flat_map(|text| count(text).into_keys());
+    let words: BTreeMap<String, Vec<usize>> = touched
+        .map(|w| {
+            let of = now.get(&w).map_or(vec![0], |(n, at)| vec![*n, *at]);
+            (w, of)
+        })
+        .collect();
+    let mut v = serde_json::json!({"cuts": open.cuts, "words": words});
+    if it.lab.is_some() && open.lab.is_none() {
+        v["lab"] = Value::Bool(false);
+    }
+    v
 }
 
 #[cfg(test)]
