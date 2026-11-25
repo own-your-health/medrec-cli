@@ -27,6 +27,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
+use crate::marks::Failed;
 use crate::model::{Document, Person, PersonIndex, PersonText, Record};
 use crate::sources::Sources;
 
@@ -2992,26 +2993,28 @@ pub fn decide(
     b: &str,
     by: Option<&str>,
     request: Option<&str>,
-) -> Result<(Decision, bool), pk_cli_core::CliError> {
+) -> Result<(Decision, bool), Failed> {
     use pk_cli_core::CliError;
     if !matches!(kind, "apart" | "together") {
-        return Err(CliError::Usage(format!(
+        return Err(Failed::Refused(CliError::Usage(format!(
             "`{kind}` is not apart or together"
-        )));
+        ))));
     }
     if a == b {
-        return Err(CliError::Usage("name two different members".into()));
+        return Err(Failed::Refused(CliError::Usage(
+            "name two different members".into(),
+        )));
     }
     let idx = folder.index(p)?;
     for id in [a, b] {
         let known =
             idx.records.iter().any(|r| r.id == id) || idx.documents.iter().any(|d| d.id == id);
         if !known {
-            return Err(CliError::NotFound(format!(
+            return Err(Failed::Refused(CliError::NotFound(format!(
                 "{} has no record or document {}",
                 crate::printable(&p.name),
                 crate::printable(id)
-            )));
+            ))));
         }
     }
     let mut o = folder.overrides(p)?;

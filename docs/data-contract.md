@@ -641,6 +641,9 @@ fields it knows, never drops a mark. It is absent until the first mark.
   person's) was paid `amount` on `on`, as a receipt never filed would. A
   bill may have several. The same bill, day and amount again changes
   nothing.
+- `payments_undone` (`[{request, at}]`, 0.9.7 and later, absent when empty) is
+  the requests whose payments were taken back, for 90 days. A request in it
+  that is served again records no payment; a new request does.
 - A private mark is the household saying an item (`item`, one of this
   person's record, document or event ids) is private (`true`) or not
   (`false`), whatever the rules say. An item has at most one mark: another
@@ -674,7 +677,7 @@ fields it knows, never drops a mark. It is absent until the first mark.
   it came from, `null` from a terminal, neither trusted.
 - medrec writes it (`medrec bills paid|undo`, `medrec private
   mark|unmark|reset`, `medrec labels set|same|different|wrong|undo`, and paid,
-  private and provider requests in `_requests/`, below). Readers read it only
+  unpaid, private and provider requests in `_requests/`, below). Readers read it only
   to judge the freshness of the views made from it (views, below).
 - A file that does not read as this person's `medrec-marks/v1` is left
   out: `bills.json` and `private.json` say `marks_unreadable`, `medrec
@@ -954,8 +957,14 @@ with `event` in place of `scope`:
 - Its `done/` file keeps `event` where a refresh's keeps `scope`.
   `handled.outcome` is `ok` once recorded (a decision already recorded is
   `ok` too), `invalid` when a member is not one of that person's records or
-  documents, and `failed` when the folder could not be written. `sources`
-  is empty.
+  documents, and `failed` when the folder could not be read or written.
+  `sources` is empty.
+- A `failed` decision (an event, paid, unpaid or private request) is answered
+  once and not tried again: its `done/` file says `failed`, and the person
+  asks again. Its `handled.message` is in medrec's own words and repeats
+  nothing from the folder (0.9.7 and later). The step and the kind of error
+  are only in the refreshing machine's own output (`medrec refresh`
+  `requests[]` `cause`).
 
 ### Paid requests (0.9.1 and later)
 
@@ -976,7 +985,8 @@ The app's "Mark paid" is a request with `paid` in place of `scope`:
   `marks.json` `payments`, pending while another writer holds the
   folder. Its `done/` file keeps `paid`, with `amount` as two places.
   `handled.outcome` is `invalid` when the document is not one of that
-  person's, or not a `bill`.
+  person's, or not a `bill`, and `skipped` when it is served again after the
+  payment it recorded was taken back (0.9.7 and later).
 
 ### Unpaid requests (0.9.7 and later)
 
@@ -992,10 +1002,11 @@ The app's undo of "Mark paid" is a request with `unpaid` in place of `scope`:
   `paid[].id` gives it. A request whose `payment` is not an `o_…` id, or whose
   `person` is not in `household.json`, is `invalid` (rule 1).
 - It is applied as an event request is: by the next pass, to the person's
-  `marks.json` `payments`, pending while another writer holds the folder. Its
-  `done/` file keeps `unpaid`. `handled.outcome` is `ok` when the payment is
-  not, or no longer, one of that person's: a request can be served twice, and
-  two people can undo the same one.
+  `marks.json` `payments`, pending while another writer holds the folder and
+  for nothing else: one that could not be read or written is `failed` at once
+  (Event requests, above). Its `done/` file keeps `unpaid`. `handled.outcome`
+  is `ok` when the payment is not, or no longer, one of that person's: a
+  request can be served twice, and two people can undo the same one.
 
 ### Private requests (0.9.1 and later)
 

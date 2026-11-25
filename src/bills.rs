@@ -12,6 +12,7 @@ use serde_json::{json, Map, Value};
 
 use crate::claims::{decimal, units};
 use crate::events::same_org;
+use crate::marks::Failed;
 use crate::model::{Amount, Document, Person, PersonIndex, PersonText};
 
 pub const SCHEMA: &str = "medrec-bills/v1";
@@ -34,6 +35,26 @@ pub struct Payment {
     /// The `_requests/` id it came from.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request: Option<String>,
+}
+
+/// A payment the household took back (`marks.json` `payments_undone`), by
+/// the request it came from: served again, that request records none.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Undone {
+    pub request: String,
+    pub at: String,
+    /// What a later medrec writes here, kept as it is.
+    #[serde(flatten)]
+    pub other: serde_json::Map<String, Value>,
+}
+
+/// What became of a payment to mark.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Marked {
+    Recorded(Payment),
+    Already(Payment),
+    /// Its request recorded it before, and the household took it back.
+    TakenBack,
 }
 
 /// A bill's own facts, from its document and statement.
@@ -592,7 +613,8 @@ pub fn of_person(
 }
 
 /// Mark a bill paid: `amount` on `on`. The same payment again (the same
-/// bill, day and amount) changes nothing.
+/// bill, day and amount) changes nothing, and neither does a request whose
+/// payment was taken back.
 pub fn mark_paid(
     folder: &crate::folder::Folder,
     p: &Person,
@@ -601,35 +623,35 @@ pub fn mark_paid(
     amount: &Amount,
     by: Option<&str>,
     request: Option<&str>,
-) -> Result<(Payment, bool), pk_cli_core::CliError> {
+) -> Result<Marked, Failed> {
     use pk_cli_core::CliError;
     if day(on).is_none() {
-        return Err(CliError::Usage(format!(
+        return Err(Failed::Refused(CliError::Usage(format!(
             "`{}` is not a date (YYYY-MM-DD)",
             crate::printable(on)
-        )));
+        ))));
     }
     if !units(&amount.amount).is_some_and(|u| u > 0)
         || amount.amount.split('.').nth(1).is_some_and(|c| c.len() > 2)
     {
-        return Err(CliError::Usage(format!(
+        return Err(Failed::Refused(CliError::Usage(format!(
             "`{}` is not an amount above zero with at most two places",
             crate::printable(&amount.amount)
-        )));
+        ))));
     }
     let idx = folder.index(p)?;
     let Some(d) = idx.documents.iter().find(|d| d.id == document) else {
-        return Err(CliError::NotFound(format!(
+        return Err(Failed::Refused(CliError::NotFound(format!(
             "{} has no document {}",
             crate::printable(&p.name),
             crate::printable(document)
-        )));
+        ))));
     };
     if d.doc_type.as_deref() != Some("bill") {
-        return Err(CliError::Usage(format!(
+        return Err(Failed::Refused(CliError::Usage(format!(
             "{} is not a bill",
             crate::printable(document)
-        )));
+        ))));
     }
     let amount = Amount {
         amount: decimal(units(&amount.amount).unwrap_or(0)),
@@ -641,7 +663,10 @@ pub fn mark_paid(
         .iter()
         .find(|pm| pm.document == document && pm.on == on && pm.amount == amount)
     {
-        return Ok((pm.clone(), false));
+        return Ok(Marked::Already(pm.clone()));
+    }
+    if request.is_some_and(|r| o.payments_undone.iter().any(|u| u.request == r)) {
+        return Ok(Marked::TakenBack);
     }
     let pm = Payment {
         id: crate::ids::new("o"),
@@ -654,26 +679,34 @@ pub fn mark_paid(
     };
     o.payments.push(pm.clone());
     folder.save_marks(p, &o)?;
-    Ok((pm, true))
+    Ok(Marked::Recorded(pm))
 }
 
-/// Drop a marked payment by its id.
+/// Drop a marked payment by its id; `None` when the person has no such
+/// payment.
 pub fn undo(
     folder: &crate::folder::Folder,
     p: &Person,
     id: &str,
-) -> Result<Payment, pk_cli_core::CliError> {
+) -> Result<Option<Payment>, pk_cli_core::CliError> {
+    use crate::refresh::time;
     let mut o = folder.marks(p)?;
     let Some(i) = o.payments.iter().position(|pm| pm.id == id) else {
-        return Err(pk_cli_core::CliError::NotFound(format!(
-            "no payment {} for {}",
-            crate::printable(id),
-            crate::printable(&p.name)
-        )));
+        return Ok(None);
     };
     let pm = o.payments.remove(i);
+    let now = time::now();
+    o.payments_undone
+        .retain(|u| now - time::parse(&u.at).unwrap_or(0) < crate::marks::UNDONE_KEEP_SECS);
+    if let Some(request) = &pm.request {
+        o.payments_undone.push(Undone {
+            request: request.clone(),
+            at: time::fmt(now),
+            other: serde_json::Map::new(),
+        });
+    }
     folder.save_marks(p, &o)?;
-    Ok(pm)
+    Ok(Some(pm))
 }
 
 #[cfg(test)]

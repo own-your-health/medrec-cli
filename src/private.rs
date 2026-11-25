@@ -18,6 +18,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use crate::marks::Failed;
 use crate::model::{Document, Household, Person, PersonIndex, PersonText, Record};
 
 pub const SCHEMA: &str = "medrec-private/v1";
@@ -705,15 +706,15 @@ pub fn mark(
     private: Option<bool>,
     by: Option<&str>,
     request: Option<&str>,
-) -> Result<(Option<Mark>, bool), CliError> {
+) -> Result<(Option<Mark>, bool), Failed> {
     if !["r", "d", "e"]
         .iter()
         .any(|k| crate::ids::is_valid(k, item))
     {
-        return Err(CliError::Usage(format!(
+        return Err(Failed::Refused(CliError::Usage(format!(
             "{} is not a record, document or event id",
             crate::printable(item)
-        )));
+        ))));
     }
     // An event's own members, and the person's events now.
     let (known, members, events) = if item.starts_with("e_") {
@@ -732,11 +733,11 @@ pub fn mark(
         (known, Vec::new(), BTreeSet::new())
     };
     if !known {
-        return Err(CliError::NotFound(format!(
+        return Err(Failed::Refused(CliError::NotFound(format!(
             "{} is not one of {}'s records, documents or events",
             crate::printable(item),
             crate::printable(&p.name)
-        )));
+        ))));
     }
     let mut m = folder.marks(p)?;
     // The marks that apply to the item: its own, and for an event those

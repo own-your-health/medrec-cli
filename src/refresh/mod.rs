@@ -566,14 +566,17 @@ fn provider_request(
 /// the pass's one write `folder`, whose views follow once, as it closes:
 /// `ok` once it is in the person's `overrides.json` or `marks.json`,
 /// `invalid` when what it names is not that person's (or, for `paid`, not a
-/// bill), `failed` when the folder could not be written. `at` is when a
-/// provider request was asked.
+/// bill), `skipped` when what it asks was taken back since, `failed` when
+/// the folder could not be read or written. `at` is when a provider request
+/// was asked.
 fn decision_request(
     folder: &Folder,
     h: &crate::model::Household,
     v: &requests::Valid,
     at: i64,
 ) -> Decided {
+    use crate::bills::Marked;
+    use crate::marks::Failed;
     let person = |id: &str| h.person(id);
     let by = v.requested_by_name();
     let by = by.as_deref();
@@ -609,11 +612,11 @@ fn decision_request(
                     Decided::new("ok", format!("the mark was already recorded as {}", m.id))
                 }
                 Ok((None, _)) => Decided::new("ok", "the item follows the rules"),
-                Err(CliError::NotFound(_)) => {
+                Err(Failed::Refused(CliError::Usage(m))) => Decided::new("invalid", m),
+                Err(Failed::Refused(_)) => {
                     Decided::new("invalid", "the item it names is not one of the person's")
                 }
-                Err(CliError::Usage(m)) => Decided::new("invalid", m),
-                Err(e) => marks(e),
+                Err(Failed::Folder(e)) => marks(e),
             }
         }
         Scope::Paid {
@@ -631,19 +634,24 @@ fn decision_request(
                 currency: currency.clone(),
             };
             match crate::bills::mark_paid(folder, p, document, on, &amount, by, Some(&v.id)) {
-                Ok((pm, true)) => Decided::new("ok", format!("recorded the payment as {}", pm.id)),
-                Ok((pm, false)) => Decided::new(
+                Ok(Marked::Recorded(pm)) => {
+                    Decided::new("ok", format!("recorded the payment as {}", pm.id))
+                }
+                Ok(Marked::Already(pm)) => Decided::new(
                     "ok",
                     format!("the payment was already recorded as {}", pm.id),
                 ),
-                Err(CliError::NotFound(_)) => Decided::new(
+                Ok(Marked::TakenBack) => {
+                    Decided::new("skipped", "the payment it recorded was taken back")
+                }
+                Err(Failed::Refused(CliError::Usage(_))) => {
+                    Decided::new("invalid", "the document it names is not a bill")
+                }
+                Err(Failed::Refused(_)) => Decided::new(
                     "invalid",
                     "the document it names is not one of the person's",
                 ),
-                Err(CliError::Usage(_)) => {
-                    Decided::new("invalid", "the document it names is not a bill")
-                }
-                Err(e) => marks(e),
+                Err(Failed::Folder(e)) => marks(e),
             }
         }
         Scope::Unpaid { person: p, payment } => {
@@ -651,9 +659,9 @@ fn decision_request(
                 return no_person("unpaid");
             };
             match crate::bills::undo(folder, p, payment) {
-                Ok(pm) => Decided::new("ok", format!("undone {}", pm.id)),
+                Ok(Some(pm)) => Decided::new("ok", format!("undone {}", pm.id)),
                 // Served again, or asked by two people, it is undone.
-                Err(CliError::NotFound(_)) => Decided::new("ok", "there was nothing to undo"),
+                Ok(None) => Decided::new("ok", "there was nothing to undo"),
                 Err(e) => marks(e),
             }
         }
@@ -670,11 +678,11 @@ fn decision_request(
                 Ok((d, false)) => {
                     Decided::new("ok", format!("{kind} was already recorded as {}", d.id))
                 }
-                Err(CliError::NotFound(_)) => Decided::new(
+                Err(Failed::Refused(_)) => Decided::new(
                     "invalid",
                     "a member it names is not one of the person's records or documents",
                 ),
-                Err(e) => Decided::failed(
+                Err(Failed::Folder(e)) => Decided::failed(
                     "the person's event decisions could not be read or written",
                     "reading or writing the person's overrides.json",
                     &e,

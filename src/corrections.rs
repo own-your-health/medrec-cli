@@ -179,10 +179,6 @@ impl Undone {
     }
 }
 
-/// How long what was taken back is kept: longer than any request is
-/// answered late.
-const UNDONE_KEEP_SECS: i64 = 90 * 86_400;
-
 fn secs(at: &str) -> i64 {
     time::parse(at).unwrap_or(0)
 }
@@ -466,7 +462,7 @@ pub fn decide(
         None => last.max().unwrap_or(now).max(now),
     };
     m.providers_undone
-        .retain(|u| u.kind().is_none() || now - secs(&u.at) < UNDONE_KEEP_SECS);
+        .retain(|u| u.kind().is_none() || now - secs(&u.at) < crate::marks::UNDONE_KEEP_SECS);
     let (printed, what, item) = match ask {
         Ask::Undo(id) => {
             let Some(i) = m.providers.iter().position(|c| c.id == *id) else {
