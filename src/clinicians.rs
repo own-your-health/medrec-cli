@@ -2,7 +2,7 @@
 //! that says what they treat, and the claims that print no more of one than a
 //! surname and an initial. A likely match: it only holds a claim back.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use serde_json::Value;
 
@@ -128,58 +128,61 @@ fn names(text: &str, people: &BTreeSet<(String, char)>) -> bool {
         .any(|read| people.iter().any(|p| same_person(&read, p)))
 }
 
-/// The practices of the bills in events, as a source gave a bill's or the
-/// provider of its one clinician's claim, and neither shows.
-fn given_practices(idx: &PersonIndex, events: &Value) -> Vec<Said> {
-    let records: BTreeMap<&str, &Record> = idx.records.iter().map(|r| (r.id.as_str(), r)).collect();
-    let papers: BTreeMap<&str, &Document> =
-        idx.documents.iter().map(|d| (d.id.as_str(), d)).collect();
-    let mut out: Vec<Said> = Vec::new();
-    for e in events["events"].as_array().into_iter().flatten() {
-        let members = e["members"].as_array().into_iter().flatten();
-        let own: Vec<&Value> = members.filter(|m| m.get("person").is_none()).collect();
-        let id = |m: &Value, of: &str| m[of].as_str().map(str::to_string);
-        let claims: Vec<&Record> = own
-            .iter()
-            .filter_map(|m| records.get(id(m, "record")?.as_str()).copied())
-            .filter(|r| r.kind == "claim")
-            .collect();
-        let bills: Vec<&Document> = own
-            .iter()
-            .filter(|m| m["rule"] == "D3")
-            .filter_map(|m| papers.get(id(m, "document")?.as_str()).copied())
-            .collect();
-        if bills.is_empty() {
+/// Whether a claim is of a day: its billable period, else its date.
+fn of_day(r: &Record, day: &str) -> bool {
+    fn ten(v: Option<&str>) -> Option<&str> {
+        v?.get(..10)
+    }
+    let period = r.fields.get("billable_period");
+    let side = |k: &str| ten(period.and_then(|p| p.get(k)).and_then(Value::as_str));
+    let start = side("start").or(ten(r.date.as_deref()));
+    let end = side("end").or(start);
+    matches!((start, end), (Some(s), Some(e)) if s <= day && day <= e)
+}
+
+/// The practice that a paper of a visit's day (one D3 joins, above) says it is,
+/// for each clinician a claim of that day prints, as each is shown and as a
+/// source gave it. Every one of them: a day with two visits holds both back.
+fn practices(idx: &PersonIndex) -> Vec<Said> {
+    let is = |text: &&str| events::is_clinician(text);
+    let claims: Vec<(&Record, Vec<(String, bool)>)> = idx
+        .records
+        .iter()
+        .filter(|r| r.kind == "claim")
+        .map(|r| {
+            let shown = provider(r).filter(is).map(|t| (t.to_string(), false));
+            let given = given::as_given(r)
+                .filter_map(|x| provider(&x).filter(is).map(|t| (t.to_string(), true)));
+            (r, shown.into_iter().chain(given).collect())
+        })
+        .collect();
+    let mut out = Vec::new();
+    for d in &idx.documents {
+        let ty = d.doc_type.as_deref().unwrap_or("other");
+        let day = d.date.as_deref().and_then(|t| t.get(..10));
+        let (true, Some(day)) = (events::of_the_days_visit(ty), day) else {
+            continue;
+        };
+        let of_day: Vec<&(&Record, Vec<(String, bool)>)> =
+            claims.iter().filter(|(r, _)| of_day(r, day)).collect();
+        if of_day.is_empty() {
             continue;
         }
-        let is = |text: &&str| events::is_clinician(text);
-        let shown: Vec<(&str, &str)> = claims
-            .iter()
-            .filter_map(|r| Some((r.id.as_str(), provider(r).filter(is)?)))
-            .collect();
-        let mut clinicians: Vec<(String, bool)> = match shown.as_slice() {
-            [(_, one)] => vec![(one.to_string(), false)],
-            _ => Vec::new(),
-        };
-        for r in &claims {
-            if shown.iter().any(|(other, _)| *other != r.id) {
+        let given = given::papers_as_given(d).map(|x| (x.organization, true));
+        for (organization, paper_gave) in
+            std::iter::once((d.organization.clone(), false)).chain(given)
+        {
+            let Some(organization) = organization else {
+                continue;
+            };
+            let pharmacy = organization.to_lowercase().contains("pharmacy");
+            if pharmacy || crate::plain::is_connection(&organization) {
                 continue;
             }
-            for x in given::as_given(r) {
-                let text = provider(&x).filter(is).map(str::to_string);
-                clinicians.extend(text.map(|t| (t, true)));
-            }
-        }
-        for d in bills {
-            let given = given::papers_as_given(d).map(|x| (x.organization, true));
-            for (organization, gave) in
-                std::iter::once((d.organization.clone(), false)).chain(given)
-            {
-                let Some(organization) = organization else {
-                    continue;
-                };
-                let each = clinicians.iter().filter(|(_, given)| gave || *given);
-                out.extend(each.filter_map(|(c, _)| Said::practice(c, &organization, true)));
+            for (_, printed) in &of_day {
+                for (text, gave) in printed {
+                    out.extend(Said::practice(text, &organization, paper_gave || *gave));
+                }
             }
         }
     }
@@ -189,26 +192,15 @@ fn given_practices(idx: &PersonIndex, events: &Value) -> Vec<Said> {
 pub(crate) struct Clinicians(Vec<Said>);
 
 impl Clinicians {
-    /// Of the person's papers, and of the practices (N5) their events learned
-    /// clinicians to be of, as a paper is shown and as a source gave it.
-    pub(crate) fn of<'a>(
-        idx: &PersonIndex,
-        practices: impl Iterator<Item = [&'a str; 3]>,
-        events: &Value,
-    ) -> Clinicians {
+    /// Of the person's own papers, and of the practices those of a visit's day
+    /// say its clinicians are of, as each is shown and as a source gave it.
+    pub(crate) fn of(idx: &PersonIndex) -> Clinicians {
         let mut each: Vec<Said> = Vec::new();
         for d in &idx.documents {
             each.extend(Said::paper(d, false));
             each.extend(given::papers_as_given(d).flat_map(|x| Said::paper(&x, true)));
         }
-        for [clinician, organization, paper] in practices {
-            each.extend(Said::practice(clinician, organization, false));
-            let of = idx.documents.iter().find(|d| d.id == paper);
-            let given = of.into_iter().flat_map(given::papers_as_given);
-            let given = given.filter_map(|x| x.organization);
-            each.extend(given.filter_map(|o| Said::practice(clinician, &o, true)));
-        }
-        each.extend(given_practices(idx, events));
+        each.extend(practices(idx));
         Clinicians(each)
     }
 
@@ -251,7 +243,7 @@ mod tests {
     }
 
     fn named(idx: &PersonIndex) -> Clinicians {
-        Clinicians::of(idx, std::iter::empty(), &Value::Null)
+        Clinicians::of(idx)
     }
 
     fn area(d: Document, provider: &str) -> Option<&'static str> {
@@ -345,19 +337,54 @@ mod tests {
         assert_eq!(area(paper(None, "Bill"), "K PLACEHOLDER"), None);
     }
 
-    /// By the practice whose bill is of the clinician's visit.
+    /// By the practice whose paper is of a day the clinician's claim is of:
+    /// each clinician of that day's, whatever the events make of them.
     #[test]
-    fn a_claim_is_of_the_practice_its_clinician_bills_for() {
-        let of = |organization: &str, provider: &str| {
-            let idx = PersonIndex::new("p_test");
-            let learned = ["K PLACEHOLDER", organization, "d_aaaaaaaaaaaaaaaaaaaa"];
-            let named = Clinicians::of(&idx, [learned].into_iter(), &Value::Null);
-            named.area(&claim(provider), false)
+    fn a_claim_is_of_the_practice_a_paper_of_its_day_is() {
+        let dated = |id: &str, provider: &str, day: &str| {
+            let mut r = claim(provider);
+            r.id = id.into();
+            r.date = Some(day.into());
+            r
+        };
+        let of = |organization: &str, ty: &str, day: &str, provider: &str| {
+            let mut d = paper(Some(organization), "Statement");
+            (d.doc_type, d.date) = (Some(ty.into()), Some("2024-10-01".into()));
+            let mut idx = PersonIndex::new("p_test");
+            idx.documents = vec![d];
+            idx.records = vec![
+                dated("r_billedaaaaaaaaaaaaaa", "K PLACEHOLDER", day),
+                dated("r_sameaaaaaaaaaaaaaaaa", "J SAMPLE", "2024-10-01"),
+            ];
+            named(&idx).area(&claim(provider), false)
         };
         let mind = Some("mental_health");
-        assert_eq!(of("Example Counseling", "PLACEHOLDER, KIM"), mind);
-        assert_eq!(of("Example Counseling", "J PLACEHOLDER"), None);
-        assert_eq!(of("Example Pediatrics", "PLACEHOLDER, KIM"), None);
+        let counseling = "Example Counseling";
+        assert_eq!(
+            of(counseling, "bill", "2024-10-01", "PLACEHOLDER, KIM"),
+            mind
+        );
+        assert_eq!(
+            of(counseling, "visit_summary", "2024-10-01", "PLACEHOLDER, K"),
+            mind
+        );
+        // The other clinician of that day is held back too.
+        assert_eq!(of(counseling, "bill", "2024-10-01", "SAMPLE, JO"), mind);
+        assert_eq!(
+            of(counseling, "bill", "2024-10-02", "PLACEHOLDER, KIM"),
+            None
+        );
+        assert_eq!(of(counseling, "bill", "2024-10-01", "J PLACEHOLDER"), None);
+        assert_eq!(
+            of(counseling, "prescription", "2024-10-01", "K PLACEHOLDER"),
+            None
+        );
+        assert_eq!(
+            of("Example Pediatrics", "bill", "2024-10-01", "K PLACEHOLDER"),
+            None
+        );
+        let pharmacy = "Example Counseling Pharmacy";
+        assert_eq!(of(pharmacy, "receipt", "2024-10-01", "K PLACEHOLDER"), None);
     }
 
     /// Nothing but a claim: what else prints a name is judged by its own words.

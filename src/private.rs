@@ -622,7 +622,7 @@ pub fn build(
     if let Some(whole) = &built.whole {
         ties.extend(crate::bills::whole_ties(p, idx, texts, whole));
     }
-    let clinicians = clinicians::Clinicians::of(idx, built.practices(), &built.for_private());
+    let clinicians = clinicians::Clinicians::of(idx);
     let judge = |given: bool| {
         let mut items: BTreeMap<String, Why> = BTreeMap::new();
         let label = |id: &str| {
