@@ -2,6 +2,7 @@
 //! what each of their sources says of it (docs/data-contract.md, "Standing").
 //! No source's word wins over another's, and nothing here changes a record.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
@@ -16,6 +17,8 @@ pub const FILE: &str = "standing.json";
 
 /// The kinds that have a standing.
 pub const KINDS: &[&str] = &["condition", "allergy", "medication"];
+/// The papers' kind in [`Standings::in_error`].
+pub const DOCUMENT: &str = "document";
 
 /// What one word, or all of a record's together, says of it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -112,7 +115,8 @@ pub struct Standings {
     /// Each kind's records, newest first, then by name.
     pub order: BTreeMap<String, Vec<String>>,
     pub records: BTreeMap<String, Standing>,
-    /// The records of every kind entered in error.
+    /// The records of every kind, and the papers ([`DOCUMENT`]), entered in
+    /// error.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub in_error: BTreeMap<String, Vec<String>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -225,6 +229,160 @@ pub fn record_differs(r: &Record) -> bool {
     errors > 0 && (errors < said.len() || !unheard.is_empty())
 }
 
+/// The index without what is entered in error, as events, bills and labels
+/// are made of it. A statement whose first paper is entered in error is its
+/// next copy's, and a study whose report is has its report found again.
+pub fn index(idx: &PersonIndex) -> Cow<'_, PersonIndex> {
+    let gone: BTreeSet<String> = errors(idx).map(str::to_string).collect();
+    if gone.is_empty() {
+        return Cow::Borrowed(idx);
+    }
+    let mut out = idx.clone();
+    out.records.retain(|r| !gone.contains(&r.id));
+    out.documents.retain(|d| !gone.contains(&d.id));
+    for r in &mut out.records {
+        r.documents.retain(|d| !gone.contains(d));
+    }
+    let mut first: BTreeMap<String, String> = BTreeMap::new();
+    for d in &mut out.documents {
+        d.near_duplicates.retain(|n| !gone.contains(&n.document));
+        let of = d.same_statement_as.take();
+        d.same_statement_as = match of {
+            Some(of) if gone.contains(&of) => match first.get(&of) {
+                Some(f) => Some(f.clone()),
+                None => {
+                    first.insert(of, d.id.clone());
+                    None
+                }
+            },
+            of => of,
+        };
+    }
+    let mut lost: BTreeSet<String> = BTreeSet::new();
+    for s in &mut out.studies {
+        if s.report.as_ref().is_some_and(|r| gone.contains(r)) {
+            s.report = None;
+            lost.insert(s.id.clone());
+        }
+    }
+    // No other: what is entered in error links no study that had no report.
+    crate::imaging::link(&mut out, |s| lost.contains(&s.id));
+    Cow::Owned(out)
+}
+
+/// The ids of a person's records and papers entered in error.
+pub fn errors(idx: &PersonIndex) -> impl Iterator<Item = &str> {
+    let records = idx.records.iter().filter(|r| record_in_error(r));
+    let papers = idx.documents.iter().filter(|d| document_in_error(d));
+    records
+        .map(|r| r.id.as_str())
+        .chain(papers.map(|d| d.id.as_str()))
+}
+
+/// One source's word of an item that some source says is entered in error.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Says {
+    /// Its source's name.
+    pub source: Option<String>,
+    /// The day its source was last read saying it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verification: Option<String>,
+    /// No word of it is kept.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unheard: bool,
+    /// The household's own file.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub household: bool,
+}
+
+impl Says {
+    fn of(from: Sources, p: Option<&Provenance>, w: Option<&Word>) -> Says {
+        let fetched = || p.and_then(|p| day(p.fetched_at.as_deref()));
+        Says {
+            source: p.and_then(|p| from.label(p)),
+            read: w.and_then(|w| day(w.read.as_deref()).or_else(fetched)),
+            status: w.and_then(|w| w.status.clone()),
+            verification: w.and_then(|w| w.verification.clone()),
+            unheard: w.is_none(),
+            household: w.is_none() && p.is_some_and(|p| p.source.cli.is_none()),
+        }
+    }
+
+    pub fn text(&self) -> String {
+        if self.household {
+            return "the household's own file".into();
+        }
+        let source = self.source.as_deref().unwrap_or("a source with no name");
+        if self.unheard {
+            return format!("{source}: not heard");
+        }
+        let said = Said {
+            source: 0,
+            read: self.read.clone(),
+            is: Is::Current,
+            status: self.status.clone(),
+            verification: self.verification.clone(),
+            abatement: None,
+            end: None,
+            end_of: None,
+        };
+        format!("{source}: {}", said.text())
+    }
+}
+
+/// What a reader says of an item its sources differ on.
+pub const DIFFER: &str = "sources differ";
+
+/// What each source says of a record of which one says it is entered in
+/// error; of one with a standing, [`Standings`] has it.
+pub fn record_says(from: Sources, r: &Record) -> Vec<Says> {
+    let (said, unheard) = words(r);
+    if stands(r) || !said.iter().any(|(w, _)| w.in_error()) {
+        return Vec::new();
+    }
+    let said = said.iter().map(|(w, p)| Says::of(from, *p, Some(w)));
+    said.chain(unheard.iter().map(|p| Says::of(from, Some(p), None)))
+        .collect()
+}
+
+/// As [`record_says`], of a paper.
+pub fn document_says(from: Sources, d: &Document) -> Vec<Says> {
+    if !d.words.iter().any(Word::in_error) {
+        return Vec::new();
+    }
+    let word = |p: &Provenance| {
+        let mut of = d.words.iter();
+        of.find(|w| p.raw_path.as_ref() == Some(&w.raw_path))
+    };
+    d.provenances()
+        .map(|p| Says::of(from, Some(p), word(p)))
+        .collect()
+}
+
+/// The standing and the words of an item that its sources differ on, as a
+/// list shows them.
+pub fn differ(says: &[Says]) -> (Option<String>, Vec<String>) {
+    let standing = (!says.is_empty()).then(|| DIFFER.to_string());
+    (standing, says.iter().map(Says::text).collect())
+}
+
+/// What a reader says of a paper opened by its id that a source says is
+/// entered in error.
+pub fn paper_note(from: Sources, d: &Document) -> Option<String> {
+    let says: Vec<String> = document_says(from, d).iter().map(Says::text).collect();
+    let says = says.join("; ");
+    if document_in_error(d) {
+        return Some(format!(
+            "Entered in error ({says}): it is in no list, event, bill or total."
+        ));
+    }
+    (!says.is_empty()).then(|| format!("Its sources differ ({says})."))
+}
+
 fn is_fill(r: &Record) -> bool {
     r.kind == "medication" && r.fields.get("source") == Some(&"dispense".into())
 }
@@ -295,6 +453,10 @@ impl Standings {
         // say, anything else of a condition.
         let mut diagnoses: BTreeMap<usize, Vec<String>> = BTreeMap::new();
         let mut lists: BTreeSet<usize> = BTreeSet::new();
+        for d in idx.documents.iter().filter(|d| document_in_error(d)) {
+            let of = in_error.entry(DOCUMENT.into()).or_default();
+            of.push(d.id.clone());
+        }
         for r in &idx.records {
             let error = record_in_error(r);
             if stands(r) {
@@ -622,7 +784,7 @@ impl Standings {
         }
     }
 
-    /// Every record entered in error, by id.
+    /// Everything entered in error, by id.
     pub fn errors(&self) -> impl Iterator<Item = &String> {
         self.in_error.values().flatten()
     }
@@ -1196,5 +1358,87 @@ mod tests {
         ] {
             assert_eq!(last_day(end).as_deref(), day, "{end}");
         }
+    }
+
+    /// What is made of an index is made of it without what is entered in
+    /// error, and of it as it is when nothing is.
+    #[test]
+    fn an_index_is_without_what_is_entered_in_error() {
+        let (record, paper) = ("r_recordaaaaaaaaaaaaaa", "d_paperaaaaaaaaaaaaaaa");
+        let copies = [
+            "d_firstaaaaaaaaaaaaaaa",
+            "d_nextaaaaaaaaaaaaaaaa",
+            "d_lastaaaaaaaaaaaaaaaa",
+        ];
+        let document = |id: &str, same: Option<&str>, near: &[&str]| {
+            let near: Vec<Value> = near
+                .iter()
+                .map(|d| json!({"document": d, "similarity": 0.9}))
+                .collect();
+            json!({"id": id, "path": "a", "sha256": "a", "md5": "a", "size": 1,
+                "media_type": "application/pdf", "doc_type": "bill", "filed_at": "2024-06-01T10:00:00Z",
+                "same_statement_as": same, "near_duplicates": near,
+                "origin": {"kind": "fhir", "action": "imported"},
+                "provenance": {"source": {"kind": "fhir"}, "method": "fhir-api",
+                    "raw_path": format!("{id}.json"),
+                    "filed_at": "2024-06-01T10:00:00Z", "filed_by": "medrec 0.9.9"}})
+        };
+        let mut idx: PersonIndex = serde_json::from_value(json!({
+            "schema": "medrec-index/v1", "person": "p_robinaaaaaaaaaaaaaaa", "rev": 1, "imports": [],
+            "documents": [
+                document(copies[0], None, &[]),
+                document(copies[1], Some(copies[0]), &[copies[0]]),
+                document(copies[2], Some(copies[0]), &[]),
+                document(paper, None, &[]),
+            ],
+            "records": [{"id": record, "kind": "encounter", "key": "k", "display": "Visit",
+                "fields": {}, "documents": [copies[0], paper], "provenance": [{"source": {"kind": "fhir"},
+                    "method": "fhir-api", "filed_at": "2024-06-01T10:00:00Z", "filed_by": "medrec 0.9.9"}]}],
+        }))
+        .unwrap();
+        assert!(matches!(index(&idx), Cow::Borrowed(_)));
+        assert_eq!(errors(&idx).count(), 0);
+        let error = |idx: &mut PersonIndex, id: &str| {
+            let d = idx.documents.iter_mut().find(|d| d.id == id).unwrap();
+            d.words = serde_json::from_value(
+                json!([{"raw_path": format!("{id}.json"), "status": "entered-in-error"}]),
+            )
+            .unwrap();
+        };
+        error(&mut idx, copies[0]);
+        let now = index(&idx);
+        let same: Vec<(&str, Option<&str>)> = now
+            .documents
+            .iter()
+            .map(|d| (d.id.as_str(), d.same_statement_as.as_deref()))
+            .collect();
+        assert_eq!(
+            same,
+            [
+                (copies[1], None),
+                (copies[2], Some(copies[1])),
+                (paper, None)
+            ]
+        );
+        assert!(now.documents[0].near_duplicates.is_empty());
+        assert_eq!(now.records[0].documents, [paper]);
+        // What is kept is as it was.
+        assert_eq!(idx.documents.len(), 4);
+        assert_eq!(
+            idx.documents[2].same_statement_as.as_deref(),
+            Some(copies[0])
+        );
+        assert_eq!(errors(&idx).collect::<Vec<_>>(), [copies[0]]);
+        // A copy that is in error is not the first of those left.
+        error(&mut idx, copies[1]);
+        let now = index(&idx);
+        assert_eq!(now.documents[0].id, copies[2]);
+        assert_eq!(now.documents[0].same_statement_as, None);
+        idx.records[0].status = Some("entered-in-error".into());
+        assert!(index(&idx).records.is_empty());
+        assert_eq!(
+            errors(&idx).collect::<Vec<_>>(),
+            [record, copies[0], copies[1]]
+        );
     }
 }

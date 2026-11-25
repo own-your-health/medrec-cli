@@ -61,6 +61,11 @@ real record, document, study or provider response.
   places. `make.py` writes `household.json` and `index.json`, medrec gives
   `standing.json` from them, and `lists.json` is the lists a reader makes of
   it, each with the day, the records it may not show, and why.
+- `errors/` is an invented person's records and papers entered in error, one
+  of each kind the contract's "Entered in error" names, beside ones that stand
+  and ones their sources differ on, with what the household decided of them
+  (`marks.json`, `overrides.json`). `make.py` writes the files; their sources
+  are those of `standing/household.json`.
 - `bills/` holds invented text in the shapes `pdftotext -layout` gives a
   provider's patient statement and a payment receipt:
   `statement-columns.txt` puts the statement's fields in a header row over a

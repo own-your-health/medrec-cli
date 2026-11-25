@@ -224,8 +224,12 @@ pub fn person(
 ) -> Result<Summary, CliError> {
     let idx = folder.index(p)?;
     let notes = folder.notes(p)?.len();
-    let settled = crate::bills::settled(&crate::bills::of_person(folder, h, p)?);
-    Ok(of_index(h, p, &idx, notes, today, limits, &settled))
+    let bills = crate::bills::of_person(folder, h, p)?;
+    let settled = crate::bills::settled(&bills);
+    let mut out = of_index(h, p, &idx, notes, today, limits, &settled);
+    let gone = crate::bills::in_error(&bills, &|_| true);
+    out.notes.extend(gone.map(|n| ("bills", n)));
+    Ok(out)
 }
 
 /// [`person`] from the person's index already read, with `notes` notes and
@@ -293,6 +297,16 @@ pub(crate) fn of_index(
             said.push((section, standing::in_error(l.in_error)));
         }
     }
+    for (section, kind) in [
+        ("immunizations", "immunization"),
+        ("latest_results", "result"),
+        ("recent_visits", "encounter"),
+    ] {
+        let n = st.in_error.get(kind).map_or(0, Vec::len);
+        if n > 0 {
+            said.push((section, standing::in_error(n)));
+        }
+    }
 
     Summary {
         person: person_row(p, idx, notes),
@@ -315,7 +329,7 @@ pub(crate) fn of_index(
                 .collect(),
             n,
         ),
-        bills: Listed::cut(bills(idx, today, settled), n),
+        bills: Listed::cut(bills(&standing::index(idx), today, settled), n),
     }
 }
 
@@ -418,7 +432,7 @@ pub(crate) fn by_status(from: Sources, idx: &PersonIndex, kind: &str, n: usize) 
 fn vaccines(from: Sources, records: &[&Record]) -> Vec<Vaccine> {
     let mut by: Vec<(String, Vaccine)> = Vec::new();
     for r in records.iter().filter(|r| r.kind == "immunization") {
-        if matches!(r.status.as_deref(), Some("not-done" | "entered-in-error")) {
+        if r.status.as_deref() == Some("not-done") {
             continue;
         }
         let key = series_key(r);

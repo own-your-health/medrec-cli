@@ -24,6 +24,7 @@ use crate::model::{
 };
 use crate::people;
 use crate::proc::{which, Bounded};
+use crate::standing;
 use crate::store;
 
 /// Files read from one source; a CD with its viewer software is far less.
@@ -582,8 +583,14 @@ pub fn study_folder_name(
 }
 
 /// Link each study without a report to the one radiology report filed for
-/// the same person on the same date, when there is exactly one.
+/// the same person on the same date, when there is exactly one. One entered
+/// in error counts, so that what links a study is the same when it comes back.
 pub fn link_reports(idx: &mut PersonIndex) -> usize {
+    link(idx, |s| s.report.is_none())
+}
+
+/// The same for these studies.
+pub(crate) fn link(idx: &mut PersonIndex, which: impl Fn(&ImagingStudy) -> bool) -> usize {
     let mut linked = 0;
     let reports: Vec<(String, Option<String>)> = idx
         .documents
@@ -591,7 +598,7 @@ pub fn link_reports(idx: &mut PersonIndex) -> usize {
         .filter(|d| d.doc_type.as_deref() == Some("imaging_report"))
         .map(|d| (d.id.clone(), d.date.clone()))
         .collect();
-    for s in idx.studies.iter_mut().filter(|s| s.report.is_none()) {
+    for s in idx.studies.iter_mut().filter(|s| which(s)) {
         let same_day: Vec<&String> = reports
             .iter()
             .filter(|(_, d)| d.is_some() && *d == s.date)
@@ -854,7 +861,7 @@ pub fn list(
 ) -> Result<Vec<StudyRow>, CliError> {
     let mut rows = Vec::new();
     for p in people::selected(h, person)? {
-        for s in folder.index(p)?.studies {
+        for s in standing::index(&folder.index(p)?).into_owned().studies {
             rows.push(StudyRow {
                 id: s.id,
                 person: p.id.clone(),
@@ -883,8 +890,8 @@ pub fn find(
     query: &str,
 ) -> Result<(Person, ImagingStudy), CliError> {
     for p in &h.people {
-        if let Some(s) = folder
-            .index(p)?
+        if let Some(s) = standing::index(&folder.index(p)?)
+            .into_owned()
             .studies
             .into_iter()
             .find(|s| s.id == query || s.study_uid == query)

@@ -18,8 +18,10 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use crate::events::Built;
 use crate::marks::{failed, Failed, READ, RECORDS, WRITE};
 use crate::model::{Document, Household, Person, PersonIndex, PersonText, Record};
+use crate::standing;
 
 pub const SCHEMA: &str = "medrec-private/v1";
 
@@ -345,10 +347,10 @@ fn document_why(d: &Document, text: Option<&str>) -> Option<Why> {
     place.or_else(words)
 }
 
-/// The pairs of documents that tell of one another: a paper and its copy,
-/// and those [`crate::bills::ties`] ties.
-fn papers_tied(idx: &PersonIndex, bills: &Value) -> Vec<(String, String)> {
-    let mut out = crate::bills::ties(bills);
+/// The pairs of documents that tell of one another as copies. So do those
+/// [`crate::bills::ties`] ties.
+fn papers_tied(idx: &PersonIndex) -> Vec<(String, String)> {
+    let mut out = Vec::new();
     for d in &idx.documents {
         let copies = d
             .near_duplicates
@@ -363,17 +365,20 @@ fn papers_tied(idx: &PersonIndex, bills: &Value) -> Vec<(String, String)> {
 // ---------------------------------------------------------------- the view
 
 /// The person's `private.json` as `medrec views write` writes it: from
-/// their index and its texts, their `events.json`, their marks, and the
-/// items a provider label makes private, with their area
-/// (`labels::Said::areas`).
+/// their index and its texts, their events (`events::Built`), their marks,
+/// and the items a provider label makes private, with their area
+/// (`labels::Said::areas` of [`Built::for_private`]). What a source takes
+/// back still tells what it did, so nothing it made private opens.
 pub fn build(
     p: &Person,
     idx: &PersonIndex,
     texts: &PersonText,
-    events: &Value,
+    built: &Built,
     marks: &[Mark],
     labelled: &BTreeMap<String, &'static str>,
 ) -> Value {
+    let now_index = standing::index(idx);
+    let events = &*built.for_private();
     let by_label = |id: &str| {
         labelled.get(id).map(|area| Why {
             area,
@@ -438,7 +443,17 @@ pub fn build(
         }
     };
     // So is one tied to a private one.
-    let ties = papers_tied(idx, &crate::bills::build(p, idx, texts, events, &[]));
+    let mut ties = papers_tied(idx);
+    ties.extend(crate::bills::ties(&crate::bills::build(
+        p,
+        idx,
+        texts,
+        &built.events,
+        &[],
+    )));
+    if let Some(whole) = &built.whole {
+        ties.extend(crate::bills::whole_ties(p, idx, texts, whole));
+    }
     let tie = |items: &mut BTreeMap<String, Why>| loop {
         let tied: Vec<(String, Why)> = ties
             .iter()
@@ -541,26 +556,29 @@ pub fn build(
     }
 
     // A study is private when its report is. One with no report, or a
-    // report the person does not have, cannot be judged.
+    // report the person does not have, cannot be judged, with what is entered
+    // in error or without it.
     let mut unreported = Vec::new();
-    for s in &idx.studies {
-        let report = s
-            .report
-            .as_deref()
-            .filter(|r| documents.contains(r) || idx.records.iter().any(|x| x.id == *r));
-        match report {
-            None => unreported.push(s.id.clone()),
-            Some(r) => {
-                if let Some(w) = items.get(r).copied() {
-                    items.insert(
-                        s.id.clone(),
-                        Why {
-                            area: w.area,
-                            from: "report",
-                        },
-                    );
-                }
-            }
+    for (s, now) in idx.studies.iter().zip(&now_index.studies) {
+        let report = |of: &PersonIndex, report: &Option<String>| -> Option<String> {
+            let has = |r: &&String| {
+                of.documents.iter().any(|d| d.id == **r) || of.records.iter().any(|x| x.id == **r)
+            };
+            report.as_ref().filter(has).cloned()
+        };
+        let (was, is) = (report(idx, &s.report), report(&now_index, &now.report));
+        if was.is_none() || is.is_none() {
+            unreported.push(s.id.clone());
+        }
+        let mut why = [was, is].into_iter().flatten();
+        if let Some(w) = why.find_map(|r| items.get(&r).copied()) {
+            items.insert(
+                s.id.clone(),
+                Why {
+                    area: w.area,
+                    from: "report",
+                },
+            );
         }
     }
 
@@ -592,14 +610,14 @@ pub fn of_person(
     Ok(with_events(folder, h, p, &idx)?.0)
 }
 
-/// The person's `private.json` now, and the `events.json` it was made from.
+/// The person's `private.json` now, and the events it was made from.
 pub fn with_events(
     folder: &crate::folder::Folder,
     h: &Household,
     p: &Person,
     idx: &PersonIndex,
-) -> Result<(Value, Value), CliError> {
-    let events = crate::events::of_person(folder, h, p)?;
+) -> Result<(Value, Built), CliError> {
+    let events = crate::events::both(folder, h, p)?;
     let marks = folder.marks_if_readable(p)?;
     // As the last pass left it: what is private is the same on a machine
     // with the directory and on one without it.
@@ -608,7 +626,8 @@ pub fn with_events(
         .as_ref()
         .map(|m| m.providers.as_slice())
         .unwrap_or_default();
-    let said = crate::labels::Said::of(idx, &events, &state, corrections);
+    let whole = events.for_private();
+    let said = crate::labels::Said::of(idx, &whole, &state, corrections);
     let mut v = build(
         p,
         idx,
@@ -626,6 +645,7 @@ pub fn with_events(
     if marks.is_none() || state.lost() {
         v["marks_unreadable"] = Value::Bool(true);
     }
+    drop(whole);
     Ok((v, events))
 }
 
@@ -947,7 +967,11 @@ mod tests {
         events: &Value,
         marks: &[Mark],
     ) -> Value {
-        build(p, idx, texts, events, marks, &BTreeMap::new())
+        let built = Built {
+            events: events.clone(),
+            whole: None,
+        };
+        build(p, idx, texts, &built, marks, &BTreeMap::new())
     }
 
     #[test]
@@ -1265,6 +1289,130 @@ mod tests {
         assert_eq!(marked["d_thirdaaaaaaaaaaaaaaa"].0, HOUSEHOLD);
         assert!(!marked.contains_key("d_firstaaaaaaaaaaaaaaa"));
         assert!(!marked.contains_key("d_photoaaaaaaaaaaaaaaa"));
+    }
+
+    /// A paper whose only source says it is entered in error.
+    fn in_error(d: &mut Document) {
+        let raw = format!("Records/example/Binary/{}.json", d.id);
+        d.provenance.raw_path = Some(raw.clone());
+        d.words = serde_json::from_value(json!([{"raw_path": raw, "status": "entered-in-error"}]))
+            .unwrap();
+    }
+
+    /// A study no report judges stays so whatever is entered in error: one of
+    /// its day's two reports, or a paper of another day.
+    #[test]
+    fn what_is_entered_in_error_opens_no_study_without_a_report() {
+        let (one, two, other) = (
+            "d_reportoneaaaaaaaaaaa",
+            "d_reporttwoaaaaaaaaaaa",
+            "d_letteraaaaaaaaaaaaaa",
+        );
+        let report = |id: &str| {
+            let mut d = document(id);
+            d["doc_type"] = "imaging_report".into();
+            d["date"] = "2026-10-30".into();
+            d
+        };
+        let mut idx: PersonIndex = serde_json::from_value(json!({
+            "schema": "medrec-index/v1", "person": "p_testaaaaaaaaaaaaaaaa", "rev": 1, "imports": [],
+            "documents": [report(one), report(two), document(other)],
+            "studies": [study("m_studyaaaaaaaaaaaaaaa", None)], "records": []
+        }))
+        .unwrap();
+        // Two reports of its day: none is its own.
+        assert_eq!(crate::imaging::link_reports(&mut idx), 0);
+        let unreported = |idx: &PersonIndex| {
+            let v = built(&person(), idx, &no_text(), &json!({"events": []}), &[]);
+            v["unreported_studies"].clone()
+        };
+        let none = json!(["m_studyaaaaaaaaaaaaaaa"]);
+        assert_eq!(unreported(&idx), none);
+        for i in 0..3 {
+            let mut gone = idx.clone();
+            in_error(&mut gone.documents[i]);
+            assert_eq!(unreported(&gone), none, "{}", idx.documents[i].id);
+            // Nor does a link made while it is.
+            assert_eq!(crate::imaging::link_reports(&mut gone), 0);
+        }
+        // One of one report not linked yet is not linked by another's.
+        idx.documents.remove(1);
+        in_error(&mut idx.documents[1]);
+        assert_eq!(unreported(&idx), none);
+        assert_eq!(crate::standing::index(&idx).studies[0].report, None);
+    }
+
+    /// What a source takes back still tells: each paper stays private, as do
+    /// those that were by it.
+    #[test]
+    fn nothing_opens_because_a_paper_is_entered_in_error() {
+        let (idx, texts) = papers();
+        let none = || json!({"events": []});
+        let before = built(&person(), &idx, &texts, &none(), &[]);
+        let before = areas(&before, "documents");
+        assert!(before.len() > 5);
+        for i in 0..idx.documents.len() {
+            let mut idx = idx.clone();
+            in_error(&mut idx.documents[i]);
+            let both = Built {
+                events: none(),
+                whole: Some(none()),
+            };
+            let v = build(&person(), &idx, &texts, &both, &[], &BTreeMap::new());
+            let after = areas(&v, "documents");
+            for (id, area) in &before {
+                assert_eq!(after.get(id), Some(area), "{id} by {}", idx.documents[i].id);
+            }
+        }
+    }
+
+    /// So does a visit its claim made private, and its event, though a source
+    /// takes the claim back; and a study whose only report is.
+    #[test]
+    fn nothing_opens_because_a_claim_or_a_report_is_entered_in_error() {
+        let (claim, visit) = ("r_programclaimaaaaaaaa", "r_programvisitaaaaaaaa");
+        let (event, report) = ("e_programaaaaaaaaaaaaa", "d_reportaaaaaaaaaaaaa");
+        let mut program = record(
+            claim,
+            "claim",
+            "Class",
+            json!({"provider": "Kim Example",
+                "diagnoses": [{"sequence": 1, "code": {"system": crate::normalize::ICD10, "code": "F17.210"}}]}),
+        );
+        program["documents"] = json!([report]);
+        let mut idx: PersonIndex = serde_json::from_value(json!({
+            "schema": "medrec-index/v1", "person": "p_testaaaaaaaaaaaaaaaa", "rev": 1, "imports": [],
+            "documents": [document(report)],
+            "studies": [study("m_reportaaaaaaaaaaaaa", Some(report))],
+            "records": [program, record(visit, "encounter", "Group Visit", json!({"class": "AMB"}))]
+        }))
+        .unwrap();
+        let member = |id: &str, kind: &str| json!({"record": id, "kind": kind, "role": "office"});
+        let events = |members: &[Value]| json!({"events": [{"id": event, "members": members}]});
+        let whole = events(&[member(claim, "claim"), member(visit, "encounter")]);
+        let before = built(&person(), &idx, &no_text(), &whole, &[]);
+        assert_eq!(before["events"][event]["from"], "members");
+        assert_eq!(before["records"][visit]["from"], "event");
+        idx.records[0].status = Some("entered-in-error".into());
+        in_error(&mut idx.documents[0]);
+        let both = Built {
+            events: events(&[member(visit, "encounter")]),
+            whole: Some(whole),
+        };
+        let v = build(&person(), &idx, &no_text(), &both, &[], &BTreeMap::new());
+        for kind in ["records", "documents", "events", "studies"] {
+            assert_eq!(areas(&v, kind), areas(&before, kind), "{kind}");
+        }
+        // No report judges the study now, and it is not opened for that.
+        assert_eq!(v["unreported_studies"], json!(["m_reportaaaaaaaaaaaaa"]));
+        // Once its claim is gone from the events as from the index, no more.
+        let gone = Built {
+            events: both.events.clone(),
+            whole: None,
+        };
+        idx.records.remove(0);
+        let v = build(&person(), &idx, &no_text(), &gone, &[], &BTreeMap::new());
+        assert!(areas(&v, "events").is_empty(), "{v}");
     }
 
     #[test]

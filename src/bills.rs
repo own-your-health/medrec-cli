@@ -14,6 +14,7 @@ use crate::claims::{decimal, units};
 use crate::events::same_org;
 use crate::marks::{failed, Failed, READ, RECORDS, WRITE};
 use crate::model::{Amount, Document, Person, PersonIndex, PersonText};
+use crate::standing;
 
 pub const SCHEMA: &str = "medrec-bills/v1";
 /// How long after a bill's date a receipt can be its payment.
@@ -63,6 +64,55 @@ struct Bill<'a> {
     date: Option<String>,
     due: Option<(i128, String)>,
     copies: Vec<String>,
+}
+
+impl Bill<'_> {
+    fn papers(&self) -> impl Iterator<Item = &str> {
+        std::iter::once(self.doc.id.as_str()).chain(self.copies.iter().map(String::as_str))
+    }
+}
+
+/// Each statement of these papers once, its later copies listed with it.
+fn bills_of(docs: &[Document]) -> Vec<Bill<'_>> {
+    docs.iter()
+        .filter(|d| d.doc_type.as_deref() == Some("bill") && d.same_statement_as.is_none())
+        .map(|d| Bill {
+            doc: d,
+            date: d
+                .statement
+                .as_ref()
+                .and_then(|s| s.statement_date.clone())
+                .or_else(|| d.date.clone()),
+            due: d
+                .statement
+                .as_ref()
+                .and_then(|s| s.amount_due.as_ref())
+                .and_then(amount_units),
+            copies: docs
+                .iter()
+                .filter(|c| c.same_statement_as.as_deref() == Some(d.id.as_str()))
+                .map(|c| c.id.clone())
+                .collect(),
+        })
+        .collect()
+}
+
+/// What became of a person's paper or claim entered in error.
+#[derive(Serialize)]
+#[serde(tag = "as", rename_all = "snake_case")]
+enum Gone<'a> {
+    /// A bill every paper of which is, and the payments on it, which pay
+    /// nothing else.
+    Bill {
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        not_applied: Vec<Value>,
+    },
+    /// Another paper of a bill.
+    Copy {
+        bill: &'a str,
+    },
+    Receipt,
+    Claim,
 }
 
 fn amount_units(a: &Amount) -> Option<(i128, String)> {
@@ -128,6 +178,60 @@ fn money(u: i128) -> String {
     decimal(u)
 }
 
+/// The bill of these a receipt pays, and whether to the cent.
+fn pays<'a>(
+    bills: &[&Bill<'a>],
+    receipt: &Document,
+    paid: &(i128, String),
+    on: Option<i64>,
+) -> Option<(&'a str, bool)> {
+    let cands: Vec<&&Bill> = bills
+        .iter()
+        .filter(|b| same_biller(b.doc, receipt))
+        .filter(|b| match (b.date.as_deref().and_then(day), on) {
+            (Some(bd), Some(od)) => bd <= od && od <= bd + RECEIPT_DAYS,
+            _ => false,
+        })
+        .collect();
+    let equal: Vec<&&&Bill> = cands
+        .iter()
+        .filter(|b| b.due.as_ref() == Some(paid))
+        .collect();
+    match (equal.as_slice(), cands.as_slice()) {
+        ([b], _) => Some((b.doc.id.as_str(), true)),
+        ([], [b]) => Some((b.doc.id.as_str(), false)),
+        _ => None,
+    }
+}
+
+fn of_receipt(r: &Receipt) -> Value {
+    json!({"from": "receipt", "document": r.doc.id, "on": r.on,
+           "amount": money(r.paid.0), "currency": r.paid.1})
+}
+
+fn of_household(pm: &Payment, u: i128, currency: &str) -> Value {
+    json!({"from": "household", "id": pm.id, "on": pm.on,
+           "amount": money(u), "currency": currency})
+}
+
+/// In the order of a bill's payments.
+fn in_order(rows: &mut [Value]) {
+    rows.sort_by(|a, b| {
+        (s(a, "on"), s(a, "document").or(s(a, "id")))
+            .cmp(&(s(b, "on"), s(b, "document").or(s(b, "id"))))
+    });
+}
+
+struct Receipt<'a> {
+    doc: &'a Document,
+    on: Option<String>,
+    paid: (i128, String),
+    bill: Option<&'a str>,
+    /// The bill entered in error it paid.
+    lost: Option<&'a str>,
+    event: Option<usize>,
+}
+
 /// The person's `bills.json` from their index and its texts, their built
 /// events (`crate::events::build`) and the payments the household marked.
 pub fn build(
@@ -137,56 +241,70 @@ pub fn build(
     events: &Value,
     payments: &[Payment],
 ) -> Value {
-    let docs = &idx.documents;
+    table(p, &standing::index(idx), idx, texts, events, payments)
+}
+
+/// The pairs of [`ties`] with what is entered in error as well, of the events
+/// as they are with it.
+pub fn whole_ties(
+    p: &Person,
+    idx: &PersonIndex,
+    texts: &PersonText,
+    events: &Value,
+) -> Vec<(String, String)> {
+    ties(&table(p, idx, idx, texts, events, &[]))
+}
+
+/// The bills of the papers in `now`, of those the person has (`all`).
+fn table(
+    p: &Person,
+    now: &PersonIndex,
+    all: &PersonIndex,
+    texts: &PersonText,
+    events: &Value,
+    payments: &[Payment],
+) -> Value {
+    let docs = &now.documents;
     let evs: Vec<&Value> = events
         .get("events")
         .and_then(Value::as_array)
         .map(|a| a.iter().collect())
         .unwrap_or_default();
 
-    // Bills: each statement once, its later copies listed with it.
-    let mut bills: Vec<Bill> = docs
-        .iter()
-        .filter(|d| d.doc_type.as_deref() == Some("bill") && d.same_statement_as.is_none())
-        .map(|d| Bill {
-            doc: d,
-            date: d
-                .statement
-                .as_ref()
-                .and_then(|s| s.statement_date.clone())
-                .or_else(|| d.date.clone()),
-            due: d
-                .statement
-                .as_ref()
-                .and_then(|s| s.amount_due.as_ref())
-                .and_then(amount_units),
-            copies: docs
-                .iter()
-                .filter(|c| c.same_statement_as.as_deref() == Some(d.id.as_str()))
-                .map(|c| c.id.clone())
-                .collect(),
-        })
-        .collect();
+    let mut bills = bills_of(docs);
     bills.sort_by(|a, b| b.date.cmp(&a.date).then(a.doc.id.cmp(&b.doc.id)));
     let first_of: BTreeMap<&str, &str> = bills
         .iter()
-        .flat_map(|b| {
-            std::iter::once((b.doc.id.as_str(), b.doc.id.as_str())).chain(
-                b.copies
-                    .iter()
-                    .map(move |c| (c.as_str(), b.doc.id.as_str())),
-            )
-        })
+        .flat_map(|b| b.papers().map(|id| (id, b.doc.id.as_str())))
+        .collect();
+
+    // A payment is of the statement, whichever of its papers it is marked on;
+    // one is entered in error when every paper of it is.
+    let statements = bills_of(&all.documents);
+    let statement_of: BTreeMap<&str, usize> = statements
+        .iter()
+        .enumerate()
+        .flat_map(|(i, b)| b.papers().map(move |id| (id, i)))
+        .collect();
+    let mut bill_of: BTreeMap<usize, &str> = BTreeMap::new();
+    for b in &bills {
+        if let Some(i) = statement_of.get(b.doc.id.as_str()) {
+            bill_of.entry(*i).or_insert(b.doc.id.as_str());
+        }
+    }
+    let lost: Vec<&Bill> = statements
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| !bill_of.contains_key(i))
+        .map(|(_, b)| b)
+        .collect();
+    let here: BTreeSet<&str> = docs
+        .iter()
+        .map(|d| d.id.as_str())
+        .chain(now.records.iter().map(|r| r.id.as_str()))
         .collect();
 
     // Receipts: to the bill they pay, else to the visit they were paid at.
-    struct Receipt<'a> {
-        doc: &'a Document,
-        on: Option<String>,
-        paid: (i128, String),
-        bill: Option<&'a str>,
-        event: Option<usize>,
-    }
     let mut receipts: Vec<Receipt> = Vec::new();
     for d in docs
         .iter()
@@ -206,24 +324,16 @@ pub fn build(
             .and_then(|s| s.paid_on.clone())
             .or_else(|| d.date.clone());
         let on_day = on.as_deref().and_then(day);
-        let cands: Vec<&Bill> = bills
-            .iter()
-            .filter(|b| same_biller(b.doc, d))
-            .filter(|b| match (b.date.as_deref().and_then(day), on_day) {
-                (Some(bd), Some(od)) => bd <= od && od <= bd + RECEIPT_DAYS,
-                _ => false,
-            })
-            .collect();
-        let equal: Vec<&&Bill> = cands
-            .iter()
-            .filter(|b| b.due == Some(paid.clone()))
-            .collect();
-        let bill = match (equal.as_slice(), cands.as_slice()) {
-            ([b], _) => Some(b.doc.id.as_str()),
-            ([], [b]) => Some(b.doc.id.as_str()),
-            _ => None,
+        // One entered in error takes from no bill that stands what is its to
+        // the cent, and what may be its pays no other.
+        let standing: Vec<&Bill> = bills.iter().collect();
+        let exact = pays(&standing, d, &paid, on_day).filter(|(_, exact)| *exact);
+        let of = exact.or_else(|| pays(&[&standing[..], &lost[..]].concat(), d, &paid, on_day));
+        let (bill, lost) = match of {
+            Some((id, _)) if lost.iter().any(|b| b.doc.id == id) => (None, Some(id)),
+            of => (of.map(|(id, _)| id), None),
         };
-        let event = if bill.is_some() {
+        let event = if bill.is_some() || lost.is_some() {
             None
         } else {
             let org = d.organization.as_deref().unwrap_or("");
@@ -258,9 +368,19 @@ pub fn build(
             on,
             paid,
             bill,
+            lost,
             event,
         });
     }
+
+    // The payments the household marked on a statement.
+    let marked = |of: Option<&usize>| -> Vec<(&Payment, i128, String)> {
+        payments
+            .iter()
+            .filter(|pm| of.is_some() && statement_of.get(pm.document.as_str()) == of)
+            .filter_map(|pm| amount_units(&pm.amount).map(|(u, c)| (pm, u, c)))
+            .collect()
+    };
 
     let mut out_bills = Map::new();
     let mut calls = Vec::new();
@@ -326,31 +446,13 @@ pub fn build(
             paid.push(row);
         };
         for r in receipts.iter().filter(|r| r.bill == Some(d.id.as_str())) {
-            count(
-                r.paid.0,
-                &r.paid.1,
-                json!({"from": "receipt", "document": r.doc.id, "on": r.on,
-                       "amount": money(r.paid.0), "currency": r.paid.1}),
-            );
+            count(r.paid.0, &r.paid.1, of_receipt(r));
         }
-        for pm in payments
-            .iter()
-            .filter(|pm| first_of.get(pm.document.as_str()) == Some(&d.id.as_str()))
-        {
-            let Some((u, c)) = amount_units(&pm.amount) else {
-                continue;
-            };
-            count(
-                u,
-                &c,
-                json!({"from": "household", "id": pm.id, "on": pm.on,
-                       "amount": money(u), "currency": c}),
-            );
+        let of = statement_of.get(d.id.as_str());
+        for (pm, u, c) in marked(of) {
+            count(u, &c, of_household(pm, u, &c));
         }
-        paid.sort_by(|a, b| {
-            (s(a, "on"), s(a, "document").or(s(a, "id")))
-                .cmp(&(s(b, "on"), s(b, "document").or(s(b, "id"))))
-        });
+        in_order(&mut paid);
         let superseded_by = bills
             .iter()
             .filter(|o| o.doc.id != d.id && o.date > b.date && same_biller(o.doc, d))
@@ -396,6 +498,17 @@ pub fn build(
         row.insert("settled".into(), json!(settled));
         if let Some(o) = &superseded_by {
             row.insert("superseded_by".into(), json!(o));
+        }
+        let gone: Vec<&str> = of
+            .into_iter()
+            .flat_map(|i| statements[*i].papers())
+            .filter(|id| !here.contains(id))
+            .collect();
+        if !gone.is_empty() {
+            row.insert("in_error".into(), json!(gone));
+        }
+        if standing::document_differs(d) {
+            row.insert("differs".into(), json!(true));
         }
         // What an insurer was billed for is not one no insurer is.
         let self_pay = texts
@@ -460,6 +573,9 @@ pub fn build(
         });
         if let Some(b) = r.bill {
             row["bill"] = json!(b);
+        }
+        if let Some(b) = r.lost {
+            row["bill_in_error"] = json!(b);
         }
         if let Some(i) = r.event {
             let ev = evs[i];
@@ -540,7 +656,37 @@ pub fn build(
         }
     }
 
-    json!({
+    // What is entered in error, and the payments that stay on a bill that is.
+    let mut in_error: BTreeMap<&str, Gone> = BTreeMap::new();
+    let gone_records = all.records.iter().filter(|r| !here.contains(r.id.as_str()));
+    for r in gone_records.filter(|r| r.kind == "claim") {
+        in_error.insert(&r.id, Gone::Claim);
+    }
+    for d in all
+        .documents
+        .iter()
+        .filter(|d| !here.contains(d.id.as_str()))
+    {
+        let of = statement_of.get(d.id.as_str());
+        let first = of.map(|i| statements[*i].doc.id.as_str());
+        let stands = of.and_then(|i| bill_of.get(i).copied());
+        let gone = match (d.doc_type.as_deref(), stands.or(first)) {
+            (Some("receipt"), _) => Gone::Receipt,
+            (_, Some(bill)) if bill != d.id => Gone::Copy { bill },
+            (_, Some(_)) => {
+                let receipts = receipts.iter().filter(|r| r.lost == first);
+                let mut not_applied: Vec<Value> = receipts.map(of_receipt).collect();
+                let marked = marked(of);
+                not_applied.extend(marked.iter().map(|(pm, u, c)| of_household(pm, *u, c)));
+                in_order(&mut not_applied);
+                Gone::Bill { not_applied }
+            }
+            (_, None) => continue,
+        };
+        in_error.insert(&d.id, gone);
+    }
+
+    let mut out = json!({
         "schema": SCHEMA,
         "person": p.id,
         "bills": out_bills,
@@ -552,7 +698,60 @@ pub fn build(
         "receipts": out_receipts,
         "worth_a_call": calls,
         "not_billed": not_billed,
-    })
+    });
+    if !in_error.is_empty() {
+        out["in_error"] = json!(in_error);
+    }
+    out
+}
+
+/// The bills a `bills.json` says are entered in error, by document id, and
+/// whether the household marked a payment on it.
+pub fn lost(bills: &Value) -> BTreeMap<&str, bool> {
+    let gone = bills["in_error"].as_object().into_iter().flatten();
+    gone.filter(|(_, g)| g["as"] == "bill")
+        .map(|(id, g)| {
+            let mut paid = g["not_applied"].as_array().into_iter().flatten();
+            (id.as_str(), paid.any(|x| x["from"] == "household"))
+        })
+        .collect()
+}
+
+/// The payments the household marked that are kept on a bill entered in
+/// error and not applied, by id.
+pub fn not_applied(bills: &Value) -> BTreeSet<&str> {
+    let gone = bills["in_error"].as_object().into_iter().flatten();
+    gone.flat_map(|(_, g)| g["not_applied"].as_array().into_iter().flatten())
+        .filter_map(|x| s(x, "id"))
+        .collect()
+}
+
+/// How many payments, marked or by receipt, are kept on the bill a paper
+/// entered in error is of, and not applied.
+pub fn not_applied_on(bills: &Value, paper: &str) -> usize {
+    let gone = &bills["in_error"];
+    let of = s(&gone[paper], "bill").unwrap_or(paper);
+    gone[of]["not_applied"].as_array().map_or(0, Vec::len)
+}
+
+/// What a page says of the bills entered in error it does not show, of those
+/// it may.
+pub fn in_error(bills: &Value, may_show: &dyn Fn(&str) -> bool) -> Option<String> {
+    let lost = lost(bills);
+    let shown = || lost.iter().filter(|(id, _)| may_show(id));
+    let n = shown().count();
+    (n > 0).then(|| in_error_line(n, shown().filter(|(_, paid)| **paid).count()))
+}
+
+/// The same of `n` bills, `paid` of them with a payment the household marked.
+pub fn in_error_line(n: usize, paid: usize) -> String {
+    let bills = if n == 1 { "bill" } else { "bills" };
+    match paid {
+        0 => format!("{n} {bills} entered in error, not shown"),
+        1 if n == 1 => "1 bill entered in error, with a payment you marked".into(),
+        _ if paid == n => format!("{n} bills entered in error, each with a payment you marked"),
+        _ => format!("{n} {bills} entered in error, {paid} with a payment you marked"),
+    }
 }
 
 /// The pairs of documents a `bills.json` ties to one balance: a bill and its
@@ -1007,5 +1206,252 @@ mod tests {
             assert_eq!(bill(&full, id)["settled"], true);
             assert!(!reasons(&full).iter().any(|(b, _)| *b == id), "{id}");
         }
+    }
+
+    /// The scenario's papers, of which these are entered in error.
+    fn index_without(gone: &[&str]) -> PersonIndex {
+        let mut idx = index();
+        for d in &mut idx.documents {
+            if gone.contains(&d.id.as_str()) {
+                says(d, &["entered-in-error"]);
+            }
+        }
+        idx
+    }
+
+    /// What each of a paper's sources says of it.
+    fn says(d: &mut Document, statuses: &[&str]) {
+        let raw = |i: usize| format!("Records/example-{i}/Binary/{}.json", d.id);
+        let words: Vec<Value> = statuses
+            .iter()
+            .enumerate()
+            .map(|(i, s)| json!({"raw_path": raw(i), "status": s}))
+            .collect();
+        d.words = serde_json::from_value(json!(words)).unwrap();
+        d.provenance.raw_path = Some(raw(0));
+        for i in 1..statuses.len() {
+            let mut p = d.provenance.clone();
+            p.raw_path = Some(raw(i));
+            d.also_from.push(p);
+        }
+    }
+
+    /// The scenario's events as they are made without these: a statement is
+    /// its next copy's, and an event with no member is none.
+    fn events_without(gone: &[&str]) -> Value {
+        let mut v: Value = serde_json::from_str(EVENTS).unwrap();
+        let stands = |id: &Value| !gone.contains(&id.as_str().unwrap());
+        let evs = v["events"].as_array_mut().unwrap();
+        for e in evs.iter_mut() {
+            e["members"].as_array_mut().unwrap().retain_mut(|m| {
+                let copies = m["copies"].as_array().cloned().unwrap_or_default();
+                let mut left: Vec<Value> = copies.into_iter().filter(|c| stands(c)).collect();
+                if m["document"].is_string() && !stands(&m["document"]) {
+                    if left.is_empty() {
+                        return false;
+                    }
+                    m["document"] = left.remove(0);
+                }
+                if m["copies"].is_array() {
+                    m["copies"] = json!(left);
+                }
+                !m["record"].is_string() || stands(&m["record"])
+            });
+        }
+        evs.retain(|e| !e["members"].as_array().unwrap().is_empty());
+        v
+    }
+
+    fn payment(id: &str, document: &str, amount: &str) -> Payment {
+        Payment {
+            id: id.into(),
+            document: document.into(),
+            on: "2024-11-12".into(),
+            amount: Amount {
+                amount: amount.into(),
+                currency: "USD".into(),
+            },
+            at: "2024-11-12T10:00:00Z".into(),
+            by: None,
+            request: None,
+        }
+    }
+
+    fn built(idx: &PersonIndex, events: &Value, payments: &[Payment]) -> Value {
+        build(&person(), idx, &PersonText::new("p_test"), events, payments)
+    }
+
+    const SCAN: [&str; 3] = [
+        "d_scanbillaaaaaaaaaaaa",
+        "d_scancopyoneaaaaaaaaa",
+        "d_scancopytwoaaaaaaaaa",
+    ];
+
+    fn all(_: &str) -> bool {
+        true
+    }
+
+    /// A statement whose first paper is entered in error is its next copy's,
+    /// with every payment.
+    #[test]
+    fn a_statement_is_its_next_copys_while_its_first_paper_is_in_error() {
+        let [first, next, last] = SCAN;
+        let marked = [payment("o_paidaaaaaaaaaaaaaaaa", first, "3.00")];
+        let before = built(&index(), &events_without(&[]), &marked);
+        let gone = [first];
+        let v = built(&index_without(&gone), &events_without(&gone), &marked);
+        assert!(v["bills"].get(first).is_none());
+        let b = bill(&v, next);
+        assert_eq!(b["copies"], json!([last]));
+        assert_eq!(b["in_error"], json!([first]));
+        for k in ["paid", "paid_total", "left", "settled", "event", "claim"] {
+            assert_eq!(b[k], bill(&before, first)[k], "{k}");
+        }
+        assert_eq!(b["paid_total"], "93.00");
+        assert_eq!(v["copy_of"], json!({last: next}));
+        assert_eq!(v["in_error"], json!({first: {"as": "copy", "bill": next}}));
+        assert_eq!(in_error(&v, &all), None);
+        // It is as it was once it comes back.
+        assert_eq!(built(&index(), &events_without(&[]), &marked), before);
+        assert!(before.get("in_error").is_none());
+    }
+
+    /// One every paper of which is entered in error is in no total and worth
+    /// no call, settles no bill, and what paid it pays nothing else.
+    #[test]
+    fn a_bill_in_error_is_in_no_total_and_what_paid_it_pays_no_other() {
+        let [first, next, last] = SCAN;
+        let mark = payment("o_paidaaaaaaaaaaaaaaaa", last, "3.00");
+        let v = built(
+            &index_without(&SCAN),
+            &events_without(&SCAN),
+            std::slice::from_ref(&mark),
+        );
+        assert!(SCAN.iter().all(|id| v["bills"].get(id).is_none()));
+        assert!(!reasons(&v).iter().any(|(b, _)| SCAN.contains(b)));
+        let paid = bill(&built(&index(), &events_without(&[]), &[mark]), first)["paid"].clone();
+        assert_eq!(paid.as_array().unwrap().len(), 3);
+        assert_eq!(
+            v["in_error"],
+            json!({
+                first: {"as": "bill", "not_applied": paid},
+                next: {"as": "copy", "bill": first},
+                last: {"as": "copy", "bill": first},
+            })
+        );
+        for id in ["d_scanpaidoneaaaaaaaaa", "d_scanpaidtwoaaaaaaaaa"] {
+            let r = row(&v, "receipts", "document", id);
+            assert_eq!(r["bill_in_error"], first);
+            assert!(r.get("bill").is_none() && r.get("event").is_none(), "{r}");
+        }
+        // Nothing has asked for its claim's share.
+        let nb = row(&v, "not_billed", "provider", "Sample Imaging House");
+        assert_eq!(nb["you_owe"], "90.00");
+        // Another bill of that biller's is not paid by them, but for one that
+        // is a receipt's amount to the cent.
+        for (due, bill_of) in [("41.00", None), ("50.00", Some("d_scanpaidoneaaaaaaaaa"))] {
+            let mut idx = index_without(&SCAN);
+            let mut other = index().documents[0].clone();
+            other.id = "d_scanotheraaaaaaaaaaa".into();
+            let st = other.statement.as_mut().unwrap();
+            st.amount_due.as_mut().unwrap().amount = due.into();
+            st.statement_date = Some("2024-10-15".into());
+            idx.documents.push(other);
+            let v = built(&idx, &events_without(&SCAN), &[]);
+            let b = bill(&v, "d_scanotheraaaaaaaaaaa");
+            let paid = b["paid"].as_array().unwrap();
+            let by: Vec<Option<&str>> = paid.iter().map(|p| p["document"].as_str()).collect();
+            assert_eq!(by, Vec::from_iter(bill_of.map(Some)), "{due}");
+            assert_eq!(b["settled"], bill_of.is_some());
+        }
+    }
+
+    /// A payment the household marked on one is said by the page that loses
+    /// it, and one it may not show is not.
+    #[test]
+    fn a_payment_marked_on_a_bill_in_error_is_said() {
+        let (paid, unpaid) = ("d_readerbillaaaaaaaaaa", "d_allergybillaaaaaaaaa");
+        let gone = [paid, unpaid];
+        let marked = [payment("o_paidaaaaaaaaaaaaaaaa", paid, "12.00")];
+        let v = built(&index_without(&gone), &events_without(&gone), &marked);
+        let line = |may: &[&str]| in_error(&v, &|id| may.contains(&id));
+        let says = |s: &str| Some(s.to_string());
+        assert_eq!(
+            line(&[paid]),
+            says("1 bill entered in error, with a payment you marked")
+        );
+        assert_eq!(
+            line(&gone),
+            says("2 bills entered in error, 1 with a payment you marked")
+        );
+        assert_eq!(line(&[unpaid]), says("1 bill entered in error, not shown"));
+        assert_eq!(line(&[]), None);
+        assert_eq!(not_applied(&v), BTreeSet::from(["o_paidaaaaaaaaaaaaaaaa"]));
+        assert_eq!(not_applied_on(&v, paid), 1);
+        assert_eq!(not_applied_on(&v, unpaid), 0);
+        assert!(!reasons(&v).iter().any(|(b, _)| gone.contains(b)));
+        let both = [
+            payment("o_paidaaaaaaaaaaaaaaaa", paid, "12.00"),
+            payment("o_paidbbbbbbbbbbbbbbbb", unpaid, "12.00"),
+        ];
+        let v = built(&index_without(&gone), &events_without(&gone), &both);
+        assert_eq!(
+            in_error(&v, &all),
+            says("2 bills entered in error, each with a payment you marked")
+        );
+    }
+
+    #[test]
+    fn a_receipt_in_error_pays_nothing_and_a_later_bill_in_error_follows_none() {
+        let (receipt, later) = ("d_scanpaidtwoaaaaaaaaa", "d_visionlateraaaaaaaaa");
+        let gone = [receipt, later];
+        let v = built(&index_without(&gone), &events_without(&gone), &[]);
+        let scan = bill(&v, SCAN[0]);
+        assert_eq!(
+            (&scan["paid_total"], &scan["left"], &scan["settled"]),
+            (&json!("50.00"), &json!("40.00"), &json!(false))
+        );
+        let receipts = v["receipts"].as_array().unwrap();
+        assert!(receipts.iter().all(|r| r["document"] != receipt));
+        assert!(bill(&v, "d_visionbillaaaaaaaaaa")
+            .get("superseded_by")
+            .is_none());
+        assert_eq!(
+            v["in_error"],
+            json!({receipt: {"as": "receipt"}, later: {"as": "bill"}})
+        );
+        // A desk payment entered in error is none.
+        let desk = ["d_deskaaaaaaaaaaaaaaaa"];
+        let v = built(&index_without(&desk), &events_without(&desk), &[]);
+        assert!(!reasons(&v).iter().any(|(b, _)| *b == desk[0]));
+    }
+
+    /// A bill only one of its sources calls in error is counted once, and
+    /// says that they differ.
+    #[test]
+    fn a_bill_its_sources_differ_on_is_counted_once_and_says_so() {
+        let before = built(&index(), &events_without(&[]), &[]);
+        let mut idx = index();
+        says(&mut idx.documents[0], &["entered-in-error", "current"]);
+        let mut v = built(&idx, &events_without(&[]), &[]);
+        let b = v["bills"][SCAN[0]].as_object_mut().unwrap();
+        assert_eq!(b.remove("differs"), Some(json!(true)));
+        assert_eq!(v, before);
+    }
+
+    /// A claim entered in error is owed nothing, and is named.
+    #[test]
+    fn a_claim_in_error_is_in_no_share() {
+        let claim = "r_fillingaaaaaaaaaaaaa";
+        let mut idx = index();
+        let source = serde_json::to_value(&idx.documents[0].provenance).unwrap();
+        let record = json!({"id": claim, "kind": "claim", "key": "k", "display": "Filling",
+            "status": "entered-in-error", "fields": {}, "provenance": [source]});
+        idx.records = vec![serde_json::from_value(record).unwrap()];
+        let v = built(&idx, &events_without(&[claim]), &[]);
+        let nb = v["not_billed"].as_array().unwrap();
+        assert!(nb.iter().all(|n| n["you_owe"] != "31.00"), "{nb:?}");
+        assert_eq!(v["in_error"], json!({claim: {"as": "claim"}}));
+        assert_eq!(in_error(&v, &all), None);
     }
 }

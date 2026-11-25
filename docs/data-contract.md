@@ -368,8 +368,10 @@ there.
   source whose word is not kept does not say so, and a file of the household's
   has none, so it stands.
 - One that only some say so of stands, and differs: its `words` say so, and no
-  other field does (a condition's, an allergy's or a medicine's `differs` is in
-  `standing.json`, below). Its values are never those
+  other field of the index does. The views do: a condition's, an allergy's or a
+  medicine's `differs` in `standing.json`, any other's `says` (Records, and
+  `documents.json`), and `differs` on a member of an event and on a bill. Its
+  values are never those
   of a source that says so: when the resource `fields_from` names does, medrec
   reads `date`, `code`, `display`, `status` and `fields` again from the raw file
   of another that does not and that reads, and names it; a version that says so
@@ -395,6 +397,13 @@ there.
 - A raw file that does not read tells nothing, and an import and `reindex` count
   it (`papers_unread`). While one of a resource that describes papers does not,
   no paper of its source's is newly entered in error.
+- What is entered in error is in no list, the timeline or the search, in no
+  event, and in no total, balance or "worth a call". It is no bill, receipt or
+  copy, names no one, prints no labelled provider and is the report of no
+  study. Each view says what it leaves out, by id (below).
+- What the household decided of it (`overrides.json`, `marks.json`) is kept, is
+  not applied while it is in error, and applies again when it comes back, but a
+  private mark, which holds.
 - A medrec before 0.9.9 drops `also_from`, `words` and `errors` from an index
   it saves. `medrec reindex` gives back what raw files tell: the sources in
   `also_from`, `words`, and `errors` for what a source says now. A time that
@@ -735,7 +744,9 @@ which outrank the matching rules. It is absent until the first decision.
   and a paper or another record joins none.
 - `together`: the second joins the event holding the first.
 - Decisions apply in order, after every rule. One naming a member the index
-  no longer holds is skipped. The same two members have at most one
+  no longer holds is skipped, and one naming a member entered in error while it
+  is (0.9.9 and later): it is kept, and applies again when the member comes
+  back. The same two members have at most one
   decision: the other kind replaces it, and the same kind again changes
   nothing.
 - `by` is who asked, as shown (a request's `requested_by`), and `request`
@@ -1398,6 +1409,8 @@ provider, of whom the household said nothing, has no `providers.json`.
     the order they said it, `item` the event's id now when it followed the
     event's members. It is in `private` unless items that are not private print
     every name it gives, and when its `item` or what it sets is private.
+    `applied` is `false` while its `item` is entered in error (0.9.9 and
+    later), and absent otherwise.
 - **The id** comes from the label's confidence, name (the printed one when it
   has none), practice, role and phone, with the folder's random `label_salt`
   (`views.json`), never from the NPI. One provider's sure label has one id in
@@ -1429,6 +1442,9 @@ provider, of whom the household said nothing, has no `providers.json`.
   nothing is known of. A newer one replaces what it has, and takes away only
   a match it no longer makes. `directory` is the newest one read, and absent
   when none gave any label.
+- **Entered in error** (0.9.9 and later): an item that is prints nothing here.
+  It has no label and is evidence of none. What it makes private, by a sure
+  label or the household's, it makes private still.
 - **Stale** as `private.json` is. Missing or stale, there is no label, with
   no warning. Nothing of it is in `events.json`, `bills.json` or
   `documents.json`.
@@ -1548,7 +1564,7 @@ A reader decides freshness by MD5, as Drive reports it (`md5Checksum`):
 | `people.<id>.code_table` | The code table the person's names were made with (`icd10cm FY2027`); absent when the pass that made the views had none, whatever names it carried over (0.9.4 and later). A pass on a machine with another table makes the person's views again, which fills in the names; one on a machine with none leaves them. |
 | `people.<id>.directory` | Which provider directory the pass that made the views had: the last day it covers and when it was fetched, so that a newer one sorts after (0.9.7 and later). Absent when it had none. A pass on a machine with a newer one makes the person's views again; one with an older one or none leaves them. |
 | `people.<id>.provider_state` | The MD5 of the person's `provider-state.json`, absent when there is none (0.9.7 and later). Another one makes three of the person's views stale (above). |
-| `people.<id>.in_error` | `standing.json`'s `in_error`, as it is there: the ids of the person's records entered in error, by kind, `{"condition": ["r_…"]}`; absent when there is none (0.9.9 and later). |
+| `people.<id>.in_error` | `standing.json`'s `in_error`, as it is there: the ids of the person's records entered in error, by kind, and of their papers, `{"condition": ["r_…"], "document": ["d_…"]}`; absent when there is none (0.9.9 and later). |
 | `row` | `documents`, `records`, `studies`, and `newest` and `last_import` when there are any: the person's line in `medrec_summary`'s people list, without `notes`. |
 | `records` | For each record kind, `{"shards": [[newest day, oldest day, count], …], "undated": count}`: its dated shards by number, and how many records its undated file holds. |
 | `timeline` | The timeline's shards, the same way. |
@@ -1595,6 +1611,14 @@ the source's label (Provenance, above), or `null`. Each is absent in a view an
 older medrec wrote. A reader shows `label`, as `medrec mcp` does. Without it, a
 view holds no `imports` to find the patient by: the sources step 2 gives
 with the patient unknown name it, by steps 3 and 4.
+
+A record whose sources differ on whether it is entered in error, or that is, has
+`says` (0.9.9 and later), unless its kind has a standing: what each of its
+provenances says, in their order, as `{source, read, status, verification,
+unheard, household}`. `source` is the source's label, or `null`; `read` the day
+it was last read saying so. `unheard` is `true` for one whose word is not kept,
+and `household` for the household's own file. Each but `source` is absent when
+it has no value.
 
 `names-<kind>.json` lists every distinct name the kind's records carry, as
 `[code, display, code display, [shard numbers]]`. `code` and `code display`
@@ -1648,17 +1672,20 @@ with what an answer may show: `medications`, `conditions` and `allergies`, each
 every record that `standing.json` has as `current` or `on_hold`, uncut, in its
 `order`, as the same lines. A reader makes the lists by the rules of "As a
 reader lists them", cuts each, and shows a line by the first of its `records`.
-Immunizations, results and visits leave out what is entered in error.
+Immunizations, results, visits and bills leave out what is entered in error.
 
 ### documents.json and text-<n>.bin
 
-`documents.json` is `index.json`'s `documents`, each with two fields added:
+`documents.json` is `index.json`'s `documents`, each with these fields added:
 
 - `text_at`: where its text is, `[pack, byte offset, byte length,
   characters]`. Absent when the document has no text.
 - `linked`: the names (`display`) of the first 20 records that list it in
   their `documents`, in `index.json` order, but those entered in error (0.9.9
   and later). Absent when none do.
+- `says`: of a paper that a source says is entered in error, what each of its
+  provenances says, as a record's (Records, above; 0.9.9 and later). Absent of
+  any other.
 
 `text-<n>.bin` holds the documents' texts, UTF-8, one after another in
 document order. A pack closes before a text would take it past 1,000,000
@@ -1747,7 +1774,9 @@ matching rules), then the household's decisions (`overrides.json`).
  "pending": [{"document": "d_…", "could_join": ["e_…", "e_…"], "rule": "D4"}],
  "aliases": [{"clinician": "…", "organization": "…", "rule": "N5", "document": "d_…", "confidence": "likely"}],
  "undated": ["r_…"],
- "overrides": 1}
+ "overrides": 1,
+ "events_in_error": [],
+ "in_error": {"r_…": {"event": "e_…", "not_applied": [{"id": "o_…", "kind": "together", "members": ["r_…", "r_…"], "at": "…"}]}}}
 ```
 
 | Field | What |
@@ -1762,7 +1791,7 @@ matching rules), then the household's decisions (`overrides.json`).
 | `confidence` | The lowest of its members': `sure`, `likely` or `unsure`. |
 | `status` | `unsure` when the confidence is; else `waiting` when something is `expected`; else `complete`. |
 | `money` | The claim members' claim-level amounts, summed, as decimal strings: `billed`, `allowed`, `plan_paid`, `you_owe`, `discount` (`billed` − `allowed`) and `share`, the reasons for `you_owe` that the claims give (`deductible`, `copay`, `coinsurance`, `not_covered`). An amount some claim lacks is left out and named in `partial`. A claim with no `you_owe` of its own counts its share's parts added up, and `you_owe_added` is then `true`. A claim whose `allowed` is below zero counts `plan_paid` + `you_owe` as its allowed, and one with neither leaves `allowed` out. Absent with no claim. |
-| `members` | Every record and document in the event, each with `record` or `document`, its `kind` (a record kind, or a document type), its `title` (at most 120 characters) and `date`, its `role`, the `rule` that placed it and that placement's `confidence`. A claim adds `provider` and its amounts. A bill joined by its amount due (D3s) adds `matches`, the claim whose share it bills. `person` marks another person's paper (X2). `role` is `facility`, `hospital`, `ancillary`, `office`, `dental`, `fill`, `vaccine`, `portal`, `contact`, `satellite` or `paper`; a reader ignores one it does not know. |
+| `members` | Every record and document in the event, each with `record` or `document`, its `kind` (a record kind, or a document type), its `title` (at most 120 characters) and `date`, its `role`, the `rule` that placed it and that placement's `confidence`. A claim adds `provider` and its amounts. A bill joined by its amount due (D3s) adds `matches`, the claim whose share it bills. `person` marks another person's paper (X2). `differs` is `true` of one whose sources differ on whether it is entered in error (0.9.9 and later), and absent otherwise. `role` is `facility`, `hospital`, `ancillary`, `office`, `dental`, `fill`, `vaccine`, `portal`, `contact`, `satellite` or `paper`; a reader ignores one it does not know. |
 | `expected` | What has not arrived: `doctor_claims`, `facility_claim`, `claim` or `bill`, with `why` in words and `since`, the day it was first expected. `doctor_claims` is expected of an `er` or `inpatient` event that has a facility claim and no other; `claim`, of a portal visit with no claim, whatever its `kind`. A fill or a vaccine expects no bill. |
 | `differences` | Where the sources disagree (a clinician's name, a date), each source's value, and the rule. |
 | `links` | Related events of a linked person: `newborn` (from a parent's stay to the child's care in it) and `born_during` (back). A reader ignores a relation it does not know. |
@@ -1771,6 +1800,10 @@ matching rules), then the household's decisions (`overrides.json`).
 | `aliases` | Clinicians learned to belong to a practice, with the paper that says so. |
 | `undated` | Claims with no date, in no event. |
 | `overrides` | How many of the household's decisions applied. |
+| `events[].in_error` | The ids of the person's own items entered in error that the event would have (0.9.9 and later): a list, where the document's own `in_error` is an object by id. Absent when there are none. |
+| `events[].not_applied` | The household's decisions naming one of those, each with the `id`, `kind`, `members` and `at` it has in `overrides.json`, which alone says who asked for it (0.9.9 and later). Absent when there are none. |
+| `events_in_error` | The events that are none without what is entered in error, as they would be, newest first (0.9.9 and later). A reader lists none, counts them ("N entered in error, not shown"), and shows one only when asked for it by its id, as entered in error. Absent when there are none. |
+| `in_error` | Every item of the person's entered in error that an event would have or a decision names, by id (0.9.9 and later): `event`, the event that has the rest of it, else the one in `events_in_error`, absent when it would be in none; and `not_applied`, the decisions naming it, absent when there are none. Absent when there are none. |
 | `overrides_unreadable` | `true` when the person's `overrides.json` does not read as `medrec-overrides/v1`: the events are the rules' alone, and medrec writes no decision over the file until it is fixed or removed. Absent otherwise. |
 
 Plain visit names (0.9.3 and later), bundled with medrec and never fetched,
@@ -1794,8 +1827,13 @@ from CPT evaluation-and-management codes:
  "you_owe_added": true, "share": {"deductible": "20.00"}, "partial": ["allowed"]}
 ```
 
-- **Every claim is in exactly one event.** A portal visit, a result or a
-  paper joins at most one.
+- **Every claim is in exactly one event**, but those entered in error. A portal
+  visit, a result or a paper joins at most one.
+- **Entered in error** (0.9.9 and later). The events are made of what is not:
+  no claim, record or paper entered in error is in one, adds to its money,
+  names it, is expected of it or joins others to it. Its event's id changes
+  only when it was the anchor. A linked person's are left out too, and are
+  named in that person's own file alone.
 - **A portal visit's records.** Records from the same portal source join a
   portal visit on its day, a result or report also the day before (E4),
   and from 0.9.1 on any day of the visit's period, as a result during a
@@ -1851,7 +1889,12 @@ when they have no bills. It is made from the person's documents, their
  "not_billed": [
    {"event": "e_…", "start": "2024-05-21", "provider": "Sample Corner Pharmacy",
     "claims": ["r_…"], "you_owe": "7.50", "currency": "USD", "fill": true}
- ]}
+ ],
+ "in_error": {
+   "d_…": {"as": "bill", "not_applied": [{"from": "household", "id": "o_…", "on": "2024-11-04", "amount": "25.00", "currency": "USD"}]},
+   "d_…": {"as": "copy", "bill": "d_…"},
+   "r_…": {"as": "claim"}
+ }}
 ```
 
 - **`bills`**, by document id, newest first by `date` (the statement date,
@@ -1906,6 +1949,34 @@ when they have no bills. It is made from the person's documents, their
   its organization; a desk payment, the claims it was compared with. `fill`
   is `true` for a pharmacy fill, usually paid at the counter, and absent
   otherwise.
+- **Entered in error** (0.9.9 and later). The bills are made of the papers,
+  events and claims that are not. A bill is all the papers that are one
+  statement, so one whose first paper is entered in error is its next copy's,
+  with its payments, and it is out only when every paper of it is.
+  - `bills.<id>.in_error` lists the papers of it that are, and `differs` is
+    `true` when the sources of its first paper differ on it; its amounts are
+    those of a source that does not say so, counted once. Each is absent
+    otherwise.
+  - The top-level `in_error` has each paper and claim that is, by id, and what
+    it is (`as`): a `bill` none of whose papers stands, by its first, with
+    `not_applied`, the payments the household marked on it and the receipts
+    that paid it, as a bill's `paid` has them (absent when there are none); a
+    `copy`, of the `bill` it names, which stands or not; a `receipt`; or a
+    `claim`. A reader takes an `as` it does not know as one to count. Absent
+    when there are none.
+  - Those payments are in no total and settle nothing. They pay no other bill:
+    a receipt that paid one entered in error has `bill_in_error` and no `bill`
+    or `event`, unless another bill is its amount to the cent. One that could be
+    of it or of another bill, and is neither's amount, pays neither. A receipt
+    that is entered in error itself pays nothing.
+  - The bill is in no `paid_total`, `left`, `worth_a_call` or `not_billed`, and
+    no bill is `superseded_by` it. Its claim is as if nothing had asked for it.
+  - A page of the person's bills counts those it may show: "1 bill entered in
+    error, not shown", "2 bills entered in error, not shown". Where the
+    household marked a payment on one, the line says so instead, since money may
+    be owed back: "1 bill entered in error, with a payment you marked", "2 bills
+    entered in error, 1 with a payment you marked", "2 bills entered in error,
+    each with a payment you marked".
 - **`marks_unreadable`**: `true` when the person's `marks.json` does not
   read (above), so no household payment is counted. Absent otherwise.
 - Amounts are decimal strings with two places. A reader treats a field it
@@ -2004,8 +2075,8 @@ word wins over another's. Every person has one.
   current ends and another has not.
 - **`in_error`**: the person's records entered in error (index.json, "Entered
   in error"), by kind, those with no standing too (a fill, a result, a
-  vaccine). `views.json` has the same object, for a reader that opens no other
-  view.
+  vaccine), and their papers as `document`. `views.json` has the same object,
+  for a reader that opens no other view.
 - **`no_problem_list`**: each source with a diagnosis given for a visit and no
   other condition, heard or not, and those diagnoses. A condition that is
   `error`, and a word of no source, are neither.
@@ -2028,7 +2099,10 @@ word wins over another's. Every person has one.
    which no word on the line is current; and names the sources not heard.
 5. What is in `in_error`, of any kind, is out of every list, and of the
    timeline and the search, and the list says how many: "1 entered in error,
-   not shown". The views' other files hold it as they hold the rest.
+   not shown" (a page of bills as Bills, above, has it). The views' other files
+   hold it as they hold the rest, and one opened by its id says that it is
+   entered in error, what each source says (`says`), and what the household
+   decided of it, which is kept and not applied.
 6. A list of conditions names each source in `no_problem_list` with a diagnosis
    there that the answer may show: "No problem list from <source>; diagnoses
    from visits are listed under All".
@@ -2092,6 +2166,13 @@ nothing is private.
   | `paper` | is a document tied to a private one, either way: its copy (`same_statement_as`, `near_duplicates`), the bill that supersedes it or one it supersedes (`superseded_by` in `bills.json`), or the receipt that pays it or the bill it pays (0.9.6 and later) |
   | `household` | was marked private by the household; its `area` is the one the rules give it, else `household` |
 
+- **What a source takes back still tells** (0.9.9 and later). Nothing opens
+  because a record or a paper is entered in error, the person's or one of a
+  person their events read (X1, X2): each rule is judged with what is and with
+  what is not, events as they would be with it included, so an event in
+  `events_in_error` can be here. A study with no report, with what is
+  entered in error or without it, is in `unreported_studies`; so one whose only
+  report is, which is in `studies` too when that report was private.
 - An event's own members are those without `person`. A paper an event shows
   from another person (X2) is judged as that person's.
 - **The household has the last word** (`marks.json` `private`, above). A
@@ -2170,15 +2251,35 @@ readers ship with medrec:
       page by page as `private-left-out` does, in `medrec_records` (`timeline`
       too) and `medrec_search`. It counts none that is left out as private.
       `tests` is made of the results that are not, and counts none.
-      `medrec_document` names none.
+      `medrec_document` names none. A page of `bills` has Bills' own line, of
+      the bills on it, and `events` counts those in `events_in_error`; an event
+      on it says how many of its own are, of those the answer may show, in its
+      `detail` ("1 entered in error, not shown"), and has `in_error` and
+      `not_applied` in its `fields` when those are in the answer.
+    - any other item its sources differ on has `standing` `sources differ` and
+      `says`, as `standing.json`'s words are said; the household's own file is
+      `the household's own file`. It keeps its `status`.
+    - `medrec_document` of a paper entered in error says so first in its `hint`:
+      "Entered in error (<says>): it is in no list, event, bill or total." and,
+      where the household decided something of it, "Kept and not applied: 1
+      decision about its event, 2 payments on it, 1 correction of a provider it
+      names." One its sources differ on: "Its sources differ (<says>)." An
+      event asked for by the id it has in `events_in_error` has `standing`
+      `entered in error`.
     - a person's summary has the current lists, each line once, with
       `medications_on_hold` and `medications_ended_by_date` after
       `medications` when they are not empty. A list's `note` has what its
       warnings would say: of sources with no problem list, then of those
-      entered in error, each a sentence, joined by `. `.
+      entered in error, each a sentence, joined by `. `. So has the note of
+      `immunizations`, `latest_results`, `recent_visits` and `bills`.
     - the commands give the same: `conditions`, `allergies` and `meds` have
       `standing` and `says`, and the lists, the timeline and the search have
-      `notes`, with what they say of those not shown.
+      `notes`, with what they say of those not shown. So do `documents list`,
+      `events list`, `bills list` and `private list`, and `documents open` with
+      what it says of the paper. What was decided of an item entered in error
+      has `applied: false`, absent otherwise, where `events decisions`, `bills
+      payments` and `labels list` list it, and where `events apart`, `events
+      together` and `bills paid` record it.
   - the latest result of each test is one per code (with its system), or per
     name with case and accents folded when uncoded: the newest. A test's
     series is every `result` record whose code is the one asked for, or

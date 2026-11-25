@@ -548,11 +548,15 @@ no source's word wins:
 - A diagnosis given for a visit is not a current condition. It is in the list
   without `--active`, and a list of current conditions names each source that
   sends diagnoses and no problem list.
-- What a source calls refuted is not current. A record of any kind entered in
-  error is in no list, the timeline or the search, which say how many are not
-  shown. It is one only while every source that has it says so, and comes back
-  by itself when one no longer does. A record one source still states shows
-  that one's values.
+- What a source calls refuted is not current. A record or a paper entered in
+  error is in no list, the timeline, the search, an event, a bill or a total;
+  the lists say how many are not shown. It is one only while every source that
+  has it says so, and comes back by itself when one no longer does. One that a
+  source still states shows that one's values and says `sources differ`. Where
+  you marked a payment on a bill entered in error, the bills list says so:
+  money may be owed back. What you decided of it is kept, shown as not
+  applied, and applies again when it comes back. Nothing private opens
+  because a source takes an item back.
 - A source's word that medrec does not keep yet never lets the others end a
   record: its line says `not every source heard`. After upgrading to 0.9.9 run
   `medrec reindex`, which reads them from the raw files.

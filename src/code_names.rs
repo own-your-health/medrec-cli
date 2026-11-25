@@ -258,7 +258,10 @@ mod tests {
         .unwrap();
         let mut idx = PersonIndex::new("p_test");
         idx.records = records.into_iter().map(record).collect();
-        let events = json!({"schema": crate::events::SCHEMA, "events": []});
+        let events = crate::events::Built {
+            events: json!({"schema": crate::events::SCHEMA, "events": []}),
+            whole: None,
+        };
         let mut private = private::build(
             &p,
             &idx,

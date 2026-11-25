@@ -201,6 +201,9 @@ struct Override {
     printed: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     item: Option<String>,
+    /// False while the item is entered in error, else absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    applied: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     by: Option<String>,
     at: String,
@@ -1537,6 +1540,9 @@ pub struct Input<'a> {
     pub private: &'a Value,
     pub state: &'a State,
     pub said: &'a Said<'a>,
+    /// What is entered in error, which what the household said of it does
+    /// not apply to.
+    pub in_error: &'a BTreeSet<String>,
     /// The folder's salt, made when it is first needed.
     pub salt: &'a dyn Fn() -> String,
 }
@@ -1616,6 +1622,10 @@ fn overrides(inp: &Input, uses: &[Use]) -> [Vec<Override>; 2] {
             kind,
             printed: c.printed.clone(),
             item: about.as_ref().map(|a| a.item.clone()),
+            applied: about
+                .as_ref()
+                .filter(|a| inp.in_error.contains(&a.item))
+                .map(|_| false),
             by: c.by.clone(),
             at: c.at.clone(),
         });
@@ -2796,6 +2806,43 @@ mod tests {
         c.sync(false);
         assert_eq!(c.labels()["overrides"][0]["kind"], "wrong");
         assert_eq!(c.labels()["labels"], json!({}));
+    }
+
+    /// An item entered in error has no label and gives none. What the
+    /// household said of it is kept, and is listed as not applied where what
+    /// is said of a private item is.
+    #[test]
+    fn what_is_said_of_an_item_in_error_is_kept_and_not_applied() {
+        let mut c = Case::new();
+        c.says(&[
+            json!({"printed": ["J SAMPLE"], "set": {"name": "Only here"}, "item": SAMPLE}),
+            json!({"printed": ["C EXAMPLE"], "set": {"name": "Not told"}, "item": TALK}),
+        ]);
+        c.sync(true);
+        assert_eq!(c.label(SAMPLE, "J SAMPLE").unwrap()["name"], "Only here");
+        let before = c.labels();
+        assert!(c.private(TALK));
+        let standing = c.index.clone();
+        for r in &mut c.index.records {
+            if r.id == SAMPLE || r.id == TALK {
+                r.status = Some("entered-in-error".into());
+            }
+        }
+        c.sync(true);
+        let v = c.labels();
+        assert!(c.label(SAMPLE, "J SAMPLE").is_none(), "{v}");
+        assert!(!v.to_string().contains("Not told"), "{v}");
+        assert!(c.private(TALK));
+        // No open item prints what is said of either.
+        assert!(v.get("overrides").is_none(), "{v}");
+        let said = v["private"]["overrides"].as_array().unwrap();
+        let items: Vec<&Value> = said.iter().map(|o| &o["item"]).collect();
+        assert_eq!(items, [SAMPLE, TALK]);
+        assert!(said.iter().all(|o| o["applied"] == false), "{v}");
+        c.index = standing;
+        c.sync(true);
+        assert_eq!(c.labels(), before);
+        assert!(!before.to_string().contains("\"applied\""));
     }
 
     #[test]
