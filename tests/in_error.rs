@@ -759,13 +759,20 @@ fn a_binary_that_does_not_read_is_counted() {
         for d in v["documents"].as_array_mut().unwrap() {
             d.as_object_mut().unwrap().remove("also_from");
             d.as_object_mut().unwrap().remove("words");
+            d["provenance"]["filed_by"] = "medrec 0.9.8".into();
         }
     });
     let path = e.raw("two", "Binary/bin-0002.json");
     let mut v: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
     v["data"] = "not base64!".into();
     std::fs::write(&path, v.to_string()).unwrap();
+    let papers = e.index().documents.len();
+    let r = e.ok(&["reindex", "--dry-run"]);
+    let counted = &r["people"][0]["views"]["papers"];
+    let want = serde_json::json!({"filed_before": papers, "source_found": 1});
+    assert_eq!((counted, r["fresh"].as_bool()), (&want, Some(true)), "{r}");
     let r = e.ok(&["reindex"]);
+    assert!(r.get("fresh").is_none() && r["people"][0].get("views").is_none());
     assert_eq!(r["papers_unread"], 1);
     assert_eq!(r["papers_updated"], 1);
     assert_eq!(e.paper().also_from.len(), 1);
@@ -1715,7 +1722,11 @@ fn a_parents_test_never_hides_the_persons_own() {
             check("imported again");
         }
         fold();
-        assert_eq!(e.ok(&["reindex", "--dry-run"])["results_split"], 1);
+        let dry = e.ok(&["reindex", "--dry-run"]);
+        assert_eq!(dry["results_split"], 1);
+        let about = &dry["people"][0]["views"]["about_another"];
+        let want = serde_json::json!({"said": 1, "by_age": 0, "documents": 0});
+        assert_eq!(*about, want, "{dry}");
         assert_eq!(e.ok(&["reindex"])["results_split"], 1);
         check("read again");
         assert_eq!(e.ok(&["reindex"])["results_split"], 0);

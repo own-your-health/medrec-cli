@@ -7,6 +7,7 @@
 use std::collections::BTreeSet;
 
 use pk_cli_core::dates;
+use serde::Serialize;
 use serde_json::Value;
 
 use crate::given;
@@ -129,6 +130,32 @@ pub fn ids(p: &Person, idx: &PersonIndex) -> BTreeSet<String> {
         let filed = d.provenances().any(|p| p.source.cli.is_none());
         if paper(p, d).is_some() || (only && !filed) {
             out.insert(d.id.clone());
+        }
+    }
+    out
+}
+
+/// How much of a person's chart is about somebody else.
+#[derive(Debug, Default, PartialEq, Eq, Serialize)]
+pub struct Counted {
+    /// Results and reports whose source says so.
+    pub said: usize,
+    /// Those a grown person answers, of a day the person had not grown.
+    pub by_age: usize,
+    pub documents: usize,
+}
+
+pub fn counted(p: &Person, idx: &PersonIndex) -> Counted {
+    let ids = ids(p, idx);
+    let of = idx.records.iter().filter(|r| ids.contains(&r.id));
+    let mut out = Counted {
+        documents: idx.documents.iter().filter(|d| ids.contains(&d.id)).count(),
+        ..Counted::default()
+    };
+    for r in of {
+        match of_resource(r, import::wrote(r)) {
+            Some(_) => out.said += 1,
+            None => out.by_age += 1,
         }
     }
     out

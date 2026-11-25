@@ -559,7 +559,7 @@ under the source, filed by an earlier import). A pharmacy `claim`
 
 `medrec reindex --json` counts what it did, for each person and in all
 (`--dry-run`, 0.9.9 and later, counts what it would do, writes nothing and adds
-`dry_run: true`):
+`dry_run: true` and what is in "A dry run", below):
 `claims` (how many there are), `reshaped`, `unchanged` and `without_raw`
 (claims with no raw file), `statements` (bills and receipts whose statement
 gained fields), `providers_updated` (0.9.6 and later: records whose
@@ -571,6 +571,33 @@ something), `results_split` (0.9.9 and later: results about somebody else that
 were filed as the person's own, or in one record with it), `papers_updated` (0.9.9 and later: papers whose `also_from`,
 `words`, `errors` or `given` changed) and `papers_unread` (0.9.9 and later: raw files of
 papers that do not read).
+
+**A dry run** (0.9.9 and later) makes the records and the views in memory as a run
+would, writes nothing, and counts what would change. It has no name, date, amount
+or id of an item, and names no kind of questionnaire that there is one of.
+
+- `fresh` is `true` when each `index.json` is in the folder, at the end, with the
+  MD5 it was read with, and `false` when another command wrote one meanwhile: the
+  counts are of neither, and the dry run is to be made again.
+- Each person's `views` is against the views the last pass made. `against` is that
+  medrec's version, null where the folder has none (then every private item, event
+  and bill is counted as added), and `stale` is `true` where those were made from
+  other files than the folder has. A dry run that cannot read a view `views.json`
+  names says so and counts nothing.
+
+  | Field | Counts |
+  |---|---|
+  | `private.added` | by kind, items that are private and were open, or were not there; `added_by`, by the rules that make them so (`from`); `questionnaires`, the questionnaires of them, by kind, where `one of its kind` is how many kinds there is one of |
+  | `private.opened` | by kind, items that were private and are open |
+  | `private.gone` | by kind, items that were private and are not there: what is about somebody else, and an event that is another now |
+  | `private.given` | by kind, items that are private only by what a source gave |
+  | `private.parts` | by kind, open items with a private part |
+  | `in_error` | by kind, what is entered in error |
+  | `current` | of conditions, allergies and medicines, the records that a list of current ones has: `added` and `removed`. Those of a medrec before 0.9.9 are by `status` |
+  | `events` | `added`, `removed`, and `changed`, those with other money |
+  | `bills`, `worth_a_call`, `not_billed` | of the lists of `bills.json`, `added`, `removed`, and `changed`, those with other amounts |
+  | `about_another` | what is about somebody else: results and reports by what their source says (`said`) and by the person's age (`by_age`), and `documents` |
+  | `papers` | `filed_before`, papers filed by a medrec that did not keep every source of one, and `source_found`, those of them another source of which the raw files tell |
 
 A `claim` (an ExplanationOfBenefit) is shaped for costs (0.5.0 and later).
 An earlier import's claims take this shape when their source serves them

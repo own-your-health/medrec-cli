@@ -563,7 +563,9 @@ no source's word wins:
   `medrec private unmark` opens it.
 - A source's word that medrec does not keep yet never lets the others end a
   record: its line says `not every source heard`. After upgrading to 0.9.9 run
-  `medrec reindex`, which reads them from the raw files.
+  `medrec reindex`, which reads them from the raw files. `medrec reindex
+  --dry-run` counts first what it and the new rules would change, for each person,
+  and writes nothing.
 - A prescription whose end date has passed is not current: it follows the
   current ones with that date and any fill after it, as one on hold does. A
   fill is a fact and changes nothing. An allergy is never ended by a date.

@@ -197,17 +197,26 @@ impl Folder {
         if let Some(idx) = held.and_then(|h| h.borrow().get(&p.id).cloned()) {
             return Ok(idx);
         }
-        let rel = index_rel(p);
-        let idx: PersonIndex = self
-            .read_json(&rel)?
-            .unwrap_or_else(|| PersonIndex::new(&p.id));
-        if idx.person != p.id {
-            return Err(CliError::Other(format!("{rel} names another person")));
-        }
+        let (idx, _) = self.whole_index_read(p)?;
         if let Some(h) = held {
             h.borrow_mut().insert(p.id.clone(), idx.clone());
         }
         Ok(idx)
+    }
+
+    /// The index as the folder has it now, and the MD5 of what was read, none
+    /// where there is none.
+    pub fn whole_index_read(&self, p: &Person) -> Result<(PersonIndex, Option<String>), CliError> {
+        let rel = index_rel(p);
+        let text = self.store.read_text(&rel)?;
+        let idx: PersonIndex = match &text {
+            Some(t) => parse_json(&self.store, &rel, t)?,
+            None => PersonIndex::new(&p.id),
+        };
+        if idx.person != p.id {
+            return Err(CliError::Other(format!("{rel} names another person")));
+        }
+        Ok((idx, text.map(|t| crate::hash::md5_hex(t.as_bytes()))))
     }
 
     /// Refuse when another machine wrote `p`'s index since `idx` was read.
@@ -430,8 +439,11 @@ pub fn read_json<T: DeserializeOwned>(store: &Store, rel: &str) -> Result<Option
     let Some(text) = store.read_text(rel)? else {
         return Ok(None);
     };
-    serde_json::from_str(&text)
-        .map(Some)
+    parse_json(store, rel, &text).map(Some)
+}
+
+fn parse_json<T: DeserializeOwned>(store: &Store, rel: &str, text: &str) -> Result<T, CliError> {
+    serde_json::from_str(text)
         .map_err(|e| CliError::Other(format!("{} is not readable: {e}", store.display_path(rel))))
 }
 

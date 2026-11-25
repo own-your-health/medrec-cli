@@ -16,19 +16,25 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::about;
+use crate::changes::{self, Changes};
 use crate::claims::without_links;
-use crate::folder::Folder;
+use crate::folder::{self, Folder};
 use crate::given::{self, Given};
 use crate::import;
-use crate::model::{Household, InError, PersonIndex, Provenance, Record, Word};
+use crate::model::{Household, InError, Person, PersonIndex, Provenance, Record, Word};
 use crate::normalize;
 use crate::people;
+use crate::viewfiles;
 
 #[derive(Debug, Default, Serialize)]
 pub struct Reindexed {
     /// Nothing was written.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub dry_run: bool,
+    /// Of a dry run: whether every index is in the folder, at its end, as it
+    /// was read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fresh: Option<bool>,
     pub people: Vec<PersonReindexed>,
     pub claims: usize,
     pub reshaped: usize,
@@ -68,6 +74,9 @@ pub struct PersonReindexed {
     pub results_split: usize,
     pub papers_updated: usize,
     pub papers_unread: usize,
+    /// Of a dry run: what would change in the person's views.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub views: Option<Changes>,
 }
 
 /// The claim's own content, links left out.
@@ -86,7 +95,8 @@ fn content(r: &Record) -> impl PartialEq + '_ {
 /// is: re-keying is an import's to do. Bills and
 /// receipts gain the statement fields their text gives and they lack
 /// ([`crate::bill::backfill`]). The index is written only when something
-/// changed, and never when `dry_run`: then this counts what it would do.
+/// changed, and never when `dry_run`: then this counts what it would do, and
+/// what the views would say otherwise ([`crate::changes`]).
 pub fn claims(
     folder: &Folder,
     h: &Household,
@@ -98,8 +108,13 @@ pub fn claims(
         dry_run,
         ..Reindexed::default()
     };
+    let mut as_read: Vec<(&Person, PersonIndex, Option<String>)> = Vec::new();
+    let mut would_be: BTreeMap<String, PersonIndex> = BTreeMap::new();
     for p in people::selected(h, person)? {
-        let mut idx = folder.whole_index(p)?;
+        let (mut idx, md5) = folder.whole_index_read(p)?;
+        if dry_run {
+            as_read.push((p, idx.clone(), md5));
+        }
         let raw_of = |r: &Record| r.provenance.iter().find_map(|pr| pr.raw_path.clone());
         // One copy per folder of raw files, not one call per file.
         let dirs: BTreeSet<String> = idx
@@ -171,6 +186,10 @@ pub fn claims(
         if !dry_run && changed.iter().any(|n| *n > 0) {
             folder.save_index(p, &mut idx)?;
         }
+        if dry_run {
+            crate::claims::link(&mut idx.records);
+            would_be.insert(p.id.clone(), idx);
+        }
         out.statements += row.statements;
         out.providers_updated += row.providers_updated;
         out.statuses_updated += row.statuses_updated;
@@ -183,6 +202,15 @@ pub fn claims(
         out.unchanged += row.unchanged;
         out.without_raw += row.without_raw;
         out.people.push(row);
+    }
+    if dry_run {
+        let views = viewfiles::preview(folder, &would_be)?;
+        let mut fresh = true;
+        for ((p, was, md5), row) in as_read.iter().zip(&mut out.people) {
+            row.views = Some(changes::of(folder, p, was, &would_be[&p.id], &views)?);
+            fresh &= folder.store.md5(&folder::index_rel(p))? == *md5;
+        }
+        out.fresh = Some(fresh);
     }
     Ok(out)
 }
