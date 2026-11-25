@@ -1,6 +1,6 @@
 """Writes tests/fixtures/private/adult.{index,text}.json: an invented adult's
-records, some of them private by the rules (a mental health code, a medicine,
-a behavioral health practice's visit and letter) and some not."""
+records, one private by each of the rules `code`, `medicine`, `test` and
+`provider` (a record and a document), and some not."""
 import json, os
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -14,7 +14,7 @@ def pad(prefix, stem):
 
 
 def src(org):
-    return [{"source": {"kind": "fhir", "cli": "mychart", "organization_id": org,
+    return [{"source": {"kind": "fhir", "cli": "fakeprov", "organization_id": org,
                         "fhir_base": "https://portal.example.test/fhir"},
              "method": "fhir-api", "filed_at": "2026-11-20T10:00:00Z", "filed_by": "medrec 0.9.0"}]
 
@@ -45,36 +45,38 @@ def doc(stem, date, doc_type, title, org):
 
 
 records = [
-    rec("phobia", "condition", "2025-07-07", "Social phobia, unspecified",
-        {}, "example-family", icd("F40.10", "Social phobia, unspecified"),
+    rec("smoking", "condition", "2025-01-14", "Nicotine dependence, cigarettes", {},
+        "sample-neighborhood", icd("F17.210", "Nicotine dependence, cigarettes, uncomplicated"),
         "active"),
-    rec("anemia", "condition", "2025-03-04", "Iron deficiency anemia", {},
-        "example-family", icd("D50.9", "Iron deficiency anemia, unspecified"), "active"),
-    rec("escitalopram", "medication", "2025-07-08", "Escitalopram 10 mg tablet", {},
-        "example-family", status="active"),
-    rec("ferrous", "medication", "2025-03-05", "Ferrous sulfate 325 mg tablet", {},
-        "example-family", status="active"),
-    rec("counselvisit", "encounter", "2025-08-12T14:00:00Z", "Office Visit",
-        {"class": "AMB", "service_provider": "Example Behavioral Health",
-         "period": {"start": "2025-08-12T14:00:00Z", "end": "2025-08-12T15:00:00Z"}},
-        "example-behavioral"),
-    rec("physical", "encounter", "2025-04-15T13:00:00Z", "Office Visit",
-        {"class": "AMB", "service_provider": "Example Family Practice",
-         "period": {"start": "2025-04-15T13:00:00Z", "end": "2025-04-15T13:30:00Z"}},
-        "example-family"),
-    rec("ferritin", "result", "2025-04-15T13:20:00Z", "Ferritin",
-        {"value": {"value": 40, "unit": "ng/mL"}, "reference_range": "15-150 ng/mL"},
-        "example-family"),
+    rec("migraine", "condition", "2024-11-12", "Migraine headache", {},
+        "sample-headache", icd("G43.909", "Migraine, unspecified, not intractable"), "active"),
+    rec("varenicline", "medication", "2025-01-15", "Varenicline 1 mg tablet", {},
+        "sample-neighborhood", status="active"),
+    rec("sumatriptan", "medication", "2024-11-13", "Sumatriptan 50 mg tablet", {},
+        "sample-headache", status="active"),
+    rec("quitvisit", "encounter", "2025-02-20T17:00:00Z", "Group Visit",
+        {"class": "AMB", "service_provider": "Example Recovery Center",
+         "period": {"start": "2025-02-20T17:00:00Z", "end": "2025-02-20T18:30:00Z"}},
+        "example-recovery"),
+    rec("headvisit", "encounter", "2025-03-18T15:00:00Z", "Follow-up Visit",
+        {"class": "AMB", "service_provider": "Sample Headache Clinic",
+         "period": {"start": "2025-03-18T15:00:00Z", "end": "2025-03-18T15:20:00Z"}},
+        "sample-headache"),
+    rec("magnesium", "result", "2025-03-18T15:10:00Z", "Magnesium",
+        {"value": {"value": 2, "unit": "mg/dL"}, "reference_range": "1.7-2.4 mg/dL"},
+        "sample-headache"),
+    rec("screen", "result", "2025-03-18T15:10:00Z", "Drug screen",
+        {"value_text": "None found"}, "sample-headache"),
 ]
 documents = [
-    doc("counselletter", "2025-08-16", "letter", "Letter", "Example Counseling Center"),
-    doc("physicalavs", "2025-04-15", "visit_summary", "After Visit Summary",
-        "Example Family Practice"),
+    doc("quitnotice", "2025-04-08", "letter", "Letter", "Sample Addiction Services"),
+    doc("headsummary", "2025-03-18", "visit_summary", "After Visit Summary",
+        "Sample Headache Clinic"),
 ]
 texts = {
-    pad("d", "counselletter"): "Example Counseling Center\nLetter\nNext session in four weeks.",
-    pad("d", "physicalavs"): "Example Family Practice\nAfter Visit Summary\nBlood count recheck in "
-                            "three months.",
+    pad("d", "quitnotice"): "Sample Addiction Services\nLetter\nThe next class is in the cedar room.",
+    pad("d", "headsummary"): "Sample Headache Clinic\nAfter Visit Summary\nBring the diary in six "
+                             "weeks.",
 }
 idx = {"schema": "medrec-index/v1", "person": PERSON, "rev": 1, "documents": documents,
        "records": records, "studies": [], "imports": []}

@@ -732,22 +732,22 @@ mod tests {
         let events: Value = serde_json::from_str(EVENTS).unwrap();
         let paid = Payment {
             id: "o_paidaaaaaaaaaaaaaaaa".into(),
-            document: "d_doctorbillaaaaaaaaaa".into(),
-            on: "2025-12-19".into(),
+            document: "d_readerbillaaaaaaaaaa".into(),
+            on: "2024-11-12".into(),
             amount: Amount {
-                amount: "40.00".into(),
+                amount: "12.00".into(),
                 currency: "USD".into(),
             },
-            at: "2025-12-19T12:00:00Z".into(),
+            at: "2024-11-12T12:00:00Z".into(),
             by: None,
             request: None,
         };
         // A payment marked in another currency is listed and not counted.
         let euros = Payment {
             id: "o_euroaaaaaaaaaaaaaaaa".into(),
-            on: "2025-12-20".into(),
+            on: "2024-11-13".into(),
             amount: Amount {
-                amount: "4.00".into(),
+                amount: "7.00".into(),
                 currency: "EUR".into(),
             },
             ..paid.clone()
@@ -769,55 +769,68 @@ mod tests {
         assert_eq!(
             order,
             [
-                "d_labbilllateraaaaaaaa",
-                "d_dentbillaaaaaaaaaaaa",
-                "d_labbillaaaaaaaaaaaaa",
-                "d_doctorbillaaaaaaaaaa",
-                "d_erbillaaaaaaaaaaaaaa"
+                "d_readerbillaaaaaaaaaa",
+                "d_visionlateraaaaaaaaa",
+                "d_scanbillaaaaaaaaaaaa",
+                "d_visionbillaaaaaaaaaa",
+                "d_allergybillaaaaaaaaa"
             ],
             "keyed by document, newest first, a copy only under its first"
         );
         assert_eq!(
             v["copy_of"],
-            json!({"d_erbillcopyaaaaaaaaaa": "d_erbillaaaaaaaaaaaaaa"})
+            json!({"d_scancopyoneaaaaaaaaa": "d_scanbillaaaaaaaaaaaa",
+                "d_scancopytwoaaaaaaaaa": "d_scanbillaaaaaaaaaaaa"})
         );
 
-        // The ER's statement: its claim by amount, paid by the receipt.
-        let er = bill(&v, "d_erbillaaaaaaaaaaaaaa");
-        assert_eq!(er["copies"], json!(["d_erbillcopyaaaaaaaaaa"]));
+        // A statement whose claim D3s matched, paid by two receipts.
+        let scan = bill(&v, "d_scanbillaaaaaaaaaaaa");
         assert_eq!(
-            (&er["event"], &er["rule"]),
-            (&json!("e_eraaaaaaaaaaaaaaaaaa"), &json!("D3s"))
+            scan["copies"],
+            json!(["d_scancopyoneaaaaaaaaa", "d_scancopytwoaaaaaaaaa"])
         );
-        assert_eq!(er["claim"], "r_erfacilityaaaaaaaaaa");
-        assert_eq!(er["phone"], "555-010-0123");
-        assert_eq!(er["paid"][0]["document"], "d_errcptaaaaaaaaaaaaaa");
         assert_eq!(
-            (&er["paid_total"], &er["left"], &er["settled"]),
-            (&json!("200.00"), &json!("0.00"), &json!(true))
+            (&scan["event"], &scan["rule"]),
+            (&json!("e_scanaaaaaaaaaaaaaaaa"), &json!("D3s"))
+        );
+        assert_eq!(scan["claim"], "r_scanroomaaaaaaaaaaaa");
+        assert_eq!(scan["phone"], "555-010-0155");
+        let by: Vec<&str> = scan["paid"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["document"].as_str().unwrap())
+            .collect();
+        assert_eq!(by, ["d_scanpaidoneaaaaaaaaa", "d_scanpaidtwoaaaaaaaaa"]);
+        assert_eq!(
+            (&scan["paid_total"], &scan["left"], &scan["settled"]),
+            (&json!("90.00"), &json!("0.00"), &json!(true))
         );
 
-        // The ER doctor's: more than its claim says, half marked paid.
-        let doc = bill(&v, "d_doctorbillaaaaaaaaaa");
+        // One that asks more than its claim's share, part of it marked paid.
+        let reader = bill(&v, "d_readerbillaaaaaaaaaa");
         assert_eq!(
-            doc["claim"], "r_erdoctoraaaaaaaaaaaa",
+            reader["claim"], "r_scanreaderaaaaaaaaaa",
             "the event's claim from its biller"
         );
-        assert_eq!(doc["paid"][0]["from"], "household");
-        assert!(doc["paid"][0].get("counted").is_none());
+        assert_eq!(reader["paid"][0]["from"], "household");
+        assert!(reader["paid"][0].get("counted").is_none());
         assert_eq!(
-            (&doc["paid"][1]["currency"], &doc["paid"][1]["counted"]),
+            (
+                &reader["paid"][1]["currency"],
+                &reader["paid"][1]["counted"]
+            ),
             (&json!("EUR"), &json!(false))
         );
         assert_eq!(
-            (&doc["paid_total"], &doc["left"], &doc["settled"]),
-            (&json!("40.00"), &json!("36.00"), &json!(false))
+            (&reader["paid_total"], &reader["left"], &reader["settled"]),
+            (&json!("12.00"), &json!("18.00"), &json!(false))
         );
 
-        // The lab's first statement, and the later one that repeats it.
-        let lab = bill(&v, "d_labbillaaaaaaaaaaaaa");
-        assert_eq!(lab["superseded_by"], "d_labbilllateraaaaaaaa");
-        assert!(bill(&v, "d_labbilllateraaaaaaaa")
+        // A first statement, and the later one from its biller.
+        let vision = bill(&v, "d_visionbillaaaaaaaaaa");
+        assert_eq!(vision["superseded_by"], "d_visionlateraaaaaaaaa");
+        assert!(bill(&v, "d_visionlateraaaaaaaaa")
             .get("superseded_by")
             .is_none());
 
@@ -831,9 +844,9 @@ mod tests {
         assert_eq!(
             calls,
             [
-                ("no_claim", "d_dentbillaaaaaaaaaaaa"),
-                ("asks_less", "d_labbillaaaaaaaaaaaaa"),
-                ("asks_more", "d_doctorbillaaaaaaaaaa"),
+                ("asks_more", "d_readerbillaaaaaaaaaa"),
+                ("asks_less", "d_visionbillaaaaaaaaaa"),
+                ("no_claim", "d_allergybillaaaaaaaaa"),
                 ("desk_copay", "d_deskaaaaaaaaaaaaaaaa"),
             ],
             "a later statement repeating a balance is no missing claim"
@@ -842,25 +855,25 @@ mod tests {
         assert_eq!(
             (&desk["asked"], &desk["owed"], &desk["claim"]),
             (
-                &json!("32.00"),
-                &json!("0.00"),
-                &json!("r_visitaaaaaaaaaaaaaaa")
+                &json!("25.00"),
+                &json!("10.00"),
+                &json!("r_rehabaaaaaaaaaaaaaaa")
             )
         );
         let more = row(&v, "worth_a_call", "reason", "asks_more");
         assert_eq!(
             (&more["asked"], &more["owed"]),
-            (&json!("76.00"), &json!("64.00"))
+            (&json!("30.00"), &json!("22.00"))
         );
 
         // Receipts: to a bill, to a visit, or to neither.
         assert_eq!(
-            row(&v, "receipts", "document", "d_errcptaaaaaaaaaaaaaa")["bill"],
-            "d_erbillaaaaaaaaaaaaaa"
+            row(&v, "receipts", "document", "d_scanpaidtwoaaaaaaaaa")["bill"],
+            "d_scanbillaaaaaaaaaaaa"
         );
         assert_eq!(
             row(&v, "receipts", "document", "d_deskaaaaaaaaaaaaaaaa")["event"],
-            "e_visitaaaaaaaaaaaaaaa"
+            "e_rehabaaaaaaaaaaaaaaa"
         );
         let stray = row(&v, "receipts", "document", "d_strayaaaaaaaaaaaaaaa");
         assert!(
@@ -868,7 +881,8 @@ mod tests {
             "{stray}"
         );
 
-        // Not billed yet: the shares nothing has met, a fill marked.
+        // Not billed yet: the shares nothing has met, summed by provider, a
+        // fill marked.
         let nb: Vec<(&str, &str, Option<bool>)> = v["not_billed"]
             .as_array()
             .unwrap()
@@ -884,8 +898,8 @@ mod tests {
         assert_eq!(
             nb,
             [
-                ("e_fillaaaaaaaaaaaaaaaa", "8.00", Some(true)),
-                ("e_oldaaaaaaaaaaaaaaaaa", "12.00", None),
+                ("e_fillaaaaaaaaaaaaaaaa", "7.50", Some(true)),
+                ("e_fillingaaaaaaaaaaaaa", "31.00", None),
             ]
         );
     }
@@ -903,14 +917,14 @@ mod tests {
     #[test]
     fn a_self_pay_bill_is_not_missing_a_claim() {
         let events: Value = serde_json::from_str(EVENTS).unwrap();
-        let (dental, doctor) = ("d_dentbillaaaaaaaaaaaa", "d_doctorbillaaaaaaaaaa");
+        let (alone, claimed) = ("d_allergybillaaaaaaaaa", "d_readerbillaaaaaaaaaa");
         let says = |id: &str, text: &str| {
             let mut texts = PersonText::new("p_test");
             texts.texts.insert(id.into(), text.into());
             build(&person(), &index(), &texts, &events, &[])
         };
         for (text, kind) in [
-            ("Sample storage fee\nAmount due $60.00", Some("storage")),
+            ("Sample storage fee\nAmount due $75.00", Some("storage")),
             ("Specimen\n  storage, 12 months", Some("storage")),
             ("Yearly tissue\nbank storage", Some("storage")),
             ("Insurance: Self-pay", Some("stated")),
@@ -919,17 +933,17 @@ mod tests {
             // What any bill may say, and what its other pages do.
             ("If you self pay, ask about our discounts", None),
             ("Office visit\n\u{c}Storage fee", None),
-            ("Cleaning", None),
+            ("Skin test", None),
         ] {
-            let v = says(dental, text);
-            assert_eq!(bill(&v, dental)["self_pay"].as_str(), kind, "{text}");
-            let asked = reasons(&v).contains(&(dental, "no_claim"));
+            let v = says(alone, text);
+            assert_eq!(bill(&v, alone)["self_pay"].as_str(), kind, "{text}");
+            let asked = reasons(&v).contains(&(alone, "no_claim"));
             assert_eq!(asked, kind.is_none(), "{text}");
         }
         // One with a claim was billed to an insurer, whatever it says.
-        let v = says(doctor, "Insurance: Self-pay");
-        assert!(bill(&v, doctor).get("self_pay").is_none());
-        assert!(reasons(&v).contains(&(doctor, "asks_more")));
+        let v = says(claimed, "Insurance: Self-pay");
+        assert!(bill(&v, claimed).get("self_pay").is_none());
+        assert!(reasons(&v).contains(&(claimed, "asks_more")));
     }
 
     #[test]
@@ -937,20 +951,20 @@ mod tests {
         let events: Value = serde_json::from_str(EVENTS).unwrap();
         let no_text = PersonText::new("p_test");
         for (id, amount) in [
-            ("d_dentbillaaaaaaaaaaaa", "60.00"),
-            ("d_doctorbillaaaaaaaaaa", "76.00"),
-            ("d_labbillaaaaaaaaaaaaa", "16.00"),
+            ("d_allergybillaaaaaaaaa", "75.00"),
+            ("d_readerbillaaaaaaaaaa", "30.00"),
+            ("d_visionbillaaaaaaaaaa", "9.00"),
         ] {
             let paid = |amount: &str| {
                 let p = Payment {
                     id: "o_paidaaaaaaaaaaaaaaaa".into(),
                     document: id.into(),
-                    on: "2026-01-14".into(),
+                    on: "2025-01-14".into(),
                     amount: Amount {
                         amount: amount.into(),
                         currency: "USD".into(),
                     },
-                    at: "2026-01-14T10:00:00Z".into(),
+                    at: "2025-01-14T10:00:00Z".into(),
                     by: None,
                     request: None,
                 };

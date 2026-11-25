@@ -1006,8 +1006,8 @@ mod tests {
     }
 
     fn record(id: &str, kind: &str, display: &str, fields: Value) -> Value {
-        json!({"id": id, "kind": kind, "key": id, "date": "2026-10-28", "display": display,
-            "fields": fields, "provenance": [{"source": {"kind": "fhir", "cli": "mychart"},
+        json!({"id": id, "kind": kind, "key": id, "date": "2024-08-13", "display": display,
+            "fields": fields, "provenance": [{"source": {"kind": "fhir", "cli": "fakeprov"},
             "method": "fhir-api", "filed_at": "2026-11-20T10:00:00Z", "filed_by": "medrec"}]})
     }
 
@@ -1031,25 +1031,25 @@ mod tests {
     /// A document follows the record that links it, and a study its report.
     #[test]
     fn a_document_follows_the_record_that_links_it_and_a_study_its_report() {
-        let mut therapy = record(
-            "r_therapyclaimaaaaaaaa",
+        let mut program = record(
+            "r_programclaimaaaaaaaa",
             "claim",
-            "Office visit",
+            "Class",
             json!({"provider": "Kim Example",
-                "diagnoses": [{"sequence": 1, "code": {"system": crate::normalize::ICD10, "code": "F41.1"}}]}),
+                "diagnoses": [{"sequence": 1, "code": {"system": crate::normalize::ICD10, "code": "F17.210"}}]}),
         );
-        therapy["documents"] = json!([
+        program["documents"] = json!([
             "d_eobaaaaaaaaaaaaaaaaa",
             "d_sharedaaaaaaaaaaaaaa",
             "d_goneaaaaaaaaaaaaaaa"
         ]);
-        let mut checkup = record(
-            "r_checkupclaimaaaaaaaa",
+        let mut foot = record(
+            "r_footclaimaaaaaaaaaaa",
             "claim",
-            "Office visit",
-            json!({"provider": "Example Family Practice"}),
+            "Class",
+            json!({"provider": "Sample Foot Room"}),
         );
-        checkup["documents"] = json!(["d_sharedaaaaaaaaaaaaaa", "d_plainaaaaaaaaaaaaaaa"]);
+        foot["documents"] = json!(["d_sharedaaaaaaaaaaaaaa", "d_plainaaaaaaaaaaaaaaa"]);
         let v_of = |marks: &[Mark]| {
             let idx: PersonIndex = serde_json::from_value(json!({
                 "schema": "medrec-index/v1", "person": "p_testaaaaaaaaaaaaaaaa", "rev": 1, "imports": [],
@@ -1058,10 +1058,10 @@ mod tests {
                 "studies": [
                     study("m_eobaaaaaaaaaaaaaaaaa", Some("d_eobaaaaaaaaaaaaaaaaa")),
                     study("m_plainaaaaaaaaaaaaaa", Some("d_plainaaaaaaaaaaaaaaa")),
-                    study("m_recordaaaaaaaaaaaaa", Some("r_therapyclaimaaaaaaaa")),
+                    study("m_recordaaaaaaaaaaaaa", Some("r_programclaimaaaaaaaa")),
                     study("m_noneaaaaaaaaaaaaaaa", None),
                     study("m_lostaaaaaaaaaaaaaaa", Some("d_lostaaaaaaaaaaaaaaaa"))],
-                "records": [therapy.clone(), checkup.clone()]
+                "records": [program.clone(), foot.clone()]
             }))
             .unwrap();
             built(&person(), &idx, &no_text(), &json!({"events": []}), marks)
@@ -1071,7 +1071,7 @@ mod tests {
         let docs = areas(&v, "documents");
         assert_eq!(
             docs,
-            json!({"d_eobaaaaaaaaaaaaaaaaa": MENTAL_HEALTH, "d_sharedaaaaaaaaaaaaaa": MENTAL_HEALTH})
+            json!({"d_eobaaaaaaaaaaaaaaaaa": SUBSTANCE_USE, "d_sharedaaaaaaaaaaaaaa": SUBSTANCE_USE})
                 .as_object()
                 .unwrap()
                 .clone()
@@ -1080,7 +1080,7 @@ mod tests {
         let studies = areas(&v, "studies");
         assert_eq!(
             studies,
-            json!({"m_eobaaaaaaaaaaaaaaaaa": MENTAL_HEALTH, "m_recordaaaaaaaaaaaaa": MENTAL_HEALTH})
+            json!({"m_eobaaaaaaaaaaaaaaaaa": SUBSTANCE_USE, "m_recordaaaaaaaaaaaaa": SUBSTANCE_USE})
                 .as_object()
                 .unwrap()
                 .clone()
@@ -1114,20 +1114,20 @@ mod tests {
         ]);
         assert_eq!(
             areas(&v, "documents"),
-            json!({"d_plainaaaaaaaaaaaaaaa": HOUSEHOLD, "d_sharedaaaaaaaaaaaaaa": MENTAL_HEALTH})
+            json!({"d_plainaaaaaaaaaaaaaaa": HOUSEHOLD, "d_sharedaaaaaaaaaaaaaa": SUBSTANCE_USE})
                 .as_object()
                 .unwrap()
                 .clone()
         );
         assert_eq!(
             areas(&v, "studies"),
-            json!({"m_plainaaaaaaaaaaaaaa": HOUSEHOLD, "m_recordaaaaaaaaaaaaa": MENTAL_HEALTH})
+            json!({"m_plainaaaaaaaaaaaaaa": HOUSEHOLD, "m_recordaaaaaaaaaaaaa": SUBSTANCE_USE})
                 .as_object()
                 .unwrap()
                 .clone()
         );
         // A record marked not private links nothing.
-        let v = v_of(&[mark("r_therapyclaimaaaaaaaa", false)]);
+        let v = v_of(&[mark("r_programclaimaaaaaaaa", false)]);
         assert!(areas(&v, "documents").is_empty(), "{v}");
         assert!(areas(&v, "studies").is_empty(), "{v}");
     }
@@ -1135,29 +1135,29 @@ mod tests {
     /// A document linked to a record an event makes private is private too.
     #[test]
     fn a_link_follows_what_an_event_makes_private() {
-        let therapy = record(
-            "r_therapyclaimaaaaaaaa",
+        let program = record(
+            "r_programclaimaaaaaaaa",
             "claim",
-            "Office visit",
+            "Class",
             json!({"provider": "Kim Example",
-                "diagnoses": [{"sequence": 1, "code": {"system": crate::normalize::ICD10, "code": "F41.1"}}]}),
+                "diagnoses": [{"sequence": 1, "code": {"system": crate::normalize::ICD10, "code": "F17.210"}}]}),
         );
         let mut visit = record(
-            "r_therapyvisitaaaaaaaa",
+            "r_programvisitaaaaaaaa",
             "encounter",
-            "Office Visit",
+            "Group Visit",
             json!({"class": "AMB"}),
         );
         visit["documents"] = json!(["d_summaryaaaaaaaaaaaa"]);
         let idx: PersonIndex = serde_json::from_value(json!({
             "schema": "medrec-index/v1", "person": "p_testaaaaaaaaaaaaaaaa", "rev": 1, "imports": [],
             "documents": [document("d_summaryaaaaaaaaaaaa")], "studies": [],
-            "records": [therapy, visit]
+            "records": [program, visit]
         }))
         .unwrap();
-        let events = json!({"events": [{"id": "e_therapyaaaaaaaaaaaaa", "members": [
-            {"record": "r_therapyclaimaaaaaaaa", "kind": "claim", "role": "office"},
-            {"record": "r_therapyvisitaaaaaaaa", "kind": "encounter", "role": "portal"}]}]});
+        let events = json!({"events": [{"id": "e_programaaaaaaaaaaaaa", "members": [
+            {"record": "r_programclaimaaaaaaaa", "kind": "claim", "role": "office"},
+            {"record": "r_programvisitaaaaaaaa", "kind": "encounter", "role": "portal"}]}]});
         let v = built(&person(), &idx, &no_text(), &events, &[]);
         assert_eq!(v["documents"]["d_summaryaaaaaaaaaaaa"]["from"], "record");
     }
@@ -1220,21 +1220,21 @@ mod tests {
                 .collect()
         };
         let all = [
-            ("d_earlieraaaaaaaaaaaaa", MENTAL_HEALTH, "paper"),
-            ("d_labaaaaaaaaaaaaaaaaa", SEXUAL_HEALTH, "words"),
-            ("d_lateraaaaaaaaaaaaaaa", MENTAL_HEALTH, "paper"),
-            ("d_latercopyaaaaaaaaaaa", MENTAL_HEALTH, "paper"),
-            ("d_pharmacyaaaaaaaaaaaa", SEXUAL_HEALTH, "words"),
-            ("d_receiptaaaaaaaaaaaaa", MENTAL_HEALTH, "paper"),
-            ("d_rescanaaaaaaaaaaaaaa", MENTAL_HEALTH, "paper"),
-            ("d_therapyaaaaaaaaaaaaa", MENTAL_HEALTH, "words"),
-            ("d_titledaaaaaaaaaaaaaa", MENTAL_HEALTH, "words"),
+            ("d_firstaaaaaaaaaaaaaaa", SUBSTANCE_USE, "words"),
+            ("d_lozengesaaaaaaaaaaaa", SUBSTANCE_USE, "words"),
+            ("d_photoaaaaaaaaaaaaaaa", SUBSTANCE_USE, "paper"),
+            ("d_secondaaaaaaaaaaaaaa", SUBSTANCE_USE, "paper"),
+            ("d_secondcopyaaaaaaaaaa", SUBSTANCE_USE, "paper"),
+            ("d_testbillaaaaaaaaaaaa", SEXUAL_HEALTH, "words"),
+            ("d_thirdaaaaaaaaaaaaaaa", SUBSTANCE_USE, "paper"),
+            ("d_thirdpaidaaaaaaaaaaa", SUBSTANCE_USE, "paper"),
+            ("d_titledaaaaaaaaaaaaaa", SUBSTANCE_USE, "words"),
         ];
         assert_eq!(why(&[]), want(&all));
 
         // The household's word comes first, and what it takes out ties no
-        // other paper: without the later statement the receipt, which pays
-        // that one, and its copy are out too.
+        // other paper: without the last statement the receipt that pays it, and
+        // the second, with its copy, are out too.
         let mark = |item: &str, private: bool| Mark {
             id: "o_markaaaaaaaaaaaaaaaa".into(),
             item: item.into(),
@@ -1244,26 +1244,26 @@ mod tests {
             request: None,
             members: Vec::new(),
         };
-        let out = ["d_earlier", "d_later", "d_receipt"];
+        let out = ["d_second", "d_third"];
         let left: Vec<_> = all
             .iter()
             .filter(|(id, ..)| !out.iter().any(|o| id.starts_with(o)))
             .copied()
             .collect();
         assert_eq!(
-            why(&[mark("d_lateraaaaaaaaaaaaaaa", false)]),
+            why(&[mark("d_thirdaaaaaaaaaaaaaaa", false)]),
             want(&left),
-            "both statements are superseded by the one taken out"
+            "the statement taken out superseded the second"
         );
         // And marking one private takes the same papers along.
         let marked = why(&[
-            mark("d_therapyaaaaaaaaaaaaa", false),
-            mark("d_latercopyaaaaaaaaaaa", true),
+            mark("d_firstaaaaaaaaaaaaaaa", false),
+            mark("d_secondcopyaaaaaaaaaa", true),
         ]);
-        assert_eq!(marked["d_earlieraaaaaaaaaaaaa"].1, "paper");
-        assert_eq!(marked["d_lateraaaaaaaaaaaaaaa"].0, HOUSEHOLD);
-        assert!(!marked.contains_key("d_therapyaaaaaaaaaaaaa"));
-        assert!(!marked.contains_key("d_rescanaaaaaaaaaaaaaa"));
+        assert_eq!(marked["d_thirdpaidaaaaaaaaaaa"].1, "paper");
+        assert_eq!(marked["d_thirdaaaaaaaaaaaaaaa"].0, HOUSEHOLD);
+        assert!(!marked.contains_key("d_firstaaaaaaaaaaaaaaa"));
+        assert!(!marked.contains_key("d_photoaaaaaaaaaaaaaaa"));
     }
 
     #[test]
@@ -1272,63 +1272,63 @@ mod tests {
             "schema": "medrec-index/v1", "person": "p_testaaaaaaaaaaaaaaaa", "rev": 1,
             "documents": [], "studies": [], "imports": [],
             "records": [
-                record("r_therapyclaimaaaaaaaa", "claim", "Office visit", json!({
+                record("r_programclaimaaaaaaaa", "claim", "Class", json!({
                     "provider": "Kim Example",
                     "diagnoses": [{"sequence": 2, "code": {"system": crate::normalize::ICD10, "code": "I10"}},
-                                  {"sequence": 1, "code": {"system": crate::normalize::ICD10, "code": "F41.1"}}]})),
-                record("r_therapyvisitaaaaaaaa", "encounter", "Office Visit", json!({"class": "AMB"})),
-                record("r_sertralineaaaaaaaaaa", "medication", "Sertraline 50 mg tablet", json!({"source": "dispense"})),
-                record("r_vitaminaaaaaaaaaaaaa", "medication", "Vitamin D3 2,000 unit capsule", json!({"source": "dispense"})),
-                record("r_checkupclaimaaaaaaaa", "claim", "Office visit", json!({
-                    "provider": "Example Family Practice",
-                    "diagnoses": [{"sequence": 1, "code": {"system": crate::normalize::ICD10, "code": "Z00.00"}},
-                                  {"sequence": 2, "code": {"system": crate::normalize::ICD10, "code": "Z11.3"}}]})),
-                record("r_chlamydiaaaaaaaaaaaa", "result", "Chlamydia trachomatis DNA", json!({})),
+                                  {"sequence": 1, "code": {"system": crate::normalize::ICD10, "code": "F17.210"}}]})),
+                record("r_programvisitaaaaaaaa", "encounter", "Group Visit", json!({"class": "AMB"})),
+                record("r_lozengeaaaaaaaaaaaaa", "medication", "Nicotine 2 mg lozenge", json!({"source": "dispense"})),
+                record("r_loratadineaaaaaaaaaa", "medication", "Loratadine 10 mg tablet", json!({"source": "dispense"})),
+                record("r_earclaimaaaaaaaaaaaa", "claim", "Class", json!({
+                    "provider": "Sample Ear Room",
+                    "diagnoses": [{"sequence": 1, "code": {"system": crate::normalize::ICD10, "code": "H61.20"}},
+                                  {"sequence": 2, "code": {"system": crate::normalize::ICD10, "code": "Z71.41"}}]})),
+                record("r_screenaaaaaaaaaaaaaa", "result", "Drug screen", json!({})),
             ]
         }))
         .unwrap();
         let events = json!({"events": [
-            {"id": "e_therapyaaaaaaaaaaaaa", "members": [
-                {"record": "r_therapyclaimaaaaaaaa", "kind": "claim", "role": "office"},
-                {"record": "r_therapyvisitaaaaaaaa", "kind": "encounter", "role": "portal"}]},
-            {"id": "e_checkupaaaaaaaaaaaaa", "members": [
-                {"record": "r_checkupclaimaaaaaaaa", "kind": "claim", "role": "office"},
-                {"record": "r_chlamydiaaaaaaaaaaaa", "kind": "result", "role": "satellite"}]},
+            {"id": "e_programaaaaaaaaaaaaa", "members": [
+                {"record": "r_programclaimaaaaaaaa", "kind": "claim", "role": "office"},
+                {"record": "r_programvisitaaaaaaaa", "kind": "encounter", "role": "portal"}]},
+            {"id": "e_earaaaaaaaaaaaaaaaaa", "members": [
+                {"record": "r_earclaimaaaaaaaaaaaa", "kind": "claim", "role": "office"},
+                {"record": "r_screenaaaaaaaaaaaaaa", "kind": "result", "role": "satellite"}]},
             {"id": "e_fillaaaaaaaaaaaaaaaa", "members": [
-                {"record": "r_sertralineaaaaaaaaaa", "kind": "medication", "role": "fill"}]},
-            {"id": "e_vitaminfillaaaaaaaaa", "members": [
-                {"record": "r_vitaminaaaaaaaaaaaaa", "kind": "medication", "role": "fill"}]}
+                {"record": "r_lozengeaaaaaaaaaaaaa", "kind": "medication", "role": "fill"}]},
+            {"id": "e_loratadinefillaaaaaa", "members": [
+                {"record": "r_loratadineaaaaaaaaaa", "kind": "medication", "role": "fill"}]}
         ]});
         let v = built(&person(), &idx, &no_text(), &events, &[]);
         assert_eq!(v["schema"], SCHEMA);
-        // The therapy claim by its principal diagnosis, and its visit with
-        // it; the sertraline fill by its medicine; the checkup's screening
-        // result but not the checkup, whose principal diagnosis is routine.
+        // A claim by its principal diagnosis, and its visit with it; a fill
+        // by its medicine; a result by its test, but not its event, whose
+        // claim has another principal diagnosis.
         assert_eq!(
             areas(&v, "records"),
             json!({
-                "r_chlamydiaaaaaaaaaaaa": SEXUAL_HEALTH,
-                "r_sertralineaaaaaaaaaa": MENTAL_HEALTH,
-                "r_therapyclaimaaaaaaaa": MENTAL_HEALTH,
-                "r_therapyvisitaaaaaaaa": MENTAL_HEALTH,
+                "r_screenaaaaaaaaaaaaaa": SUBSTANCE_USE,
+                "r_lozengeaaaaaaaaaaaaa": SUBSTANCE_USE,
+                "r_programclaimaaaaaaaa": SUBSTANCE_USE,
+                "r_programvisitaaaaaaaa": SUBSTANCE_USE,
             })
             .as_object()
             .unwrap()
             .clone()
         );
-        assert_eq!(v["records"]["r_therapyclaimaaaaaaaa"]["from"], "code");
-        assert_eq!(v["records"]["r_therapyvisitaaaaaaaa"]["from"], "event");
+        assert_eq!(v["records"]["r_programclaimaaaaaaaa"]["from"], "code");
+        assert_eq!(v["records"]["r_programvisitaaaaaaaa"]["from"], "event");
         assert_eq!(
             areas(&v, "events"),
-            json!({"e_fillaaaaaaaaaaaaaaaa": MENTAL_HEALTH, "e_therapyaaaaaaaaaaaaa": MENTAL_HEALTH})
+            json!({"e_fillaaaaaaaaaaaaaaaa": SUBSTANCE_USE, "e_programaaaaaaaaaaaaa": SUBSTANCE_USE})
                 .as_object()
                 .unwrap()
                 .clone()
         );
 
-        // The household marks the vitamin private and the therapy visit's
-        // event not: the event and the visit leave, the claim stays private
-        // by its own code.
+        // The household marks the other fill private and the program's event
+        // not: the event and the visit leave, the claim stays private by its
+        // own code.
         let mark = |item: &str, private: bool| Mark {
             id: "o_markaaaaaaaaaaaaaaaa".into(),
             item: item.into(),
@@ -1344,8 +1344,8 @@ mod tests {
             &no_text(),
             &events,
             &[
-                mark("r_vitaminaaaaaaaaaaaaa", true),
-                mark("e_therapyaaaaaaaaaaaaa", false),
+                mark("r_loratadineaaaaaaaaaa", true),
+                mark("e_programaaaaaaaaaaaaa", false),
                 // Items the person no longer has.
                 mark("r_goneaaaaaaaaaaaaaaaa", true),
                 mark("e_goneaaaaaaaaaaaaaaaa", true),
@@ -1355,41 +1355,41 @@ mod tests {
         assert!(v["events"].get("e_goneaaaaaaaaaaaaaaaa").is_none(), "{v}");
 
         assert_eq!(
-            v["records"]["r_vitaminaaaaaaaaaaaaa"],
+            v["records"]["r_loratadineaaaaaaaaaa"],
             json!({"area": HOUSEHOLD, "from": "household"})
         );
         assert_eq!(
-            v["events"]["e_vitaminfillaaaaaaaaa"],
+            v["events"]["e_loratadinefillaaaaaa"],
             json!({"area": HOUSEHOLD, "from": "members"})
         );
-        assert!(v["events"].get("e_therapyaaaaaaaaaaaaa").is_none(), "{v}");
-        assert!(v["records"].get("r_therapyvisitaaaaaaaa").is_none(), "{v}");
-        assert_eq!(v["records"]["r_therapyclaimaaaaaaaa"]["from"], "code");
+        assert!(v["events"].get("e_programaaaaaaaaaaaaa").is_none(), "{v}");
+        assert!(v["records"].get("r_programvisitaaaaaaaa").is_none(), "{v}");
+        assert_eq!(v["records"]["r_programclaimaaaaaaaa"]["from"], "code");
 
         // A mark on an event whose id changed (its anchor did) follows its
         // members; one whose members are all gone is skipped.
         let followed = Mark {
-            members: vec!["r_vitaminaaaaaaaaaaaaa".into()],
-            ..mark("e_oldvitaminfillaaaaa", false)
+            members: vec!["r_loratadineaaaaaaaaaa".into()],
+            ..mark("e_oldloratadinefillaaa", false)
         };
         let w = built(
             &person(),
             &idx,
             &no_text(),
             &events,
-            &[mark("r_vitaminaaaaaaaaaaaaa", true), followed],
+            &[mark("r_loratadineaaaaaaaaaa", true), followed],
         );
-        assert!(w["events"].get("e_vitaminfillaaaaaaaaa").is_none(), "{w}");
-        assert!(w["events"].get("e_oldvitaminfillaaaaa").is_none(), "{w}");
+        assert!(w["events"].get("e_loratadinefillaaaaaa").is_none(), "{w}");
+        assert!(w["events"].get("e_oldloratadinefillaaa").is_none(), "{w}");
         // Its own mark wins over one that followed.
-        let own = mark("e_vitaminfillaaaaaaaaa", true);
+        let own = mark("e_loratadinefillaaaaaa", true);
         let followed = Mark {
-            members: vec!["r_vitaminaaaaaaaaaaaaa".into()],
-            ..mark("e_oldvitaminfillaaaaa", false)
+            members: vec!["r_loratadineaaaaaaaaaa".into()],
+            ..mark("e_oldloratadinefillaaa", false)
         };
         let w = built(&person(), &idx, &no_text(), &events, &[own, followed]);
         assert_eq!(
-            w["events"]["e_vitaminfillaaaaaaaaa"],
+            w["events"]["e_loratadinefillaaaaaa"],
             json!({"area": HOUSEHOLD, "from": "household"})
         );
     }

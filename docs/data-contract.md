@@ -369,9 +369,8 @@ its totals leave one out.
   own `payer_notes` are the `processNote` texts no line points at. They
   are the payer's, never the household's notes in `notes.md`.
 - `counted: false` (0.8.2 and later) marks a line the claim's totals
-  leave out. A payer can list a line it then does not count: UHC lists
-  the billed code it replaced, at the member's whole cost, beside its
-  replacement, and lines it wrote off. The same amounts occur on lines
+  leave out. A payer can list a line it then does not count: one it
+  replaced with another, or wrote off. The same amounts occur on lines
   that are counted, so medrec tells them apart by the totals alone. It
   compares the lines' sums of `billed`, `plan_paid` and `you_owe` with
   the totals, for those the totals and some line give. When at least two
@@ -1532,23 +1531,23 @@ matching rules), then the household's decisions (`overrides.json`).
 ```json
 {"schema": "medrec-events/v1", "person": "p_…",
  "events": [
-  {"id": "e_…", "kind": "er", "start": "2025-02-11", "end": "2025-02-12",
+  {"id": "e_…", "kind": "er", "start": "2024-10-08", "end": "2024-10-08",
    "title": "ER visit", "what": "Emergency room visit", "what_from": "claims",
-   "place": "Example Lakeside Hospital", "place_from": "claims",
-   "clinicians": ["J SAMPLE"],
+   "place": "Sample Valley Hospital", "place_from": "claims",
+   "clinicians": ["T PLACEHOLDER"],
    "confidence": "sure", "status": "complete",
-   "money": {"currency": "USD", "billed": "7060.00", "allowed": "1017.00",
-             "discount": "6043.00", "plan_paid": "819.00", "you_owe": "198.00",
-             "share": {"copay": "150.00", "coinsurance": "48.00"}},
+   "money": {"currency": "USD", "billed": "2630.00", "allowed": "1005.00",
+             "discount": "1625.00", "plan_paid": "844.00", "you_owe": "161.00",
+             "share": {"copay": "100.00", "coinsurance": "61.00"}},
    "members": [
-     {"record": "r_…", "kind": "claim", "title": "…", "date": "2025-02-11",
+     {"record": "r_…", "kind": "claim", "title": "…", "date": "2024-10-08",
       "role": "facility", "rule": "C1", "confidence": "sure",
-      "provider": "Example Lakeside Hospital",
-      "billed": "6000.00", "allowed": "740.00", "plan_paid": "590.00", "you_owe": "150.00"},
-     {"document": "d_…", "kind": "bill", "title": "…", "date": "2025-03-20",
-      "role": "paper", "rule": "D3s", "confidence": "sure"}
+      "provider": "Sample Valley Hospital",
+      "billed": "1800.00", "allowed": "700.00", "plan_paid": "600.00", "you_owe": "100.00"},
+     {"document": "d_…", "kind": "bill", "title": "…", "date": "2024-11-19",
+      "role": "paper", "rule": "D3s", "confidence": "sure", "matches": "r_…"}
    ],
-   "expected": [{"what": "doctor_claims", "why": "…", "since": "2025-02-12"}],
+   "expected": [{"what": "doctor_claims", "why": "…", "since": "YYYY-MM-DD"}],
    "differences": [{"field": "clinician", "values": [{"from": "portal", "value": "…"}, {"from": "claims", "value": "…"}], "rule": "N3"}],
    "links": [{"event": "e_…", "person": "p_…", "relation": "newborn"}],
    "could_join": ["e_…"]}
@@ -1599,8 +1598,8 @@ from CPT evaluation-and-management codes:
 `you_owe`, only its deductible:
 
 ```json
-{"currency": "USD", "billed": "300.00", "plan_paid": "180.00", "you_owe": "40.00",
- "you_owe_added": true, "share": {"deductible": "40.00"}, "partial": ["allowed"]}
+{"currency": "USD", "billed": "110.00", "plan_paid": "45.00", "you_owe": "20.00",
+ "you_owe_added": true, "share": {"deductible": "20.00"}, "partial": ["allowed"]}
 ```
 
 - **Every claim is in exactly one event.** A portal visit, a result or a
@@ -1612,8 +1611,10 @@ from CPT evaluation-and-management codes:
   `vaccine` event (0.9.1 and later; one event per dose before).
 - **Linked people.** A person's events read the records of their guardians
   and children, when the child has a birth date: a newborn's care during a
-  parent's birth stay links to it (X1), and a child's paper filed under a
-  parent joins the child's visit that day (X2).
+  parent's birth stay links to it (X1). A paper filed under a child and dated
+  before the child was born, other than an EOB or an insurance card, joins the
+  parent's visit on its day, or one that ended the day before (X2): the one it
+  names, else the only one.
 - **Order.** Newest first by `start`, then by `end`, then by `id`, so a
   cursor over the list holds between calls.
 - **Size.** One file per person, about 1 KB per event: a person with 200
@@ -1638,26 +1639,26 @@ when they have no bills. It is made from the person's documents, their
 ```json
 {"schema": "medrec-bills/v1", "person": "p_…",
  "bills": {
-   "d_…": {"copies": ["d_…"], "organization": "Example Health",
-    "title": "Statement from Example Health", "date": "2025-12-24", "currency": "USD",
-    "amount_due": "76.00", "due_date": "2026-01-19", "phone": "555-010-0123",
-    "event": "e_…", "rule": "D2", "claim": "r_…", "claim_you_owe": "64.00",
-    "paid": [{"from": "receipt", "document": "d_…", "on": "2026-01-03", "amount": "40.00", "currency": "USD"},
-             {"from": "household", "id": "o_…", "on": "2026-01-14", "amount": "36.00", "currency": "USD"}],
-    "paid_total": "76.00", "left": "0.00", "settled": true}
+   "d_…": {"copies": ["d_…"], "organization": "Sample Imaging House",
+    "title": "Statement from Sample Imaging House", "date": "2024-10-08", "currency": "USD",
+    "amount_due": "90.00", "due_date": "2024-10-29", "phone": "555-010-0155",
+    "event": "e_…", "rule": "D2", "claim": "r_…", "claim_you_owe": "72.00",
+    "paid": [{"from": "receipt", "document": "d_…", "on": "2024-10-21", "amount": "50.00", "currency": "USD"},
+             {"from": "household", "id": "o_…", "on": "2024-11-04", "amount": "25.00", "currency": "USD"}],
+    "paid_total": "75.00", "left": "15.00", "settled": false}
  },
  "copy_of": {"d_…": "d_…"},
  "receipts": [
-   {"document": "d_…", "organization": "Example Health", "on": "2026-01-03",
-    "amount": "40.00", "currency": "USD", "bill": "d_…"}
+   {"document": "d_…", "organization": "Sample Imaging House", "on": "2024-10-21",
+    "amount": "50.00", "currency": "USD", "bill": "d_…"}
  ],
  "worth_a_call": [
    {"reason": "asks_more", "bill": "d_…", "claim": "r_…", "event": "e_…",
-    "asked": "76.00", "owed": "64.00", "currency": "USD"}
+    "asked": "90.00", "owed": "72.00", "currency": "USD"}
  ],
  "not_billed": [
-   {"event": "e_…", "start": "2025-12-06", "provider": "Sample Pharmacy",
-    "claims": ["r_…"], "you_owe": "8.00", "currency": "USD", "fill": true}
+   {"event": "e_…", "start": "2024-05-21", "provider": "Sample Corner Pharmacy",
+    "claims": ["r_…"], "you_owe": "7.50", "currency": "USD", "fill": true}
  ]}
 ```
 
@@ -1732,10 +1733,10 @@ nothing is private.
 
 ```json
 {"schema": "medrec-private/v1", "person": "p_…",
- "records": {"r_…": {"area": "mental_health", "from": "code"}},
- "documents": {"d_…": {"area": "mental_health", "from": "provider"}},
- "events": {"e_…": {"area": "mental_health", "from": "members"}},
- "studies": {"m_…": {"area": "mental_health", "from": "report"}},
+ "records": {"r_…": {"area": "substance_use", "from": "code"}},
+ "documents": {"d_…": {"area": "substance_use", "from": "provider"}},
+ "events": {"e_…": {"area": "substance_use", "from": "members"}},
+ "studies": {"m_…": {"area": "substance_use", "from": "report"}},
  "unreported_studies": ["m_…"]}
 ```
 
