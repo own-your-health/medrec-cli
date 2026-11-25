@@ -126,10 +126,10 @@ pub struct PersonViews {
     /// before the views, and one cut short between them leaves these.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_state: Option<String>,
-    /// Their records entered in error, by id, as `standing.json` has them
-    /// (0.9.9 and later).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub in_error: Vec<String>,
+    /// `standing.json`'s `in_error`: the ids of their records entered in
+    /// error, by kind (0.9.9 and later).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub in_error: BTreeMap<String, Vec<String>>,
     pub row: Row,
     pub records: BTreeMap<String, Run>,
     pub timeline: Run,
@@ -1371,7 +1371,7 @@ pub(crate) fn person(
         code_table: from.code_table,
         directory: from.directory,
         provider_state: from.provider_state,
-        in_error: st.errors().cloned().collect(),
+        in_error: st.in_error,
         row: Row {
             documents: row.documents,
             records: row.records,
@@ -1754,14 +1754,14 @@ pub(crate) mod tests {
             .contains("in_error"));
         records[1].status = Some("entered-in-error".into());
         let (out, v) = write(&index_of(records.clone()));
-        assert_eq!(v.in_error, [records[1].id.clone()]);
+        assert_eq!(v.in_error["result"], [records[1].id.clone()]);
         let st = out.values().zip(out.keys());
         let st = st
             .filter(|(_, name)| name.ends_with(crate::standing::FILE))
             .map(|(b, _)| serde_json::from_slice::<Value>(b).unwrap())
             .next()
             .unwrap();
-        assert_eq!(st["in_error"]["result"][0], records[1].id);
+        assert_eq!(st["in_error"], serde_json::json!(v.in_error));
     }
 
     #[test]

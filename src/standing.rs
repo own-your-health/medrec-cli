@@ -490,11 +490,6 @@ impl Standing {
 }
 
 impl Standings {
-    /// Every record entered in error, by id.
-    pub fn errors(&self) -> impl Iterator<Item = &String> {
-        self.in_error.values().flatten()
-    }
-
     /// The lists of one kind ([`KINDS`]; another has none), of the records a
     /// reader may show.
     pub fn lists(&self, kind: &str, may_show: &dyn Fn(&str) -> bool, today: &str) -> Lists {

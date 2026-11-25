@@ -1484,7 +1484,7 @@ A reader decides freshness by MD5, as Drive reports it (`md5Checksum`):
 | `people.<id>.code_table` | The code table the person's names were made with (`icd10cm FY2027`); absent when the pass that made the views had none, whatever names it carried over (0.9.4 and later). A pass on a machine with another table makes the person's views again, which fills in the names; one on a machine with none leaves them. |
 | `people.<id>.directory` | Which provider directory the pass that made the views had: the last day it covers and when it was fetched, so that a newer one sorts after (0.9.7 and later). Absent when it had none. A pass on a machine with a newer one makes the person's views again; one with an older one or none leaves them. |
 | `people.<id>.provider_state` | The MD5 of the person's `provider-state.json`, absent when there is none (0.9.7 and later). Another one makes three of the person's views stale (above). |
-| `people.<id>.in_error` | The ids of the person's records entered in error, those in `standing.json`'s `in_error`, kind by kind; absent when there is none (0.9.9 and later). |
+| `people.<id>.in_error` | `standing.json`'s `in_error`, as it is there: the ids of the person's records entered in error, by kind, `{"condition": ["r_…"]}`; absent when there is none (0.9.9 and later). |
 | `row` | `documents`, `records`, `studies`, and `newest` and `last_import` when there are any: the person's line in `medrec_summary`'s people list, without `notes`. |
 | `records` | For each record kind, `{"shards": [[newest day, oldest day, count], …], "undated": count}`: its dated shards by number, and how many records its undated file holds. |
 | `timeline` | The timeline's shards, the same way. |
@@ -1927,7 +1927,7 @@ word wins over another's. Every person has one.
 - **`in_error`**: the person's records entered in error, by kind: those whose
   `is` is `error`, and of every record with no standing (a fill, a result, a
   vaccine) those whose own status is `entered-in-error`. `views.json` has the
-  same ids, for a reader that opens no other view.
+  same object, for a reader that opens no other view.
 - **`no_problem_list`**: each source with a diagnosis given for a visit and no
   other condition, heard or not, and those diagnoses.
 
