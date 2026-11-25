@@ -1240,7 +1240,8 @@ A reader decides freshness by MD5, as Drive reports it (`md5Checksum`):
   leaves these three stale. A reader compares its MD5 and does not read it,
   so it cannot judge from the files what a label makes private: while the
   person's `private.json` is missing or stale, one whose own rules judge the
-  files counts as having none for a person with a `provider-state.json`
+  files counts as having none for a person who has a `provider-state.json`,
+  or whose `provider_state` in `views.json` names one that is gone
   (`private-not-prepared`, Readers, below).
 - `events.json`'s dates are those of the zone of the machine that wrote
   it (Events, below). That zone is no input `views.json` records: a
@@ -1761,7 +1762,8 @@ readers ship with medrec:
     for a person cannot tell which of their items are private: theirs is
     stale or absent (views from 0.9.0 or earlier), or the reader falls
     back to the files and has no rules of its own, or rules that cannot
-    judge the person's provider labels. It holds back all of
+    judge the person's provider labels (a `provider-state.json` is there,
+    or `views.json` names one). It holds back all of
     that person's items from answers about the whole household, with a
     `private-not-prepared` warning naming them, and includes them
     unmarked, with the same warning, in an answer about that person.
