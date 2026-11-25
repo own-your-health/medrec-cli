@@ -929,7 +929,11 @@ fn visit_at(org: &str, place: Option<&str>, status: &str, version: u32) -> Strin
 
 /// A condition's code as a source gives it.
 fn coded(code: &str, version: u32) -> String {
-    stream("one", |id, v| {
+    coded_by("one", code, version)
+}
+
+fn coded_by(org: &str, code: &str, version: u32) -> String {
+    stream(org, |id, v| {
         if id == "cond-0001" {
             let at = format!("2026-03-05T1{version}:00:00Z");
             v["meta"] = json!({"versionId": version.to_string(), "lastUpdated": at});
@@ -1014,6 +1018,31 @@ fn what_an_earlier_version_gave_stays_private() {
     }
     e.import(&visit_at("one", Some(OPEN), "finished", 3));
     assert_eq!((shows_place(&e).as_str(), held(&e)), (OPEN, Some(true)));
+}
+
+/// One that leaves a record it was of with another's is held by what that
+/// showed, whichever of the two wrote it.
+#[test]
+fn a_record_that_leaves_another_sources_stays_private() {
+    for (first, second) in [("one", "two"), ("two", "one")] {
+        let e = Env::new("gave-left");
+        for org in ["one", "two"] {
+            e.import(&coded_by(org, "F32.1", 1));
+        }
+        for org in [first, second] {
+            e.import(&coded_by(org, "J45.909", 2));
+            for again in [false, true] {
+                if again {
+                    e.reindex();
+                }
+                let records = e.index().records;
+                let conditions = records.iter().filter(|r| r.kind == "condition");
+                let private = e.private();
+                let mut held = conditions.map(|r| private.contains_key(&r.id));
+                assert!(held.all(|held| held), "{first} {org} {again}");
+            }
+        }
+    }
 }
 
 /// An import cut short after its raw files are written is made good by the
@@ -1403,6 +1432,45 @@ fn a_test_its_source_says_is_of_another_person_is_in_no_list() {
             _ => assert_eq!(e.ok(&["reindex"])["given_updated"], 1),
         }
         assert_eq!(the_test(&e), (id, false), "{again}");
+    }
+}
+
+/// Where two sources say so, it stays so once either says otherwise, or both.
+#[test]
+fn a_test_two_sources_say_is_of_another_person_stays_so() {
+    let parent = json!({"reference": "RelatedPerson/rp-0001", "display": "Mother"});
+    let seen = |e: &Env| {
+        let lists = [
+            e.ok(&["results", "--person", "Robin"]),
+            e.ok(&["search", "hemoglobin"]),
+            e.ok(&["timeline"]),
+        ];
+        let mut lists = lists.iter();
+        lists.any(|v| v.to_string().contains("Hemoglobin"))
+    };
+    let count = |e: &Env| {
+        let list = e.ok(&["records", "about-another"]);
+        list["items"].as_array().unwrap().len()
+    };
+    for (n, first) in ["one", "two"].into_iter().enumerate() {
+        let second = if first == "one" { "two" } else { "one" };
+        let e = Env::new(&format!("about-sources-{n}"));
+        for org in ["one", "two"] {
+            e.import(&test_about(org, Some(parent.clone()), 1));
+        }
+        assert_eq!(count(&e), 1);
+        for org in [first, second] {
+            e.import(&test_about(org, None, 2));
+            assert!(!seen(&e), "{first} {org}");
+            e.ok(&["reindex"]);
+            assert!(!seen(&e), "{first} {org}");
+        }
+        let kept = e.index().records.len();
+        for org in [first, second] {
+            e.import(&test_about(org, None, 2));
+        }
+        assert!(!seen(&e), "{first}");
+        assert_eq!(e.index().records.len(), kept);
     }
 }
 

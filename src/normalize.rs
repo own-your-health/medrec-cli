@@ -536,8 +536,9 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
         ),
         // A test of somebody else is none of the person's own.
         "Observation" if fields.contains_key(crate::about::FIELD) => format!(
-            "{}|about {}",
+            "{}{} {}",
             merge_key(kind, code.as_ref(), &display, date.as_deref()),
+            crate::about::KEY,
             focus(r)
         ),
         _ => merge_key(kind, code.as_ref(), &display, date.as_deref()),

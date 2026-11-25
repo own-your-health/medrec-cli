@@ -20,6 +20,8 @@ const ANSWERS_FROM: i64 = 11;
 
 /// The field of a result that says whom its source says it is about.
 pub const FIELD: &str = "about";
+/// What the key of one starts to differ by from the person's own.
+pub const KEY: &str = "|about";
 /// [`FIELD`]'s words.
 pub const PARENT: &str = "a parent";
 pub const ANOTHER: &str = "another person";
@@ -47,6 +49,12 @@ pub fn of_resource(r: &Record, path: Option<&str>) -> Option<&'static str> {
     let of = |g: &&given::Given| g.raw_path.is_none() || g.raw_path.as_deref() == path;
     let shown = || who(&r.fields).filter(|_| import::wrote(r) == path);
     shown().or_else(|| r.given.iter().filter(of).find_map(|g| who(&g.fields)))
+}
+
+/// Whether a resource of the record's, by its raw file, says or said it is
+/// about somebody else: as any in a record that such a key names.
+pub fn was(r: &Record, path: Option<&str>) -> bool {
+    r.key.contains(KEY) || of_resource(r, path).is_some()
 }
 
 /// Whether the record is of a questionnaire that a grown person answers, and

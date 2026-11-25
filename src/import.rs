@@ -1720,11 +1720,11 @@ fn merge(
     let of = &rec.provenance[0];
     let mut held = index.records.iter();
     let held = held.find(|r| r.provenance.iter().any(|p| one_resource(p, of)));
-    let was = held.filter(|r| about::of_resource(r, of.raw_path.as_deref()).is_some());
+    let was = held.filter(|r| about::was(r, of.raw_path.as_deref()));
     if let Some(r) = was.filter(|_| !rec.fields.contains_key(about::FIELD)) {
         rec.key = match r.provenance.len() {
             1 => r.key.clone(),
-            _ => format!("{}|about", rec.key),
+            _ => format!("{}{}", rec.key, about::KEY),
         };
     }
     let came = Came::of(index, &rec, &found, word.as_ref());
@@ -1805,14 +1805,19 @@ impl Came {
             return false;
         };
         let mut changed = false;
-        // What it gave moves with it to the record it is of now.
+        // What it gave moves with it to the record it is of now. What another
+        // gave of the record it was of is as good as given by it: nothing
+        // opens because it left.
         let mut moved: Vec<Given> = vec![self.gives];
         for (i, was, had) in self.was {
             let r = &mut index.records[i];
             if had && i != now {
-                let of = |g: &&Given| g.raw_path.is_some() && g.raw_path == self.raw;
-                moved.extend(r.given.iter().filter(of).cloned());
-                moved.extend(was.iter().filter(of).cloned());
+                let shown = was.clone().unwrap_or_else(|| showed(r));
+                let all = r.given.iter().cloned().chain([shown]);
+                moved.extend(all.map(|g| Given {
+                    raw_path: self.raw.clone(),
+                    ..g
+                }));
                 let cli = |p: &Provenance| p.source.cli == self.of.source.cli;
                 if !r.provenance.iter().any(cli) {
                     let left = Given {

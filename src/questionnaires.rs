@@ -1,7 +1,7 @@
 //! Questionnaires about mental health and substance use, and what a chart says
-//! of tobacco, told by their codes and by medrec's own names for them: which area their answers are of, and
-//! whether a child answers them of themself (docs/data-contract.md, "Private"
-//! and "About another person").
+//! of tobacco, told by their codes and by medrec's own names for them: which
+//! area their answers are of, and whether a child answers them of themself
+//! (docs/data-contract.md, "Private" and "About another person").
 
 use std::sync::LazyLock;
 
