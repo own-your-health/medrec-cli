@@ -195,8 +195,8 @@ only a display.
 fact from two sources is one record; a fill and a claim are keyed by their
 identity instead, below), `date`, `code` (`{system, code,
 display}`), `display`, `status`, `fields` (kind-specific, with FHIR element
-names), `providers` (below), `documents` (linked document ids) and
-`provenance` (one per source).
+names), `providers` and `words` (below), `documents` (linked document ids)
+and `provenance` (one per source).
 
 **Fields by kind.** Every name a record's `fields` can hold. A field is
 present only when the source gave it, so a reader takes none for granted.
@@ -223,13 +223,23 @@ The last column is the FHIR element the value comes from.
 | `report` | `results` | the number of results it lists | `result` |
 | `report` | `issued` | as written | `issued` |
 | `condition` | `when` | as written | `onsetDateTime`, `onsetPeriod.start`, `recordedDate` or `assertedDate` |
+| `condition` | `onset` | text, below | `onset[x]` |
+| `condition` | `recorded` | as written | `recordedDate` or `assertedDate` |
 | `condition` | `verification_status` | text | `verificationStatus` |
 | `condition` | `category` | text | first `category` |
-| `condition` | `abatement` | as written | `abatementDateTime` |
+| `condition` | `categories` | a list of codes, below | each `category` |
+| `condition` | `abatement` | text, below | `abatement[x]` |
+| `condition` | `recorder` | text | `recorder.display` or `asserter.display` |
 | `medication` | `when` | as written | `authoredOn`; a fill's `whenHandedOver` or `whenPrepared`; a statement's `effectiveDateTime`, `effectivePeriod.start` or `dateAsserted` |
+| `medication` | `start` | as written | a request's first `dosageInstruction.timing.repeat.boundsPeriod.start`, else `dispenseRequest.validityPeriod.start`; a statement's `effectivePeriod.start` |
+| `medication` | `end` | as written | a request's last `boundsPeriod.end`, when each that has a period has an end, else `dispenseRequest.validityPeriod.end`; a statement's `effectivePeriod.end` |
+| `medication` | `end_of` | `dosage`, `prescription` or `taking` | which of those `end` is |
 | `medication` | `dosage` | text | first `dosageInstruction.text`, or a statement's `dosage.text` |
 | `medication` | `prescriber` | text | `requester.display`; on a fill, its prescription's `requester`, below |
 | `medication` | `intent` | text | a request's `intent` |
+| `medication` | `categories` | a list of codes, below | a request's or a statement's `category` |
+| `medication` | `status_reason` | text | a request's `statusReason`, or a statement's first |
+| `medication` | `reported` | `true` | a request's `reportedBoolean`, or its `reportedReference` |
 | `medication` | `quantity` | `{value, unit}` | a fill's `quantity` |
 | `medication` | `days_supply` | a number | a fill's `daysSupply.value` |
 | `medication` | `pharmacy` | text | a fill's first `performer.actor.display`, else `location.display` |
@@ -237,8 +247,12 @@ The last column is the FHIR element the value comes from.
 | `medication` | `ndc` | text | a fill's NDC, when its code is another |
 | `medication` | `source` | `request`, `statement` or `dispense` | the resource type |
 | `allergy` | `when` | as written | `onsetDateTime`, `recordedDate` or `assertedDate` |
+| `allergy` | `onset` | text, below | `onset[x]` |
+| `allergy` | `recorded` | as written | `recordedDate` or `assertedDate` |
+| `allergy` | `verification_status` | text | `verificationStatus` |
 | `allergy` | `criticality` | text | `criticality` |
 | `allergy` | `reaction` | a list of text | each `reaction.manifestation` |
+| `allergy` | `recorder` | text | `recorder.display` or `asserter.display` |
 | `immunization` | `when` | as written | `occurrenceDateTime` or `date` |
 | `immunization` | `lot_number` | text | `lotNumber` |
 | `immunization` | `site` | text | `site` |
@@ -277,6 +291,36 @@ The last column is the FHIR element the value comes from.
 | `claim` | `brand_generic` | text | `supportingInfo` (`brandgenericindicator`) |
 | `claim` | `visit` | a record id | its links, below |
 | `claim` | `results` | a list of record ids | its links, below |
+
+**When and what kind** (0.9.9 and later). `onset` and `abatement` are the
+element in whichever form the source gives: a date as written, a period as
+`2019-04 – 2019-06` (`from 2019-04`, `until 2019-06` with one end), an age as
+`12 years`, a range of ages as its two, the source's own words, or `yes` where
+it says only that there was one. `categories` is the code of each `category`,
+in FHIR's and US Core's own systems before a vendor's, else its text, each
+once. Before 0.9.9, `abatement` was `abatementDateTime` alone, a condition had
+no `onset`, `recorded`, `categories` or `recorder`, an allergy had only
+`when`, `criticality` and `reaction`, and a medicine had no `start`, `end`,
+`end_of`, `categories`, `status_reason` or `reported`. `medrec reindex` gives
+them to records filed before.
+
+**Words.** A condition's, an allergy's and a medicine's `words` (0.9.9 and
+later) is what each of its sources says of it that can differ between them.
+There is one for each of its provenances whose raw file is kept, in their
+order, but none of a fill, which says only that it was filled:
+`{raw_path, status, verification, categories, abatement, end, end_of}`, each
+but `raw_path` absent where the source gives none. `raw_path` is the
+provenance's, and so says whose word it is and when it was read. `status` is
+the source's code for a condition's or an allergy's clinical status and for a
+medicine's status. `verification` is the code of the verification status, and
+the others are the fields of those names. Two resources of one source that are
+one record are two words. `status` and `fields` of the record are one source's
+(below), and no word is changed for another: a reader that says whether a
+condition is current reads every word. An older version served again changes no
+word. `medrec reindex` reads them all again from the raw files, where each
+reads. A medrec before 0.9.9 drops `words` from an index it saves, so run 0.9.9
+or later on every machine that writes the folder; the next import of each
+source, or `medrec reindex`, gives them back.
 
 **Providers.** A record's `providers` (0.9.6 and later) is what its sources
 say of the people and places its fields print, beyond their names: a list
@@ -325,8 +369,9 @@ under the source, filed by an earlier import). A pharmacy `claim`
 `medrec reindex --json` counts what it did, for each person and in all:
 `claims` (how many there are), `reshaped`, `unchanged` and `without_raw`
 (claims with no raw file), `statements` (bills and receipts whose statement
-gained fields) and `providers_updated` (0.9.6 and later: records whose
-`providers` changed).
+gained fields), `providers_updated` (0.9.6 and later: records whose
+`providers` changed) and `statuses_updated` (0.9.9 and later: conditions,
+allergies and medicines whose `status`, `fields` or `words` changed).
 
 A `claim` (an ExplanationOfBenefit) is shaped for costs (0.5.0 and later).
 An earlier import's claims take this shape when their source serves them
@@ -486,11 +531,16 @@ entered twice) are one record: the first of them on the record writes its
 fields, and the other keeps only its own provenance, whatever order the
 source serves them in (0.2.8 and later; before, each import's later one
 wrote over the first). Both stay in the raw layer, and the record names
-both. A resource with no id
-is never the same resource as another; it joins a record only by key. On
-that record, the provenances of its type from its source with no id belong
-to the resources like it: each takes the one naming its raw file
-(`noid-<digest>`), or else, for a version with other content or one filed
+both. Where two sources state one record, the one whose version changed last
+wrote its fields (0.9.9 and later; before, each import's wrote over the
+other's). A version held already, served again, writes them only where it says
+all the record does, alike, and more, as a later medrec's reading of it can.
+`medrec reindex` reads a condition, an allergy or a medicine again from the
+first raw file that says all its record does, else, where each reads, from the
+first. A resource with no id is never the same resource as another; it joins a
+record only by key. On that record, the provenances of its type from its source
+with no id belong to the resources like it: each takes the one naming its raw
+file (`noid-<digest>`), or else, for a version with other content or one filed
 before 0.2.7, the first that no resource of the same import names, or adds
 one. The first of those provenances on the record writes its fields,
 whatever order the source serves them in, as the first of two resources
@@ -1220,7 +1270,10 @@ provider, of whom the household said nothing, has no `providers.json`.
   label. **`by_item`** has the items whose label is not the one `by_name`
   gives. **`claims`** has the label of each labelled claim's `provider`, for a
   reader that shows a claim without its fields; it says nothing the other two
-  do not.
+  do not. Such a reader tells which of the label's texts a claim prints, for
+  that text's own `first_name`, by the claim's title, which ends with ` · ` and
+  the provider or is the provider alone, its spaces trimmed. It shows all of
+  them where the title says none.
 - **`confidence`**: `household` (the household said so), `sure`, or `likely`. A
   reader treats one it does not know as likely. A likely label is marked as
   likely, with its evidence, and never leads the source's words.

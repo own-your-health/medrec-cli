@@ -1,9 +1,10 @@
 //! `medrec reindex`: every claim shaped again from the raw resource filed
 //! for it, as this medrec's import shapes it, so claims no source serves any
 //! more take the current shape too; what the sources' raw files say of the
-//! providers each record prints ([`crate::providers`]); and every bill's and
-//! receipt's statement read again from its stored text for the fields it
-//! lacks. It reads only the folder.
+//! providers each record prints ([`crate::providers`]); the fields of every
+//! condition, allergy and medicine and what each of its sources says of it;
+//! and every bill's and receipt's statement read again from its stored text
+//! for the fields it lacks. It reads only the folder.
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
@@ -30,8 +31,11 @@ pub struct Reindexed {
     pub without_raw: usize,
     /// Bills and receipts whose statement gained fields from their text.
     pub statements: usize,
-    /// Records whose providers' NPI or state changed.
+    /// Records whose providers' NPI or address changed.
     pub providers_updated: usize,
+    /// Conditions, allergies and medicines whose fields, or what a source
+    /// says of them, changed.
+    pub statuses_updated: usize,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -43,6 +47,7 @@ pub struct PersonReindexed {
     pub without_raw: usize,
     pub statements: usize,
     pub providers_updated: usize,
+    pub statuses_updated: usize,
 }
 
 /// The claim's own content, links left out.
@@ -110,13 +115,23 @@ pub fn claims(folder: &Folder, h: &Household, person: Option<&str>) -> Result<Re
             r.fields = new.fields;
             row.reshaped += 1;
         }
+        // Before the providers, which are of the fields.
+        fetch(folder, &idx, tmp.path(), &dirs, normalize::WORD_TYPES)?;
+        row.statuses_updated = statuses(&mut idx, tmp.path());
         row.providers_updated = providers(folder, &mut idx, tmp.path(), &dirs)?;
         row.statements = crate::bill::backfill(&mut idx, &folder.text(p)?);
-        if row.reshaped > 0 || row.statements > 0 || row.providers_updated > 0 {
+        let changed = [
+            row.reshaped,
+            row.statements,
+            row.providers_updated,
+            row.statuses_updated,
+        ];
+        if changed.iter().any(|n| *n > 0) {
             folder.save_index(p, &mut idx)?;
         }
         out.statements += row.statements;
         out.providers_updated += row.providers_updated;
+        out.statuses_updated += row.statuses_updated;
         out.claims += row.claims;
         out.reshaped += row.reshaped;
         out.unchanged += row.unchanged;
@@ -124,6 +139,90 @@ pub fn claims(folder: &Folder, h: &Household, person: Option<&str>) -> Result<Re
         out.people.push(row);
     }
     Ok(out)
+}
+
+/// A copy of the raw files of these types, of every source, where there is
+/// none yet.
+fn fetch(
+    folder: &Folder,
+    idx: &PersonIndex,
+    tmp: &Path,
+    fetched: &BTreeSet<String>,
+    types: &[&str],
+) -> Result<(), CliError> {
+    let sources: BTreeSet<&str> = idx
+        .records
+        .iter()
+        .flat_map(|r| &r.provenance)
+        .filter_map(|pr| source_of(pr.raw_path.as_ref()?))
+        .collect();
+    for source in sources {
+        for ty in types {
+            let dir = format!("{source}/{ty}");
+            let to = tmp.join(&dir);
+            if !fetched.contains(&dir) && !to.exists() && folder.store.exists(&dir)? {
+                folder.store.fetch_tree(&dir, &to)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The fields of each condition, allergy and medicine again from the raw file
+/// they are of, and what each of its raw files says. Records changed, counted.
+/// One whose `key` that would change keeps its fields, and what a raw file
+/// that does not read said stays.
+fn statuses(idx: &mut PersonIndex, tmp: &Path) -> usize {
+    let mut changed = 0;
+    for r in &mut idx.records {
+        if !["condition", "allergy", "medication"].contains(&r.kind.as_str()) {
+            continue;
+        }
+        let mut now = r.clone();
+        now.words.clear();
+        let mut shapes: Vec<Record> = Vec::new();
+        let mut all_read = true;
+        for pr in &r.provenance {
+            let Some(rel) = &pr.raw_path else { continue };
+            let shaped = read(tmp, rel).and_then(|v| normalize::record(&v, pr.clone()));
+            let Some(new) = shaped else {
+                let had = r.words.iter().find(|w| w.raw_path == *rel);
+                now.words.extend(had.cloned());
+                all_read = false;
+                continue;
+            };
+            now.words.extend(new.words.iter().cloned());
+            if new.key == r.key {
+                shapes.push(new);
+            }
+        }
+        // The one the record's fields agree with wrote them. None does where
+        // one is shaped otherwise now, or where one did not read.
+        let wrote = shapes
+            .iter()
+            .position(|n| agrees(n, r))
+            .or_else(|| (all_read && !shapes.is_empty()).then_some(0));
+        if let Some(new) = wrote.map(|i| shapes.swap_remove(i)) {
+            now.status = new.status;
+            now.fields = new.fields;
+            // A fill's is its prescription's.
+            if let Some(p) = r.fields.get("prescriber") {
+                now.fields.entry("prescriber").or_insert(p.clone());
+            }
+        }
+        if now != *r {
+            *r = now;
+            changed += 1;
+        }
+    }
+    changed
+}
+
+/// Whether a record's status and fields are of this shape of one of its raw
+/// files: it has each, but the prescriber import finds elsewhere.
+fn agrees(shape: &Record, r: &Record) -> bool {
+    let said = |(k, v): (&String, &Value)| k == "prescriber" || shape.fields.get(k) == Some(v);
+    shape.status == r.status && r.fields.iter().all(said)
 }
 
 /// What each record's raw file says of the providers it prints, and the
@@ -134,27 +233,13 @@ fn providers(
     tmp: &Path,
     fetched: &BTreeSet<String>,
 ) -> Result<usize, CliError> {
-    let sources: BTreeSet<String> = idx
-        .records
-        .iter()
-        .flat_map(|r| &r.provenance)
-        .filter_map(|pr| source_of(pr.raw_path.as_ref()?))
-        .map(str::to_string)
-        .collect();
+    fetch(folder, idx, tmp, fetched, RAW_TYPES)?;
     let mut held = Held {
         tmp,
         source: String::new(),
         base: None,
         read: HashMap::new(),
     };
-    for source in &sources {
-        for ty in RAW_TYPES {
-            let dir = format!("{source}/{ty}");
-            if !fetched.contains(&dir) && folder.store.exists(&dir)? {
-                folder.store.fetch_tree(&dir, &tmp.join(&dir))?;
-            }
-        }
-    }
     let mut changed = 0;
     for r in &mut idx.records {
         // Every source of the record, in the order it names them, so that

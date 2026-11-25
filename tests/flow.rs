@@ -2785,6 +2785,168 @@ fn two_sources_of_one_record_keep_what_either_says_of_its_providers() {
     assert_eq!(providers_of(&read()), want);
 }
 
+/// What each source says of a condition and of a medicine, kept through
+/// imports in any order and given back by `reindex`.
+#[test]
+fn a_record_keeps_what_each_source_says_of_its_status() {
+    const STATUS: &str = include_str!("fixtures/fhir/status.json");
+    let base = Env::new("status-words");
+    setup(&base);
+    let stream = |org: &str, version: u32, clinical: &str, medicine: &str| -> String {
+        let mut resources: Vec<Value> = serde_json::from_str(STATUS).unwrap();
+        for r in &mut resources {
+            if r["id"] == "cond-period" {
+                r["clinicalStatus"]["coding"][0]["code"] = clinical.into();
+                r["meta"] = serde_json::json!({"versionId": version.to_string(),
+                    "lastUpdated": format!("2026-02-0{version}T00:00:00Z")});
+            }
+            if r["id"] == "med-prescription" {
+                r["status"] = medicine.into();
+            }
+            let of = if r["resourceType"] == "AllergyIntolerance" {
+                "patient"
+            } else {
+                "subject"
+            };
+            r[of] = serde_json::json!({"reference": "Patient/pat-0001"});
+        }
+        let mut counts = serde_json::Map::from_iter([("Patient".to_string(), 1.into())]);
+        for r in &resources {
+            let n = counts
+                .entry(r["resourceType"].as_str().unwrap())
+                .or_insert(0.into());
+            *n = (n.as_u64().unwrap() + 1).into();
+        }
+        let mut out: Vec<Value> = Vec::new();
+        for l in medrec::testdata::PROVIDERS_STREAM.lines() {
+            let mut v: Value = serde_json::from_str(l).unwrap();
+            if v["organization"].is_object() {
+                v["organization"]["id"] = org.into();
+                v["organization"]["fhir_base"] = format!("https://{org}.example.org").into();
+            }
+            if v.get("counts").is_some() {
+                v["counts"] = counts.clone().into();
+                out.append(&mut resources);
+            }
+            if v["resourceType"].as_str().is_none_or(|t| t == "Patient") {
+                out.push(v);
+            }
+        }
+        out.iter().map(|v| format!("{v}\n")).collect()
+    };
+    let import = |s: &str| {
+        provider_env(&base, s).ok(&[
+            "import",
+            "--from",
+            "fakeprov",
+            "--from-profile",
+            "adult1",
+            "--patient",
+            "pat-0001",
+            "--person",
+            "Robin",
+        ])
+    };
+    let path = base.records().join("Robin Testperson/index.json");
+    let read =
+        || -> Value { serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap() };
+    let record = |v: &Value, display: &str| -> Value {
+        let all = v["records"].as_array().unwrap();
+        all.iter()
+            .find(|r| r["display"] == display)
+            .cloned()
+            .unwrap()
+    };
+    let said = |display: &str| -> Vec<String> {
+        let r = record(&read(), display);
+        let words = r["words"].as_array().cloned().unwrap_or_default();
+        let word = |w: &Value| {
+            let of = w["raw_path"]
+                .as_str()
+                .unwrap()
+                .split('/')
+                .nth(2)
+                .unwrap()
+                .to_string();
+            format!("{of} {}", w["status"].as_str().unwrap_or("-"))
+        };
+        std::iter::once(r["status"].as_str().unwrap().to_string())
+            .chain(words.iter().map(word))
+            .collect()
+    };
+    let one = stream("one", 1, "resolved", "active");
+    let two = stream("two", 1, "active", "stopped");
+    import(&one);
+    let r = import(&two);
+    assert_eq!(r["records_added"], 0, "{r}");
+    let condition = ["resolved", "fakeprov-one resolved", "fakeprov-two active"];
+    let medicine = ["active", "fakeprov-one active", "fakeprov-two stopped"];
+    assert_eq!(said("Sample stiffness"), condition);
+    assert_eq!(said("Sample syrup"), medicine);
+    // Each served again as it was writes nothing.
+    for s in [&one, &two, &one] {
+        let r = import(s);
+        assert_eq!(r["records_updated"], 0, "{r}");
+        assert_eq!(said("Sample stiffness"), condition);
+    }
+    assert_eq!(base.ok(&["reindex"])["statuses_updated"], 0);
+
+    // A change at one is its word, and writes the record.
+    let newer = stream("two", 2, "inactive", "stopped");
+    let changed = ["inactive", "fakeprov-one resolved", "fakeprov-two inactive"];
+    import(&newer);
+    assert_eq!(said("Sample stiffness"), changed);
+    import(&one);
+    assert_eq!(said("Sample stiffness"), changed);
+    assert_eq!(base.ok(&["reindex"])["statuses_updated"], 0);
+    assert_eq!(said("Sample stiffness"), changed);
+
+    // An index an earlier medrec wrote.
+    let full = read();
+    let mut old = full.clone();
+    for r in old["records"].as_array_mut().unwrap() {
+        r.as_object_mut().unwrap().remove("words");
+        let kind = r["kind"].as_str().unwrap().to_string();
+        let f = r["fields"].as_object_mut().unwrap();
+        for k in [
+            "onset",
+            "recorded",
+            "categories",
+            "recorder",
+            "start",
+            "end",
+            "end_of",
+            "status_reason",
+            "reported",
+        ] {
+            f.remove(k);
+        }
+        if kind == "condition" {
+            f.remove("abatement");
+        }
+        if kind == "allergy" {
+            f.remove("verification_status");
+        }
+    }
+    std::fs::write(&path, serde_json::to_string(&old).unwrap()).unwrap();
+    let r = base.ok(&["reindex"]);
+    assert_eq!(r["statuses_updated"], 7, "{r}");
+    assert_eq!(read()["records"], full["records"]);
+    assert_eq!(base.ok(&["reindex"])["statuses_updated"], 0);
+    // Or the next import of each, which serves the same versions.
+    std::fs::write(&path, serde_json::to_string(&old).unwrap()).unwrap();
+    import(&one);
+    import(&newer);
+    assert_eq!(read()["records"], full["records"]);
+
+    // What was said stays where its raw file no longer reads.
+    let raw = base.records().join("Robin Testperson/Records/fakeprov-two");
+    std::fs::write(raw.join("Condition/cond-period.json"), "{").unwrap();
+    std::fs::remove_file(raw.join("MedicationRequest/med-prescription.json")).unwrap();
+    assert_eq!(base.ok(&["reindex"])["statuses_updated"], 0);
+    assert_eq!(read()["records"], full["records"]);
+}
+
 #[test]
 fn a_claim_line_its_totals_leave_out_is_marked_and_kept_through_reindex() {
     let base = Env::new("claim-lines");

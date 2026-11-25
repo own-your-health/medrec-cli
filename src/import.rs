@@ -1588,7 +1588,39 @@ enum Merge {
 /// that holds other resources too, whose key this resource no longer
 /// shares, lets this one go to a record of its own: a claim folded under
 /// the type-and-date key before 0.2.6 splits on its next import.
+///
+/// The record keeps what each of its sources says, whichever of them writes
+/// its fields.
 fn merge(
+    index: &mut PersonIndex,
+    mut rec: Record,
+    found: Found,
+    filing: Option<Filing>,
+    idless: &mut Idless,
+) -> Merge {
+    let word = rec.words.pop();
+    let merged = merge_fields(index, rec, found, filing, idless);
+    if matches!(merged, Merge::Older) {
+        return merged;
+    }
+    let mut changed = false;
+    if let Some(w) = word {
+        let of = |r: &&mut Record| {
+            let mut paths = r.provenance.iter().filter_map(|p| p.raw_path.as_ref());
+            paths.any(|p| *p == w.raw_path) || r.words.iter().any(|x| x.raw_path == w.raw_path)
+        };
+        for r in index.records.iter_mut().filter(of) {
+            changed |= r.say(&w);
+        }
+    }
+    match merged {
+        Merge::Unchanged if changed => Merge::Updated,
+        m => m,
+    }
+}
+
+/// [`merge`], but for what each source says.
+fn merge_fields(
     index: &mut PersonIndex,
     mut rec: Record,
     found: Found,
@@ -1654,6 +1686,14 @@ fn merge(
             if let Some(i) = at.filter(|&i| Some(i) != owner) {
                 return refresh_provenance(existing, i, incoming, filing);
             }
+            // Of several sources, the one whose version changed last has
+            // written them: each served again as it was writes nothing over
+            // another.
+            let of_several = !existing.provenance.iter().all(same_source);
+            let held = of_several && again(filing) && !says_more(&rec, existing);
+            if let Some(i) = at.filter(|_| held) {
+                return refresh_shared(existing, rec, found, i, incoming, filing);
+            }
             return rewrite(existing, rec, found, incoming, at, filing);
         }
         if let Some(shared) = index
@@ -1710,6 +1750,10 @@ fn merge(
         Some(i) => {
             idless.claimed.insert((key, i));
             if mine.first() == Some(&i) {
+                let of_several = !existing.provenance.iter().all(same_source);
+                if of_several && again(filing) && !says_more(&rec, existing) {
+                    return refresh_shared(existing, rec, found, i, incoming, filing);
+                }
                 return rewrite(existing, rec, found, incoming, Some(i), filing);
             }
             refresh_provenance(existing, i, incoming, filing)
@@ -1817,6 +1861,44 @@ fn request_id(reference: &str) -> Option<&str> {
 struct Idless {
     incoming: HashSet<String>,
     claimed: HashSet<(String, usize)>,
+}
+
+/// Whether a version is one the raw layer held already.
+fn again(filing: Option<Filing>) -> bool {
+    matches!(filing, Some(Filing::Unchanged | Filing::Refreshed))
+}
+
+/// Whether `rec` says all `existing` does, alike, so that it takes nothing
+/// back: a later medrec's reading of the version held.
+fn says_more(rec: &Record, existing: &Record) -> bool {
+    let said = |(k, v): (&String, &Value)| rec.fields.get(k) == Some(v);
+    (&rec.status, &rec.date, &rec.display, &rec.code)
+        == (
+            &existing.status,
+            &existing.date,
+            &existing.display,
+            &existing.code,
+        )
+        && existing.fields.iter().all(said)
+}
+
+/// A version read again of a record other sources state too: its provenance,
+/// and what it adds of the providers.
+fn refresh_shared(
+    existing: &mut Record,
+    rec: Record,
+    found: Found,
+    i: usize,
+    incoming: Provenance,
+    filing: Option<Filing>,
+) -> Merge {
+    let providers = states_too(existing, &rec, found);
+    let changed = providers != existing.providers;
+    existing.providers = providers;
+    match refresh_provenance(existing, i, incoming, filing) {
+        Merge::Unchanged if changed => Merge::Updated,
+        m => m,
+    }
 }
 
 /// Put `incoming` in place of the record's provenance at `i`, leaving its
@@ -2527,6 +2609,122 @@ mod tests {
             filed_by: crate::model::filed_by(),
         };
         (r, prov)
+    }
+
+    /// A condition of one source, as its raw file has it.
+    fn condition_of(org: &str, id: &str, status: &str, category: &str) -> Record {
+        let v = serde_json::json!({"resourceType": "Condition", "id": id,
+            "clinicalStatus": {"coding": [{"code": status}]},
+            "category": [{"coding": [{"code": category}]}],
+            "code": {"text": "Sample stiffness"}, "onsetDateTime": "2020-05-01"});
+        let (_, mut p) = eob_from("", 0.0);
+        p.source.organization_id = Some(org.into());
+        p.source_resource = source_resource(&v);
+        p.raw_path = Some(format!("Robin Example/Records/{org}/Condition/{id}.json"));
+        normalize::record(&v, p).unwrap()
+    }
+
+    /// What each source says stays, whichever wrote the fields; one served
+    /// again as it was writes nothing over another.
+    #[test]
+    fn each_source_keeps_its_word_and_writes_only_by_a_change() {
+        let mut index = PersonIndex::new("p_test");
+        let mut import = |org: &str, id: &str, status: &str, filing: Option<Filing>| {
+            let rec = condition_of(org, id, status, "problem-list-item");
+            let m = merge(
+                &mut index,
+                rec,
+                Found::default(),
+                filing,
+                &mut Idless::default(),
+            );
+            let r = &index.records[0];
+            let words: Vec<String> = r.words.iter().map(|w| w.status.clone().unwrap()).collect();
+            (format!("{m:?}"), r.status.clone().unwrap(), words.join(" "))
+        };
+        let is = |m: &str, status: &str, words: &str| (m.into(), status.into(), words.into());
+        let (again, newer) = (Some(Filing::Unchanged), Some(Filing::Replaces));
+        assert_eq!(
+            import("one", "a", "active", None),
+            is("Added", "active", "active")
+        );
+        assert_eq!(
+            import("two", "b", "resolved", None),
+            is("Updated", "active", "active resolved")
+        );
+        for _ in 0..2 {
+            for (org, id, status) in [("one", "a", "active"), ("two", "b", "resolved")] {
+                for filing in [again, Some(Filing::Refreshed)] {
+                    assert_eq!(
+                        import(org, id, status, filing),
+                        is("Unchanged", "active", "active resolved")
+                    );
+                }
+            }
+        }
+        assert_eq!(
+            import("two", "b", "inactive", newer),
+            is("Updated", "inactive", "active inactive")
+        );
+        assert_eq!(
+            import("one", "a", "active", again),
+            is("Unchanged", "inactive", "active inactive")
+        );
+        // An older version says nothing of it now.
+        assert_eq!(
+            import("one", "a", "resolved", Some(Filing::Older)),
+            is("Older", "inactive", "active inactive")
+        );
+        // A word is of a raw file the record has.
+        let r = &index.records[0];
+        for w in &r.words {
+            let of = |p: &Provenance| p.raw_path.as_ref() == Some(&w.raw_path);
+            assert!(r.provenance.iter().any(of));
+        }
+    }
+
+    /// Two resources of one source that are one record are two words.
+    #[test]
+    fn one_source_can_have_two_words() {
+        let mut index = PersonIndex::new("p_test");
+        for (id, category) in [("a", "encounter-diagnosis"), ("b", "problem-list-item")] {
+            merge_once(&mut index, condition_of("one", id, "active", category));
+        }
+        assert_eq!(index.records.len(), 1);
+        let words: Vec<&[String]> = index.records[0]
+            .words
+            .iter()
+            .map(|w| w.categories.as_slice())
+            .collect();
+        assert_eq!(words, [["encounter-diagnosis"], ["problem-list-item"]]);
+    }
+
+    /// A version with no id has a raw file of its own; the one whose place it
+    /// takes says nothing any more.
+    #[test]
+    fn a_word_goes_with_its_raw_file() {
+        let mut index = PersonIndex::new("p_test");
+        let mut idless = |file: &str, status: &str| {
+            let mut rec = condition_of("one", "", status, "problem-list-item");
+            let path = format!("Robin Example/Records/one/Condition/{file}.json");
+            rec.provenance[0].raw_path = Some(path.clone());
+            rec.words[0].raw_path = path;
+            merge(
+                &mut index,
+                rec,
+                Found::default(),
+                None,
+                &mut Idless::default(),
+            );
+            let words: Vec<String> = index.records[0]
+                .words
+                .iter()
+                .map(|w| w.status.clone().unwrap())
+                .collect();
+            (index.records.len(), words.join(" "))
+        };
+        assert_eq!(idless("noid-a", "active"), (1, "active".into()));
+        assert_eq!(idless("noid-b", "resolved"), (1, "resolved".into()));
     }
 
     #[test]
