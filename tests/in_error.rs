@@ -1438,7 +1438,7 @@ fn a_test_its_source_says_is_of_another_person_is_in_no_list() {
         assert_eq!(the_test(&e), (id.clone(), false), "{again}");
         let records = e.index().records;
         let theirs = records.iter().find(|r| r.id == id).unwrap();
-        assert!(theirs.key.contains("|about"), "{}", theirs.key);
+        assert!(theirs.key.starts_with("about|result|"), "{}", theirs.key);
         e.import(&test_about("two", None, 1));
         for how in ["imported", "read again"] {
             let listed = e.ok(&["results", "--person", "Robin"]).to_string();
@@ -1453,8 +1453,80 @@ fn a_test_its_source_says_is_of_another_person_is_in_no_list() {
 fn as_filed_before(r: &mut Value) {
     r["fields"].as_object_mut().unwrap().remove("about");
     r.as_object_mut().unwrap().remove("given");
-    let key = r["key"].as_str().unwrap();
-    r["key"] = key.split("|about").next().unwrap().into();
+    r["key"] = own_key(r).into();
+}
+
+/// The key of one, as the person's own.
+fn own_key(r: &Value) -> String {
+    let key = r["key"].as_str().unwrap().strip_prefix("about|");
+    let parts: Vec<&str> = key.unwrap().split('|').collect();
+    parts[..4].join("|")
+}
+
+/// Nor where an import that filed the version that says so was cut short, and
+/// the next serves one that does not.
+#[test]
+fn a_test_an_unfinished_import_says_is_of_another_is_none_of_the_persons() {
+    let parent = json!({"reference": "RelatedPerson/rp-0001", "display": "Mother"});
+    for own_first in [false, true] {
+        let e = Env::new(&format!("about-cut-{own_first}"));
+        if own_first {
+            e.import(&test_about("two", None, 1));
+        } else {
+            e.import(&test_about("one", None, 1));
+            e.edit(|v| {
+                let records = v["records"].as_array_mut().unwrap();
+                records.retain(|r| !r["display"].as_str().unwrap().contains("Hemoglobin"));
+            });
+        }
+        e.import_cut_short(&test_about("one", Some(parent.clone()), 2));
+        e.import(&test_about("one", None, 3));
+        if !own_first {
+            e.import(&test_about("two", None, 1));
+        }
+        let records = e.index().records;
+        let of = records.iter().filter(|r| r.display.contains("Hemoglobin"));
+        let (theirs, own): (Vec<&Record>, Vec<&Record>) =
+            of.partition(|r| r.key.starts_with("about|"));
+        assert_eq!((theirs.len(), own.len()), (1, 1), "{own_first}");
+        for how in ["imported", "read again"] {
+            let listed = e.ok(&["results", "--person", "Robin"]).to_string();
+            assert!(listed.contains(&own[0].id), "{own_first}, {how}");
+            assert!(!listed.contains(&theirs[0].id), "{own_first}, {how}");
+            let list = e.ok(&["records", "about-another"]);
+            assert_eq!(list["items"].as_array().unwrap().len(), 1, "{how}");
+            e.ok(&["reindex"]);
+        }
+    }
+}
+
+/// What the person's own is called says nothing of whom it is about.
+#[test]
+fn a_test_called_about_something_is_the_persons() {
+    for called in ["About how many servings a day", "about|result|x"] {
+        let e = Env::new(&format!("about-called-{}", called.len()));
+        let named = |version| {
+            stream("one", |id, v| {
+                if id == "obs-0001" {
+                    say(v, "final", version);
+                    v["code"] = json!({"text": called});
+                }
+                true
+            })
+        };
+        e.import(&named(1));
+        e.import(&named(1));
+        e.import(&named(2));
+        e.ok(&["reindex"]);
+        let records = e.index().records;
+        let of: Vec<&Record> = records.iter().filter(|r| r.display == called).collect();
+        assert_eq!(of.len(), 1);
+        assert!(of[0].given.is_empty(), "{:?}", of[0].given);
+        let listed = e.ok(&["results", "--person", "Robin"]).to_string();
+        assert!(listed.contains(&of[0].id), "{listed}");
+        let list = e.ok(&["records", "about-another"]);
+        assert!(list["items"].as_array().unwrap().is_empty(), "{list}");
+    }
 }
 
 /// Two records of what is about another, of two sources, are one once each is
@@ -1664,12 +1736,7 @@ fn values_left_by_a_parents_test_are_never_the_persons() {
         let records = v["records"].as_array_mut().unwrap();
         let at = records.iter().position(|r| !r["fields"]["about"].is_null());
         let mut theirs = records.remove(at.unwrap());
-        let key = theirs["key"]
-            .as_str()
-            .unwrap()
-            .split("|about")
-            .next()
-            .unwrap();
+        let key = own_key(&theirs);
         let mine = records.iter_mut().find(|r| r["key"] == key).unwrap();
         let provenance = mine["provenance"].as_array_mut().unwrap();
         provenance[0].as_object_mut().unwrap().remove("raw_path");

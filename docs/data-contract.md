@@ -467,10 +467,10 @@ are:
 - a `result` whose `about` says so. An import sets it from an Observation's
   `focus`, where that names a RelatedPerson, or a Patient other than its
   `subject`: `a parent` where the reference's `display` or the relationship of
-  the RelatedPerson it contains says so, else `another person`. Its `key` ends
-  with `|about ` and what the `focus` refers to, or with `|about` where only an
-  earlier version says so, so it is never one record with the person's own of
-  that code and day.
+  the RelatedPerson it contains says so, else `another person`. Its `key` is
+  `about|` and the key it would have as the person's own, then `|` and what the
+  `focus` refers to (not where only an earlier version says so), so it is never
+  one record with the person's own of that code and day.
 - a `result` or a `report` of a questionnaire that a grown person answers
   (Questionnaires, under Private, below), dated before the person's 11th
   birthday, or undated and first fetched before it. Not a laboratory's, whose

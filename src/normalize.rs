@@ -535,11 +535,9 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
             date.as_deref().unwrap_or("")
         ),
         // A test of somebody else is none of the person's own.
-        "Observation" if fields.contains_key(crate::about::FIELD) => format!(
-            "{}{} {}",
-            merge_key(kind, code.as_ref(), &display, date.as_deref()),
-            crate::about::KEY,
-            focus(r)
+        "Observation" if fields.contains_key(crate::about::FIELD) => crate::about::key(
+            &merge_key(kind, code.as_ref(), &display, date.as_deref()),
+            Some(&focus(r)),
         ),
         _ => merge_key(kind, code.as_ref(), &display, date.as_deref()),
     };

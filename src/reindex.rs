@@ -309,8 +309,8 @@ fn fetch_files(
 }
 
 /// What a source gave of the records it states, by every version of its raw
-/// files: those filed by an import that did not finish were never read in.
-/// Records changed, counted.
+/// files: those filed by an import that did not finish were never read in. One
+/// that says it is about somebody else goes apart. Records changed, counted.
 pub(crate) fn given_by(
     folder: &Folder,
     idx: &mut PersonIndex,
@@ -319,13 +319,18 @@ pub(crate) fn given_by(
     let tmp = pk_cli_drive::private_temp_dir("medrec-given")?;
     let sources = BTreeSet::from([source_dir.to_string()]);
     let mut wanted: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
-    let of = idx.records.iter().flat_map(|r| &r.provenance);
-    for rel in of.filter_map(|p| p.raw_path.as_deref()) {
-        if import::source_dir_of(rel) != Some(source_dir) {
+    for r in &idx.records {
+        let files = r.provenance.iter().filter_map(|p| p.raw_path.as_deref());
+        let files: Vec<&str> = files.collect();
+        // Another source's of the same record too: it can be what is left.
+        let its = |rel: &&str| import::source_dir_of(rel) == Some(source_dir);
+        if !files.iter().any(its) {
             continue;
         }
-        if let Some((dir, _)) = rel.rsplit_once('/') {
-            wanted.entry(dir).or_default().insert(rel);
+        for rel in files {
+            if let Some((dir, _)) = rel.rsplit_once('/') {
+                wanted.entry(dir).or_default().insert(rel);
+            }
         }
     }
     for (dir, files) in wanted {
@@ -334,8 +339,9 @@ pub(crate) fn given_by(
     }
     fetch(folder, &sources, tmp.path(), &BTreeSet::new(), RAW_TYPES)?;
     let older = fetch_older(folder, idx, &sources, tmp.path())?;
+    let split = apart(idx, &older, tmp.path())?;
     let showed: Vec<Given> = idx.records.iter().map(import::showed).collect();
-    given(idx, &showed, &older, tmp.path())
+    Ok(split + given(idx, &showed, &older, tmp.path())?)
 }
 
 /// Each resource about somebody else that was filed as the person's own, or
@@ -357,7 +363,7 @@ fn apart(
         let mut before = older.get(path).into_iter().flatten();
         let before = before.find_map(|f| about::of_resource(&of_file(f, p)?, Some(path)));
         let who = before.or_else(|| about::of_resource(r, Some(path)))?;
-        n.key.push_str(about::KEY);
+        n.key = about::key(&n.key, None);
         n.given.push(Given {
             raw_path: Some(path.clone()),
             fields: [(about::FIELD.to_string(), who.into())]
@@ -371,7 +377,7 @@ fn apart(
     let mut split = 0;
     let mut records = Vec::new();
     for mut r in std::mem::take(&mut idx.records) {
-        let apart = r.kind == "result" && !r.key.contains(about::KEY);
+        let apart = r.kind == "result" && !about::keyed(&r);
         let each = r.provenance.iter().filter(|_| apart);
         let mut others: Vec<Record> = each.filter_map(|p| other(&r, p)).collect();
         if others.is_empty() {

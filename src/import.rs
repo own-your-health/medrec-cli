@@ -1725,8 +1725,8 @@ fn merge(
     let who = was.map(|(_, who)| who);
     if let Some((r, _)) = was {
         rec.key = match r.provenance.len() {
-            1 => r.key.clone(),
-            _ => format!("{}{}", rec.key, about::KEY),
+            1 if about::keyed(r) => r.key.clone(),
+            _ => about::key(&rec.key, None),
         };
     }
     let mut came = Came::of(index, &rec, &found, word.as_ref());

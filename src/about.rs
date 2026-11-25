@@ -20,8 +20,9 @@ const ANSWERS_FROM: i64 = 11;
 
 /// The field of a result that says whom its source says it is about.
 pub const FIELD: &str = "about";
-/// What the key of one starts to differ by from the person's own.
-pub const KEY: &str = "|about";
+/// What the key of one starts with, in place of a kind: no key of the person's
+/// own does.
+const KEY: &str = "about|";
 /// [`FIELD`]'s words.
 pub const PARENT: &str = "a parent";
 pub const ANOTHER: &str = "another person";
@@ -51,11 +52,25 @@ pub fn of_resource(r: &Record, path: Option<&str>) -> Option<&'static str> {
     shown().or_else(|| r.given.iter().filter(of).find_map(|g| who(&g.fields)))
 }
 
+/// The key of a result that is about somebody else: by the one it has as the
+/// person's own, and by what its source says of whom, where it does.
+pub fn key(own: &str, who: Option<&str>) -> String {
+    match who {
+        Some(who) => format!("{KEY}{own}|{who}"),
+        None => format!("{KEY}{own}"),
+    }
+}
+
+/// Whether a record has such a key.
+pub fn keyed(r: &Record) -> bool {
+    r.key.starts_with(KEY)
+}
+
 /// Whom a resource of the record's, by its raw file, says or said it is about:
 /// in a record that such a key names, as any other of it.
 pub fn was(r: &Record, path: Option<&str>) -> Option<&'static str> {
     let any = || of_resource(r, import::wrote(r)).or(Some(ANOTHER));
-    of_resource(r, path).or_else(|| any().filter(|_| r.key.contains(KEY)))
+    of_resource(r, path).or_else(|| any().filter(|_| keyed(r)))
 }
 
 /// Whether the record is of a questionnaire that a grown person answers, and
