@@ -3,8 +3,8 @@
 //! reproductive and fertility care, sexual health or substance use, and
 //! the medicines tied to them. They come from codes (ICD-10), the names of
 //! the places and clinicians, the portal they came from, the medicines and
-//! tests themselves, a bill's own words, and the household's own marks in
-//! `marks.json`.
+//! tests themselves, the words of a visit, a condition with no ICD-10 code, a
+//! report, a result and a bill, and the household's own marks in `marks.json`.
 //!
 //! It is discretion, not access control: a reader keeps such an item off
 //! shared screens and household-wide answers, and shows it on the person's
@@ -249,38 +249,70 @@ fn medicine(name: &str) -> Option<&'static str> {
 
 /// What a condition is called that the areas' codes are of.
 static CONDITIONS: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
+    let used = "alcohol|opioid|opiate|fentanyl|heroin|cannabis|cannabinoid|marijuana|cocaine|stimulant|psychostimulant|amphetamine|methamphetamine|sedative|hypnotic|anxiolytic|benzodiazepine|barbiturate|hallucinogen|inhalant|ketamine|kratom|polysubstance|substance";
+    let of_use = [
+        &format!(r"(?:{used}|drug)s?(?:[- ](?:type|use|related|induced))?[- ](?:use[rs]?|abus\w*|misus\w*|dependen\w*|disorders?|addiction|withdrawal|intoxication|problems?)"),
+        &format!(r"(?:{used})s?[- ](?:related|induced)(?: \w+){{0,3}} disorders?"),
+        &format!(r"(?:abuse|misuse|dependenc[ey]|withdrawal|intoxication|harmful (?:pattern of )?use) (?:of|on|from|by|with|due to) (?:\w+ )?(?:{used}|drug)s?"),
+        r"alcoholi\w*|(?:problem|heavy|binge|excessive|hazardous) (?:alcohol )?drink(?:ers?|ing)|delirium tremens|korsakoff\w*",
+        r"addict\w*|nicotine|tobacco|smok(?:es|ed|ers?|ing)|(?:second[- ]?hand|passive|environmental) smoke|cigarettes?|e-?cig\w*|vap(?:es?|ing)|snuff",
+    ]
+    .join("|");
+    let sexual = [
+        r"syphilis|syphilitic|gonorrh\w*|gonococc\w*|chlamydia\w*|trichomon\w*|mycoplasma genitalium|chancroid|lymphogranuloma|granuloma inguinale|donovanosis|condyloma\w*",
+        r"(?:ano)?genital (?:\w+ )?(?:herpes\w*|hsv|warts?)|herpes\w* (?:\w+ ){0,3}(?:ano)?genital\w*|hsv-?2|herpes simplex (?:virus )?(?:type )?2",
+        r"hiv|human immunodeficiency|acquired immun(?:e|o)?[- ]?deficien\w*|(?-i:AIDS)",
+        r"sexually transmi\w*|sexual (?:mode of )?transmission|st[di]s?|venereal|high[- ]risk sexual|un(?:safe|protected) (?:sex|sexual|intercourse)",
+        r"erectile|impotence|premature ejaculation|sexual (?:dysfunction|desire|aversion|arousal)",
+    ]
+    .join("|");
+    let reproductive = [
+        r"infertil\w*|subfertil\w*|fertility|sterility|anovulat\w*|azoosperm\w*|oligo\w*sperm\w*|sperm counts?|semen",
+        r"(?:ectopic|tubal|molar|ovarian|abdominal|cervical|cornual|interstitial|heterotopic|anembryonic) pregnanc(?:y|ies)|hydatidiform|blighted ovum",
+        r"miscarriages?|abort(?:ions?|us|ers?)|pregnancy loss(?:es)?|loss of pregnancy|terminations? of (?:\w+ )?pregnanc(?:y|ies)|pregnancy terminations?|retained products of conception",
+        r"contracept\w*|birth control|intrauterine device|iud|sterili[sz]ation|vasectomy|tubal ligation|family planning|pregnancy (?:examination or )?tests?",
+        r"procreat\w*|preconception\w*|in vitro|ivf|(?:artificial )?insemination|artificial fertili[sz]ation|assisted reproduct\w*|ovarian hyperstimulation|gestational carrier|surroga\w*",
+    ]
+    .join("|");
+    let mental = [
+        r"depressi(?:ons?|ve)|depressed mood|feeling depressed|^depressed$|dysphori\w*|(?:baby|maternity|postpartum) blues|bipolar|mania|manic|hypomani\w*|dysthymi\w*|cyclothymi\w*|mood(?: \[?\w+\]?){0,2} disorders?|affective (?:\w+ )?(?:disorders?|psychos[ei]s)",
+        r"anxiety|anxious|panic|phobi\w*|agoraphobi\w*|obsessive|compulsive|ocd|hoarding|neuros[ei]s|neurotic|ptsd|post[- ]?traumatic stress|acute stress (?:disorders?|reactions?)|reactions? to severe stress|adjustment (?:disorders?|reactions?)|prolonged grief",
+        r"psycho(?:s[ei]s|tic|logic\w*|log(?:y|ist)|genic|somatic|sexual|path\w*)|psychiatr\w*|schizo\w*|delusion\w*|paranoi\w*|catatoni\w*|dissociative|depersonali[sz]ation|pseudobulbar affect",
+        r"mental(?:ly)?(?: and behaviou?ral)? (?:health|ill\w*|disorders?|retardation)|behaviou?r(?:al)? (?:health|disorders?|problems?)|emotional (?:disorders?|disturbances?)|personality disorders?|personality and behaviou?ral|conduct disorders?|oppositional|explosive disorders?|impulse(?:[- ]control)? disorders?|gambling|kleptomania|pyromania|trichotillomania|(?:excoriation|skin[- ]picking) disorders?|paraphili\w*|factitious|munchausen\w*",
+        r"somatoform|somati[sz]ation|somatic symptom|conversion disorders?|hypochondri\w*|dysmorphi\w*|eating disorders?|anorexia nervosa|bulimi\w*|binge[- ]eating|avoidant[ /-]+restrictive|pica|suicid\w*|self[- ](?:harm\w*|injur\w*|inflicted)|(?:intentional|deliberate) (?:self[- ])?(?:\w+ )?(?:overdose|poisoning)",
+        r"adhd|attention[- ]deficit|hyperactivity|hyperkinetic (?:disorders?|syndrome)|autis\w*|asperger\w*|rett'?s?|intellectual disab\w*|(?:neuro)?developmental (?:\w+ ){0,2}disorders?|global developmental delay|(?:speech|language)(?: and language)? (?:delay|disorders?|impairment)|stutter\w*|stammer\w*|fluency disorders?|learning (?:disorders?|disabilit\w*|difficult\w*)|dyslexia|dyscalculia|dyspraxia|tourette\w*|tic disorders?|(?:motor|vocal) tics?|encopresis|mutism|attachment disorders?",
+        r"gender (?:dysphoria|identity|incongruen\w*)|transgender|transsexual\w*|sleep ?walking|somnambulism|(?:night|sleep) terrors?|nightmare disorders?|(?:primary|psychophysiologic\w*) insomnia|dementia|delirium|amnestic|post[- ]?concuss\w*",
+    ]
+    .join("|");
     [
-        (
-            r"(?:alcohol|opioid|opiate|cannabis|marijuana|cocaine|heroin|stimulant|amphetamine|methamphetamine|sedative|hallucinogen|inhalant|drug|substance|polysubstance)(?: use| related| induced)?[- ](?:use|abuse|misuse|dependen\w*|disorder|addiction|withdrawal|intoxication)|alcoholi\w*|addict\w*|nicotine|tobacco|smoker|smoking|vaping|chewing tobacco",
-            SUBSTANCE_USE,
-        ),
-        (
-            r"syphilis|syphilitic|gonorrh\w*|gonococc\w*|chlamydia\w*|trichomon\w*|chancroid|lymphogranuloma|granuloma inguinale|(?:ano)?genital (?:herpes|warts?|hsv)|herpes genitalis|condyloma\w*|hiv|human immunodeficiency|acquired immun\w* deficiency|sexually transmitted|st[di]s?|venereal|high[- ]risk sexual",
-            SEXUAL_HEALTH,
-        ),
-        (
-            r"infertil\w*|subfertil\w*|(?:ectopic|tubal|molar) pregnancy|hydatidiform|miscarriage|abortion|pregnancy loss|contracept\w*|birth control|sterilization|family planning|azoospermi\w*|oligospermi\w*|in vitro|ivf|ovarian hyperstimulation|pregnancy test|fertility",
-            REPRODUCTIVE,
-        ),
-        (
-            r"depressi(?:on|ve)|depressed mood|anxiety|anxious|panic|phobi\w*|agoraphobi\w*|bipolar|mania|manic|hypomani\w*|psychosis|psychotic|psychiatr\w*|psycholog\w*|schizo\w*|delusion\w*|paranoi\w*|dysthymi\w*|cyclothymi\w*|mood disorder\w*|mental (?:health|disorder|illness)|behaviou?ral (?:health|disorder)|adhd|attention[- ]deficit|hyperactivity|autis\w*|asperger\w*|ptsd|post[- ]?traumatic stress|acute stress (?:disorder|reaction)|obsessive|compulsive|ocd|adjustment (?:disorder|reaction)|eating disorder|anorexia nervosa|bulimi\w*|binge[- ]eating|suicid\w*|self[- ]harm\w*|self[- ]injur\w*|personality disorder|dissociative|somatoform|somatization|conversion disorder|gender (?:dysphoria|identity)|conduct disorder|oppositional|tourette\w*|tic disorder|intellectual disab\w*|developmental disorder|speech delay|language disorder|learning (?:disorder|disabilit\w*)|dyslexia|dementia",
-            MENTAL_HEALTH,
-        ),
+        (of_use, SUBSTANCE_USE),
+        (sexual, SEXUAL_HEALTH),
+        (reproductive, REPRODUCTIVE),
+        (mental, MENTAL_HEALTH),
     ]
     .into_iter()
-    .map(|(words, area)| (Regex::new(&format!(r"(?i)\b(?:{words})\b")).unwrap(), area))
+    .map(|(words, area)| {
+        (
+            Regex::new(&format!(r"(?i)\b(?:{words})(?:\b|$)")).unwrap(),
+            area,
+        )
+    })
     .collect()
 });
 
-/// What is lower than it was, and is no mood.
-static LOWERED: LazyLock<Regex> = LazyLock::new(|| {
-    let what = "st|segment|respiratory|marrow|myocardial|cardiac|cns|nervous system";
-    Regex::new(&format!(r"(?i)\b(?:{what}) depression\b")).unwrap()
+/// What has the words of one and is none: what is lower than it was, a liver's
+/// that drink does not explain, and what one hears with.
+static OTHERWISE: LazyLock<Regex> = LazyLock::new(|| {
+    let lower = "st|segment|respiratory|marrow|myocardial|cardiac|cns|nervous system";
+    Regex::new(&format!(
+        r"(?i)\b(?:(?:{lower}) depression|non[- ]alcoholic|hearing[- ]aids?)\b"
+    ))
+    .unwrap()
 });
 
 /// The area of a condition by what it is called.
 fn condition_name(text: &str) -> Option<&'static str> {
-    first_area(&CONDITIONS, &LOWERED.replace_all(text, " "))
+    first_area(&CONDITIONS, &OTHERWISE.replace_all(text, " "))
 }
 
 /// The area of a paper by its title.
@@ -385,7 +417,7 @@ pub(crate) fn words(text: &str) -> Option<&'static str> {
     page(text).or_else(|| questionnaires::of(text, None).map(|q| q.area))
 }
 
-/// The same of a page, whose words are of no questionnaire.
+/// The same of a bill's page, which a questionnaire's name is one line of.
 fn page(text: &str) -> Option<&'static str> {
     let lists = [&*PAPERS, &*MEDICINES, &*BRANDS, &*TESTS];
     lists.iter().find_map(|list| first_area(list, text))
@@ -1437,6 +1469,58 @@ mod tests {
             ("Exposure to an STI", SEXUAL_HEALTH),
             ("Female infertility", REPRODUCTIVE),
             ("Contraceptive management", REPRODUCTIVE),
+            // By the forms its name can have.
+            ("Alcohol-related disorder", SUBSTANCE_USE),
+            ("Alcohol related disorders", SUBSTANCE_USE),
+            ("Opioid related disorders", SUBSTANCE_USE),
+            ("Substance-related disorders", SUBSTANCE_USE),
+            (
+                "Alcohol-induced persisting amnestic disorder",
+                SUBSTANCE_USE,
+            ),
+            ("Opioid type dependence", SUBSTANCE_USE),
+            ("Dependence on opioids", SUBSTANCE_USE),
+            ("Abuse of cannabis", SUBSTANCE_USE),
+            ("Harmful use of alcohol", SUBSTANCE_USE),
+            ("Benzodiazepine dependence", SUBSTANCE_USE),
+            ("Injection drug user", SUBSTANCE_USE),
+            ("Smokes tobacco daily", SUBSTANCE_USE),
+            ("Second hand smoke exposure", SUBSTANCE_USE),
+            ("Problem drinker", SUBSTANCE_USE),
+            ("Personality disorders", MENTAL_HEALTH),
+            ("Eating disorders", MENTAL_HEALTH),
+            ("Adjustment disorders", MENTAL_HEALTH),
+            ("Conduct disorders", MENTAL_HEALTH),
+            ("Tic disorders", MENTAL_HEALTH),
+            ("Mental disorders", MENTAL_HEALTH),
+            ("Mental and behavioral disorders", MENTAL_HEALTH),
+            ("Persistent mood [affective] disorder", MENTAL_HEALTH),
+            ("Seasonal affective disorder", MENTAL_HEALTH),
+            ("Premenstrual dysphoric disorder", MENTAL_HEALTH),
+            ("Pervasive developmental disorders", MENTAL_HEALTH),
+            ("Developmental coordination disorder", MENTAL_HEALTH),
+            ("Trichotillomania", MENTAL_HEALTH),
+            ("Delirium", MENTAL_HEALTH),
+            ("Depressed", MENTAL_HEALTH),
+            ("Recurrent miscarriages", REPRODUCTIVE),
+            ("Termination of pregnancy", REPRODUCTIVE),
+            ("Elective termination of pregnancy", REPRODUCTIVE),
+            ("Female sterility", REPRODUCTIVE),
+            ("Habitual aborter", REPRODUCTIVE),
+            ("Procreative management", REPRODUCTIVE),
+            ("Ectopic pregnancies", REPRODUCTIVE),
+            ("Presence of intrauterine device", REPRODUCTIVE),
+            ("Acquired immunodeficiency syndrome", SEXUAL_HEALTH),
+            ("Acquired immune deficiency syndrome", SEXUAL_HEALTH),
+            ("AIDS", SEXUAL_HEALTH),
+            ("Anogenital herpesviral infection", SEXUAL_HEALTH),
+            ("Herpesviral infection of genitalia", SEXUAL_HEALTH),
+            ("Herpes simplex infection of genitalia", SEXUAL_HEALTH),
+            (
+                "Contact with infections with a predominantly sexual mode of transmission",
+                SEXUAL_HEALTH,
+            ),
+            ("Sexually transmissible infection", SEXUAL_HEALTH),
         ] {
             let want = Some((area.to_string(), "words".to_string()));
             let why = |code: Value| why_of("condition", name, code, json!({}));
@@ -1458,6 +1542,21 @@ mod tests {
             "Drug allergy",
             "Loss of appetite",
             "Ear pain",
+            "Non-alcoholic fatty liver disease",
+            "Nonalcoholic steatohepatitis",
+            "Hearing aids",
+            "HEARING AIDS",
+            "Drug-induced movement disorder",
+            "Opioid-induced constipation",
+            "Long-term use of opioid analgesic",
+            "Smoke inhalation",
+            "Skin excoriation",
+            "Altered mental status",
+            "Developmental dysplasia of the hip",
+            "Photophobia",
+            "Sterile pyuria",
+            "Pregnancy",
+            "Language barrier",
         ] {
             assert_eq!(
                 why_of("condition", name, Value::Null, json!({})),
@@ -1497,6 +1596,12 @@ mod tests {
             )
         };
         assert_eq!(told("ST depression seen"), None);
+        // As a line of a bill's text is judged, a questionnaire's name included.
+        assert_eq!(told("PHQ-9 of 3"), words(MENTAL_HEALTH, "test"));
+        assert_eq!(
+            told("A smoker, 20 pack-years"),
+            words(SUBSTANCE_USE, "test")
+        );
         assert_eq!(told("HIV antibody not seen"), words(SEXUAL_HEALTH, "test"));
         assert_eq!(told("Started Zoloft"), words(MENTAL_HEALTH, "test"));
         let value = |v: Value| why_of("result", "Example smear", Value::Null, json!({"value": v}));
