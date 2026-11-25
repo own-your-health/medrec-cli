@@ -20,6 +20,7 @@ use pk_cli_core::CliError;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use crate::changes::{Before, Views};
 use crate::folder::{self, Access, Folder};
 use crate::hash::{hex, md5_hex};
 use crate::intake::classify::Squashed;
@@ -467,31 +468,13 @@ fn make(
 
     // Whose views stand: their files have the MD5s the views were made from.
     let mut kept: BTreeMap<String, PersonViews> = BTreeMap::new();
-    let linked_md5s = |p: &Person| -> Result<BTreeMap<String, LinkedFiles>, CliError> {
-        let mut m = BTreeMap::new();
-        for q in crate::events::linked_people(&h, p) {
-            m.insert(
-                q.id.clone(),
-                LinkedFiles {
-                    index: store.md5(&folder::index_rel(q))?,
-                    text: store.md5(&folder::text_rel(q))?,
-                },
-            );
-        }
-        Ok(m)
-    };
     for p in &h.people {
         if let Some(was) = current.and_then(|o| o.people.get(&p.id)) {
-            if store.md5(&folder::index_rel(p))? == was.index
-                && store.md5(&folder::text_rel(p))? == was.text
-                && store.md5(&crate::events::overrides_rel(p))? == was.overrides
-                && store.md5(&crate::marks::rel(p))? == was.marks
-                && linked_md5s(p)? == was.linked
-                && (code_table.is_none() || was.code_table == code_table)
+            if (code_table.is_none() || was.code_table == code_table)
                 // An older directory's pass leaves what a newer one's made.
                 && was.directory >= directory_made
-                && store.md5(&crate::labels::state_rel(p))? == was.provider_state
                 && EVERY_PERSON.iter().all(|f| was.files.contains_key(*f))
+                && stands(was, &h, p, |rel| store.md5(rel))?
             {
                 kept.insert(p.id.clone(), was.clone());
             }
@@ -751,7 +734,7 @@ fn make(
 
 /// The views a pass would make, in memory, and those the last one made.
 pub(crate) struct Preview {
-    people: Vec<Person>,
+    h: Household,
     files: BTreeMap<String, Vec<u8>>,
     last: Option<ViewsIndex>,
 }
@@ -766,13 +749,13 @@ pub(crate) fn preview(
     let directories = crate::nppes::dir();
     match make(f, true, titles, directories.as_deref(), indexes)? {
         Pass::Made(made) => Ok(Preview {
-            people: made.h.people,
+            h: made.h,
             files: made.files,
             last: made.old.filter(|o| o.schema == SCHEMA),
         }),
         // Of nobody.
         Pass::Stands(_) => Ok(Preview {
-            people: Vec::new(),
+            h: f.household()?,
             files: BTreeMap::new(),
             last: None,
         }),
@@ -780,52 +763,84 @@ pub(crate) fn preview(
 }
 
 impl Preview {
-    /// One of a person's views, as a pass would make it.
-    pub fn view(&self, p: &Person, name: &str) -> Value {
-        let bytes = self.files.get(&format!("{DIR}/{}/{name}", p.id));
-        let read = bytes.and_then(|b| serde_json::from_slice(b).ok());
-        read.unwrap_or_default()
-    }
-
-    /// The same as the last pass made it, null where it made none.
-    pub fn last_view(&self, f: &Folder, p: &Person, name: &str) -> Result<Value, CliError> {
-        let last = self.last.as_ref().and_then(|l| l.people.get(&p.id));
-        let Some(v) = last.filter(|v| v.files.contains_key(name)) else {
-            return Ok(Value::Null);
-        };
-        let text = last_view(&f.store, p, v, name)?;
-        let read = text.and_then(|t| serde_json::from_str(&t).ok());
-        read.ok_or_else(|| {
-            CliError::Other(format!(
-                "{DIR}/{} has no {name} that {INDEX} names; another command may be writing the views: run this again, or after `medrec views write`",
-                p.id
-            ))
+    /// A person's views, as a pass would make them.
+    pub fn after(&self, p: &Person) -> Result<Views, CliError> {
+        Views::read(|name| {
+            let rel = format!("{DIR}/{}/{name}", p.id);
+            let bytes = self.files.get(&rel);
+            let read = bytes.and_then(|b| serde_json::from_slice(b).ok());
+            let made = read.ok_or_else(|| CliError::Other(format!("no {rel} was made")));
+            made.map(Some)
         })
     }
 
-    /// The medrec of the last pass, where it made the person's views, and
-    /// whether the files it made them from are those the folder has.
-    pub fn made_by(&self, f: &Folder, p: &Person) -> Result<Option<(&str, bool)>, CliError> {
+    /// A person's views, as the last pass made them.
+    pub fn before(&self, f: &Folder, p: &Person) -> Result<Before, CliError> {
         let Some(last) = &self.last else {
-            return Ok(None);
+            return Ok(Before::default());
         };
         let Some(v) = last.people.get(&p.id) else {
-            return Ok(None);
+            return Ok(Before::default());
         };
-        let store = &f.store;
-        let mut current = store.md5(folder::HOUSEHOLD)?.as_ref() == Some(&last.household)
-            && store.md5(&folder::index_rel(p))? == v.index
-            && store.md5(&folder::text_rel(p))? == v.text
-            && store.md5(&crate::events::overrides_rel(p))? == v.overrides
-            && store.md5(&crate::marks::rel(p))? == v.marks
-            && store.md5(&crate::labels::state_rel(p))? == v.provider_state;
-        for q in self.people.iter().filter(|q| v.linked.contains_key(&q.id)) {
-            let was = &v.linked[&q.id];
-            current &= store.md5(&folder::index_rel(q))? == was.index
-                && store.md5(&folder::text_rel(q))? == was.text;
-        }
-        Ok(Some((&last.medrec, current)))
+        let md5 = |rel: &str| f.store.md5(rel);
+        let current = md5(folder::HOUSEHOLD)?.as_ref() == Some(&last.household)
+            && stands(v, &self.h, p, md5)?;
+        let views = Views::read(|name| {
+            if !v.files.contains_key(name) {
+                return Ok(None);
+            }
+            let text = last_view(&f.store, p, v, name)?;
+            let read = text.and_then(|t| serde_json::from_str(&t).ok());
+            let there = read.ok_or_else(|| {
+                CliError::Other(format!(
+                    "{DIR}/{} has no {name} that {INDEX} names; another command may be writing the views: run this again, or after `medrec views write`",
+                    p.id
+                ))
+            });
+            there.map(Some)
+        })?;
+        Ok(Before {
+            medrec: Some(last.medrec.clone()),
+            stale: !current,
+            views,
+        })
     }
+}
+
+/// Whether a person's views were made from the files the folder has, under the
+/// same household, by what `md5` says each is.
+fn stands(
+    v: &PersonViews,
+    h: &Household,
+    p: &Person,
+    md5: impl Fn(&str) -> Result<Option<String>, CliError>,
+) -> Result<bool, CliError> {
+    let own = [
+        (folder::index_rel(p), &v.index),
+        (folder::text_rel(p), &v.text),
+        (crate::events::overrides_rel(p), &v.overrides),
+        (crate::marks::rel(p), &v.marks),
+        (crate::labels::state_rel(p), &v.provider_state),
+    ];
+    for (rel, was) in own {
+        if md5(&rel)? != *was {
+            return Ok(false);
+        }
+    }
+    let linked = crate::events::linked_people(h, p);
+    if linked.len() != v.linked.len() {
+        return Ok(false);
+    }
+    for q in linked {
+        let now = LinkedFiles {
+            index: md5(&folder::index_rel(q))?,
+            text: md5(&folder::text_rel(q))?,
+        };
+        if v.linked.get(&q.id) != Some(&now) {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 /// One of a person's views, when the views are those of the folder's files
@@ -855,26 +870,8 @@ pub fn current_view(
     let Some(want) = v.files.get(name) else {
         return Ok(None);
     };
-    if md5(&folder::index_rel(p))? != v.index
-        || md5(&folder::text_rel(p))? != v.text
-        || md5(&crate::events::overrides_rel(p))? != v.overrides
-        || md5(&crate::marks::rel(p))? != v.marks
-        || md5(&crate::labels::state_rel(p))? != v.provider_state
-    {
+    if !stands(v, h, p, md5)? {
         return Ok(None);
-    }
-    let linked = crate::events::linked_people(h, p);
-    if linked.len() != v.linked.len() {
-        return Ok(None);
-    }
-    for q in linked {
-        let now = LinkedFiles {
-            index: md5(&folder::index_rel(q))?,
-            text: md5(&folder::text_rel(q))?,
-        };
-        if v.linked.get(&q.id) != Some(&now) {
-            return Ok(None);
-        }
     }
     let text = f.store.read_text(&stored_rel(&p.id, name, want))?;
     Ok(text.map(String::into_bytes).filter(|b| md5_hex(b) == *want))

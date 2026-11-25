@@ -3932,9 +3932,10 @@ fn a_dry_run_counts_what_would_be_private() {
     e.ok(&["views", "write"]);
     let v = changes_of(&e, &alex);
     assert_eq!(v["against"], env!("CARGO_PKG_VERSION"), "{v}");
-    assert!(v.get("stale").is_none(), "{v}");
+    assert_eq!(v["stale"], false, "{v}");
     let private = v["private"].as_object().unwrap();
-    assert!(private.values().all(|n| *n == json!({})), "{v}");
+    let nothing = |n: &Value| *n == json!({}) || *n == json!(0);
+    assert!(private.values().all(nothing), "{v}");
     for list in ["events", "bills", "worth_a_call", "not_billed"] {
         assert_eq!(v[list], NONE(), "{v}");
     }
@@ -3956,7 +3957,8 @@ fn a_dry_run_counts_what_would_be_private() {
     let want = json!({
         "added": {"document": 1, "report": 1, "result": 10},
         "added_by": {"test": 11, "words": 1},
-        "questionnaires": {"anxiety": 2, "depression": 4, "one of its kind": 6},
+        "questionnaires": {"anxiety": 2, "depression": 4},
+        "questionnaires_one_of_a_kind": 6,
         "opened": {"result": 1},
         "gone": {"event": 1, "record": 1},
         "given": {},
@@ -3978,9 +3980,29 @@ fn a_dry_run_counts_what_would_be_private() {
         "in the views (against medrec 0.9.5's)",
         "private, more: 1 document, 1 report, 10 result",
         "private before, open now: 1 result",
+        "their questionnaires: 2 anxiety, 4 depression, 6 of a kind there is one of",
     ] {
         assert!(text.contains(line), "{line}: {text}");
     }
+    // The run it counts for: the index is as it was, and the views are made
+    // again under these rules, with what was counted.
+    let (index, then) = (std::fs::read(dir.join("index.json")).unwrap(), v);
+    e.ok(&["reindex"]);
+    assert_eq!(std::fs::read(dir.join("index.json")).unwrap(), index);
+    let (files, _) = views_of(&e, &alex);
+    for id in ["r_sunlightaaaaaaaaaaaa", "r_nolongeraaaaaaaaaaaa"] {
+        assert!(files["private"]["records"].get(id).is_none(), "{id}");
+    }
+    let private = ["records", "documents"].map(|k| files["private"][k].as_object().unwrap());
+    let by = |m: &&Value| ["test", "words"].iter().any(|from| m["from"] == *from);
+    let asked: usize = private.iter().map(|m| m.values().filter(by).count()).sum();
+    let counted = then["private"]["added"].as_object().unwrap().values();
+    let counted: u64 = counted.map(|n| n.as_u64().unwrap()).sum();
+    assert_eq!(asked as u64, counted);
+    let v = changes_of(&e, &alex);
+    assert_eq!(v["against"], env!("CARGO_PKG_VERSION"), "{v}");
+    let private = v["private"].as_object().unwrap();
+    assert!(private.values().all(nothing), "{v}");
     // A file the views were not made from.
     e.ok(&["private", "mark", "r_sunlightaaaaaaaaaaaa"]);
     view_before(&e, &alex, "private.json", |_| true);
@@ -4011,12 +4033,25 @@ fn a_dry_run_counts_what_would_be_private() {
             !out.status.success() && said.contains("has no bills.json"),
             "{said}"
         );
+        assert!(out.stdout.is_empty(), "nothing is counted");
     }
     std::fs::write(&stored, kept).unwrap();
+    // Nor is a view of another shape the same as none.
+    view_before(&e, &alex, "standing.json", |v| {
+        v["records"] = json!([]);
+        true
+    });
+    let out = e.run(&["reindex", "--dry-run"]);
+    let said = String::from_utf8(out.stderr).unwrap();
+    assert!(
+        !out.status.success() && said.contains("standing.json is not readable"),
+        "{said}"
+    );
+    assert!(out.stdout.is_empty(), "nothing is counted");
     // A folder with no views: all there is would be added.
     std::fs::remove_dir_all(e.records().join("views")).unwrap();
     let v = changes_of(&e, &alex);
-    assert!(v["against"].is_null() && v.get("stale").is_none(), "{v}");
+    assert!(v["against"].is_null() && v["stale"] == false, "{v}");
     let want = json!({
         "claim": 1, "condition": 2, "document": 2, "event": 1, "report": 1, "result": 10,
     });

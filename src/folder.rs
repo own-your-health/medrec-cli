@@ -58,8 +58,9 @@ pub enum Access {
 pub struct Folder {
     pub store: Store,
     pub folder_id: String,
-    /// `household.json`, an `index.json` or a `text.json` was written, so
-    /// the views are brought up to date as this closes.
+    /// `household.json`, an `index.json` or a `text.json` was written, or a
+    /// command asked for it ([`Folder::views_too`]), so the views are brought
+    /// up to date as this closes.
     written: std::cell::Cell<bool>,
     /// What one that only reads has read of each person, so that all of an
     /// answer is of the same files: what is private in an item is told by
@@ -181,6 +182,11 @@ impl Folder {
         h.rev += 1;
         self.written.set(true);
         self.write_json(HOUSEHOLD, h)
+    }
+
+    /// Bring the views up to date as this closes, whatever it writes.
+    pub fn views_too(&self) {
+        self.written.set(true);
     }
 
     /// A person's index, without what is about somebody else

@@ -1308,9 +1308,6 @@ fn run(cli: &Cli) -> Result<(), CliError> {
                 if let Some(n) = papers_unread(r.papers_unread) {
                     println!("{n}");
                 }
-                if r.fresh == Some(false) {
-                    println!("an index was written elsewhere meanwhile: run this again");
-                }
                 for (p, views) in r.people.iter().filter_map(|p| Some((p, p.views.as_ref()?))) {
                     let against = match (&views.against, views.stale) {
                         (None, _) => "there are no views yet".to_string(),
