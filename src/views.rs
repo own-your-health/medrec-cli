@@ -351,9 +351,11 @@ pub(crate) fn record_detail(r: &Record) -> Option<String> {
     }
 }
 
-/// Every string and number in `v`, space-separated, for search.
+/// Every string and number in `v`, space-separated, for search. An id says
+/// nothing of what it is of, and can be of what is not to be shown.
 fn flat_text(v: &Value, out: &mut String) {
     match v {
+        Value::String(s) if crate::ids::is_id(s) => {}
         Value::String(s) => {
             out.push_str(s);
             out.push(' ');
@@ -895,7 +897,7 @@ pub(crate) fn searchables(
             let mut piece = |v: &Value, cut: bool| {
                 let start = body.len();
                 flat_text(v, &mut body);
-                if cut {
+                if cut && body.len() > start {
                     cuts.push([at + start, body.len() - start]);
                 }
             };
