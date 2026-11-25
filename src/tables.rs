@@ -16,6 +16,7 @@ use pk_cli_core::{private_file, CliError};
 use serde::Serialize;
 
 use crate::hash::sha256_hex;
+use crate::nppes;
 
 /// One published file.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,13 +72,21 @@ pub struct Row {
     pub id: &'static str,
     pub title: &'static str,
     pub publisher: &'static str,
-    pub version: &'static str,
-    pub date: &'static str,
+    /// Null, as the four below are, for the provider directory when it was
+    /// never fetched or does not read: each month's file is another.
+    pub version: Option<String>,
+    pub date: Option<String>,
     pub state: State,
-    pub bytes: u64,
-    pub rows: usize,
-    pub sha256: &'static str,
-    pub url: &'static str,
+    pub bytes: Option<u64>,
+    pub rows: Option<u64>,
+    pub sha256: Option<String>,
+    pub url: String,
+    /// The records folder the provider directory was read for, and how many
+    /// of its rows are kept.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kept: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -96,7 +105,7 @@ pub fn dir() -> Option<PathBuf> {
 
 pub fn by_id(id: &str) -> Result<&'static Table, CliError> {
     TABLES.iter().find(|t| t.id == id).copied().ok_or_else(|| {
-        let ids: Vec<&str> = TABLES.iter().map(|t| t.id).collect();
+        let ids: Vec<&str> = TABLES.iter().map(|t| t.id).chain([nppes::ID]).collect();
         CliError::Usage(format!("no table `{id}`: {}", ids.join(", ")))
     })
 }
@@ -126,23 +135,57 @@ impl Table {
     }
 }
 
+/// Every table, and the provider directory once for each records folder it
+/// was read for.
 pub fn list() -> Vec<Row> {
     let dir = dir();
-    TABLES
+    let mut rows: Vec<Row> = TABLES
         .iter()
         .map(|t| Row {
             id: t.id,
             title: t.title,
             publisher: t.publisher,
-            version: t.version,
-            date: t.date,
+            version: Some(t.version.into()),
+            date: Some(t.date.into()),
             state: dir.as_deref().map_or(State::Absent, |d| t.verified(d).0),
-            bytes: t.bytes,
-            rows: t.rows,
-            sha256: t.sha256,
-            url: t.url,
+            bytes: Some(t.bytes),
+            rows: Some(t.rows as u64),
+            sha256: Some(t.sha256.into()),
+            url: t.url.into(),
+            folder: None,
+            kept: None,
         })
-        .collect()
+        .collect();
+    let kept = nppes::dir().map(|d| nppes::list(&d)).unwrap_or_default();
+    if kept.is_empty() {
+        rows.push(directory_row(None, None, State::Absent));
+    }
+    for (folder, k) in kept {
+        let state = match k {
+            Some(_) => State::Ready,
+            None => State::Changed,
+        };
+        rows.push(directory_row(Some(folder), k, state));
+    }
+    rows
+}
+
+fn directory_row(folder: Option<String>, k: Option<nppes::Kept>, state: State) -> Row {
+    let k = k.as_ref();
+    Row {
+        id: nppes::ID,
+        title: nppes::TITLE,
+        publisher: nppes::PUBLISHER,
+        version: k.map(|k| k.month.clone()),
+        date: k.map(|k| k.date.clone()),
+        state,
+        bytes: k.map(|k| k.bytes),
+        rows: k.map(|k| k.rows),
+        sha256: k.map(|k| k.sha256.clone()),
+        url: k.map_or_else(|| nppes::CMS.base.into(), |k| k.url.clone()),
+        folder,
+        kept: k.map(|k| k.kept),
+    }
 }
 
 /// Keep `t` on this machine: from its publisher, or from a file someone

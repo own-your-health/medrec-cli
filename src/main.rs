@@ -23,7 +23,7 @@ use medrec::folder::{Access, Folder};
 use medrec::intake::{self, Given};
 use medrec::store::{Location, BIN};
 use medrec::views::Range;
-use medrec::{imaging, import, maint, notes, people, review, store, tables, view, views};
+use medrec::{imaging, import, maint, notes, nppes, people, review, store, tables, view, views};
 
 const REPO: &str = "own-your-health/medrec-cli";
 
@@ -299,14 +299,21 @@ struct InitArgs {
 enum TablesCmd {
     /// The tables medrec knows, and whether each is on this machine.
     List,
-    /// Download whole tables from their publishers (all of them, or those
-    /// named), checked against the SHA-256 medrec records.
+    /// Download whole tables from their publishers (all the code tables, or
+    /// those named), checked against the SHA-256 medrec records. The provider
+    /// directory, `nppes`, is fetched only when it is named: one file of over
+    /// a gigabyte, whose size is stated first, read as it arrives for the
+    /// providers the --profile folder's records need.
     Fetch {
-        /// Tables by id (default: all).
+        /// Tables by id (default: the code tables).
         ids: Vec<String>,
-        /// Keep this downloaded zip as the one table named.
+        /// Keep this downloaded zip as the one code table named.
         #[arg(long, value_name = "ZIP", requires = "ids")]
         file: Option<std::path::PathBuf>,
+        /// Fetch `nppes` without asking. Every run of it with no terminal,
+        /// or with --json, needs this.
+        #[arg(long, requires = "ids")]
+        force: bool,
     },
 }
 
@@ -872,8 +879,9 @@ enum AuthCmd {
 #[derive(Subcommand, Debug)]
 enum CacheCmd {
     /// Remove every copy medrec keeps on this machine (the records folder
-    /// itself is untouched). The next command reads from Drive again. The
-    /// run locks, the refresh state and the code tables stay.
+    /// itself is untouched), the provider directory's rows included. The
+    /// next command reads from Drive again. The run locks, the refresh state
+    /// and the code tables stay.
     Clear,
     /// The background refresh a stale cached read starts.
     #[command(hide = true)]
@@ -942,8 +950,9 @@ fn profile_name(s: &str) -> Result<ProfileName, String> {
     ProfileName::parse(s).map_err(|e| e.to_string())
 }
 
-/// The code tables: no records folder, no profile and no sign-in.
-fn tables_cmd(cli: &Cli, cmd: &TablesCmd) -> Result<(), CliError> {
+/// The published tables. A code table needs no records folder, profile or
+/// sign-in; the provider directory is read for the --profile folder.
+fn tables_cmd(cli: &Cli, cmd: &TablesCmd, store: &ConfigStore) -> Result<(), CliError> {
     let json = cli.common.json;
     match cmd {
         TablesCmd::List => {
@@ -952,26 +961,49 @@ fn tables_cmd(cli: &Cli, cmd: &TablesCmd) -> Result<(), CliError> {
             });
             Ok(())
         }
-        TablesCmd::Fetch { ids, file } => {
+        TablesCmd::Fetch { ids, file, force } => {
+            let directory = ids.iter().any(|i| i == nppes::ID);
             let wanted: Vec<&tables::Table> = if ids.is_empty() {
                 tables::TABLES.to_vec()
             } else {
                 ids.iter()
+                    .filter(|i| *i != nppes::ID)
                     .map(|i| tables::by_id(i))
                     .collect::<Result<_, _>>()?
             };
-            if file.is_some() && wanted.len() != 1 {
+            if file.is_some() && (directory || wanted.len() != 1) {
                 return Err(CliError::Usage(
-                    "--file is one table's zip: name that one table".into(),
+                    "--file is one code table's zip: name that one table".into(),
                 ));
             }
-            let dir = tables::dir().ok_or_else(|| {
-                CliError::Other("cannot resolve a cache directory (is $HOME set?)".into())
-            })?;
+            if *force && !directory {
+                return Err(CliError::Usage(
+                    "--force is for nppes: name it, or leave --force out".into(),
+                ));
+            }
+            let no_cache =
+                || CliError::Other("cannot resolve a cache directory (is $HOME set?)".into());
+            let dir = tables::dir().ok_or_else(no_cache)?;
+            let kept_in = nppes::dir().ok_or_else(no_cache)?;
+            // Refused before anything is fetched or a sign-in is read.
+            let cfg = if directory {
+                let cfg = load(store, cli)?;
+                pk_cli_core::confirm::require_confirmable(
+                    *force,
+                    cli.common.interactive(),
+                    "nppes is one download of over a gigabyte",
+                )?;
+                Some(cfg)
+            } else {
+                None
+            };
             let mut rows = Vec::new();
             for t in wanted {
                 note(cli, &format!("{} {}", t.id, t.version));
-                rows.push(tables::fetch(t, &dir, file.as_deref())?);
+                rows.push(to_value(&tables::fetch(t, &dir, file.as_deref())?));
+            }
+            if let Some(cfg) = cfg {
+                rows.push(to_value(&fetch_directory(cli, &cfg, &kept_in, *force)?));
             }
             output::emit(json, "table-fetch", items(&rows), |v| {
                 table(v, &["id", "version", "status", "bytes"])
@@ -979,6 +1011,56 @@ fn tables_cmd(cli: &Cli, cmd: &TablesCmd) -> Result<(), CliError> {
             Ok(())
         }
     }
+}
+
+/// `tables fetch nppes`: the size is stated before the download, and the
+/// download is the only thing sent: CMS is asked for a page and a file.
+fn fetch_directory(
+    cli: &Cli,
+    cfg: &Config,
+    dir: &std::path::Path,
+    force: bool,
+) -> Result<nppes::Fetched, CliError> {
+    let f = Folder::open(cfg, Access::Read)?;
+    let h = f.household()?;
+    let indexes = h
+        .people
+        .iter()
+        .map(|p| f.index(p))
+        .collect::<Result<Vec<_>, _>>()?;
+    let wanted = nppes::Wanted::of(&indexes);
+    if wanted.npis.is_empty() && wanted.states.is_empty() {
+        return Err(CliError::NotFound(
+            "the records give no provider's NPI or state, so there is nothing to keep: import \
+             again, or run `medrec reindex` once after an upgrade from before 0.9.6"
+                .into(),
+        ));
+    }
+    let offer = nppes::offer(&nppes::CMS)?;
+    let path = nppes::path(dir, &h.folder_id);
+    if let Some(have) = nppes::Directory::load(&path) {
+        if have.about.is_current(&offer, &wanted) {
+            return Ok(have.about.fetched("unchanged"));
+        }
+    }
+    let size = format!(
+        "CMS's NPPES file for {} is {} bytes ({:.1} GB). It is read as it arrives and not kept whole.",
+        offer.month,
+        offer.bytes,
+        offer.bytes as f64 / 1e9
+    );
+    if !cli.common.quiet {
+        eprintln!("{size}");
+    }
+    pk_cli_core::confirm::confirm(force, "Download it?")?;
+    let mut tenth = 0;
+    nppes::fetch(&nppes::CMS, &offer, &wanted, &path, &mut |n| {
+        let now = n * 10 / offer.bytes;
+        if now > tenth {
+            tenth = now;
+            note(cli, &format!("{}%", now * 10));
+        }
+    })
 }
 
 fn run(cli: &Cli) -> Result<(), CliError> {
@@ -1022,7 +1104,7 @@ fn run(cli: &Cli) -> Result<(), CliError> {
             });
             Ok(())
         }
-        Command::Tables(cmd) => tables_cmd(cli, cmd),
+        Command::Tables(cmd) => tables_cmd(cli, cmd, &store),
         Command::Timeline(a) => {
             let (f, h) = read(&store, cli)?;
             let rows = views::timeline(&f, &h, a.person.as_deref(), &a.range.range(), &a.kinds)?;

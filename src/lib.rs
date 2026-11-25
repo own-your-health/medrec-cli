@@ -23,6 +23,7 @@ pub mod mcp;
 pub mod model;
 pub mod normalize;
 pub mod notes;
+pub mod nppes;
 pub mod pdfgen;
 pub mod people;
 pub mod plain;
