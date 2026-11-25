@@ -194,6 +194,86 @@ identity instead, below), `date`, `code` (`{system, code,
 display}`), `display`, `status`, `fields` (kind-specific, with FHIR element
 names), `documents` (linked document ids) and `provenance` (one per source).
 
+**Fields by kind.** Every name a record's `fields` can hold. A field is
+present only when the source gave it, so a reader takes none for granted.
+The last column is the FHIR element the value comes from.
+
+| Kind | Field | Value | From |
+|---|---|---|---|
+| `encounter` | `when` | date or date and time, as written | `period.start` |
+| `encounter` | `class` | text | `class` (its display, else its code) |
+| `encounter` | `location` | text | first `location.location.display` |
+| `encounter` | `practitioner` | text | first `participant.individual.display` |
+| `encounter` | `reason` | text | first `reasonCode` |
+| `encounter` | `service_provider` | text | `serviceProvider.display` |
+| `encounter` | `period` | `{start, end}` | `period` |
+| `result` | `when` | as written | `effectiveDateTime`, `effectivePeriod.start`, `effectiveInstant` or `issued` |
+| `result` | `value` | `{value, unit, system}` (a quantity), else text, a boolean, a whole number or a date | `valueQuantity`, `valueString`, `valueCodeableConcept`, `valueBoolean`, `valueInteger`, `valueDateTime` |
+| `result` | `reference_range` | text | first `referenceRange` (its `text`, else its low and high) |
+| `result` | `interpretation` | text | first `interpretation` |
+| `result` | `category` | text | first `category` |
+| `result` | `issued` | as written | `issued` |
+| `report` | `when` | as written | `effectiveDateTime`, `effectivePeriod.start` or `issued` |
+| `report` | `conclusion` | text | `conclusion` |
+| `report` | `category` | text | `category` |
+| `report` | `results` | the number of results it lists | `result` |
+| `report` | `issued` | as written | `issued` |
+| `condition` | `when` | as written | `onsetDateTime`, `onsetPeriod.start`, `recordedDate` or `assertedDate` |
+| `condition` | `verification_status` | text | `verificationStatus` |
+| `condition` | `category` | text | first `category` |
+| `condition` | `abatement` | as written | `abatementDateTime` |
+| `medication` | `when` | as written | `authoredOn`; a fill's `whenHandedOver` or `whenPrepared`; a statement's `effectiveDateTime`, `effectivePeriod.start` or `dateAsserted` |
+| `medication` | `dosage` | text | first `dosageInstruction.text`, or a statement's `dosage.text` |
+| `medication` | `prescriber` | text | `requester.display`; on a fill, its prescription's `requester`, below |
+| `medication` | `intent` | text | a request's `intent` |
+| `medication` | `quantity` | `{value, unit}` | a fill's `quantity` |
+| `medication` | `days_supply` | a number | a fill's `daysSupply.value` |
+| `medication` | `pharmacy` | text | a fill's first `performer.actor.display`, else `location.display` |
+| `medication` | `type` | text | a fill's `type` |
+| `medication` | `ndc` | text | a fill's NDC, when its code is another |
+| `medication` | `source` | `request`, `statement` or `dispense` | the resource type |
+| `allergy` | `when` | as written | `onsetDateTime`, `recordedDate` or `assertedDate` |
+| `allergy` | `criticality` | text | `criticality` |
+| `allergy` | `reaction` | a list of text | each `reaction.manifestation` |
+| `immunization` | `when` | as written | `occurrenceDateTime` or `date` |
+| `immunization` | `lot_number` | text | `lotNumber` |
+| `immunization` | `site` | text | `site` |
+| `immunization` | `route` | text | `route` |
+| `immunization` | `performer` | text | first `performer.actor.display` (STU3: `practitioner`) |
+| `procedure` | `when` | as written | `performedDateTime` or `performedPeriod.start` |
+| `procedure` | `performer` | text | first `performer.actor.display` |
+| `procedure` | `location` | text | `location.display` |
+| `coverage` | `when` | as written | `period.start` |
+| `coverage` | `payer` | text | first `payor.display` |
+| `coverage` | `period` | `{start, end}` | `period` |
+| `coverage` | `relationship` | text | `relationship`'s code |
+| `coverage` | `plan` | text | `class` of type `plan` |
+| `coverage` | `group` | text | `class` of type `group` |
+| `coverage` | `subscriber_id` | text | `subscriberId` |
+| `claim` | `when` | as written | `billablePeriod.start` or `created` |
+| `claim` | `provider` | text | `provider.display` |
+| `claim` | `insurer` | text | `insurer.display` |
+| `claim` | `facility` | text | `facility.display` |
+| `claim` | `outcome` | text | `outcome` |
+| `claim` | `use` | text | `use` |
+| `claim` | `type` | text | `type` |
+| `claim` | `category` | text, the claim's one `category` below | its counted lines |
+| `claim` | `billable_period` | `{start, end}` | `billablePeriod` |
+| `claim` | `benefit_period` | `{start, end}` | `benefitPeriod` |
+| `claim` | `total` | `[{category, amount}]` | `total` |
+| `claim` | `payment` | an amount | `payment.amount` |
+| `claim` | `amounts` | `{<name>: {amount, currency}}`, the names below | `total`, its lines and `payment` |
+| `claim` | `items` | a list of lines, each `{sequence, category, amounts, service, …}`, below | `item` |
+| `claim` | `payer_notes` | a list of text | `processNote` no line points at |
+| `claim` | `diagnoses` | `[{sequence, code: {system, code, display}}]` | `diagnosis` |
+| `claim` | `benefit_balance` | `[{category, network, unit, term, financial: [{type, allowed, used}]}]` | `benefitBalance` |
+| `claim` | `days_supply` | a number, or text as the payer wrote it | `supportingInfo` (`dayssupply`) |
+| `claim` | `refill_number` | a number, or text as the payer wrote it | `supportingInfo` (`refillnum`) |
+| `claim` | `refills_authorized` | a number, or text as the payer wrote it | `supportingInfo` (`refillsauthorized`) |
+| `claim` | `brand_generic` | text | `supportingInfo` (`brandgenericindicator`) |
+| `claim` | `visit` | a record id | its links, below |
+| `claim` | `results` | a list of record ids | its links, below |
+
 A `medication` comes from a MedicationRequest (`source: request`), a
 MedicationStatement (`statement`) or a MedicationDispense (`dispense`, a
 fill). A fill is dated when it was handed over, else when it was prepared;
