@@ -742,7 +742,7 @@ fn parts_of(
         }
     }
     for d in idx.documents.iter().filter(|d| judged(&d.id)) {
-        let text = texts.texts.get(&d.id).filter(|_| crate::bill::charges(d));
+        let text = texts.texts.get(&d.id);
         let places = text.map(|t| parts::of_text(t)).unwrap_or_default();
         if !places.is_empty() {
             out.insert(d.id.clone(), parts::text_json(&places));

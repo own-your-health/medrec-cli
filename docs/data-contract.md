@@ -2498,7 +2498,7 @@ nothing is private.
   in ranges, are in medrec's `src/services.rs`; a code whose `system` is of
   medicines, results, findings or diagnoses (NDC, RxNorm, LOINC, SNOMED, ICD-10)
   is none. A claim's category, its amounts and its dates say nothing.
-- **Private parts** (0.9.9 and later). A claim of several services, a bill and an
+- **Private parts** (0.9.9 and later). A claim of several services, a paper and an
   event stay open when only a part of them is private. `parts` has what is
   private in each open item, by its id, and how the item is shown without it.
   Where a reader leaves private items out (a shared screen, an answer that names
@@ -2529,10 +2529,11 @@ nothing is private.
     in whose place any version of any of its sources gave one that is. `display`
     is its name by the lines that are left, `category` theirs where that is
     another (null where none is left), and `date` its date.
-  - **A bill, a receipt or an explanation of benefits** has `text`: the byte
-    offset and length in its text (`text.json`) of each line that says an area,
-    by words or by a service's number, without its line end (a line feed or a
-    form feed). Words that go over from one line to the next are in both.
+  - **A paper** (before 0.9.10 only a bill, a receipt or an explanation of
+    benefits) has `text`: the byte offset and length in its text (`text.json`) of
+    each line that says an area, by words or by a service's number, without its
+    line end (a line feed or a form feed). Words that go over from one line to
+    the next are in both.
   - **An event** has what of `kind`, `title`, `what`, `what_from`, `place`,
     `place_from`, `clinicians`, `money` and `differences` its members that are
     not private do not say as `events.json` has it: as they say it, null where

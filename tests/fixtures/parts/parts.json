@@ -141,5 +141,14 @@
  "event of r_doctoraaaaaaaaaaaaaa": {
   "place": null,
   "place_from": null
+ },
+ "d_afterwardaaaaaaaaaaa": {
+  "text": [
+   [
+    13,
+    25
+   ]
+  ],
+  "says": "1 line not shown"
  }
 }

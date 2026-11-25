@@ -603,9 +603,9 @@ medrec private unmark <id>                  # not private, whatever the rules sa
 medrec private reset <id>                   # back to the rules
 ```
 
-A claim of several services, a bill and an event stay open when only a part of
+A claim of several services, a paper and an event stay open when only a part of
 them is private. That part (a claim's line, its diagnosis or its payer's note, a
-line of a bill's text, what an event says by them) is left out where private
+line of a paper's text, what an event says by them) is left out where private
 items are, with a count such as "1 service not shown", and the amounts stay.
 `medrec private list` lists the items with one, and `medrec private unmark` shows
 all of one.
@@ -874,7 +874,7 @@ Private items (above) are left out of an answer about the whole household,
 whose warnings say how many. An answer about one person includes them, and
 so does one that names the item ("sertraline", not "tablets"), each marked
 `private` with its area. The private part of an open item is left out too, and
-`not_shown` says how much; `medrec_document` gives a bill's text without its
+`not_shown` says how much; `medrec_document` gives a paper's text without its
 private lines unless `person` names its person.
 
 Claims, events, documents and bills carry `provider_labels` beside the source's
