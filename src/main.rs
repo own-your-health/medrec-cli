@@ -1278,9 +1278,12 @@ fn run(cli: &Cli) -> Result<(), CliError> {
                     println!("nothing was written; a run would do this:");
                 }
                 println!(
-                    "{} claims: {} shaped again, {} unchanged, {} with no raw file; {} bills and receipts read again; {} records gained or changed what is said of their providers; {} conditions, allergies and medicines what is said of their status",
-                    r.claims, r.reshaped, r.unchanged, r.without_raw, r.statements, r.providers_updated, r.statuses_updated
+                    "{} claims: {} shaped again, {} unchanged, {} with no raw file; {} bills and receipts read again; {} records gained or changed what is said of their providers; {} records and {} papers what their sources say of them",
+                    r.claims, r.reshaped, r.unchanged, r.without_raw, r.statements, r.providers_updated, r.statuses_updated, r.papers_updated
                 );
+                if let Some(n) = papers_unread(r.papers_unread) {
+                    println!("{n}");
+                }
             });
             Ok(())
         }
@@ -2963,6 +2966,16 @@ fn import_cmd(cli: &Cli, a: &ImportArgs, store: &ConfigStore) -> Result<(), CliE
     Ok(())
 }
 
+/// What a run says of the papers' raw files that do not read.
+fn papers_unread(n: usize) -> Option<String> {
+    (n > 0).then(|| {
+        format!(
+            "{n} raw file{} of papers could not be read and told nothing",
+            if n == 1 { "" } else { "s" }
+        )
+    })
+}
+
 /// One import's lines for a person reading the terminal.
 fn print_import(r: &import::Report) {
     let organization = medrec::printable(&r.organization);
@@ -2982,6 +2995,9 @@ fn print_import(r: &import::Report) {
                 "{} bills are the same statement as a bill filed before; each points at it",
                 r.documents_same_statement
             );
+        }
+        if let Some(n) = papers_unread(r.papers_unread) {
+            println!("{n}");
         }
         if r.records_older > 0 {
             println!(

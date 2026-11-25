@@ -476,11 +476,21 @@ pub fn run(folder: &Folder, cfg: &Config, req: &Request) -> Result<(Report, bool
     }
 
     if !req.dry_run {
-        let touched: Vec<String> = outcomes
+        let mut touched: Vec<String> = outcomes
             .iter()
             .filter(|o| o.status == "filed")
             .filter_map(|o| o.person.clone())
             .collect();
+        for o in outcomes.iter().filter(|o| o.status == "duplicate") {
+            let (Some(pid), Some(id)) = (&o.person, &o.duplicate_of) else {
+                continue;
+            };
+            let idx = indexes.get_mut(pid);
+            let held = idx.and_then(|i| i.documents.iter_mut().find(|d| d.id == *id));
+            if held.is_some_and(|d| d.held_by_household(&o.origin)) {
+                touched.push(pid.clone());
+            }
+        }
         let write = (|| -> Result<(), CliError> {
             for pid in dedup(touched) {
                 let person = household.person(&pid).expect("filed for a known person");
@@ -1128,6 +1138,9 @@ pub fn document_for(
             derived_from: None,
             filed_by: filed_by(),
         },
+        also_from: Vec::new(),
+        words: Vec::new(),
+        errors: Vec::new(),
         origin,
     }
 }

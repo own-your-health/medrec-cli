@@ -180,10 +180,13 @@ pub fn file(folder: &Folder, req: &FileRequest) -> Result<Filed, CliError> {
     let org = class.organization.value().map(str::to_string);
 
     let mut index = folder.index(&person)?;
-    if let Some(dup) = index.documents.iter().find(|d| d.sha256 == item.sha256) {
+    if let Some(dup) = index.documents.iter_mut().find(|d| d.sha256 == item.sha256) {
         // Already filed: the queued copy goes, once the filed one checks out.
         folder.check_md5(&dup.path, &dup.md5)?;
         let (dup_id, dup_path) = (dup.id.clone(), dup.path.clone());
+        if dup.held_by_household(&item.origin.kind) {
+            folder.save_index(&person, &mut index)?;
+        }
         folder.store.delete(&item.path)?;
         queue.items.retain(|i| i.id != item.id);
         folder.save_review(&mut queue)?;
@@ -280,6 +283,9 @@ pub fn file(folder: &Folder, req: &FileRequest) -> Result<Filed, CliError> {
             derived_from: None,
             filed_by: filed_by(),
         },
+        also_from: Vec::new(),
+        words: Vec::new(),
+        errors: Vec::new(),
     };
     let mut texts = folder.text(&person)?;
     crate::bill::annotate(&mut doc, &item.text, &mut index, &texts);

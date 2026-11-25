@@ -334,6 +334,57 @@ pub struct Document {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub same_statement_as: Option<String>,
     pub provenance: Provenance,
+    /// Where else the same bytes came from: another Binary of its source's or
+    /// of another's, and the household (0.9.9 and later).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub also_from: Vec<Provenance>,
+    /// What each of its sources says of it, where several serve it, or one
+    /// says or said it is entered in error (0.9.9 and later).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub words: Vec<Word>,
+    /// When a source said it is entered in error (0.9.9 and later).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub errors: Vec<InError>,
+}
+
+impl Document {
+    /// Where it came from: the one that filed it, then the others.
+    pub fn provenances(&self) -> impl Iterator<Item = &Provenance> {
+        std::iter::once(&self.provenance).chain(&self.also_from)
+    }
+
+    /// Note that the household has it too, as a file of its own. Whether that
+    /// was not known.
+    pub fn held_by_household(&mut self, origin: &str) -> bool {
+        let known = self.provenances().any(|p| p.source.cli.is_none());
+        if !known {
+            let drive = origin == "drive";
+            self.also_from.push(Provenance {
+                source: ProvenanceSource {
+                    kind: if drive { "drive" } else { "scan" }.into(),
+                    cli: None,
+                    cli_version: None,
+                    organization_id: None,
+                    fhir_base: None,
+                },
+                method: "file".into(),
+                source_resource: None,
+                fetched_at: None,
+                filed_at: now_rfc3339(),
+                raw_path: None,
+                classified_by: None,
+                derived_from: None,
+                filed_by: filed_by(),
+            });
+        }
+        !known
+    }
+
+    /// As [`Record::say`].
+    pub fn say(&mut self, word: &Word) -> bool {
+        let words = said(&self.words, self.provenances(), word);
+        say(&mut self.words, words)
+    }
 }
 
 /// What a bill's or a receipt's paper says: each field only where the text
@@ -414,10 +465,14 @@ pub struct Record {
     /// names.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub providers: Vec<ProviderRef>,
-    /// What each of its sources says of a condition, an allergy or a medicine
-    /// that can differ between them. A fill has none.
+    /// What each of its sources says: of every condition, allergy and
+    /// medicine, and of another kind and a fill where several sources state
+    /// it, or one says or said it is entered in error.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub words: Vec<Word>,
+    /// When a source said it is entered in error (0.9.9 and later).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub errors: Vec<InError>,
     /// The raw file its status and fields are of, where it has words and
     /// several provenances.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -432,34 +487,83 @@ impl Record {
     /// of the provenances they are of; one whose provenance is gone goes.
     /// Whether that changes them.
     pub fn say(&mut self, word: &Word) -> bool {
-        let of = |p: &Provenance| {
-            let path = p.raw_path.as_ref()?;
-            let had = self.words.iter().find(|w| w.raw_path == *path);
-            if *path == word.raw_path {
-                Some(word)
-            } else {
-                had
-            }
-            .cloned()
-        };
-        let words: Vec<Word> = self.provenance.iter().filter_map(of).collect();
-        let changed = words != self.words;
-        self.words = words;
-        changed
+        let words = said(&self.words, self.provenance.iter(), word);
+        say(&mut self.words, words)
     }
 }
 
-/// What one source says of a condition, an allergy or a medicine.
+fn said<'a>(
+    words: &[Word],
+    provenances: impl Iterator<Item = &'a Provenance>,
+    word: &Word,
+) -> Vec<Word> {
+    let of = |p: &Provenance| {
+        let path = p.raw_path.as_ref()?;
+        if *path == word.raw_path {
+            return Some(word.clone());
+        }
+        words.iter().find(|w| w.raw_path == *path).cloned()
+    };
+    provenances.filter_map(of).collect()
+}
+
+/// Whether the words say otherwise than those they replace: which version one
+/// is of, and when it was read, says nothing.
+fn say(words: &mut Vec<Word>, now: Vec<Word>) -> bool {
+    let says = |w: &Word| Word {
+        version: None,
+        read: None,
+        ..w.clone()
+    };
+    let changed = !words.iter().map(says).eq(now.iter().map(says));
+    *words = now;
+    changed
+}
+
+/// A time a source said an item is entered in error.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InError {
+    /// The raw file that says or said so: one of its provenances'.
+    pub raw_path: String,
+    /// When medrec first read it saying so.
+    pub from: String,
+    /// When medrec first read a later version that does not. Absent while it
+    /// says so.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub until: Option<String>,
+}
+
+impl InError {
+    /// Note in an item's history what a source's word is, read first at `at`.
+    /// Whether that changes it.
+    pub fn note(history: &mut Vec<InError>, word: &Word, at: &str) -> bool {
+        let open = history
+            .iter_mut()
+            .find(|e| e.raw_path == word.raw_path && e.until.is_none());
+        match (open, word.in_error()) {
+            (None, true) => history.push(InError {
+                raw_path: word.raw_path.clone(),
+                from: at.into(),
+                until: None,
+            }),
+            (Some(e), false) => e.until = Some(at.into()),
+            _ => return false,
+        }
+        true
+    }
+}
+
+/// What one source says of a record or a paper.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Word {
     /// The raw file it is read from, which is one of the record's
     /// provenances'.
     pub raw_path: String,
     /// The source's own code: a condition's or an allergy's clinical status,
-    /// a medicine's status.
+    /// another record's status, the status of what describes a paper.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
-    /// The code of the verification status.
+    /// The code of the verification status; of a paper, of its `docStatus`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verification: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -478,6 +582,19 @@ pub struct Word {
     /// raw files is seen by the next.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    /// When a paper's was last read. A record's is its provenance's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read: Option<String>,
+}
+
+impl Word {
+    /// Whether its source says it is entered in error.
+    pub fn in_error(&self) -> bool {
+        [&self.status, &self.verification]
+            .into_iter()
+            .flatten()
+            .any(|s| crate::standing::code(Some(s)) == "entered-in-error")
+    }
 }
 
 /// Who a field of a record prints, as its source identifies them.

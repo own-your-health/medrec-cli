@@ -101,7 +101,8 @@ pub fn plan(folder: &Folder, h: &Household, duplicate: &str, into: &str) -> Resu
 }
 
 /// Merge as `plan` checked. `duplicate`'s hash, size and fetch time, and
-/// its own renderings, go on `into`'s `renderings`, each distinct one once;
+/// its own renderings, go on `into`'s `renderings`, each distinct one once,
+/// and what else served its bytes and said of it, on `into`;
 /// everything that named it names `into`; its text and index entry go, and
 /// then its file. Each step leaves the folder consistent if the next one
 /// fails: notes name `into` beside `duplicate` before the index loses
@@ -150,6 +151,22 @@ pub fn apply(folder: &Folder, plan: Plan) -> Result<Merged, CliError> {
     for r in std::iter::once(copy).chain(dup.renderings.iter().cloned()) {
         if r.sha256 != kept.sha256 && !kept.renderings.iter().any(|k| k.sha256 == r.sha256) {
             kept.renderings.push(r);
+        }
+    }
+    // Its own provenance is of the kept paper's Binary (`plan`).
+    for p in dup.also_from {
+        if !kept.provenances().any(|k| k.raw_path == p.raw_path) {
+            kept.also_from.push(p);
+        }
+    }
+    for w in &dup.words {
+        if !kept.words.iter().any(|k| k.raw_path == w.raw_path) {
+            kept.say(w);
+        }
+    }
+    for e in dup.errors {
+        if !kept.errors.contains(&e) {
+            kept.errors.push(e);
         }
     }
     let moved = repoint(&mut index, &duplicate, &into) + named.len();

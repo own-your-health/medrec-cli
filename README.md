@@ -302,7 +302,7 @@ medrec meds --active
 medrec note add Robin "Ask about the recheck" --tag question --about <record id>
 
 medrec verify                                   # every indexed file against the index
-medrec reindex                                  # claims shaped again, providers and statuses read again from their raw files, and bills and receipts read again, after an upgrade
+medrec reindex                                  # claims shaped again, providers, statuses and what else served a paper read again from the raw files, and bills and receipts read again, after an upgrade
 medrec backup --to "/Volumes/Backup/Medical Records"
 ```
 
@@ -550,7 +550,9 @@ no source's word wins:
   sends diagnoses and no problem list.
 - What a source calls refuted is not current. A record of any kind entered in
   error is in no list, the timeline or the search, which say how many are not
-  shown.
+  shown. It is one only while every source that has it says so, and comes back
+  by itself when one no longer does. A record one source still states shows
+  that one's values.
 - A source's word that medrec does not keep yet never lets the others end a
   record: its line says `not every source heard`. After upgrading to 0.9.9 run
   `medrec reindex`, which reads them from the raw files.

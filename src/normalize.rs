@@ -551,14 +551,15 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
         fields,
         providers: Vec::new(),
         words: words.into_iter().collect(),
+        errors: Vec::new(),
         fields_from: None,
         documents: Vec::new(),
         provenance: vec![provenance],
     })
 }
 
-/// What the source of one condition, allergy or medicine says of it, when its
-/// raw file is kept. A fill says only that it was filled.
+/// What the source of a record says of it, when its raw file is kept: its
+/// status alone, but of a condition, an allergy and a prescription.
 fn word(
     r: &Value,
     resource_type: &str,
@@ -566,12 +567,17 @@ fn word(
     fields: &Map<String, Value>,
     provenance: &Provenance,
 ) -> Option<Word> {
+    let raw_path = provenance.raw_path.clone()?;
     if !WORD_TYPES.contains(&resource_type) {
-        return None;
+        return Some(Word {
+            raw_path,
+            status: status.map(str::to_string),
+            ..Word::default()
+        });
     }
     let text = |k: &str| fields.get(k).and_then(Value::as_str).map(str::to_string);
     Some(Word {
-        raw_path: provenance.raw_path.clone()?,
+        raw_path,
         status: status.map(str::to_string),
         verification: r.get("verificationStatus").and_then(status_code),
         categories: fields
@@ -584,11 +590,11 @@ fn word(
         abatement: text("abatement").or_else(|| text("abatement_text")),
         end: text("end"),
         end_of: text("end_of"),
-        version: None,
+        ..Word::default()
     })
 }
 
-/// The resources whose source's word a record keeps.
+/// The resources whose word a record always keeps.
 pub const WORD_TYPES: &[&str] = &[
     "Condition",
     "AllergyIntolerance",
@@ -1363,7 +1369,11 @@ mod tests {
         let fill: Value = serde_json::from_str(DISPENSE).unwrap();
         let mut p = prov();
         p.raw_path = Some("fill.json".into());
-        assert!(record(&fill, p).unwrap().words.is_empty());
+        // A fill's is its status alone, as any other kind's.
+        assert_eq!(
+            serde_json::to_value(record(&fill, p).unwrap().words).unwrap(),
+            json!([{"raw_path": "fill.json", "status": "completed"}])
+        );
     }
 
     #[test]

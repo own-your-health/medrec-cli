@@ -471,26 +471,14 @@ fn error_info(e: &CliError) -> ErrorInfo {
     }
 }
 
+/// Every count of what an import did; what its stream held is not.
 fn counts(r: &import::Report) -> BTreeMap<String, u64> {
     let v = serde_json::to_value(r).expect("an import report is plain data and serializes");
-    let mut out = BTreeMap::new();
-    for k in [
-        "records_added",
-        "records_updated",
-        "records_unchanged",
-        "records_older",
-        "resources_written",
-        "resources_unchanged",
-        "documents_added",
-        "documents_duplicate",
-        "documents_unchanged",
-        "documents_same_statement",
-    ] {
-        if let Some(n) = v.get(k).and_then(serde_json::Value::as_u64) {
-            out.insert(k.to_string(), n);
-        }
-    }
-    out
+    let sizes = ["resources", "skipped", "stream_bytes"];
+    let all = v.as_object().into_iter().flatten();
+    all.filter(|(k, _)| !sizes.contains(&k.as_str()))
+        .filter_map(|(k, n)| Some((k.clone(), n.as_u64()?)))
+        .collect()
 }
 
 /// How long a pass waits for another writer before it leaves the
