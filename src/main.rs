@@ -1594,7 +1594,15 @@ fn bills_cmd(cli: &Cli, cmd: &BillsCmd, store: &ConfigStore) -> Result<(), CliEr
             let f = Folder::open(&cfg, Access::Write)?;
             let h = f.household()?;
             let p = owner_of(&f, &h, document)?;
-            let (pm, new) = medrec::bills::mark_paid(&f, p, document, on, &amount, None, None)?;
+            use medrec::bills::Marked;
+            let (pm, new) =
+                match medrec::bills::mark_paid(&f, p, document, on, &amount, None, None)? {
+                    Marked::Recorded(pm) => (pm, true),
+                    Marked::Already(pm) => (pm, false),
+                    Marked::TakenBack => {
+                        return Err(CliError::Other("the payment was taken back".into()))
+                    }
+                };
             let mut v = to_value(&pm);
             v["person"] = p.id.clone().into();
             v["status"] = if new { "recorded" } else { "unchanged" }.into();
