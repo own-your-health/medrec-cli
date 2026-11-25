@@ -173,26 +173,21 @@ impl Found {
                 let had = old
                     .iter()
                     .find(|r| r.field == *f && old_fields.get(*f) == Some(text));
-                let pick = |of: fn(&ProviderRef) -> Option<String>| {
-                    let (new, had) = (new.and_then(of), had.and_then(of));
-                    if shared {
-                        had.or(new)
-                    } else if self.unresolved.contains(f) {
-                        new.or(had)
-                    } else {
-                        new
-                    }
+                let order = if shared {
+                    [had, new]
+                } else if self.unresolved.contains(f) {
+                    [new, had]
+                } else {
+                    [new, None]
                 };
-                let (npi, state) = (pick(|r| r.npi.clone()), pick(|r| r.state.clone()));
-                // The city of the address the state is of.
-                let of = |r: Option<&ProviderRef>| {
-                    let r = r.filter(|r| r.state.is_some() && r.state == state);
-                    r.and_then(|r| r.city.clone())
-                };
-                let city = match shared {
-                    true => of(had).or_else(|| of(new)),
-                    false => of(new).or_else(|| of(had)),
-                };
+                let says = || order.into_iter().flatten();
+                let npi = says().find_map(|r| r.npi.clone());
+                // One address: its state, and its city or that it was not
+                // read for one.
+                let place = says().find(|r| r.state.is_some());
+                let (state, city) = place
+                    .map(|r| (r.state.clone(), r.city.clone()))
+                    .unwrap_or_default();
                 (npi.is_some() || state.is_some()).then(|| ProviderRef {
                     field: f.to_string(),
                     npi,
@@ -548,7 +543,9 @@ mod tests {
         assert_eq!(over(&ny, &fl, false), ny);
         assert_eq!(over(&ny, &fl, true), fl);
         assert_eq!(over(&ny, &bare, true), bare);
-        assert_eq!(over(&fl, &bare, true), fl);
+        // An address not read for its city has none of another's.
+        assert_eq!(over(&fl, &bare, true), bare);
+        assert_eq!(over(&fl, &bare, false), fl);
         let npi = entry("performer", Some("0000000006"), None);
         let both = says(vec![npi.clone()]).and(says(vec![fl.clone()]));
         assert_eq!(
