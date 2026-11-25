@@ -9,6 +9,7 @@ use serde_json::{json, Map, Value};
 
 use crate::claims;
 use crate::model::{Code, Provenance, Record};
+use crate::providers::printed;
 
 pub const LOINC: &str = "http://loinc.org";
 pub const SNOMED: &str = "http://snomed.info/sct";
@@ -199,16 +200,8 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
     match rt {
         "Encounter" => {
             put(&mut fields, "class", r.get("class").map(coding_text));
-            put_str(
-                &mut fields,
-                "location",
-                path_str(r, "location.0.location.display"),
-            );
-            put_str(
-                &mut fields,
-                "practitioner",
-                path_str(r, "participant.0.individual.display"),
-            );
+            put_str(&mut fields, "location", printed(r, "location"));
+            put_str(&mut fields, "practitioner", printed(r, "practitioner"));
             put(
                 &mut fields,
                 "reason",
@@ -217,7 +210,7 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
             put_str(
                 &mut fields,
                 "service_provider",
-                path_str(r, "serviceProvider.display"),
+                printed(r, "service_provider"),
             );
             put(&mut fields, "period", r.get("period").cloned());
         }
@@ -275,11 +268,7 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
                 "dosage",
                 path_str(r, "dosageInstruction.0.text"),
             );
-            put_str(
-                &mut fields,
-                "prescriber",
-                path_str(r, "requester.display").or_else(|| path_str(r, "requester.agent.display")),
-            );
+            put_str(&mut fields, "prescriber", printed(r, "prescriber"));
             put_str(&mut fields, "intent", path_str(r, "intent"));
             put(&mut fields, "source", Some(json!("request")));
         }
@@ -299,12 +288,7 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
                 "days_supply",
                 path(r, "daysSupply.value").cloned(),
             );
-            put_str(
-                &mut fields,
-                "pharmacy",
-                path_str(r, "performer.0.actor.display")
-                    .or_else(|| path_str(r, "location.display")),
-            );
+            put_str(&mut fields, "pharmacy", printed(r, "pharmacy"));
             put(&mut fields, "type", r.get("type").map(concept_text));
             put(&mut fields, "ndc", ndc(r.get("medicationCodeableConcept")));
             put_str(&mut fields, "prescriber", contained_prescriber(r));
@@ -333,20 +317,11 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
             put_str(&mut fields, "lot_number", path_str(r, "lotNumber"));
             put(&mut fields, "site", r.get("site").map(concept_text));
             put(&mut fields, "route", r.get("route").map(concept_text));
-            put_str(
-                &mut fields,
-                "performer",
-                path_str(r, "performer.0.actor.display")
-                    .or_else(|| path_str(r, "practitioner.0.actor.display")),
-            );
+            put_str(&mut fields, "performer", printed(r, "performer"));
         }
         "Procedure" => {
-            put_str(
-                &mut fields,
-                "performer",
-                path_str(r, "performer.0.actor.display"),
-            );
-            put_str(&mut fields, "location", path_str(r, "location.display"));
+            put_str(&mut fields, "performer", printed(r, "performer"));
+            put_str(&mut fields, "location", printed(r, "location"));
         }
         "Coverage" => {
             put_str(&mut fields, "payer", path_str(r, "payor.0.display"));
@@ -379,7 +354,7 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
             put_str(&mut fields, "subscriber_id", path_str(r, "subscriberId"));
         }
         "ExplanationOfBenefit" => {
-            put_str(&mut fields, "provider", path_str(r, "provider.display"));
+            put_str(&mut fields, "provider", printed(r, "provider"));
             put_str(&mut fields, "insurer", path_str(r, "insurer.display"));
             put_str(&mut fields, "outcome", path_str(r, "outcome"));
             put(
@@ -410,7 +385,7 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
             put(&mut fields, "payment", money(path(r, "payment.amount")));
             put(&mut fields, "type", r.get("type").map(concept_text));
             put_str(&mut fields, "use", path_str(r, "use"));
-            put_str(&mut fields, "facility", path_str(r, "facility.display"));
+            put_str(&mut fields, "facility", printed(r, "facility"));
             let pharmacy = is_pharmacy(r);
             let mut items = eob_items(r, pharmacy);
             let totals = claims::amounts(eob_entries(r.get("total")));
@@ -945,7 +920,7 @@ fn contained_prescriber(r: &Value) -> Option<&str> {
         c.get("resourceType").and_then(Value::as_str) == Some("MedicationRequest")
             && c.get("id").and_then(Value::as_str) == Some(id)
     })?;
-    path_str(request, "requester.display").or_else(|| path_str(request, "requester.agent.display"))
+    printed(request, "prescriber")
 }
 
 /// A status served as a CodeableConcept (R4) or a plain code (STU3).

@@ -17,6 +17,7 @@ use crate::folder::Folder;
 use crate::model::{Household, PersonIndex, Record};
 use crate::normalize;
 use crate::people;
+use crate::providers::Found;
 
 #[derive(Debug, Default, Serialize)]
 pub struct Reindexed {
@@ -30,7 +31,7 @@ pub struct Reindexed {
     /// Bills and receipts whose statement gained fields from their text.
     pub statements: usize,
     /// Records whose providers' NPI or state changed.
-    pub providers: usize,
+    pub providers_updated: usize,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -41,7 +42,7 @@ pub struct PersonReindexed {
     pub unchanged: usize,
     pub without_raw: usize,
     pub statements: usize,
-    pub providers: usize,
+    pub providers_updated: usize,
 }
 
 /// The claim's own content, links left out.
@@ -109,13 +110,13 @@ pub fn claims(folder: &Folder, h: &Household, person: Option<&str>) -> Result<Re
             r.fields = new.fields;
             row.reshaped += 1;
         }
-        row.providers = providers(folder, &mut idx, tmp.path(), &dirs)?;
+        row.providers_updated = providers(folder, &mut idx, tmp.path(), &dirs)?;
         row.statements = crate::bill::backfill(&mut idx, &folder.text(p)?);
-        if row.reshaped > 0 || row.statements > 0 || row.providers > 0 {
+        if row.reshaped > 0 || row.statements > 0 || row.providers_updated > 0 {
             folder.save_index(p, &mut idx)?;
         }
         out.statements += row.statements;
-        out.providers += row.providers;
+        out.providers_updated += row.providers_updated;
         out.claims += row.claims;
         out.reshaped += row.reshaped;
         out.unchanged += row.unchanged;
@@ -143,6 +144,7 @@ fn providers(
     let mut held = Held {
         tmp,
         source: String::new(),
+        base: None,
         read: HashMap::new(),
     };
     for source in &sources {
@@ -155,26 +157,32 @@ fn providers(
     }
     let mut changed = 0;
     for r in &mut idx.records {
-        // A record two sources state holds the fields of one of them.
-        let raw = r.provenance.iter().find_map(|pr| {
-            let rel = pr.raw_path.as_ref()?;
-            let text = std::fs::read_to_string(tmp.join(rel)).ok()?;
-            let v: Value = serde_json::from_str(&text).ok()?;
-            let stated = normalize::record(&v, pr.clone())?;
-            crate::providers::prints_the_same(&stated.fields, &r.fields).then(|| (rel.clone(), v))
-        });
-        let Some((rel, v)) = raw else { continue };
-        let Some(source) = source_of(&rel) else {
-            continue;
-        };
-        held.source = source.to_string();
-        let found = crate::providers::of(&v, &r.fields, &mut held)?;
-        if found != r.providers {
-            r.providers = found;
+        // Every source of the record, in the order it names them, so that
+        // the first to say something of a provider they all print stands.
+        let mut found = Found::default();
+        for pr in &r.provenance {
+            let Some(rel) = &pr.raw_path else { continue };
+            let Some(v) = read(tmp, rel) else {
+                found.unresolved.extend(crate::providers::FIELDS);
+                continue;
+            };
+            held.source = source_of(rel).unwrap_or_default().to_string();
+            held.base = pr.source.fhir_base.clone();
+            found = found.and(crate::providers::of(&v, &r.fields, &mut held)?);
+        }
+        let now = found.over(&r.providers, &r.fields, &r.fields, false);
+        if now != r.providers {
+            r.providers = now;
             changed += 1;
         }
     }
     Ok(changed)
+}
+
+/// A raw file, when it is there and reads.
+fn read(tmp: &Path, rel: &str) -> Option<Value> {
+    let text = std::fs::read_to_string(tmp.join(rel)).ok()?;
+    serde_json::from_str(&text).ok()
 }
 
 /// The source folder of `<source>/<Type>/<file>`.
@@ -201,22 +209,25 @@ const RAW_TYPES: &[&str] = &[
 struct Held<'a> {
     tmp: &'a Path,
     source: String,
+    base: Option<String>,
     read: HashMap<String, Option<Value>>,
 }
 
 impl crate::providers::Resolve for Held<'_> {
+    fn base(&self) -> Option<&str> {
+        self.base.as_deref()
+    }
+
     fn resource(&mut self, resource_type: &str, id: &str) -> Result<Option<Value>, CliError> {
         let rel = format!(
-            "{}/{}",
+            "{}/{}.json",
             self.source,
             crate::import::raw_sub_of(resource_type, id)
         );
         if let Some(v) = self.read.get(&rel) {
             return Ok(v.clone());
         }
-        let v = std::fs::read_to_string(self.tmp.join(format!("{rel}.json")))
-            .ok()
-            .and_then(|t| serde_json::from_str(&t).ok());
+        let v = read(self.tmp, &rel);
         self.read.insert(rel, v.clone());
         Ok(v)
     }

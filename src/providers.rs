@@ -2,11 +2,13 @@
 //! National Provider Identifier and the state of the practitioner,
 //! organization or place each field's reference points at.
 
+use std::collections::BTreeSet;
+
 use pk_cli_core::CliError;
 use serde_json::{Map, Value};
 
 use crate::model::ProviderRef;
-use crate::normalize::path;
+use crate::normalize::{path, path_str};
 
 /// The code system of a National Provider Identifier.
 pub const NPI: &str = "http://hl7.org/fhir/sid/us-npi";
@@ -19,46 +21,16 @@ pub const TYPES: &[&str] = &[
     "Location",
 ];
 
-/// Reads a resource its source holds, by type and id.
+/// Reads what a record's source holds.
 pub trait Resolve {
+    /// The source's FHIR base: an absolute reference to any other server is
+    /// not followed, since an id is unique only on its own.
+    fn base(&self) -> Option<&str>;
     fn resource(&mut self, resource_type: &str, id: &str) -> Result<Option<Value>, CliError>;
 }
 
-/// What the source says of each provider `fields` print: one entry per field
-/// that names one and whose reference gives an NPI or a state.
-pub fn of(
-    r: &Value,
-    fields: &Map<String, Value>,
-    sources: &mut dyn Resolve,
-) -> Result<Vec<ProviderRef>, CliError> {
-    let mut out = Vec::new();
-    for (field, refs) in references(r) {
-        if !fields.contains_key(field) {
-            continue;
-        }
-        let Some(target) = refs.iter().find_map(|p| path(r, p)) else {
-            continue;
-        };
-        let (npi, state) = facts(target, r, sources, 0)?;
-        if npi.is_some() || state.is_some() {
-            out.push(ProviderRef {
-                field: field.into(),
-                npi,
-                state,
-            });
-        }
-    }
-    if let Some((npi, state)) = fill_prescriber(r, fields, sources)? {
-        out.push(ProviderRef {
-            field: "prescriber".into(),
-            npi,
-            state,
-        });
-    }
-    Ok(out)
-}
-
-/// The fields that print a provider, of any kind.
+/// The fields that print a provider, of any kind, in the order a record
+/// lists them.
 pub const FIELDS: &[&str] = &[
     "facility",
     "location",
@@ -70,73 +42,175 @@ pub const FIELDS: &[&str] = &[
     "service_provider",
 ];
 
-/// Whether `stated`, as one source states it, prints the providers `fields`
-/// prints. A fill's prescriber is left out where its source names it only in
-/// the prescription.
-pub fn prints_the_same(stated: &Map<String, Value>, fields: &Map<String, Value>) -> bool {
-    FIELDS.iter().all(|f| {
-        stated.get(*f) == fields.get(*f) || (*f == "prescriber" && !stated.contains_key(*f))
-    })
+/// What one source says of the providers a record prints.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Found {
+    /// One entry per field its source says more than a name of, in
+    /// [`FIELDS`] order.
+    pub refs: Vec<ProviderRef>,
+    /// Fields whose reference leads to something the source did not give.
+    pub unresolved: BTreeSet<&'static str>,
 }
 
-/// The fields of each kind that print a provider, with the elements that
-/// refer to it, the first present one counting.
-fn references(r: &Value) -> Vec<(&'static str, &'static [&'static str])> {
-    match r.get("resourceType").and_then(Value::as_str).unwrap_or("") {
-        "Encounter" => vec![
+/// The elements of `resource_type` that print each provider field: the first
+/// with a display prints it.
+fn references(resource_type: &str) -> &'static [(&'static str, &'static [&'static str])] {
+    match resource_type {
+        "Encounter" => &[
             ("practitioner", &["participant.0.individual"]),
             ("location", &["location.0.location"]),
             ("service_provider", &["serviceProvider"]),
         ],
-        "MedicationRequest" => vec![("prescriber", &["requester", "requester.agent"])],
-        "MedicationDispense" => vec![("pharmacy", &["performer.0.actor", "location"])],
-        "Immunization" => vec![("performer", &["performer.0.actor", "practitioner.0.actor"])],
-        "Procedure" => vec![
+        "MedicationRequest" => &[("prescriber", &["requester", "requester.agent"])],
+        "MedicationDispense" => &[("pharmacy", &["performer.0.actor", "location"])],
+        "Immunization" => &[("performer", &["performer.0.actor", "practitioner.0.actor"])],
+        "Procedure" => &[
             ("performer", &["performer.0.actor"]),
             ("location", &["location"]),
         ],
-        "ExplanationOfBenefit" => vec![("provider", &["provider"]), ("facility", &["facility"])],
-        _ => Vec::new(),
+        "ExplanationOfBenefit" => &[("provider", &["provider"]), ("facility", &["facility"])],
+        _ => &[],
     }
 }
 
-/// A fill's prescriber is its prescription's `requester`: contained in the
-/// fill, or the one its source serves.
-fn fill_prescriber(
+/// The element that prints `field` of `r`, and what it prints.
+fn printed_by<'a>(r: &'a Value, field: &str) -> Option<(&'a Value, &'a str)> {
+    let ty = r.get("resourceType").and_then(Value::as_str)?;
+    let (_, paths) = references(ty).iter().find(|(f, _)| *f == field)?;
+    paths.iter().find_map(|p| {
+        let at = path(r, p)?;
+        Some((at, path_str(at, "display")?))
+    })
+}
+
+/// The provider `field` of `r` prints.
+pub fn printed<'a>(r: &'a Value, field: &str) -> Option<&'a str> {
+    printed_by(r, field).map(|(_, text)| text)
+}
+
+/// What the source of `r` says of each provider `fields` prints as `r`
+/// does.
+pub fn of(
     r: &Value,
     fields: &Map<String, Value>,
     sources: &mut dyn Resolve,
-) -> Result<Option<Facts>, CliError> {
-    if r.get("resourceType").and_then(Value::as_str) != Some("MedicationDispense")
-        || !fields.contains_key("prescriber")
-    {
-        return Ok(None);
+) -> Result<Found, CliError> {
+    let ty = r.get("resourceType").and_then(Value::as_str).unwrap_or("");
+    let mut out = Found::default();
+    for field in FIELDS.iter().copied() {
+        let Some(text) = fields.get(field).and_then(Value::as_str) else {
+            continue;
+        };
+        let facts = if ty == "MedicationDispense" && field == "prescriber" {
+            match prescription(r, sources)? {
+                Some(request) => match printed_by(&request, field) {
+                    // A contained prescription's own references are the
+                    // fill's.
+                    Some((at, t)) if t == text => facts(at, r, sources, 0)?,
+                    _ => continue,
+                },
+                None => Facts {
+                    unresolved: true,
+                    ..Facts::default()
+                },
+            }
+        } else {
+            match printed_by(r, field) {
+                Some((at, t)) if t == text => facts(at, r, sources, 0)?,
+                _ => continue,
+            }
+        };
+        if facts.unresolved {
+            out.unresolved.insert(field);
+        }
+        if facts.npi.is_some() || facts.state.is_some() {
+            out.refs.push(ProviderRef {
+                field: field.into(),
+                npi: facts.npi,
+                state: facts.state,
+            });
+        }
     }
-    let Some(reference) = path(r, "authorizingPrescription.0.reference").and_then(Value::as_str)
-    else {
-        return Ok(None);
-    };
-    let request = match reference.strip_prefix('#') {
-        Some(id) => contained(r, id).cloned(),
-        None => match split(reference) {
-            Some(("MedicationRequest", id)) => sources.resource("MedicationRequest", id)?,
-            _ => None,
-        },
-    };
-    let Some(request) = request else {
-        return Ok(None);
-    };
-    let Some(target) = path(&request, "requester").or_else(|| path(&request, "requester.agent"))
-    else {
-        return Ok(None);
-    };
-    // A contained prescription's own references are the fill's.
-    let found = facts(target, r, sources, 0)?;
-    Ok((found.0.is_some() || found.1.is_some()).then_some(found))
+    Ok(out)
 }
 
-/// A provider's NPI and its state, each when the source gives it.
-type Facts = (Option<String>, Option<String>);
+impl Found {
+    /// Fill what this lacks from another source of the same record.
+    pub fn and(mut self, other: Found) -> Found {
+        for r in other.refs {
+            match self.refs.iter_mut().find(|s| s.field == r.field) {
+                Some(s) => {
+                    s.npi = s.npi.take().or(r.npi);
+                    s.state = s.state.take().or(r.state);
+                }
+                None => self.refs.push(r),
+            }
+        }
+        self.unresolved.extend(other.unresolved);
+        self
+    }
+
+    /// What a record that said `old` of its providers, and printed
+    /// `old_fields`, now says. A provider printed as before keeps what it had
+    /// where this source gives its reference and not what it leads to, and
+    /// where another source states the record too (`shared`), so that two
+    /// sources do not write over each other.
+    pub fn over(
+        self,
+        old: &[ProviderRef],
+        old_fields: &Map<String, Value>,
+        fields: &Map<String, Value>,
+        shared: bool,
+    ) -> Vec<ProviderRef> {
+        FIELDS
+            .iter()
+            .filter_map(|f| {
+                let text = fields.get(*f)?;
+                let new = self.refs.iter().find(|r| r.field == *f);
+                let had = old
+                    .iter()
+                    .find(|r| r.field == *f && old_fields.get(*f) == Some(text));
+                let pick = |of: fn(&ProviderRef) -> Option<String>| {
+                    let (new, had) = (new.and_then(of), had.and_then(of));
+                    if shared || self.unresolved.contains(f) {
+                        had.or(new)
+                    } else {
+                        new
+                    }
+                };
+                let (npi, state) = (pick(|r| r.npi.clone()), pick(|r| r.state.clone()));
+                (npi.is_some() || state.is_some()).then(|| ProviderRef {
+                    field: f.to_string(),
+                    npi,
+                    state,
+                })
+            })
+            .collect()
+    }
+}
+
+/// A fill's prescription: contained in it, or one its source serves.
+fn prescription(r: &Value, sources: &mut dyn Resolve) -> Result<Option<Value>, CliError> {
+    let Some(reference) = path_str(r, "authorizingPrescription.0.reference") else {
+        return Ok(None);
+    };
+    if let Some(id) = reference.strip_prefix('#') {
+        return Ok(contained(r, id).cloned());
+    }
+    match local(reference, sources.base()) {
+        Some(("MedicationRequest", id)) => sources.resource("MedicationRequest", id),
+        _ => Ok(None),
+    }
+}
+
+/// What a reference leads to.
+#[derive(Debug, Default)]
+struct Facts {
+    npi: Option<String>,
+    state: Option<String>,
+    /// Something on the way could not be read.
+    unresolved: bool,
+}
 
 /// The NPI and state a reference leads to: its own identifier, then the
 /// resource it points at, contained in `root` or held by the source.
@@ -146,14 +220,22 @@ fn facts(
     sources: &mut dyn Resolve,
     depth: u8,
 ) -> Result<Facts, CliError> {
-    let own = reference.get("identifier").and_then(npi_of_one);
-    let Some(v) = target(reference, root, sources)? else {
-        return Ok((own, None));
+    let mut out = Facts {
+        npi: reference.get("identifier").and_then(npi_of_one),
+        ..Facts::default()
     };
-    let mut npi = own.or_else(|| identifiers(&v));
-    let mut state = address_state(&v);
+    let v = match target(reference, root, sources)? {
+        Target::None => return Ok(out),
+        Target::Unread => {
+            out.unresolved = true;
+            return Ok(out);
+        }
+        Target::Read(v) => v,
+    };
+    out.npi = out.npi.or_else(|| identifiers(&v));
+    out.state = address_state(&v);
     if depth >= 2 {
-        return Ok((npi, state));
+        return Ok(out);
     }
     match v["resourceType"].as_str() {
         // A person at a place: the NPI is the person's, and the state is the
@@ -163,42 +245,53 @@ fn facts(
                 Some(p) => facts(p, root, sources, depth + 1)?,
                 None => Facts::default(),
             };
-            npi = npi.or(person.0);
+            out.npi = out.npi.or(person.npi);
+            out.unresolved |= person.unresolved;
             for part in ["location.0", "organization"] {
-                if state.is_none() {
+                if out.state.is_none() {
                     if let Some(p) = path(&v, part) {
-                        state = facts(p, root, sources, depth + 1)?.1;
+                        let place = facts(p, root, sources, depth + 1)?;
+                        out.state = place.state;
+                        out.unresolved |= place.unresolved;
                     }
                 }
             }
-            state = state.or(person.1);
+            out.state = out.state.or(person.state);
         }
-        Some("Location") if state.is_none() => {
+        Some("Location") if out.state.is_none() => {
             if let Some(o) = v.get("managingOrganization") {
-                state = facts(o, root, sources, depth + 1)?.1;
+                let place = facts(o, root, sources, depth + 1)?;
+                out.state = place.state;
+                out.unresolved |= place.unresolved;
             }
         }
         _ => {}
     }
-    Ok((npi, state))
+    Ok(out)
+}
+
+enum Target {
+    /// The reference points at nothing a provider is read from.
+    None,
+    /// It points at something the source did not give.
+    Unread,
+    Read(Value),
 }
 
 /// The resource a reference points at.
-fn target(
-    reference: &Value,
-    root: &Value,
-    sources: &mut dyn Resolve,
-) -> Result<Option<Value>, CliError> {
+fn target(reference: &Value, root: &Value, sources: &mut dyn Resolve) -> Result<Target, CliError> {
     let Some(text) = reference.get("reference").and_then(Value::as_str) else {
-        return Ok(None);
+        return Ok(Target::None);
     };
-    if let Some(id) = text.strip_prefix('#') {
-        return Ok(contained(root, id).cloned());
-    }
-    match split(text) {
-        Some((ty, id)) if TYPES.contains(&ty) => sources.resource(ty, id),
-        _ => Ok(None),
-    }
+    let found = if let Some(id) = text.strip_prefix('#') {
+        contained(root, id).cloned()
+    } else {
+        match local(text, sources.base()) {
+            Some((ty, id)) if TYPES.contains(&ty) => sources.resource(ty, id)?,
+            _ => return Ok(Target::None),
+        }
+    };
+    Ok(found.map_or(Target::Unread, Target::Read))
 }
 
 fn contained<'a>(root: &'a Value, id: &str) -> Option<&'a Value> {
@@ -208,16 +301,23 @@ fn contained<'a>(root: &'a Value, id: &str) -> Option<&'a Value> {
         .find(|c| c.get("id").and_then(Value::as_str) == Some(id))
 }
 
-/// `Type/id` from a reference, relative or absolute, with or without
-/// `/_history/<v>`.
-pub fn split(reference: &str) -> Option<(&str, &str)> {
-    let mut parts: Vec<&str> = reference.split('/').collect();
-    if let Some(h) = parts.iter().position(|p| *p == "_history") {
-        parts.truncate(h);
-    }
-    let id = parts.pop().filter(|s| !s.is_empty())?;
-    let ty = parts.pop().filter(|s| !s.is_empty())?;
-    Some((ty, id))
+/// `(type, id)` of a reference to the server at `base`: relative, or
+/// absolute under it, with or without `/_history/<v>`.
+fn local<'a>(reference: &'a str, base: Option<&str>) -> Option<(&'a str, &'a str)> {
+    let rest = if reference.contains(':') {
+        reference
+            .strip_prefix(base?.trim_end_matches('/'))?
+            .strip_prefix('/')?
+    } else {
+        reference
+    };
+    let mut parts = rest.split('/');
+    let (ty, id) = (parts.next()?, parts.next()?);
+    let end = matches!(
+        (parts.next(), parts.next(), parts.next()),
+        (None, _, _) | (Some("_history"), Some(_), None)
+    );
+    (end && !ty.is_empty() && !id.is_empty()).then_some((ty, id))
 }
 
 /// The first NPI among a resource's identifiers.
@@ -343,10 +443,32 @@ mod tests {
 
     use super::*;
 
-    struct None_;
-    impl Resolve for None_ {
-        fn resource(&mut self, _: &str, _: &str) -> Result<Option<Value>, CliError> {
-            Ok(None)
+    /// A source whose only resource is `Practitioner/a1`.
+    struct One;
+    impl Resolve for One {
+        fn base(&self) -> Option<&str> {
+            Some("https://fhir.example.org/r4/")
+        }
+
+        fn resource(&mut self, ty: &str, id: &str) -> Result<Option<Value>, CliError> {
+            Ok((ty == "Practitioner" && id == "a1").then(|| {
+                json!({
+                    "resourceType": "Practitioner",
+                    "identifier": [{"system": NPI, "value": "0000000006"}]
+                })
+            }))
+        }
+    }
+
+    fn map(v: Value) -> Map<String, Value> {
+        v.as_object().unwrap().clone()
+    }
+
+    fn entry(field: &str, npi: Option<&str>, state: Option<&str>) -> ProviderRef {
+        ProviderRef {
+            field: field.into(),
+            npi: npi.map(str::to_string),
+            state: state.map(str::to_string),
         }
     }
 
@@ -371,34 +493,127 @@ mod tests {
         assert_eq!(state(""), None);
     }
 
-    /// Only what the fields print, and only where the source says more than
-    /// a name: an unresolved reference and a field that is not there add
-    /// nothing.
+    /// Only what the fields print, as this resource prints it: a field that
+    /// is not there or prints another provider adds nothing.
     #[test]
     fn a_reference_adds_only_what_its_source_says() {
         let r = json!({
             "resourceType": "Procedure",
             "performer": [{"actor": {"reference": "Practitioner/gone", "display": "Jordan Sample"}}],
-            "location": {"reference": "#place"},
+            "location": {"reference": "#place", "display": "Example Annex"},
             "contained": [{"resourceType": "Location", "id": "place", "address": {"state": "NY"}}]
         });
-        let fields = json!({"performer": "Jordan Sample", "location": "Example Annex"});
-        let of = |f: &Value| of(&r, f.as_object().unwrap(), &mut None_).unwrap();
-        assert_eq!(
-            of(&fields),
-            [ProviderRef {
-                field: "location".into(),
-                npi: None,
-                state: Some("NY".into())
-            }]
-        );
-        assert!(of(&json!({"performer": "Jordan Sample"})).is_empty());
+        let of = |f: Value| of(&r, &map(f), &mut One).unwrap();
+        let both = of(json!({"performer": "Jordan Sample", "location": "Example Annex"}));
+        assert_eq!(both.refs, [entry("location", None, Some("NY"))]);
+        assert_eq!(both.unresolved, BTreeSet::from(["performer"]));
+        assert!(of(json!({"location": "Example Clinic"})).refs.is_empty());
+        assert!(of(json!({})).refs.is_empty());
     }
 
-    /// The fields compared are all the fields references print, and a fill's
-    /// prescriber is only in its record.
+    /// The element followed is the one that prints the name: an agent under
+    /// a requester, and a place where the performer has no name.
     #[test]
-    fn the_source_that_wrote_the_fields_prints_the_same_providers() {
+    fn the_reference_followed_is_the_one_printed() {
+        let rx = json!({
+            "resourceType": "MedicationRequest",
+            "requester": {"agent": {"reference": "Practitioner/a1", "display": "Jordan Sample"}}
+        });
+        assert_eq!(printed(&rx, "prescriber"), Some("Jordan Sample"));
+        let fields = map(json!({"prescriber": "Jordan Sample"}));
+        assert_eq!(
+            of(&rx, &fields, &mut One).unwrap().refs,
+            [entry("prescriber", Some("0000000006"), None)]
+        );
+        let fill = json!({
+            "resourceType": "MedicationDispense",
+            "performer": [{"actor": {"reference": "Practitioner/a1"}}],
+            "location": {"display": "Sample Pharmacy"}
+        });
+        assert_eq!(printed(&fill, "pharmacy"), Some("Sample Pharmacy"));
+        let fields = map(json!({"pharmacy": "Sample Pharmacy"}));
+        assert!(of(&fill, &fields, &mut One).unwrap().refs.is_empty());
+    }
+
+    /// An id is unique only on its own server.
+    #[test]
+    fn an_absolute_reference_is_followed_only_on_its_sources_server() {
+        let at = |reference: &str| {
+            let r = json!({
+                "resourceType": "Procedure",
+                "performer": [{"actor": {"reference": reference, "display": "Jordan Sample"}}]
+            });
+            of(&r, &map(json!({"performer": "Jordan Sample"})), &mut One)
+                .unwrap()
+                .refs
+                .len()
+        };
+        assert_eq!(at("Practitioner/a1"), 1);
+        assert_eq!(at("Practitioner/a1/_history/2"), 1);
+        assert_eq!(at("https://fhir.example.org/r4/Practitioner/a1"), 1);
+        assert_eq!(
+            at("https://fhir.example.org/r4/Practitioner/a1/_history/2"),
+            1
+        );
+        for other in [
+            "https://other.example.org/r4/Practitioner/a1",
+            "https://fhir.example.org/r4x/Practitioner/a1",
+            "https://fhir.example.org/Practitioner/a1",
+            "urn:uuid:a1",
+            "Practitioner/a1/extra",
+            "Practitioner/",
+            "a1",
+            "",
+        ] {
+            assert_eq!(at(other), 0, "{other}");
+        }
+    }
+
+    #[test]
+    fn a_record_keeps_what_a_source_cannot_resolve_and_what_another_says() {
+        let fields = map(json!({"performer": "Jordan Sample", "location": "Example Annex"}));
+        let old = [
+            entry("location", None, Some("NY")),
+            entry("performer", Some("0000000006"), Some("FL")),
+        ];
+        let says = |refs: Vec<ProviderRef>, unresolved: &[&'static str]| Found {
+            refs,
+            unresolved: unresolved.iter().copied().collect(),
+        };
+        // Its one source says nothing any more.
+        assert!(says(vec![], &[])
+            .over(&old, &fields, &fields, false)
+            .is_empty());
+        // It could not read the performer.
+        assert_eq!(
+            says(vec![], &["performer"]).over(&old, &fields, &fields, false),
+            [old[1].clone()]
+        );
+        // It says less, and another source stands behind the record.
+        assert_eq!(
+            says(vec![entry("performer", Some("0000000014"), None)], &[])
+                .over(&old, &fields, &fields, true),
+            old
+        );
+        // It prints another performer.
+        let now = map(json!({"performer": "Casey Example", "location": "Example Annex"}));
+        assert_eq!(
+            says(vec![], &["performer"]).over(&old, &fields, &now, true),
+            [old[0].clone()]
+        );
+        // The first source to say something stands.
+        let both = says(vec![entry("performer", Some("0000000006"), None)], &[]).and(says(
+            vec![
+                entry("performer", Some("0000000014"), Some("FL")),
+                entry("location", None, Some("NY")),
+            ],
+            &[],
+        ));
+        assert_eq!(both.over(&[], &fields, &fields, false), old);
+    }
+
+    #[test]
+    fn every_field_a_kind_prints_is_one_a_record_lists() {
         for ty in [
             "Encounter",
             "MedicationRequest",
@@ -407,36 +622,11 @@ mod tests {
             "Procedure",
             "ExplanationOfBenefit",
         ] {
-            for (f, _) in references(&json!({"resourceType": ty})) {
-                assert!(FIELDS.contains(&f), "{ty} {f}");
+            assert!(!references(ty).is_empty());
+            for (f, _) in references(ty) {
+                assert!(FIELDS.contains(f), "{ty} {f}");
             }
         }
-        let same =
-            |a: Value, b: Value| prints_the_same(a.as_object().unwrap(), b.as_object().unwrap());
-        assert!(same(
-            json!({"pharmacy": "Sample Pharmacy", "quantity": 1}),
-            json!({"pharmacy": "Sample Pharmacy", "prescriber": "Casey Example", "quantity": 2})
-        ));
-        assert!(!same(
-            json!({"pharmacy": "Sample Pharmacy"}),
-            json!({"pharmacy": "Example Pharmacy"})
-        ));
-        assert!(!same(
-            json!({"prescriber": "Casey Example"}),
-            json!({"prescriber": "Jordan Sample"})
-        ));
-        assert!(!same(json!({"location": "Example Annex"}), json!({})));
-    }
-
-    #[test]
-    fn a_reference_is_split_whatever_its_shape() {
-        assert_eq!(split("Practitioner/a1"), Some(("Practitioner", "a1")));
-        assert_eq!(
-            split("https://fhir.example.org/r4/Practitioner/a1/_history/2"),
-            Some(("Practitioner", "a1"))
-        );
-        assert_eq!(split("a1"), None);
-        assert_eq!(split("Practitioner/"), None);
-        assert_eq!(split(""), None);
+        assert!(FIELDS.is_sorted());
     }
 }

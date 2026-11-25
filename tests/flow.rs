@@ -2548,6 +2548,9 @@ fn a_record_keeps_who_its_source_says_a_provider_is() {
         "medication 2026-02-10 prescriber 0000000014 TX",
         "medication 2026-02-11 pharmacy 0000000030 -",
         "medication 2026-02-11 prescriber 0000000014 TX",
+        "medication 2026-02-12 prescriber 0000000006 FL",
+        "medication 2026-02-13 pharmacy - TX",
+        "medication 2026-02-13 prescriber 0000000006 FL",
         "procedure 2026-02-10 performer 0000000006 FL",
     ];
     assert_eq!(providers_of(&read()), want);
@@ -2592,9 +2595,91 @@ fn a_record_keeps_who_its_source_says_a_provider_is() {
     std::fs::write(&path, serde_json::to_string(&old).unwrap()).unwrap();
     assert!(providers_of(&read()).is_empty());
     let r = e2.ok(&["reindex"]);
-    assert_eq!(r["providers"], 7, "{r}");
+    assert_eq!(r["providers_updated"], 9, "{r}");
     assert_eq!(providers_of(&read()), want);
-    assert_eq!(e2.ok(&["reindex"])["providers"], 0);
+    assert_eq!(e2.ok(&["reindex"])["providers_updated"], 0);
+
+    // A raw file that no longer reads takes nothing from a record, and
+    // neither does one that is gone.
+    let raw = e
+        .records()
+        .join("Robin Testperson/Records/fakeprov-example-health");
+    std::fs::write(raw.join("Practitioner/prac-one.json"), "{").unwrap();
+    std::fs::remove_file(raw.join("Location/loc-one.json")).unwrap();
+    assert_eq!(e2.ok(&["reindex"])["providers_updated"], 0);
+    assert_eq!(providers_of(&read()), want);
+}
+
+/// Two sources state one fact and print it alike; one identifies its
+/// providers and the other does not. Neither takes from the other, whichever
+/// imports last.
+#[test]
+fn two_sources_of_one_record_keep_what_either_says_of_its_providers() {
+    let base = Env::new("provider-two");
+    setup(&base);
+    let only = |v: &Value, kinds: &[&str]| {
+        v["resourceType"]
+            .as_str()
+            .is_none_or(|t| t == "Patient" || kinds.contains(&t))
+    };
+    let stream = |org: &str, kinds: &[&str]| -> String {
+        medrec::testdata::PROVIDERS_STREAM
+            .lines()
+            .filter_map(|l| {
+                let mut v: Value = serde_json::from_str(l).unwrap();
+                if !only(&v, kinds) {
+                    return None;
+                }
+                if let Some(counts) = v.get_mut("counts").and_then(Value::as_object_mut) {
+                    counts.retain(|k, _| k == "Patient" || kinds.contains(&k.as_str()));
+                }
+                if v["organization"].is_object() {
+                    v["organization"]["id"] = org.into();
+                    v["organization"]["fhir_base"] = format!("https://{org}.example.org").into();
+                }
+                Some(format!("{}\n", serde_json::to_string(&v).unwrap()))
+            })
+            .collect()
+    };
+    let bare = stream("one", &["Encounter"]);
+    let full = stream(
+        "two",
+        &["Encounter", "Practitioner", "Organization", "Location"],
+    );
+    let import = |s: &str| {
+        provider_env(&base, s).ok(&[
+            "import",
+            "--from",
+            "fakeprov",
+            "--from-profile",
+            "adult1",
+            "--patient",
+            "pat-0001",
+            "--person",
+            "Robin",
+        ])
+    };
+    let path = base.records().join("Robin Testperson/index.json");
+    let read =
+        || -> Value { serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap() };
+    let want = [
+        "encounter 2026-02-10 location - TX",
+        "encounter 2026-02-10 practitioner 0000000006 FL",
+        "encounter 2026-02-10 service_provider 0000000022 GA",
+        "encounter 2026-02-17 location - GA",
+    ];
+    import(&bare);
+    assert!(providers_of(&read()).is_empty());
+    import(&full);
+    assert_eq!(read()["records"].as_array().unwrap().len(), 2);
+    assert_eq!(providers_of(&read()), want);
+    for s in [&full, &bare, &full] {
+        let r = import(s);
+        assert_eq!(r["records_updated"], 0, "{r}");
+        assert_eq!(providers_of(&read()), want);
+    }
+    assert_eq!(base.ok(&["reindex"])["providers_updated"], 0);
+    assert_eq!(providers_of(&read()), want);
 }
 
 #[test]

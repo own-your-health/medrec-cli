@@ -44,12 +44,13 @@ use crate::ids;
 use crate::intake::{self, classify, filetype, text};
 use crate::model::{
     filed_by, now_rfc3339, Document, Household, Identifier, ImportRun, Organization, Origin,
-    Person, PersonIndex, PersonText, Provenance, ProvenanceSource, Record, Rendering, Source,
-    SourceResource,
+    Person, PersonIndex, PersonText, Provenance, ProvenanceSource, ProviderRef, Record, Rendering,
+    Source, SourceResource,
 };
 use crate::normalize;
 use crate::people;
 use crate::proc::{which, Bounded};
+use crate::providers::Found;
 use crate::stream::{self, Header, Item, RawResource, RecordsReader, Skip};
 use crate::version::{self, Filing};
 
@@ -734,6 +735,7 @@ fn file_streamed(
     let mut held = Held {
         folder,
         source_dir: &source_dir,
+        base: base_prov.source.fhir_base.clone(),
         stream: stream_providers(&resources),
         read: HashMap::new(),
         listed: HashMap::new(),
@@ -775,8 +777,8 @@ fn file_streamed(
                         .insert("prescriber".into(), serde_json::json!(name));
                 }
             }
-            rec.providers = crate::providers::of(&v, &rec.fields, &mut held)?;
-            match merge(&mut index, rec, filing, &mut idless) {
+            let found = crate::providers::of(&v, &rec.fields, &mut held)?;
+            match merge(&mut index, rec, found, filing, &mut idless) {
                 Merge::Added => added += 1,
                 Merge::Updated => updated += 1,
                 Merge::Unchanged => unchanged += 1,
@@ -1588,10 +1590,12 @@ enum Merge {
 /// the type-and-date key before 0.2.6 splits on its next import.
 fn merge(
     index: &mut PersonIndex,
-    rec: Record,
+    mut rec: Record,
+    found: Found,
     filing: Option<Filing>,
     idless: &mut Idless,
 ) -> Merge {
+    rec.providers = found.refs.clone();
     let incoming = rec.provenance[0].clone();
     let incoming_type = incoming
         .source_resource
@@ -1650,7 +1654,7 @@ fn merge(
             if let Some(i) = at.filter(|&i| Some(i) != owner) {
                 return refresh_provenance(existing, i, incoming, filing);
             }
-            return rewrite(existing, rec, incoming, at, filing);
+            return rewrite(existing, rec, found, incoming, at, filing);
         }
         if let Some(shared) = index
             .records
@@ -1661,6 +1665,7 @@ fn merge(
         }
         if let Some(existing) = index.records.iter_mut().find(|r| r.key == rec.key) {
             existing.provenance.push(incoming);
+            existing.providers = states_too(existing, &rec, found);
             return Merge::Updated;
         }
         index.records.push(rec);
@@ -1705,13 +1710,14 @@ fn merge(
         Some(i) => {
             idless.claimed.insert((key, i));
             if mine.first() == Some(&i) {
-                return rewrite(existing, rec, incoming, Some(i), filing);
+                return rewrite(existing, rec, found, incoming, Some(i), filing);
             }
             refresh_provenance(existing, i, incoming, filing)
         }
         None => {
             idless.claimed.insert((key, existing.provenance.len()));
             existing.provenance.push(incoming);
+            existing.providers = states_too(existing, &rec, found);
             Merge::Updated
         }
     }
@@ -1722,6 +1728,7 @@ fn merge(
 struct Held<'a> {
     folder: &'a Folder,
     source_dir: &'a str,
+    base: Option<String>,
     stream: HashMap<(String, String), Value>,
     read: HashMap<String, Option<Value>>,
     /// The raw files each type's folder holds, listed once.
@@ -1729,6 +1736,10 @@ struct Held<'a> {
 }
 
 impl crate::providers::Resolve for Held<'_> {
+    fn base(&self) -> Option<&str> {
+        self.base.as_deref()
+    }
+
     fn resource(&mut self, resource_type: &str, id: &str) -> Result<Option<Value>, CliError> {
         let key = (resource_type.to_string(), id.to_string());
         if let Some(v) = self.stream.get(&key) {
@@ -1790,9 +1801,7 @@ fn stream_prescribers(resources: &[RawResource]) -> HashMap<String, Option<Strin
 /// A MedicationRequest's prescriber: `requester.display` (R4), or
 /// `requester.agent.display` (STU3).
 fn requester(v: &Value) -> Option<String> {
-    normalize::path_str(v, "requester.display")
-        .or_else(|| normalize::path_str(v, "requester.agent.display"))
-        .map(str::to_string)
+    crate::providers::printed(v, "prescriber").map(str::to_string)
 }
 
 /// The id in a reference to a MedicationRequest (`MedicationRequest/<id>`,
@@ -1850,6 +1859,20 @@ fn same_content(a: &Record, b: &Record) -> bool {
         && a.providers == b.providers
 }
 
+/// What `existing` says of its providers once `rec`, the same fact from
+/// another resource, adds what `found` says of those both print.
+fn states_too(existing: &Record, rec: &Record, mut found: Found) -> Vec<ProviderRef> {
+    found
+        .refs
+        .retain(|r| rec.fields.get(&r.field) == existing.fields.get(&r.field));
+    found.over(
+        &existing.providers,
+        &existing.fields,
+        &existing.fields,
+        true,
+    )
+}
+
 /// Write `rec` over the record `existing`, whose provenance at `at` is this
 /// resource's own. A version filed new or in place of the held one takes
 /// that provenance's place; one read again refreshes it
@@ -1857,11 +1880,14 @@ fn same_content(a: &Record, b: &Record) -> bool {
 /// says the same thing from the same version is unchanged.
 fn rewrite(
     existing: &mut Record,
-    rec: Record,
+    mut rec: Record,
+    found: Found,
     incoming: Provenance,
     at: Option<usize>,
     filing: Option<Filing>,
 ) -> Merge {
+    let shared = existing.provenance.len() > usize::from(at.is_some());
+    rec.providers = found.over(&existing.providers, &existing.fields, &rec.fields, shared);
     let changed = !same_content(existing, &rec);
     let new_version = matches!(filing, None | Some(Filing::Replaces))
         && at.is_none_or(|i| existing.provenance[i] != incoming);
@@ -2470,7 +2496,7 @@ mod tests {
             Some(q) if q == p => Some(Filing::Unchanged),
             Some(_) => Some(Filing::Replaces),
         };
-        merge(index, rec, filing, &mut Idless::default())
+        merge(index, rec, Found::default(), filing, &mut Idless::default())
     }
 
     fn eob_from(id: &str, paid: f64) -> (Value, Provenance) {
@@ -2581,7 +2607,7 @@ mod tests {
             let mut idless = Idless::default();
             order
                 .iter()
-                .map(|v| merge(&mut index, filed(v), filing, &mut idless))
+                .map(|v| merge(&mut index, filed(v), Found::default(), filing, &mut idless))
                 .collect()
         };
         let first = import([&a, &b], None);
@@ -2700,7 +2726,13 @@ mod tests {
                 .iter()
                 .map(|&i| {
                     let (v, path) = served[i];
-                    merge(&mut index, filed(v, path), filing, &mut idless)
+                    merge(
+                        &mut index,
+                        filed(v, path),
+                        Found::default(),
+                        filing,
+                        &mut idless,
+                    )
                 })
                 .collect()
         };
