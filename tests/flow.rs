@@ -2868,8 +2868,10 @@ fn the_raw_files_of_a_record_are_counted_by_the_names_of_their_elements() {
         );
     }
     // The answers with no value name no file in an error either.
-    let no_name = |how: &str| {
-        let out = base.run(&["records", "raw", &id, how]);
+    let of_one = |how| ["records", "raw", id.as_str(), how];
+    let no_name = |args: [&str; 4]| {
+        let out = base.run(&args);
+        let how = args.join(" ");
         assert_eq!(out.status.code(), Some(1), "{how}");
         let says = String::from_utf8(out.stderr).unwrap();
         assert!(says.contains("could not be read"), "{how}: {says}");
@@ -2883,15 +2885,18 @@ fn the_raw_files_of_a_record_are_counted_by_the_names_of_their_elements() {
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
     };
     may(0o000);
-    no_name("--changes");
-    no_name("--fields");
+    let all = ["records", "fields", "--kind", "claim"];
+    for args in [of_one("--changes"), of_one("--fields"), all] {
+        no_name(args);
+    }
     may(0o600);
     let dir = path.parent().unwrap();
     let aside = dir.with_extension("aside");
     std::fs::rename(dir, &aside).unwrap();
     std::fs::write(dir, "not a folder").unwrap();
-    no_name("--changes");
-    no_name("--fields");
+    for args in [of_one("--changes"), of_one("--fields"), all] {
+        no_name(args);
+    }
     // Nor who can be meant.
     let out = base.run(&["records", "fields", "--person", "Testperson"]);
     assert_eq!(out.status.code(), Some(4));

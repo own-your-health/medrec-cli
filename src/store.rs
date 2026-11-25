@@ -416,6 +416,11 @@ impl Store {
             .map_err(|e| CliError::Other(format!("reading {}: {e}", self.display_path(rel))))
     }
 
+    /// Whether it is a folder of this machine.
+    pub fn is_local(&self) -> bool {
+        matches!(self.location, Location::Dir(_))
+    }
+
     /// The same, never from the read cache; `None` where the file is not there.
     pub fn read_bytes_fresh(&self, rel: &str) -> Result<Option<Vec<u8>>, CliError> {
         let read = match &self.location {

@@ -244,6 +244,12 @@ pub fn fields(
         let idx = folder.index(p).map_err(unnamed)?;
         let of = |r: &&Record| kinds.is_empty() || kinds.contains(&r.kind);
         let chosen: Vec<&Record> = idx.records.iter().filter(of).collect();
+        if folder.store.is_local() {
+            for r in chosen {
+                count.record(r, &mut |rel| bytes(folder, rel).map_err(unnamed))?;
+            }
+            continue;
+        }
         // One copy per folder of raw files, not one call per file.
         let paths = chosen.iter().flat_map(|r| currents(r));
         let dirs: BTreeSet<String> = paths
@@ -256,7 +262,7 @@ pub fn fields(
             }
         }
         for r in chosen {
-            count.record(r, &mut |rel| Ok(copy(tmp.path(), rel)))?;
+            count.record(r, &mut |rel| copy(tmp.path(), rel))?;
         }
     }
     Ok(count.done())
@@ -267,16 +273,21 @@ pub fn kinds() -> impl Iterator<Item = &'static str> {
     normalize::FIELDS.iter().map(|(kind, _)| *kind)
 }
 
-fn copy(tmp: &Path, rel: &str) -> Option<Vec<u8>> {
-    std::fs::read(tmp.join(rel)).ok()
-}
-
 /// A raw file's bytes; `None` where it is not there.
 type Read = Result<Option<Vec<u8>>, CliError>;
 
 /// A raw file, never of the read cache.
 fn bytes(folder: &Folder, rel: &str) -> Read {
     folder.store.read_bytes_fresh(rel)
+}
+
+/// The same of the copies in `tmp`.
+fn copy(tmp: &Path, rel: &str) -> Read {
+    match std::fs::read(tmp.join(rel)) {
+        Ok(b) => Ok(Some(b)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(unnamed(CliError::Other(e.to_string()))),
+    }
 }
 
 /// The current raw files of a record, and the CLI each came by.
