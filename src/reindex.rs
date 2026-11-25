@@ -16,20 +16,30 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::about;
+use crate::changes::{self, Changes};
 use crate::claims::without_links;
-use crate::folder::Folder;
+use crate::folder::{self, Folder};
 use crate::given::{self, Given};
 use crate::import;
-use crate::model::{Household, InError, PersonIndex, Provenance, Record, Word};
+use crate::model::{today, Household, InError, Person, PersonIndex, Provenance, Record, Word};
 use crate::normalize;
 use crate::people;
+use crate::viewfiles;
 
 #[derive(Debug, Default, Serialize)]
 pub struct Reindexed {
     /// Nothing was written.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub dry_run: bool,
+    /// Of a dry run: every index is in the folder, at its end, as it was read.
+    /// One that is not is an error.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fresh: Option<bool>,
     pub people: Vec<PersonReindexed>,
+    /// Of a dry run of one person's records: what would change in everyone
+    /// else's views, which a run makes again too.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub others: Vec<OtherViews>,
     pub claims: usize,
     pub reshaped: usize,
     pub unchanged: usize,
@@ -68,6 +78,29 @@ pub struct PersonReindexed {
     pub results_split: usize,
     pub papers_updated: usize,
     pub papers_unread: usize,
+    /// Of a dry run: what would change in the person's views.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub views: Option<Changes>,
+}
+
+/// A person whose records a run would leave, and whose views it would make
+/// again.
+#[derive(Debug, Serialize)]
+pub struct OtherViews {
+    pub person: String,
+    pub views: Changes,
+}
+
+/// Refuse to count when another command wrote a person's index since it was
+/// read, with this MD5.
+fn as_read_still(folder: &Folder, p: &Person, md5: Option<&str>) -> Result<(), CliError> {
+    let rel = folder::index_rel(p);
+    if folder.store.md5(&rel)?.as_deref() == md5 {
+        return Ok(());
+    }
+    Err(CliError::Other(format!(
+        "{rel} was written elsewhere while this read it, so the counts would be of neither: run this again"
+    )))
 }
 
 /// The claim's own content, links left out.
@@ -86,7 +119,9 @@ fn content(r: &Record) -> impl PartialEq + '_ {
 /// is: re-keying is an import's to do. Bills and
 /// receipts gain the statement fields their text gives and they lack
 /// ([`crate::bill::backfill`]). The index is written only when something
-/// changed, and never when `dry_run`: then this counts what it would do.
+/// changed, and never when `dry_run`: then this counts what it would do, and
+/// what the views would say otherwise ([`crate::changes`]). The views are
+/// brought up to date whether or not an index is written.
 pub fn claims(
     folder: &Folder,
     h: &Household,
@@ -98,8 +133,13 @@ pub fn claims(
         dry_run,
         ..Reindexed::default()
     };
+    let mut as_read: Vec<(&Person, PersonIndex, Option<String>)> = Vec::new();
+    let mut would_be: BTreeMap<String, PersonIndex> = BTreeMap::new();
     for p in people::selected(h, person)? {
-        let mut idx = folder.whole_index(p)?;
+        let (mut idx, md5) = folder.whole_index_read(p)?;
+        if dry_run {
+            as_read.push((p, idx.clone(), md5));
+        }
         let raw_of = |r: &Record| r.provenance.iter().find_map(|pr| pr.raw_path.clone());
         // One copy per folder of raw files, not one call per file.
         let dirs: BTreeSet<String> = idx
@@ -168,8 +208,14 @@ pub fn claims(
             row.results_split,
             row.papers_updated,
         ];
-        if !dry_run && changed.iter().any(|n| *n > 0) {
-            folder.save_index(p, &mut idx)?;
+        match (changed.iter().any(|n| *n > 0), dry_run) {
+            (true, false) => folder.save_index(p, &mut idx)?,
+            // As a saved index is.
+            (true, true) => crate::claims::link(&mut idx.records),
+            (false, _) => {}
+        }
+        if dry_run {
+            would_be.insert(p.id.clone(), idx);
         }
         out.statements += row.statements;
         out.providers_updated += row.providers_updated;
@@ -184,7 +230,49 @@ pub fn claims(
         out.without_raw += row.without_raw;
         out.people.push(row);
     }
+    if dry_run {
+        count_views(folder, h, as_read, would_be, &mut out)?;
+    } else {
+        // What another medrec's rules made of the same files is made again too.
+        folder.every_view();
+    }
     Ok(out)
+}
+
+/// Count what would change in everyone's views: in the row of each person
+/// whose records were read again, and in `others`. `as_read` is their indexes
+/// as the folder has them, and `would_be` as a run would leave them.
+fn count_views<'a>(
+    folder: &Folder,
+    h: &'a Household,
+    mut as_read: Vec<(&'a Person, PersonIndex, Option<String>)>,
+    mut would_be: BTreeMap<String, PersonIndex>,
+    out: &mut Reindexed,
+) -> Result<(), CliError> {
+    for p in &h.people {
+        if !would_be.contains_key(&p.id) {
+            let (idx, md5) = folder.whole_index_read(p)?;
+            would_be.insert(p.id.clone(), idx.clone());
+            as_read.push((p, idx, md5));
+        }
+    }
+    let views = viewfiles::preview(folder, &would_be)?;
+    for (p, was, _) in &as_read {
+        let (before, after) = (views.before(folder, p)?, views.after(p)?);
+        let views = changes::of(p, was, &would_be[&p.id], &before, &after, &today());
+        match out.people.iter_mut().find(|row| row.person == p.id) {
+            Some(row) => row.views = Some(views),
+            None => out.others.push(OtherViews {
+                person: p.id.clone(),
+                views,
+            }),
+        }
+    }
+    for (p, _, md5) in &as_read {
+        as_read_still(folder, p, md5.as_deref())?;
+    }
+    out.fresh = Some(true);
+    Ok(())
 }
 
 /// The folders of raw files the records are of, one per source.
@@ -740,5 +828,41 @@ mod tests {
         let from = idx.records[0].fields_from.as_deref();
         assert_eq!(from, Some("one/Condition/c.json"));
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// Counts of an index another command wrote meanwhile would be of neither.
+    #[test]
+    fn an_index_written_meanwhile_is_not_counted() {
+        use crate::folder::Access;
+        use crate::store::{Location, Reads, Store, DEFAULT_BUDGET};
+
+        let root = crate::testutil::temp_dir("reindex-meanwhile");
+        let loc = Location::Dir(root.clone());
+        let store = Store::open(&loc, Reads::Fresh, DEFAULT_BUDGET).unwrap();
+        folder::create(&store).unwrap();
+        let f = Folder::open_at(&loc, Access::Fresh, DEFAULT_BUDGET).unwrap();
+        let p: Person = serde_json::from_value(json!({
+            "id": "p_exampleaaaaaaaaaaaaa", "name": "Robin Example", "folder": "Robin Example",
+            "adult": true, "created_at": "2024-01-02T00:00:00Z"
+        }))
+        .unwrap();
+        // One that is not there is read as none, and stays none.
+        let (_, none) = f.whole_index_read(&p).unwrap();
+        assert!(none.is_none() && as_read_still(&f, &p, None).is_ok());
+        let write = |rev: u64| {
+            let mut idx = PersonIndex::new(&p.id);
+            idx.rev = rev;
+            let text = serde_json::to_string(&idx).unwrap();
+            store.write_text(&folder::index_rel(&p), &text).unwrap();
+        };
+        write(1);
+        assert!(as_read_still(&f, &p, None).is_err());
+        let (idx, md5) = f.whole_index_read(&p).unwrap();
+        assert_eq!(idx.rev, 1);
+        assert!(as_read_still(&f, &p, md5.as_deref()).is_ok());
+        write(2);
+        let e = as_read_still(&f, &p, md5.as_deref()).unwrap_err();
+        assert!(e.to_string().contains("run this again"), "{e}");
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

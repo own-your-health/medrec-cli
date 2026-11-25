@@ -3869,3 +3869,387 @@ fn what_an_event_shows_of_another_person_is_judged_as_theirs() {
     assert!(assert_fits(&t, RECORDS, &r).to_string().contains(paper));
     let _ = std::fs::remove_dir_all(&e.root);
 }
+
+/// The folders of the raw files a fixture names: it has none of those.
+fn raw_folders(e: &Env, dir: &Path) {
+    let v: Value = serde_json::from_slice(&std::fs::read(dir.join("index.json")).unwrap()).unwrap();
+    let records = v["records"].as_array().unwrap().iter();
+    let of = records.flat_map(|r| r["provenance"].as_array().unwrap());
+    let documents = v["documents"].as_array().unwrap().iter();
+    for p in of.chain(documents.map(|d| &d["provenance"])) {
+        if let Some((folder, _)) = p["raw_path"].as_str().and_then(|r| r.rsplit_once('/')) {
+            std::fs::create_dir_all(e.records().join(folder)).unwrap();
+        }
+    }
+}
+
+/// Every file of the folder.
+fn folder_files(dir: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
+    let mut out = BTreeMap::new();
+    for f in std::fs::read_dir(dir).unwrap() {
+        let path = f.unwrap().path();
+        if path.is_dir() {
+            out.extend(folder_files(&path));
+        } else {
+            out.insert(path.clone(), std::fs::read(&path).unwrap());
+        }
+    }
+    out
+}
+
+/// One of a person's views as an earlier medrec made it: changed, or not there.
+fn view_before(e: &Env, pid: &str, name: &str, change: impl FnOnce(&mut Value) -> bool) {
+    view_by("0.9.5", e, pid, name, change);
+}
+
+/// The same of any medrec.
+fn view_by(medrec: &str, e: &Env, pid: &str, name: &str, change: impl FnOnce(&mut Value) -> bool) {
+    let views = e.records().join("views");
+    let read = |p: &Path| -> Value { serde_json::from_slice(&std::fs::read(p).unwrap()).unwrap() };
+    let mut all = read(&views.join("views.json"));
+    all["medrec"] = medrec.into();
+    let (stem, ext) = name.split_once('.').unwrap();
+    let stored = |md5: &str| views.join(pid).join(format!("{stem}.{}.{ext}", &md5[..12]));
+    let files = all["people"][pid]["files"].as_object_mut().unwrap();
+    let md5 = files.remove(name).unwrap();
+    let path = stored(md5.as_str().unwrap());
+    let mut v = read(&path);
+    if change(&mut v) {
+        let bytes = serde_json::to_vec(&v).unwrap();
+        let md5 = medrec::hash::md5_hex(&bytes);
+        files.insert(name.into(), md5.clone().into());
+        std::fs::write(stored(&md5), bytes).unwrap();
+    }
+    std::fs::write(views.join("views.json"), serde_json::to_vec(&all).unwrap()).unwrap();
+}
+
+/// What a dry run of the reindex counts for a person, and that it writes
+/// nothing.
+fn changes_of(e: &Env, pid: &str) -> Value {
+    let before = folder_files(&e.records());
+    let v = e.ok(&["reindex", "--dry-run"]);
+    assert!(
+        folder_files(&e.records()) == before,
+        "a dry run writes nothing"
+    );
+    assert_eq!(v["fresh"], true);
+    let mut people = v["people"].as_array().unwrap().iter();
+    people.find(|p| p["person"] == pid).unwrap()["views"].clone()
+}
+
+const NONE: fn() -> Value = || json!({"added": 0, "removed": 0, "changed": 0});
+
+/// A dry run of the reindex counts what each person's views would say
+/// otherwise, against those the folder has.
+#[test]
+fn a_dry_run_counts_what_would_be_private() {
+    let e = Env::new("counted");
+    let dir = fixture_household(&e, "questionnaires", &["index.json"]);
+    raw_folders(&e, &dir);
+    let alex = h_id(&e, "Alex Testperson");
+    e.ok(&["views", "write"]);
+    let v = changes_of(&e, &alex);
+    assert_eq!(v["against"], env!("CARGO_PKG_VERSION"), "{v}");
+    assert_eq!(v["stale"], false, "{v}");
+    let private = v["private"].as_object().unwrap();
+    let nothing = |n: &Value| *n == json!({}) || *n == json!(0);
+    assert!(private.values().all(nothing), "{v}");
+    for list in ["events", "bills", "worth_a_call", "not_billed"] {
+        assert_eq!(v[list], NONE(), "{v}");
+    }
+    // As a medrec that knew no questionnaire, and held private an open result,
+    // and a result and an event that are not there now.
+    view_before(&e, &alex, "private.json", |v| {
+        for list in ["records", "documents"] {
+            let map = v[list].as_object_mut().unwrap();
+            map.retain(|_, why| why["from"] != "test" && why["from"] != "words");
+        }
+        let why = json!({"area": "household", "from": "household"});
+        v["records"]["r_sunlightaaaaaaaaaaaa"] = why.clone();
+        v["records"]["r_nolongeraaaaaaaaaaaa"] = why.clone();
+        v["events"]["e_nolongeraaaaaaaaaaaa"] = why;
+        true
+    });
+    let v = changes_of(&e, &alex);
+    assert_eq!(v["against"], "0.9.5");
+    let want = json!({
+        "added": {"document": 1, "report": 1, "result": 10},
+        "added_by": {"test": 11, "words": 1},
+        "questionnaires": {"anxiety": 2, "depression": 4},
+        "questionnaires_one_of_a_kind": 6,
+        "opened": {"result": 1},
+        "gone": {"event": 1, "record": 1},
+        "given": {},
+        "parts": {},
+    });
+    assert_eq!(v["private"], want);
+    // Of one person's records, the others' views are counted too: a run makes
+    // everyone's again.
+    let other = h_id(&e, "Robin Testperson");
+    let one = e.ok(&["reindex", "--dry-run", "--person", &other]);
+    assert_eq!(one["people"].as_array().unwrap().len(), 1, "{one}");
+    assert_eq!(one["people"][0]["person"], *other);
+    let others = one["others"].as_array().unwrap().iter();
+    let of = |o: &&Value| o["person"] == *alex;
+    assert_eq!(others.clone().find(of).unwrap()["views"], v, "{one}");
+    assert_eq!(others.clone().filter(of).count(), 1);
+    let all = e.ok(&["reindex", "--dry-run"]);
+    assert!(all.get("others").is_none(), "{all}");
+    let everyone = all["people"].as_array().unwrap().len();
+    assert_eq!(others.count() + 1, everyone);
+    let out = e.run(&["reindex", "--dry-run", "--person", &other]);
+    let text = String::from_utf8(out.stdout).unwrap();
+    let (own, others) = text.split_once("\nthe others' records are not").unwrap();
+    for (part, id) in [(own, &other), (others, &alex)] {
+        assert!(part.contains(&format!("\n{id}: in the views")), "{text}");
+    }
+    // No name, id, date or kind there is one of.
+    let text = v.to_string();
+    let words = [
+        "r_f", "r_l", "r_n", "r_s", "d_a", "d_s", "e_n", "p_a", "2024", "suicide", "alcohol",
+        "Alex",
+    ];
+    for word in words {
+        assert!(!text.contains(word), "{word}: {text}");
+    }
+    let out = e.run(&["reindex", "--dry-run"]);
+    let text = String::from_utf8(out.stdout).unwrap();
+    for line in [
+        "in the views (against medrec 0.9.5's)",
+        "private, more: 1 document, 1 report, 10 result",
+        "private before, open now: 1 result",
+        "their questionnaires: 2 anxiety, 4 depression, 6 of a kind there is one of",
+    ] {
+        assert!(text.contains(line), "{line}: {text}");
+    }
+    // The run it counts for: the index is as it was, and the views are made
+    // again under these rules, with what was counted.
+    let (index, then) = (std::fs::read(dir.join("index.json")).unwrap(), v);
+    e.ok(&["reindex"]);
+    assert_eq!(std::fs::read(dir.join("index.json")).unwrap(), index);
+    let (files, _) = views_of(&e, &alex);
+    for id in ["r_sunlightaaaaaaaaaaaa", "r_nolongeraaaaaaaaaaaa"] {
+        assert!(files["private"]["records"].get(id).is_none(), "{id}");
+    }
+    let private = ["records", "documents"].map(|k| files["private"][k].as_object().unwrap());
+    let by = |m: &&Value| ["test", "words"].iter().any(|from| m["from"] == *from);
+    let asked: usize = private.iter().map(|m| m.values().filter(by).count()).sum();
+    let counted = then["private"]["added"].as_object().unwrap().values();
+    let counted: u64 = counted.map(|n| n.as_u64().unwrap()).sum();
+    assert_eq!(asked as u64, counted);
+    let v = changes_of(&e, &alex);
+    assert_eq!(v["against"], env!("CARGO_PKG_VERSION"), "{v}");
+    let private = v["private"].as_object().unwrap();
+    assert!(private.values().all(nothing), "{v}");
+    let out = e.run(&["reindex", "--dry-run"]);
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.contains("\n  nothing counted\n"), "{text}");
+    // A build of the same version whose rules are others', and the same files:
+    // what is counted is made.
+    view_by(env!("CARGO_PKG_VERSION"), &e, &alex, "private.json", |v| {
+        v["records"]["r_sunlightaaaaaaaaaaaa"] = json!({"area": "household", "from": "household"});
+        true
+    });
+    let v = changes_of(&e, &alex);
+    assert_eq!(v["private"]["opened"], json!({"result": 1}), "{v}");
+    e.ok(&["reindex"]);
+    let v = changes_of(&e, &alex);
+    assert_eq!(v["private"]["opened"], json!({}), "{v}");
+    // A file the views were not made from.
+    e.ok(&["private", "mark", "r_sunlightaaaaaaaaaaaa"]);
+    view_before(&e, &alex, "private.json", |_| true);
+    let marks = dir.join("marks.json");
+    let mut m: Value = serde_json::from_slice(&std::fs::read(&marks).unwrap()).unwrap();
+    m["private"] = json!([]);
+    std::fs::write(&marks, serde_json::to_vec(&m).unwrap()).unwrap();
+    let v = changes_of(&e, &alex);
+    assert_eq!(v["stale"], true, "{v}");
+    assert_eq!(v["private"]["opened"], json!({"result": 1}), "{v}");
+    // Views that are named and not there are no views to count against.
+    let views = e.records().join("views");
+    let all: Value =
+        serde_json::from_slice(&std::fs::read(views.join("views.json")).unwrap()).unwrap();
+    let md5 = all["people"][&alex]["files"]["bills.json"]
+        .as_str()
+        .unwrap();
+    let stored = views.join(&alex).join(format!("bills.{}.json", &md5[..12]));
+    let kept = std::fs::read(&stored).unwrap();
+    for torn in [None, Some(&b"{}"[..])] {
+        match torn {
+            Some(bytes) => std::fs::write(&stored, bytes).unwrap(),
+            None => std::fs::remove_file(&stored).unwrap(),
+        }
+        let out = e.run(&["reindex", "--dry-run"]);
+        let said = String::from_utf8(out.stderr).unwrap();
+        assert!(
+            !out.status.success() && said.contains("has no bills.json"),
+            "{said}"
+        );
+        assert!(out.stdout.is_empty(), "nothing is counted");
+    }
+    std::fs::write(&stored, kept).unwrap();
+    // Nor is a view of another shape the same as none.
+    view_before(&e, &alex, "standing.json", |v| {
+        v["records"] = json!([]);
+        true
+    });
+    let out = e.run(&["reindex", "--dry-run"]);
+    let said = String::from_utf8(out.stderr).unwrap();
+    assert!(
+        !out.status.success()
+            && said.contains(&format!("views/{alex}/standing.json has another shape"))
+            && said.contains("views write --all"),
+        "{said}"
+    );
+    assert!(out.stdout.is_empty(), "nothing is counted");
+    // Nor is an index of the views that does not read, or is no medrec's.
+    let kept = std::fs::read(views.join("views.json")).unwrap();
+    let again = "`medrec views write` makes it again";
+    for (torn, remedy) in [
+        (&b"{"[..], again),
+        (br#"{"schema": "another/v1"}"#, again),
+        (br#"{"schema": "medrec-views/v3"}"#, "upgrade"),
+        (
+            br#"{"schema": "medrec-views/v10", "people": []}"#,
+            "upgrade",
+        ),
+    ] {
+        std::fs::write(views.join("views.json"), torn).unwrap();
+        let out = e.run(&["reindex", "--dry-run"]);
+        let said = String::from_utf8(out.stderr).unwrap();
+        assert!(
+            !out.status.success() && said.contains("views/views.json is") && said.contains(remedy),
+            "{said}"
+        );
+        assert!(out.stdout.is_empty(), "nothing is counted");
+    }
+    std::fs::write(views.join("views.json"), kept).unwrap();
+    // A folder with no views: all there is would be added.
+    std::fs::remove_dir_all(e.records().join("views")).unwrap();
+    let v = changes_of(&e, &alex);
+    assert!(v["against"].is_null() && v["stale"] == false, "{v}");
+    let want = json!({
+        "claim": 1, "condition": 2, "document": 2, "event": 1, "report": 1, "result": 10,
+    });
+    assert_eq!(v["private"]["added"], want, "{v}");
+    assert_eq!(v["private"]["opened"], json!({}), "{v}");
+    assert_eq!(v["private"]["gone"], json!({}), "{v}");
+    let out = e.run(&["reindex", "--dry-run"]);
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.contains("there are no views yet"), "{text}");
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
+/// Before it, a list of current ones was those whose status was no end.
+#[test]
+fn a_dry_run_counts_what_would_be_current_and_about_another() {
+    let e = Env::new("counted-current");
+    let dir = fixture_household(&e, "standing", &["index.json"]);
+    raw_folders(&e, &dir);
+    let alex = h_id(&e, "Alex Testperson");
+    e.ok(&["views", "write"]);
+    let v = changes_of(&e, &alex);
+    for kind in ["allergy", "condition", "medication"] {
+        assert_eq!(v["current"][kind], NONE(), "{v}");
+    }
+    view_before(&e, &alex, "standing.json", |_| false);
+    let v = changes_of(&e, &alex);
+    let moved =
+        |added: u64, removed: u64| json!({"added": added, "removed": removed, "changed": 0});
+    let want = json!({
+        "allergy": moved(2, 2),
+        "condition": moved(1, 6),
+        "medication": moved(1, 6),
+    });
+    assert_eq!(v["current"], want);
+    let want = json!({"allergy": 1, "condition": 1, "event": 1, "medication": 2, "result": 1});
+    assert_eq!(v["in_error"], want);
+    let _ = std::fs::remove_dir_all(&e.root);
+
+    let e = Env::new("counted-about");
+    let dir = fixture_household(&e, "questionnaires", &["index.json"]);
+    raw_folders(&e, &dir);
+    let alex = h_id(&e, "Alex Testperson");
+    e.ok(&["views", "write"]);
+    let born = |day: &str| {
+        let path = e.records().join("household.json");
+        let mut h: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        for p in h["people"].as_array_mut().unwrap() {
+            if p["id"] == alex.as_str() {
+                p["birth_date"] = day.into();
+            }
+        }
+        std::fs::write(&path, serde_json::to_vec(&h).unwrap()).unwrap();
+    };
+    born("2023-12-04");
+    let v = changes_of(&e, &alex);
+    let want = json!({"said": 0, "by_age": 7, "documents": 2});
+    assert_eq!(v["about_another"], want);
+    let want = json!({"document": 2, "report": 1, "result": 6});
+    assert_eq!(v["private"]["gone"], want);
+    assert_eq!(v["private"]["opened"], json!({}));
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
+/// Bills, what is worth a call, and the money of events that would be
+/// otherwise.
+#[test]
+fn a_dry_run_counts_the_money_that_would_move() {
+    let e = Env::new("counted-money");
+    let dir = fixture_household(&e, "errors", ERRORS);
+    raw_folders(&e, &dir);
+    let alex = h_id(&e, "Alex Testperson");
+    e.ok(&["views", "write"]);
+    view_before(&e, &alex, "bills.json", |v| {
+        let mut bill = v["bills"][EYE_BILL].clone();
+        bill["left"] = "10.00".into();
+        v["bills"] = json!({EYE_BILL: bill.clone(), SKIN_BILL: bill});
+        v["worth_a_call"][0]["reason"] = "asks_more".into();
+        v["not_billed"][0]["you_owe"] = "50.00".into();
+        true
+    });
+    view_before(&e, &alex, "events.json", |v| {
+        let events = v["events"].as_array_mut().unwrap();
+        let mut each = events.iter_mut().filter(|e| e.get("money").is_some());
+        let e = each.next().unwrap();
+        e["money"]["you_owe"] = "50.00".into();
+        let mut gone = e.clone();
+        gone["id"] = "e_nolongeraaaaaaaaaaaa".into();
+        events.push(gone);
+        events[1]["title"] = "Of other words".into();
+        true
+    });
+    let v = changes_of(&e, &alex);
+    let moved = |added: u64, removed: u64, changed: u64| json!({"added": added, "removed": removed, "changed": changed});
+    assert_eq!(v["bills"], moved(0, 1, 1), "{v}");
+    assert_eq!(v["worth_a_call"], moved(1, 1, 0), "{v}");
+    assert_eq!(v["not_billed"], moved(0, 0, 1), "{v}");
+    assert_eq!(v["events"], moved(0, 1, 1), "{v}");
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
+/// Papers filed before every source of one was kept, and open items with a
+/// private part.
+#[test]
+fn a_dry_run_counts_papers_and_private_parts() {
+    let (e, alex) = parts_household("counted-parts");
+    let h = std::fs::read(e.records().join("household.json")).unwrap();
+    let h: Value = serde_json::from_slice(&h).unwrap();
+    let mut people = h["people"].as_array().unwrap().iter();
+    let found = people.find(|p| p["id"] == alex.as_str()).unwrap();
+    let dir = e.records().join(found["folder"].as_str().unwrap());
+    raw_folders(&e, &dir);
+    let path = dir.join("index.json");
+    let mut v: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    for (d, by) in
+        (v["documents"].as_array_mut().unwrap().iter_mut()).zip(["medrec 0.9.5", "medrec 0.8.3"])
+    {
+        d["provenance"]["filed_by"] = by.into();
+    }
+    std::fs::write(&path, serde_json::to_vec(&v).unwrap()).unwrap();
+    let v = changes_of(&e, &alex);
+    assert_eq!(v["papers"], json!({"filed_before": 2, "source_found": 0}));
+    let want = json!({"claim": 9, "document": 2, "event": 9});
+    assert_eq!(v["private"]["parts"], want);
+    let _ = std::fs::remove_dir_all(&e.root);
+}

@@ -6,6 +6,7 @@ pub mod about;
 pub mod batch;
 pub mod bill;
 pub mod bills;
+pub mod changes;
 pub mod claims;
 pub mod code_names;
 pub mod config;

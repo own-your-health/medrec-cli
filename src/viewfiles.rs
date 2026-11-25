@@ -13,13 +13,14 @@ use std::cell::OnceCell;
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use pk_cli_core::CliError;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use crate::changes::{Before, Views};
 use crate::folder::{self, Access, Folder};
 use crate::hash::{hex, md5_hex};
 use crate::intake::classify::Squashed;
@@ -259,6 +260,155 @@ pub(crate) fn sync_with(
     titles: Option<crate::tables::Titles>,
     directories: Option<&Path>,
 ) -> Result<Synced, CliError> {
+    let Made {
+        h,
+        index,
+        old,
+        old_text,
+        held,
+        kept,
+        files,
+        states,
+        made_from,
+    } = match make(f, all, titles, directories, &BTreeMap::new())? {
+        Pass::Made(made) => *made,
+        Pass::Stands(people) => {
+            return Ok(Synced {
+                people,
+                ..Synced::default()
+            })
+        }
+    };
+    let store = &f.store;
+    let mut out = Synced {
+        people: h.people.len(),
+        people_rebuilt: h.people.len() - kept,
+        ..Synced::default()
+    };
+    let mut uploads = Vec::new();
+    for (rel, bytes) in &files {
+        let (dir, name) = rel
+            .rsplit_once('/')
+            .expect("a view is in a person's directory");
+        let md5 = md5_hex(bytes);
+        let stored = format!("{dir}/{}", stored_name(name, &md5));
+        if held.get(&stored).and_then(|m| m.as_deref()) == Some(md5.as_str()) {
+            out.files_unchanged += 1;
+        } else {
+            uploads.push((stored, bytes));
+        }
+    }
+    if uploads.len() > NOTE_FILES && !QUIET.load(Ordering::SeqCst) {
+        eprintln!(
+            "note: writing {} view files to {}; the first time after an upgrade takes a while",
+            uploads.len(),
+            store.display_path(DIR)
+        );
+    }
+    #[cfg(test)]
+    tests::before_writing();
+    // Before the views made with them: a pass cut short here leaves views
+    // the next one makes again.
+    for s in &states {
+        s.write(store)?;
+    }
+    out.files_written = upload(store, &uploads)?;
+    let index_bytes = json(&index);
+    if old_text.as_deref().map(str::as_bytes) != Some(index_bytes.as_slice()) {
+        // No reader takes a view of what was private by another machine's
+        // state for current.
+        for (rel, md5) in &made_from {
+            if store.md5(rel)? != *md5 {
+                return Err(folder::changed_elsewhere(rel));
+            }
+        }
+        store.write_bytes(INDEX, &index_bytes)?;
+    }
+
+    // The views no pass names any more, after `views.json`: in the
+    // directory of someone the household or the last views.json names, and
+    // of a stored view's shape. Nothing else under views/ is touched.
+    let wanted: BTreeSet<String> = index
+        .people
+        .iter()
+        .flat_map(|(pid, v)| {
+            v.files
+                .iter()
+                .map(move |(name, md5)| stored_rel(pid, name, md5))
+        })
+        .collect();
+    let known: BTreeSet<&str> = h
+        .people
+        .iter()
+        .map(|p| p.id.as_str())
+        .chain(old.iter().flat_map(|o| o.people.keys().map(String::as_str)))
+        .collect();
+    let prefix = format!("{DIR}/");
+    for rel in held.keys() {
+        if wanted.contains(rel) {
+            continue;
+        }
+        let Some((pid, name)) = rel.strip_prefix(&prefix).and_then(|r| r.split_once('/')) else {
+            continue;
+        };
+        if name.contains('/') || !is_stored_name(name) || !known.contains(pid) {
+            continue;
+        }
+        if store.delete(rel)? {
+            out.files_removed += 1;
+        }
+    }
+    // A v1 `views.json` named its views plainly; each is removed by the
+    // name it gave.
+    for (pid, v) in old
+        .iter()
+        .filter(|o| o.schema == SCHEMA_V1)
+        .flat_map(|o| &o.people)
+    {
+        for name in v.files.keys() {
+            let rel = format!("{DIR}/{pid}/{name}");
+            if name.contains('/') || wanted.contains(&rel) || !held.contains_key(&rel) {
+                continue;
+            }
+            if store.delete(&rel)? {
+                out.files_removed += 1;
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// What a pass makes before it writes any of it.
+struct Made {
+    h: Household,
+    index: ViewsIndex,
+    old: Option<ViewsIndex>,
+    old_text: Option<String>,
+    /// The files under [`DIR`], with the MD5s the store has for them.
+    held: BTreeMap<String, Option<String>>,
+    /// How many people's views stand.
+    kept: usize,
+    files: BTreeMap<String, Vec<u8>>,
+    states: Vec<NewState>,
+    /// The state each person's views are made from.
+    made_from: Vec<(String, Option<String>)>,
+}
+
+enum Pass {
+    /// Everyone's views stand, of so many people.
+    Stands(usize),
+    Made(Box<Made>),
+}
+
+/// The views of the folder's files, with these people's indexes in place of
+/// those it has.
+fn make(
+    f: &Folder,
+    all: bool,
+    titles: Option<crate::tables::Titles>,
+    directories: Option<&Path>,
+    indexes: &BTreeMap<String, PersonIndex>,
+) -> Result<Pass, CliError> {
     let store = &f.store;
     let household_text = store.read_text(folder::HOUSEHOLD)?.ok_or_else(|| {
         CliError::Other(format!(
@@ -318,31 +468,13 @@ pub(crate) fn sync_with(
 
     // Whose views stand: their files have the MD5s the views were made from.
     let mut kept: BTreeMap<String, PersonViews> = BTreeMap::new();
-    let linked_md5s = |p: &Person| -> Result<BTreeMap<String, LinkedFiles>, CliError> {
-        let mut m = BTreeMap::new();
-        for q in crate::events::linked_people(&h, p) {
-            m.insert(
-                q.id.clone(),
-                LinkedFiles {
-                    index: store.md5(&folder::index_rel(q))?,
-                    text: store.md5(&folder::text_rel(q))?,
-                },
-            );
-        }
-        Ok(m)
-    };
     for p in &h.people {
         if let Some(was) = current.and_then(|o| o.people.get(&p.id)) {
-            if store.md5(&folder::index_rel(p))? == was.index
-                && store.md5(&folder::text_rel(p))? == was.text
-                && store.md5(&crate::events::overrides_rel(p))? == was.overrides
-                && store.md5(&crate::marks::rel(p))? == was.marks
-                && linked_md5s(p)? == was.linked
-                && (code_table.is_none() || was.code_table == code_table)
+            if (code_table.is_none() || was.code_table == code_table)
                 // An older directory's pass leaves what a newer one's made.
                 && was.directory >= directory_made
-                && store.md5(&crate::labels::state_rel(p))? == was.provider_state
                 && EVERY_PERSON.iter().all(|f| was.files.contains_key(*f))
+                && stands(was, &h, p, |rel| store.md5(rel))?
             {
                 kept.insert(p.id.clone(), was.clone());
             }
@@ -352,10 +484,7 @@ pub(crate) fn sync_with(
     if kept.len() == n
         && old_text.as_deref().map(str::as_bytes) == Some(json(&fresh(kept.clone())).as_slice())
     {
-        return Ok(Synced {
-            people: n,
-            ..Synced::default()
-        });
+        return Ok(Pass::Stands(n));
     }
     let held: BTreeMap<String, Option<String>> = store
         .hashes(DIR)?
@@ -374,7 +503,6 @@ pub(crate) fn sync_with(
     let mut people = BTreeMap::new();
     let mut files = BTreeMap::new();
     let mut states: Vec<NewState> = Vec::new();
-    // The state each person's views are made from.
     let mut made_from: Vec<(String, Option<String>)> = Vec::new();
     // Each person's files read once, whoever's events need them.
     let mut loaded: BTreeMap<String, Loaded> = BTreeMap::new();
@@ -382,6 +510,7 @@ pub(crate) fn sync_with(
         store: &crate::store::Store,
         loaded: &mut BTreeMap<String, Loaded>,
         p: &Person,
+        instead: Option<&PersonIndex>,
     ) -> Result<(), CliError> {
         if loaded.contains_key(&p.id) {
             return Ok(());
@@ -389,9 +518,10 @@ pub(crate) fn sync_with(
         let (irel, trel) = (folder::index_rel(p), folder::text_rel(p));
         let itext = store.read_text(&irel)?;
         let ttext = store.read_text(&trel)?;
-        let idx: PersonIndex = match &itext {
-            Some(t) => parse(t, &irel)?,
-            None => PersonIndex::new(&p.id),
+        let idx: PersonIndex = match (instead, &itext) {
+            (Some(idx), _) => idx.clone(),
+            (None, Some(t)) => parse(t, &irel)?,
+            (None, None) => PersonIndex::new(&p.id),
         };
         if idx.person != p.id {
             return Err(CliError::Other(format!("{irel} names another person")));
@@ -419,9 +549,9 @@ pub(crate) fn sync_with(
             continue;
         }
         let linked = crate::events::linked_people(&h, p);
-        load(store, &mut loaded, p)?;
+        load(store, &mut loaded, p, indexes.get(&p.id))?;
         for q in &linked {
-            load(store, &mut loaded, q)?;
+            load(store, &mut loaded, q, indexes.get(&q.id))?;
         }
         let orel = crate::events::overrides_rel(p);
         let otext = store.read_text(&orel)?;
@@ -589,104 +719,150 @@ pub(crate) fn sync_with(
         made_from.push((crate::labels::state_rel(p), v.provider_state.clone()));
         people.insert(p.id.clone(), v);
     }
-    let index = fresh(people);
+    Ok(Pass::Made(Box::new(Made {
+        index: fresh(people),
+        h,
+        kept: kept.len(),
+        old,
+        old_text,
+        held,
+        files,
+        states,
+        made_from,
+    })))
+}
 
-    let mut out = Synced {
-        people: n,
-        people_rebuilt: n - kept.len(),
-        ..Synced::default()
-    };
-    let mut uploads = Vec::new();
-    for (rel, bytes) in &files {
-        let (dir, name) = rel
-            .rsplit_once('/')
-            .expect("a view is in a person's directory");
-        let md5 = md5_hex(bytes);
-        let stored = format!("{dir}/{}", stored_name(name, &md5));
-        if held.get(&stored).and_then(|m| m.as_deref()) == Some(md5.as_str()) {
-            out.files_unchanged += 1;
-        } else {
-            uploads.push((stored, bytes));
-        }
-    }
-    if uploads.len() > NOTE_FILES && !QUIET.load(Ordering::SeqCst) {
-        eprintln!(
-            "note: writing {} view files to {}; the first time after an upgrade takes a while",
-            uploads.len(),
-            store.display_path(DIR)
-        );
-    }
-    #[cfg(test)]
-    tests::before_writing();
-    // Before the views made with them: a pass cut short here leaves views
-    // the next one makes again.
-    for s in &states {
-        s.write(store)?;
-    }
-    out.files_written = upload(store, &uploads)?;
-    let index_bytes = json(&index);
-    if old_text.as_deref().map(str::as_bytes) != Some(index_bytes.as_slice()) {
-        // No reader takes a view of what was private by another machine's
-        // state for current.
-        for (rel, md5) in &made_from {
-            if store.md5(rel)? != *md5 {
-                return Err(folder::changed_elsewhere(rel));
-            }
-        }
-        store.write_bytes(INDEX, &index_bytes)?;
-    }
+/// The views a pass would make, in memory, and those the last one made.
+pub(crate) struct Preview {
+    h: Household,
+    files: BTreeMap<String, Vec<u8>>,
+    last: Option<ViewsIndex>,
+}
 
-    // The views no pass names any more, after `views.json`: in the
-    // directory of someone the household or the last views.json names, and
-    // of a stored view's shape. Nothing else under views/ is touched.
-    let wanted: BTreeSet<String> = index
-        .people
-        .iter()
-        .flat_map(|(pid, v)| {
-            v.files
-                .iter()
-                .map(move |(name, md5)| stored_rel(pid, name, md5))
+/// What a pass would make of everyone's views with these people's indexes in
+/// place of those the folder has. Nothing is written.
+pub(crate) fn preview(
+    f: &Folder,
+    indexes: &BTreeMap<String, PersonIndex>,
+) -> Result<Preview, CliError> {
+    let titles = crate::code_names::titles();
+    let directories = crate::nppes::dir();
+    match make(f, true, titles, directories.as_deref(), indexes)? {
+        Pass::Made(made) => Ok(Preview {
+            h: made.h,
+            files: made.files,
+            last: match (made.old_text, made.old) {
+                (None, _) => None,
+                (_, Some(o)) if o.schema == SCHEMA => Some(o),
+                // Those had none of the views this counts by.
+                (_, Some(o)) if o.schema == SCHEMA_V1 => None,
+                (Some(text), _) => return Err(unread(&text)),
+            },
+        }),
+        // Of nobody.
+        Pass::Stands(_) => Ok(Preview {
+            h: f.household()?,
+            files: BTreeMap::new(),
+            last: None,
+        }),
+    }
+}
+
+/// Why there is nothing to count against in a `views.json` that does not read
+/// as this medrec's. Its own words are not in it.
+fn unread(text: &str) -> CliError {
+    let of = |s: &str| s.strip_prefix("medrec-views/v")?.parse::<u32>().ok();
+    let v: Option<Value> = serde_json::from_str(text).ok();
+    let theirs = v.as_ref().and_then(|v| of(v.get("schema")?.as_str()?));
+    CliError::Other(match theirs {
+        Some(n) if Some(n) > of(SCHEMA) => format!(
+            "{INDEX} is a later medrec's (medrec-views/v{n}), so there is nothing this one can count against: upgrade it"
+        ),
+        _ => format!(
+            "{INDEX} is there and does not read, so there is nothing to count against: `medrec views write` makes it again"
+        ),
+    })
+}
+
+impl Preview {
+    /// A person's views, as a pass would make them.
+    pub fn after(&self, p: &Person) -> Result<Views, CliError> {
+        Views::read(&format!("{DIR}/{}", p.id), |name| {
+            let rel = format!("{DIR}/{}/{name}", p.id);
+            let bytes = self.files.get(&rel);
+            let read = bytes.and_then(|b| serde_json::from_slice(b).ok());
+            let made = read.ok_or_else(|| CliError::Other(format!("no {rel} was made")));
+            made.map(Some)
         })
-        .collect();
-    let known: BTreeSet<&str> = h
-        .people
-        .iter()
-        .map(|p| p.id.as_str())
-        .chain(old.iter().flat_map(|o| o.people.keys().map(String::as_str)))
-        .collect();
-    let prefix = format!("{DIR}/");
-    for rel in held.keys() {
-        if wanted.contains(rel) {
-            continue;
-        }
-        let Some((pid, name)) = rel.strip_prefix(&prefix).and_then(|r| r.split_once('/')) else {
-            continue;
+    }
+
+    /// A person's views, as the last pass made them.
+    pub fn before(&self, f: &Folder, p: &Person) -> Result<Before, CliError> {
+        let Some(last) = &self.last else {
+            return Ok(Before::default());
         };
-        if name.contains('/') || !is_stored_name(name) || !known.contains(pid) {
-            continue;
-        }
-        if store.delete(rel)? {
-            out.files_removed += 1;
+        let Some(v) = last.people.get(&p.id) else {
+            return Ok(Before::default());
+        };
+        let md5 = |rel: &str| f.store.md5(rel);
+        let current = md5(folder::HOUSEHOLD)?.as_ref() == Some(&last.household)
+            && stands(v, &self.h, p, md5)?;
+        let views = Views::read(&format!("{DIR}/{}", p.id), |name| {
+            if !v.files.contains_key(name) {
+                return Ok(None);
+            }
+            let text = last_view(&f.store, p, v, name)?;
+            let read = text.and_then(|t| serde_json::from_str(&t).ok());
+            let there = read.ok_or_else(|| {
+                CliError::Other(format!(
+                    "{DIR}/{} has no {name} that {INDEX} names; another command may be writing the views: run this again, or after `medrec views write`",
+                    p.id
+                ))
+            });
+            there.map(Some)
+        })?;
+        Ok(Before {
+            medrec: Some(last.medrec.clone()),
+            stale: !current,
+            views,
+        })
+    }
+}
+
+/// Whether a person's views were made from the files the folder has, under the
+/// same household, by what `md5` says each is.
+fn stands(
+    v: &PersonViews,
+    h: &Household,
+    p: &Person,
+    md5: impl Fn(&str) -> Result<Option<String>, CliError>,
+) -> Result<bool, CliError> {
+    let own = [
+        (folder::index_rel(p), &v.index),
+        (folder::text_rel(p), &v.text),
+        (crate::events::overrides_rel(p), &v.overrides),
+        (crate::marks::rel(p), &v.marks),
+        (crate::labels::state_rel(p), &v.provider_state),
+    ];
+    for (rel, was) in own {
+        if md5(&rel)? != *was {
+            return Ok(false);
         }
     }
-    // A v1 `views.json` named its views plainly; each is removed by the
-    // name it gave.
-    for (pid, v) in old
-        .iter()
-        .filter(|o| o.schema == SCHEMA_V1)
-        .flat_map(|o| &o.people)
-    {
-        for name in v.files.keys() {
-            let rel = format!("{DIR}/{pid}/{name}");
-            if name.contains('/') || wanted.contains(&rel) || !held.contains_key(&rel) {
-                continue;
-            }
-            if store.delete(&rel)? {
-                out.files_removed += 1;
-            }
+    let linked = crate::events::linked_people(h, p);
+    if linked.len() != v.linked.len() {
+        return Ok(false);
+    }
+    for q in linked {
+        let now = LinkedFiles {
+            index: md5(&folder::index_rel(q))?,
+            text: md5(&folder::text_rel(q))?,
+        };
+        if v.linked.get(&q.id) != Some(&now) {
+            return Ok(false);
         }
     }
-    Ok(out)
+    Ok(true)
 }
 
 /// One of a person's views, when the views are those of the folder's files
@@ -716,26 +892,8 @@ pub fn current_view(
     let Some(want) = v.files.get(name) else {
         return Ok(None);
     };
-    if md5(&folder::index_rel(p))? != v.index
-        || md5(&folder::text_rel(p))? != v.text
-        || md5(&crate::events::overrides_rel(p))? != v.overrides
-        || md5(&crate::marks::rel(p))? != v.marks
-        || md5(&crate::labels::state_rel(p))? != v.provider_state
-    {
+    if !stands(v, h, p, md5)? {
         return Ok(None);
-    }
-    let linked = crate::events::linked_people(h, p);
-    if linked.len() != v.linked.len() {
-        return Ok(None);
-    }
-    for q in linked {
-        let now = LinkedFiles {
-            index: md5(&folder::index_rel(q))?,
-            text: md5(&folder::text_rel(q))?,
-        };
-        if v.linked.get(&q.id) != Some(&now) {
-            return Ok(None);
-        }
     }
     let text = f.store.read_text(&stored_rel(&p.id, name, want))?;
     Ok(text.map(String::into_bytes).filter(|b| md5_hex(b) == *want))
@@ -1456,8 +1614,9 @@ pub(crate) fn person(
 
 /// Holds open while a command writes the folder several times.
 static HOLDS: AtomicUsize = AtomicUsize::new(0);
-/// A folder was written while held, so its views are owed.
-static OWED: AtomicBool = AtomicBool::new(false);
+/// The views owed by what closed while held: none (0), those of what changed
+/// (1), or every person's (2).
+static OWED: AtomicU8 = AtomicU8::new(0);
 
 /// The views of every folder written while this lives are brought up to
 /// date once, when it drops, rather than as each one closes: for a command
@@ -1478,27 +1637,28 @@ pub fn hold(location: &Location, budget: Duration) -> Hold {
 
 impl Drop for Hold {
     fn drop(&mut self) {
-        if HOLDS.fetch_sub(1, Ordering::SeqCst) != 1 || !OWED.swap(false, Ordering::SeqCst) {
+        if HOLDS.fetch_sub(1, Ordering::SeqCst) != 1 {
             return;
         }
-        if std::thread::panicking() {
+        let owed = OWED.swap(0, Ordering::SeqCst);
+        if owed == 0 || std::thread::panicking() {
             return;
         }
         match Folder::open_at(&self.location, Access::Write, self.budget) {
-            Ok(f) => report(sync(&f, false)),
+            Ok(f) => report(sync(&f, owed > 1)),
             Err(e) => report(Err(e)),
         }
     }
 }
 
-/// A folder this command wrote is closing, still under its lock: its views
-/// now, or when the [`Hold`] drops.
-pub(crate) fn written(f: &Folder) {
+/// A folder this command wrote, or asked every person's views of (`all`), is
+/// closing, still under its lock: its views now, or when the [`Hold`] drops.
+pub(crate) fn written(f: &Folder, all: bool) {
     if HOLDS.load(Ordering::SeqCst) > 0 {
-        OWED.store(true, Ordering::SeqCst);
+        OWED.fetch_max(1 + u8::from(all), Ordering::SeqCst);
         return;
     }
-    report(sync(f, false));
+    report(sync(f, all));
 }
 
 /// A failure leaves the views stale, which readers see from the MD5s; the

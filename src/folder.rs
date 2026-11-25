@@ -58,9 +58,11 @@ pub enum Access {
 pub struct Folder {
     pub store: Store,
     pub folder_id: String,
-    /// `household.json`, an `index.json` or a `text.json` was written, so
-    /// the views are brought up to date as this closes.
+    /// `household.json`, an `index.json` or a `text.json` was written, so the
+    /// views are brought up to date as this closes.
     written: std::cell::Cell<bool>,
+    /// A command asked for every person's views ([`Folder::every_view`]).
+    every_view: std::cell::Cell<bool>,
     /// What one that only reads has read of each person, so that all of an
     /// answer is of the same files: what is private in an item is told by
     /// places in it ([`crate::parts`]).
@@ -77,8 +79,10 @@ struct Held {
 impl Drop for Folder {
     fn drop(&mut self) {
         // Still under the lock: the lock is dropped after this.
-        if self.written.get() && self._lock.is_some() && !std::thread::panicking() {
-            crate::viewfiles::written(self);
+        let all = self.every_view.get();
+        let owed = self.written.get() || all;
+        if owed && self._lock.is_some() && !std::thread::panicking() {
+            crate::viewfiles::written(self, all);
         }
     }
 }
@@ -144,6 +148,7 @@ impl Folder {
             store,
             folder_id: h.folder_id,
             written: std::cell::Cell::new(false),
+            every_view: std::cell::Cell::new(false),
             held: (access == Access::Read).then(Held::default),
             _lock: lock,
         })
@@ -183,6 +188,11 @@ impl Folder {
         self.write_json(HOUSEHOLD, h)
     }
 
+    /// Make every person's views again as this closes, whatever it writes.
+    pub fn every_view(&self) {
+        self.every_view.set(true);
+    }
+
     /// A person's index, without what is about somebody else
     /// ([`crate::about`]): for everything that shows or judges it.
     pub fn index(&self, p: &Person) -> Result<PersonIndex, CliError> {
@@ -197,17 +207,26 @@ impl Folder {
         if let Some(idx) = held.and_then(|h| h.borrow().get(&p.id).cloned()) {
             return Ok(idx);
         }
-        let rel = index_rel(p);
-        let idx: PersonIndex = self
-            .read_json(&rel)?
-            .unwrap_or_else(|| PersonIndex::new(&p.id));
-        if idx.person != p.id {
-            return Err(CliError::Other(format!("{rel} names another person")));
-        }
+        let (idx, _) = self.whole_index_read(p)?;
         if let Some(h) = held {
             h.borrow_mut().insert(p.id.clone(), idx.clone());
         }
         Ok(idx)
+    }
+
+    /// The index as the folder has it now, and the MD5 of what was read, none
+    /// where there is none.
+    pub fn whole_index_read(&self, p: &Person) -> Result<(PersonIndex, Option<String>), CliError> {
+        let rel = index_rel(p);
+        let text = self.store.read_text(&rel)?;
+        let idx: PersonIndex = match &text {
+            Some(t) => parse_json(&self.store, &rel, t)?,
+            None => PersonIndex::new(&p.id),
+        };
+        if idx.person != p.id {
+            return Err(CliError::Other(format!("{rel} names another person")));
+        }
+        Ok((idx, text.map(|t| crate::hash::md5_hex(t.as_bytes()))))
     }
 
     /// Refuse when another machine wrote `p`'s index since `idx` was read.
@@ -430,8 +449,11 @@ pub fn read_json<T: DeserializeOwned>(store: &Store, rel: &str) -> Result<Option
     let Some(text) = store.read_text(rel)? else {
         return Ok(None);
     };
-    serde_json::from_str(&text)
-        .map(Some)
+    parse_json(store, rel, &text).map(Some)
+}
+
+fn parse_json<T: DeserializeOwned>(store: &Store, rel: &str, text: &str) -> Result<T, CliError> {
+    serde_json::from_str(text)
         .map_err(|e| CliError::Other(format!("{} is not readable: {e}", store.display_path(rel))))
 }
 

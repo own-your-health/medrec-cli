@@ -559,7 +559,7 @@ under the source, filed by an earlier import). A pharmacy `claim`
 
 `medrec reindex --json` counts what it did, for each person and in all
 (`--dry-run`, 0.9.9 and later, counts what it would do, writes nothing and adds
-`dry_run: true`):
+`dry_run: true` and what is in "A dry run", below):
 `claims` (how many there are), `reshaped`, `unchanged` and `without_raw`
 (claims with no raw file), `statements` (bills and receipts whose statement
 gained fields), `providers_updated` (0.9.6 and later: records whose
@@ -570,7 +570,40 @@ changed), `given_updated` (0.9.9 and later: records whose `given` gained
 something), `results_split` (0.9.9 and later: results about somebody else that
 were filed as the person's own, or in one record with it), `papers_updated` (0.9.9 and later: papers whose `also_from`,
 `words`, `errors` or `given` changed) and `papers_unread` (0.9.9 and later: raw files of
-papers that do not read).
+papers that do not read). From 0.9.9 a run makes every person's views again, even
+when no record changes.
+
+**A dry run** (0.9.9 and later) makes the records and the views in memory as a run
+would, writes nothing, and counts what would change. It has no name, date, amount
+or id of an item, and names no kind of questionnaire that there is one of.
+
+- `fresh` is `true`, and is there for a dry run alone: each `index.json` is in the
+  folder, at the end, with the MD5 it was read with. When another command wrote one
+  meanwhile, the counts would be of neither: the dry run ends with an error and
+  counts nothing.
+- Each person's `views` is against the views the last pass made. `against` is that
+  medrec's version, null where the folder has none (then every private item, event
+  and bill is counted as added), and `stale` is whether those were made from
+  other files than the folder has. A dry run that cannot read `views.json`, or a
+  view it names, ends with an error and counts nothing; where a later medrec's
+  schema is why, it says to upgrade.
+- A run with `--person` reads only that person's records again and makes every
+  person's views, so its dry run has `others`: for each of the other people, their
+  `person` and their `views`. It is absent where there are none.
+
+  | Field | Counts |
+  |---|---|
+  | `private.added` | by kind, items that are private and were open, or were not there; `added_by`, by the rules that make them so (`from`); `questionnaires`, the questionnaires of them, by kind, where there are several of one; `questionnaires_one_of_a_kind`, how many kinds there is one of |
+  | `private.opened` | by kind, items that were private and are open |
+  | `private.gone` | by kind, items that were private and are not there: what is about somebody else, and an event that is another now |
+  | `private.given` | by kind, items that are private only by what a source gave |
+  | `private.parts` | by kind, open items with a private part |
+  | `in_error` | by kind, what is entered in error |
+  | `current` | of conditions, allergies and medicines, the records that a list of current ones has: `added` and `removed`. Those of a medrec before 0.9.9 are by `status` |
+  | `events` | `added`, `removed`, and `changed`, those with other money |
+  | `bills`, `worth_a_call`, `not_billed` | of the lists of `bills.json`, `added`, `removed`, and `changed`, those with other amounts |
+  | `about_another` | what is about somebody else: results and reports by what their source says (`said`) and by the person's age (`by_age`), and `documents` |
+  | `papers` | `filed_before`, papers filed by a medrec that did not keep every source of one, and `source_found`, those of them another source of which the raw files tell |
 
 A `claim` (an ExplanationOfBenefit) is shaped for costs (0.5.0 and later).
 An earlier import's claims take this shape when their source serves them
@@ -1610,7 +1643,9 @@ removes and no reader reads. It never writes over a later
   `index.json` or a `text.json` brings the views up to date before it
   releases the folder lock. A refresh pass, and an import of several
   members, does it once, after the last filing. `medrec views write` does
-  it on demand, and `--all` makes every person's again.
+  it on demand, and `--all` makes every person's again. `medrec reindex` (0.9.9
+  and later; not with `--dry-run`) makes every person's again too, whether or not
+  it writes any of them.
 - **Only what changed.** A person keeps their views when their `index.json`,
   `text.json`, `overrides.json` and `marks.json` and their linked people's
   `index.json` and `text.json` have the MD5s `views.json` recorded, under the same `household.json` and

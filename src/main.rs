@@ -926,10 +926,12 @@ struct ViewsWriteArgs {
 
 #[derive(Args, Debug)]
 struct ReindexArgs {
-    /// Only this person's records (name or id).
+    /// Only this person's records (name or id). Everyone's views are made
+    /// again.
     #[arg(long)]
     person: Option<String>,
-    /// Count what would change, and write nothing.
+    /// Count what would change, in the records and in everyone's views, and
+    /// write nothing.
     #[arg(long)]
     dry_run: bool,
 }
@@ -1306,6 +1308,32 @@ fn run(cli: &Cli) -> Result<(), CliError> {
                 );
                 if let Some(n) = papers_unread(r.papers_unread) {
                     println!("{n}");
+                }
+                let in_views = |person: &str, views: &medrec::changes::Changes| {
+                    let against = match (&views.against, views.stale) {
+                        (None, _) => "there are no views yet".to_string(),
+                        (Some(m), false) => format!("against medrec {m}'s"),
+                        (Some(m), true) => format!("against medrec {m}'s, of older files"),
+                    };
+                    println!("{person}: in the views ({against})");
+                    let lines = views.lines();
+                    if lines.is_empty() {
+                        println!("  nothing counted");
+                    }
+                    for line in lines {
+                        println!("  {line}");
+                    }
+                };
+                for p in &r.people {
+                    if let Some(views) = &p.views {
+                        in_views(&p.person, views);
+                    }
+                }
+                if !r.others.is_empty() {
+                    println!("the others' records are not read again, and a run makes their views again:");
+                }
+                for o in &r.others {
+                    in_views(&o.person, &o.views);
                 }
             });
             Ok(())
