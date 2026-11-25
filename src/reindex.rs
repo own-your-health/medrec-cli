@@ -36,6 +36,10 @@ pub struct Reindexed {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fresh: Option<bool>,
     pub people: Vec<PersonReindexed>,
+    /// Of a dry run of one person's records: what would change in everyone
+    /// else's views, which a run makes again too.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub others: Vec<OtherViews>,
     pub claims: usize,
     pub reshaped: usize,
     pub unchanged: usize,
@@ -77,6 +81,14 @@ pub struct PersonReindexed {
     /// Of a dry run: what would change in the person's views.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub views: Option<Changes>,
+}
+
+/// A person whose records a run would leave, and whose views it would make
+/// again.
+#[derive(Debug, Serialize)]
+pub struct OtherViews {
+    pub person: String,
+    pub views: Changes,
 }
 
 /// Refuse to count when another command wrote a person's index since it was
@@ -219,11 +231,24 @@ pub fn claims(
         out.people.push(row);
     }
     if dry_run {
+        let chosen: BTreeSet<&str> = as_read.iter().map(|(p, ..)| p.id.as_str()).collect();
+        for p in h.people.iter().filter(|p| !chosen.contains(&*p.id)) {
+            let (idx, md5) = folder.whole_index_read(p)?;
+            would_be.insert(p.id.clone(), idx.clone());
+            as_read.push((p, idx, md5));
+        }
         let views = viewfiles::preview(folder, &would_be)?;
-        for ((p, was, _), row) in as_read.iter().zip(&mut out.people) {
+        for (n, (p, was, _)) in as_read.iter().enumerate() {
             let (before, after) = (views.before(folder, p)?, views.after(p)?);
             let now = &would_be[&p.id];
-            row.views = Some(changes::of(p, was, now, &before, &after, &today()));
+            let views = changes::of(p, was, now, &before, &after, &today());
+            match out.people.get_mut(n) {
+                Some(row) => row.views = Some(views),
+                None => out.others.push(OtherViews {
+                    person: p.id.clone(),
+                    views,
+                }),
+            }
         }
         for (p, _, md5) in &as_read {
             as_read_still(folder, p, md5.as_deref())?;

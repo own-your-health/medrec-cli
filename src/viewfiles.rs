@@ -756,11 +756,7 @@ pub(crate) fn preview(
                 (_, Some(o)) if o.schema == SCHEMA => Some(o),
                 // Those had none of the views this counts by.
                 (_, Some(o)) if o.schema == SCHEMA_V1 => None,
-                _ => {
-                    return Err(CliError::Other(format!(
-                        "{INDEX} is there and does not read as this medrec's, so there is nothing to count against: `medrec views write` makes it again"
-                    )))
-                }
+                (Some(text), _) => return Err(unread(&text)),
             },
         }),
         // Of nobody.
@@ -770,6 +766,22 @@ pub(crate) fn preview(
             last: None,
         }),
     }
+}
+
+/// Why there is nothing to count against in a `views.json` that does not read
+/// as this medrec's. Its own words are not in it.
+fn unread(text: &str) -> CliError {
+    let of = |s: &str| s.strip_prefix("medrec-views/v")?.parse::<u32>().ok();
+    let v: Option<Value> = serde_json::from_str(text).ok();
+    let theirs = v.as_ref().and_then(|v| of(v.get("schema")?.as_str()?));
+    CliError::Other(match theirs {
+        Some(n) if Some(n) > of(SCHEMA) => format!(
+            "{INDEX} is a later medrec's (medrec-views/v{n}), so there is nothing this one can count against: upgrade it"
+        ),
+        _ => format!(
+            "{INDEX} is there and does not read, so there is nothing to count against: `medrec views write` makes it again"
+        ),
+    })
 }
 
 impl Preview {

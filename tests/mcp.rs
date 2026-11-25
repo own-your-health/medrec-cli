@@ -3983,6 +3983,23 @@ fn a_dry_run_counts_what_would_be_private() {
         "parts": {},
     });
     assert_eq!(v["private"], want);
+    // Of one person's records, the others' views are counted too: a run makes
+    // everyone's again.
+    let other = h_id(&e, "Robin Testperson");
+    let one = e.ok(&["reindex", "--dry-run", "--person", &other]);
+    assert_eq!(one["people"].as_array().unwrap().len(), 1, "{one}");
+    assert_eq!(one["people"][0]["person"], *other);
+    let others = one["others"].as_array().unwrap().iter();
+    let of = |o: &&Value| o["person"] == *alex;
+    assert_eq!(others.clone().find(of).unwrap()["views"], v, "{one}");
+    assert_eq!(others.clone().filter(of).count(), 1);
+    let all = e.ok(&["reindex", "--dry-run"]);
+    assert!(all.get("others").is_none(), "{all}");
+    let everyone = all["people"].as_array().unwrap().len();
+    assert_eq!(others.count() + 1, everyone);
+    let out = e.run(&["reindex", "--dry-run", "--person", &other]);
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.contains(&format!("{alex}: in the views")), "{text}");
     // No name, id, date or kind there is one of.
     let text = v.to_string();
     let words = [
@@ -4084,12 +4101,21 @@ fn a_dry_run_counts_what_would_be_private() {
     assert!(out.stdout.is_empty(), "nothing is counted");
     // Nor is an index of the views that does not read, or is no medrec's.
     let kept = std::fs::read(views.join("views.json")).unwrap();
-    for torn in [&b"{"[..], br#"{"schema": "another/v1"}"#] {
+    let again = "`medrec views write` makes it again";
+    for (torn, remedy) in [
+        (&b"{"[..], again),
+        (br#"{"schema": "another/v1"}"#, again),
+        (br#"{"schema": "medrec-views/v3"}"#, "upgrade"),
+        (
+            br#"{"schema": "medrec-views/v10", "people": []}"#,
+            "upgrade",
+        ),
+    ] {
         std::fs::write(views.join("views.json"), torn).unwrap();
         let out = e.run(&["reindex", "--dry-run"]);
         let said = String::from_utf8(out.stderr).unwrap();
         assert!(
-            !out.status.success() && said.contains("views/views.json is there"),
+            !out.status.success() && said.contains("views/views.json is") && said.contains(remedy),
             "{said}"
         );
         assert!(out.stdout.is_empty(), "nothing is counted");

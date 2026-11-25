@@ -585,7 +585,11 @@ or id of an item, and names no kind of questionnaire that there is one of.
   medrec's version, null where the folder has none (then every private item, event
   and bill is counted as added), and `stale` is whether those were made from
   other files than the folder has. A dry run that cannot read `views.json`, or a
-  view it names, ends with an error and counts nothing.
+  view it names, ends with an error and counts nothing; where a later medrec's
+  schema is why, it says to upgrade.
+- A run with `--person` reads only that person's records again and makes every
+  person's views, so its dry run has `others`: for each of the other people, their
+  `person` and their `views`.
 
   | Field | Counts |
   |---|---|

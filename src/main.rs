@@ -926,11 +926,12 @@ struct ViewsWriteArgs {
 
 #[derive(Args, Debug)]
 struct ReindexArgs {
-    /// Only this person's records (name or id).
+    /// Only this person's records (name or id). Everyone's views are made
+    /// again.
     #[arg(long)]
     person: Option<String>,
-    /// Count what would change, in the records and in the views, and write
-    /// nothing.
+    /// Count what would change, in the records and in everyone's views, and
+    /// write nothing.
     #[arg(long)]
     dry_run: bool,
 }
@@ -1308,13 +1309,16 @@ fn run(cli: &Cli) -> Result<(), CliError> {
                 if let Some(n) = papers_unread(r.papers_unread) {
                     println!("{n}");
                 }
-                for (p, views) in r.people.iter().filter_map(|p| Some((p, p.views.as_ref()?))) {
+                let chosen = r.people.iter();
+                let chosen = chosen.filter_map(|p| Some((&p.person, p.views.as_ref()?)));
+                let others = r.others.iter().map(|o| (&o.person, &o.views));
+                for (person, views) in chosen.chain(others) {
                     let against = match (&views.against, views.stale) {
                         (None, _) => "there are no views yet".to_string(),
                         (Some(m), false) => format!("against medrec {m}'s"),
                         (Some(m), true) => format!("against medrec {m}'s, of older files"),
                     };
-                    println!("{}: in the views ({against})", p.person);
+                    println!("{person}: in the views ({against})");
                     let lines = views.lines();
                     if lines.is_empty() {
                         println!("  nothing counted");
