@@ -1,0 +1,889 @@
+[
+ {
+  "of": "the two of a blood pressure",
+  "resource": {
+   "resourceType": "Observation",
+   "id": "bp-1",
+   "status": "final",
+   "code": {
+    "coding": [
+     {
+      "system": "http://loinc.org",
+      "code": "85354-9",
+      "display": "Blood pressure panel"
+     }
+    ]
+   },
+   "effectiveDateTime": "2024-04-02T09:30:00Z",
+   "category": [
+    {
+     "coding": [
+      {
+       "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+       "code": "vital-signs",
+       "display": "Vital Signs"
+      }
+     ]
+    }
+   ],
+   "component": [
+    {
+     "code": {
+      "coding": [
+       {
+        "system": "http://loinc.org",
+        "code": "8480-6",
+        "display": "Systolic blood pressure"
+       }
+      ]
+     },
+     "valueQuantity": {
+      "value": 128,
+      "unit": "mmHg",
+      "system": "http://unitsofmeasure.org"
+     },
+     "referenceRange": [
+      {
+       "low": {
+        "value": 90
+       },
+       "high": {
+        "value": 120
+       }
+      }
+     ],
+     "interpretation": [
+      {
+       "coding": [
+        {
+         "system": "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation",
+         "code": "H",
+         "display": "High"
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "code": {
+      "coding": [
+       {
+        "system": "http://loinc.org",
+        "code": "8462-4",
+        "display": "Diastolic blood pressure"
+       }
+      ]
+     },
+     "valueQuantity": {
+      "value": 76,
+      "unit": "mmHg",
+      "system": "http://unitsofmeasure.org"
+     }
+    }
+   ]
+  },
+  "value": "128/76",
+  "unit": "mmHg",
+  "says": "128/76 mmHg",
+  "parts": 2,
+  "categories": [
+   "vital-signs"
+  ],
+  "absent": []
+ },
+ {
+  "of": "told by a code beside another system's",
+  "resource": {
+   "resourceType": "Observation",
+   "id": "bp-2",
+   "status": "final",
+   "code": {
+    "coding": [
+     {
+      "system": "http://loinc.org",
+      "code": "85354-9",
+      "display": "Blood pressure panel"
+     }
+    ]
+   },
+   "effectiveDateTime": "2024-04-02T09:30:00Z",
+   "component": [
+    {
+     "code": {
+      "coding": [
+       {
+        "system": "urn:example:local",
+        "code": "BPD"
+       },
+       {
+        "system": "http://loinc.org",
+        "code": "8462-4",
+        "display": "Lower"
+       }
+      ]
+     },
+     "valueQuantity": {
+      "value": 70,
+      "unit": "mmHg",
+      "system": "http://unitsofmeasure.org"
+     }
+    },
+    {
+     "code": {
+      "coding": [
+       {
+        "system": "urn:example:local",
+        "code": "BPS"
+       },
+       {
+        "system": "http://loinc.org",
+        "code": "8480-6",
+        "display": "Upper"
+       }
+      ]
+     },
+     "valueQuantity": {
+      "value": 110,
+      "unit": "mmHg",
+      "system": "http://unitsofmeasure.org"
+     }
+    }
+   ]
+  },
+  "value": "110/70",
+  "unit": "mmHg",
+  "says": "110/70 mmHg",
+  "parts": 2,
+  "absent": []
+ },
+ {
+  "of": "two that are named as a blood pressure's and not coded so",
+  "resource": {
+   "resourceType": "Observation",
+   "id": "bp-3",
+   "status": "final",
+   "code": {
+    "text": "Blood pressure"
+   },
+   "effectiveDateTime": "2024-04-02T09:30:00Z",
+   "component": [
+    {
+     "code": {
+      "text": "Systolic blood pressure"
+     },
+     "valueQuantity": {
+      "value": 120,
+      "unit": "mmHg",
+      "system": "http://unitsofmeasure.org"
+     }
+    },
+    {
+     "code": {
+      "text": "Diastolic blood pressure"
+     },
+     "valueQuantity": {
+      "value": 80,
+      "unit": "mmHg",
+      "system": "http://unitsofmeasure.org"
+     }
+    }
+   ]
+  },
+  "value": "Systolic blood pressure 120 mmHg; Diastolic blood pressure 80 mmHg",
+  "unit": null,
+  "says": "Systolic blood pressure 120 mmHg; Diastolic blood pressure 80 mmHg",
+  "parts": 2,
+  "absent": []
+ },
+ {
+  "of": "two units",
+  "resource": {
+   "resourceType": "Observation",
+   "id": "bp-4",
+   "status": "final",
+   "code": {
+    "coding": [
+     {
+      "system": "http://loinc.org",
+      "code": "85354-9",
+      "display": "Blood pressure panel"
+     }
+    ]
+   },
+   "effectiveDateTime": "2024-04-02T09:30:00Z",
+   "component": [
+    {
+     "code": {
+      "coding": [
+       {
+        "system": "http://loinc.org",
+        "code": "8480-6",
+        "display": "Systolic blood pressure"
+       }
+      ]
+     },
+     "valueQuantity": {
+      "value": 16,
+      "unit": "kPa",
+      "system": "http://unitsofmeasure.org"
+     }
+    },
+    {
+     "code": {
+      "coding": [
+       {
+        "system": "http://loinc.org",
+        "code": "8462-4",
+        "display": "Diastolic blood pressure"
+       }
+      ]
+     },
+     "valueQuantity": {
+      "value": 80,
+      "unit": "mmHg",
+      "system": "http://unitsofmeasure.org"
+     }
+    }
+   ]
+  },
+  "value": "Systolic blood pressure 16 kPa; Diastolic blood pressure 80 mmHg",
+  "unit": null,
+  "says": "Systolic blood pressure 16 kPa; Diastolic blood pressure 80 mmHg",
+  "parts": 2,
+  "absent": []
+ },
+ {
+  "of": "one of the two alone",
+  "resource": {
+   "resourceType": "Observation",
+   "id": "bp-5",
+   "status": "final",
+   "code": {
+    "coding": [
+     {
+      "system": "http://loinc.org",
+      "code": "85354-9",
+      "display": "Blood pressure panel"
+     }
+    ]
+   },
+   "effectiveDateTime": "2024-04-02T09:30:00Z",
+   "component": [
+    {
+     "code": {
+      "coding": [
+       {
+        "system": "http://loinc.org",
+        "code": "8480-6",
+        "display": "Systolic blood pressure"
+       }
+      ]
+     },
+     "valueQuantity": {
+      "value": 122,
+      "unit": "mmHg",
+      "system": "http://unitsofmeasure.org"
+     }
+    },
+    {
+     "code": {
+      "coding": [
+       {
+        "system": "http://loinc.org",
+        "code": "8462-4",
+        "display": "Diastolic blood pressure"
+       }
+      ]
+     },
+     "dataAbsentReason": {
+      "text": "Not taken"
+     }
+    }
+   ]
+  },
+  "value": "Systolic blood pressure 122 mmHg",
+  "unit": null,
+  "says": "Systolic blood pressure 122 mmHg",
+  "parts": 1,
+  "absent": [
+   "Diastolic blood pressure"
+  ]
+ },
+ {
+  "of": "the two and another",
+  "resource": {
+   "resourceType": "Observation",
+   "id": "bp-6",
+   "status": "final",
+   "code": {
+    "coding": [
+     {
+      "system": "http://loinc.org",
+      "code": "85354-9",
+      "display": "Blood pressure panel"
+     }
+    ]
+   },
+   "effectiveDateTime": "2024-04-02T09:30:00Z",
+   "component": [
+    {
+     "code": {
+      "coding": [
+       {
+        "system": "http://loinc.org",
+        "code": "8480-6",
+        "display": "Systolic blood pressure"
+       }
+      ]
+     },
+     "valueQuantity": {
+      "value": 122,
+      "unit": "mmHg",
+      "system": "http://unitsofmeasure.org"
+     }
+    },
+    {
+     "code": {
+      "coding": [
+       {
+        "system": "http://loinc.org",
+        "code": "8478-0",
+        "display": "Mean blood pressure"
+       }
+      ]
+     },
+     "valueQuantity": {
+      "value": 93,
+      "unit": "mmHg",
+      "system": "http://unitsofmeasure.org"
+     }
+    },
+    {
+     "code": {
+      "coding": [
+       {
+        "system": "http://loinc.org",
+        "code": "8462-4",
+        "display": "Diastolic blood pressure"
+       }
+      ]
+     },
+     "valueQuantity": {
+      "value": 78,
+      "unit": "mmHg",
+      "system": "http://unitsofmeasure.org"
+     }
+    }
+   ]
+  },
+  "value": "122/78 mmHg; Mean blood pressure 93 mmHg",
+  "unit": null,
+  "says": "122/78 mmHg; Mean blood pressure 93 mmHg",
+  "parts": 3,
+  "absent": []
+ },
+ {
+  "of": "the same part twice",
+  "resource": {
+   "resourceType": "Observation",
+   "id": "bp-7",
+   "status": "final",
+   "code": {
+    "coding": [
+     {
+      "system": "http://loinc.org",
+      "code": "85354-9",
+      "display": "Blood pressure panel"
+     }
+    ]
+   },
+   "effectiveDateTime": "2024-04-02T09:30:00Z",
+   "component": [
+    {
+     "code": {
+      "coding": [
+       {
+        "system": "http://loinc.org",
+        "code": "8480-6",
+        "display": "Systolic blood pressure"
+       }
+      ]
+     },
+     "valueQuantity": {
+      "value": 122,
+      "unit": "mmHg",
+      "system": "http://unitsofmeasure.org"
+     }
+    },
+    {
+     "code": {
+      "coding": [
+       {
+        "system": "http://loinc.org",
+        "code": "8480-6",
+        "display": "Systolic blood pressure"
+       }
+      ]
+     },
+     "valueQuantity": {
+      "value": 124,
+      "unit": "mmHg",
+      "system": "http://unitsofmeasure.org"
+     }
+    },
+    {
+     "code": {
+      "coding": [
+       {
+        "system": "http://loinc.org",
+        "code": "8462-4",
+        "display": "Diastolic blood pressure"
+       }
+      ]
+     },
+     "valueQuantity": {
+      "value": 78,
+      "unit": "mmHg",
+      "system": "http://unitsofmeasure.org"
+     }
+    }
+   ]
+  },
+  "value": "Systolic blood pressure 122 mmHg; Systolic blood pressure 124 mmHg; Diastolic blood pressure 78 mmHg",
+  "unit": null,
+  "says": "Systolic blood pressure 122 mmHg; Systolic blood pressure 124 mmHg; Diastolic blood pressure 78 mmHg",
+  "parts": 3,
+  "absent": []
+ },
+ {
+  "of": "a reading with a value of its own",
+  "resource": {
+   "resourceType": "Observation",
+   "id": "sum-1",
+   "status": "final",
+   "code": {
+    "text": "Example score"
+   },
+   "effectiveDateTime": "2024-04-02T09:30:00Z",
+   "valueInteger": 7,
+   "component": [
+    {
+     "code": {
+      "text": "First part"
+     },
+     "valueInteger": 3
+    },
+    {
+     "code": {
+      "text": "Second part"
+     },
+     "valueInteger": 4
+    }
+   ]
+  },
+  "value": "7",
+  "unit": null,
+  "says": "7",
+  "parts": 2,
+  "absent": []
+ },
+ {
+  "of": "no value at all",
+  "resource": {
+   "resourceType": "Observation",
+   "id": "none-1",
+   "status": "final",
+   "code": {
+    "coding": [
+     {
+      "system": "http://loinc.org",
+      "code": "85354-9",
+      "display": "Blood pressure panel"
+     }
+    ]
+   },
+   "effectiveDateTime": "2024-04-02T09:30:00Z",
+   "component": [
+    {
+     "code": {
+      "coding": [
+       {
+        "system": "http://loinc.org",
+        "code": "8480-6",
+        "display": "Systolic blood pressure"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  "value": null,
+  "unit": null,
+  "says": null,
+  "parts": 0,
+  "absent": [
+   "Systolic blood pressure"
+  ]
+ },
+ {
+  "of": "less than could be measured",
+  "resource": {
+   "resourceType": "Observation",
+   "id": "lt-1",
+   "status": "final",
+   "code": {
+    "text": "Example antibody"
+   },
+   "effectiveDateTime": "2024-04-02T09:30:00Z",
+   "valueQuantity": {
+    "value": 0.5,
+    "unit": "IU/mL",
+    "system": "http://unitsofmeasure.org",
+    "comparator": "<"
+   }
+  },
+  "value": "<0.5",
+  "unit": "IU/mL",
+  "says": "<0.5 IU/mL",
+  "parts": 0,
+  "absent": []
+ },
+ {
+  "of": "a part that is less than could be measured",
+  "resource": {
+   "resourceType": "Observation",
+   "id": "lt-2",
+   "status": "final",
+   "code": {
+    "coding": [
+     {
+      "system": "http://loinc.org",
+      "code": "85354-9",
+      "display": "Blood pressure panel"
+     }
+    ]
+   },
+   "effectiveDateTime": "2024-04-02T09:30:00Z",
+   "component": [
+    {
+     "code": {
+      "coding": [
+       {
+        "system": "http://loinc.org",
+        "code": "8480-6",
+        "display": "Systolic blood pressure"
+       }
+      ]
+     },
+     "valueQuantity": {
+      "value": 260,
+      "unit": "mmHg",
+      "system": "http://unitsofmeasure.org",
+      "comparator": ">"
+     }
+    },
+    {
+     "code": {
+      "coding": [
+       {
+        "system": "http://loinc.org",
+        "code": "8462-4",
+        "display": "Diastolic blood pressure"
+       }
+      ]
+     },
+     "valueQuantity": {
+      "value": 80,
+      "unit": "mmHg",
+      "system": "http://unitsofmeasure.org"
+     }
+    }
+   ]
+  },
+  "value": "Systolic blood pressure >260 mmHg; Diastolic blood pressure 80 mmHg",
+  "unit": null,
+  "says": "Systolic blood pressure >260 mmHg; Diastolic blood pressure 80 mmHg",
+  "parts": 2,
+  "absent": []
+ },
+ {
+  "of": "a ratio",
+  "resource": {
+   "resourceType": "Observation",
+   "id": "ratio-1",
+   "status": "final",
+   "code": {
+    "text": "Example titer"
+   },
+   "effectiveDateTime": "2024-04-02T09:30:00Z",
+   "valueRatio": {
+    "numerator": {
+     "value": 1
+    },
+    "denominator": {
+     "value": 40
+    }
+   }
+  },
+  "value": "1:40",
+  "unit": null,
+  "says": "1:40",
+  "parts": 0,
+  "absent": []
+ },
+ {
+  "of": "a range",
+  "resource": {
+   "resourceType": "Observation",
+   "id": "range-1",
+   "status": "final",
+   "code": {
+    "text": "Example cell count"
+   },
+   "effectiveDateTime": "2024-04-02T09:30:00Z",
+   "valueRange": {
+    "low": {
+     "value": 0,
+     "unit": "/HPF"
+    },
+    "high": {
+     "value": 5,
+     "unit": "/HPF"
+    }
+   }
+  },
+  "value": "0 /HPF – 5 /HPF",
+  "unit": null,
+  "says": "0 /HPF – 5 /HPF",
+  "parts": 0,
+  "absent": []
+ },
+ {
+  "of": "a ratio with a bound",
+  "resource": {
+   "resourceType": "Observation",
+   "id": "ratio-2",
+   "status": "final",
+   "code": {
+    "text": "Example titer two"
+   },
+   "effectiveDateTime": "2024-04-02T09:30:00Z",
+   "valueRatio": {
+    "numerator": {
+     "value": 1
+    },
+    "denominator": {
+     "value": 1280,
+     "comparator": ">"
+    }
+   }
+  },
+  "value": "1:>1280",
+  "unit": null,
+  "says": "1:>1280",
+  "parts": 0,
+  "absent": []
+ },
+ {
+  "of": "a time of day",
+  "resource": {
+   "resourceType": "Observation",
+   "id": "time-1",
+   "status": "final",
+   "code": {
+    "text": "Example time"
+   },
+   "effectiveDateTime": "2024-04-02T09:30:00Z",
+   "valueTime": "07:30:00"
+  },
+  "value": "07:30:00",
+  "unit": null,
+  "says": "07:30:00",
+  "parts": 0,
+  "absent": []
+ },
+ {
+  "of": "a unit and no number",
+  "resource": {
+   "resourceType": "Observation",
+   "id": "unit-1",
+   "status": "final",
+   "code": {
+    "text": "Example level"
+   },
+   "effectiveDateTime": "2024-04-02T09:30:00Z",
+   "valueQuantity": {
+    "unit": "mg/dL"
+   }
+  },
+  "value": null,
+  "unit": null,
+  "says": null,
+  "parts": 0,
+  "absent": []
+ },
+ {
+  "of": "a unit and no number of its own, and what its parts say",
+  "resource": {
+   "resourceType": "Observation",
+   "id": "unit-2",
+   "status": "final",
+   "code": {
+    "coding": [
+     {
+      "system": "http://loinc.org",
+      "code": "85354-9",
+      "display": "Blood pressure panel"
+     }
+    ]
+   },
+   "effectiveDateTime": "2024-04-02T09:30:00Z",
+   "valueQuantity": {
+    "unit": "mmHg"
+   },
+   "component": [
+    {
+     "code": {
+      "coding": [
+       {
+        "system": "http://loinc.org",
+        "code": "8480-6",
+        "display": "Systolic blood pressure"
+       }
+      ]
+     },
+     "valueQuantity": {
+      "value": 118,
+      "unit": "mmHg",
+      "system": "http://unitsofmeasure.org"
+     }
+    },
+    {
+     "code": {
+      "coding": [
+       {
+        "system": "http://loinc.org",
+        "code": "8462-4",
+        "display": "Diastolic blood pressure"
+       }
+      ]
+     },
+     "valueQuantity": {
+      "value": 74,
+      "unit": "mmHg",
+      "system": "http://unitsofmeasure.org"
+     }
+    },
+    {
+     "code": {
+      "text": "Sample wristband reading"
+     },
+     "valueQuantity": {
+      "unit": "mmHg",
+      "comparator": ">"
+     }
+    }
+   ]
+  },
+  "value": "118/74",
+  "unit": "mmHg",
+  "says": "118/74 mmHg",
+  "parts": 2,
+  "absent": [
+   "Sample wristband reading"
+  ]
+ },
+ {
+  "of": "a comparator that is none of the four",
+  "resource": {
+   "resourceType": "Observation",
+   "id": "ad-1",
+   "status": "final",
+   "code": {
+    "text": "Example dose level"
+   },
+   "effectiveDateTime": "2024-04-02T09:30:00Z",
+   "valueQuantity": {
+    "value": 4,
+    "unit": "mg",
+    "system": "http://unitsofmeasure.org",
+    "comparator": "ad"
+   }
+  },
+  "value": "4",
+  "unit": "mg",
+  "says": "4 mg",
+  "parts": 0,
+  "absent": []
+ },
+ {
+  "of": "a part with neither a name nor a code",
+  "resource": {
+   "resourceType": "Observation",
+   "id": "bare-1",
+   "status": "final",
+   "code": {
+    "text": "Example pair"
+   },
+   "effectiveDateTime": "2024-04-02T09:30:00Z",
+   "component": [
+    {
+     "code": {},
+     "valueInteger": 1
+    },
+    {
+     "code": {
+      "text": "Second part"
+     },
+     "valueInteger": 4
+    }
+   ]
+  },
+  "value": "Second part 4",
+  "unit": null,
+  "says": "Second part 4",
+  "parts": 1,
+  "absent": []
+ },
+ {
+  "of": "categories by code, the standard's before a vendor's",
+  "resource": {
+   "resourceType": "Observation",
+   "id": "cat-1",
+   "status": "final",
+   "code": {
+    "text": "Example test"
+   },
+   "effectiveDateTime": "2024-04-02T09:30:00Z",
+   "valueString": "Seen",
+   "category": [
+    {
+     "coding": [
+      {
+       "system": "urn:example:local",
+       "code": "LAB-X",
+       "display": "Laboratory"
+      },
+      {
+       "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+       "code": "laboratory",
+       "display": "Laboratory"
+      }
+     ]
+    },
+    {
+     "text": "Outside lab"
+    }
+   ]
+  },
+  "value": "Seen",
+  "unit": null,
+  "says": "Seen",
+  "parts": 0,
+  "categories": [
+   "laboratory",
+   "Outside lab"
+  ],
+  "absent": []
+ }
+]

@@ -79,8 +79,8 @@ pub fn was(r: &Record, path: Option<&str>) -> Option<&'static str> {
 fn asked(p: &Person, r: &Record) -> Option<&'static str> {
     let fetched = r.provenance.iter().filter_map(|p| p.fetched_at.as_deref());
     let day = r.date.as_deref().or(fetched.min());
-    let code = r.code.as_ref();
-    let asks = questionnaires::of(&r.display, code).is_some_and(|q| q.answers == Answers::Grown);
+    let of = questionnaires::asked_by(r);
+    let asks = of.iter().any(|q| q.answers == Answers::Grown);
     (asks && !lab(r) && too_young(p, day)).then_some(ANOTHER)
 }
 

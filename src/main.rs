@@ -122,9 +122,10 @@ enum Command {
     /// Check every indexed file is in the folder with the hash the index
     /// recorded.
     Verify(VerifyArgs),
-    /// Shape every claim again, and read every record's providers and every
+    /// Shape every claim again, and read every record's providers, every
     /// condition's, allergy's and medicine's fields and what each source says
-    /// of it again, from the filed raw resources, put each result about
+    /// of it, and every result's and report's status and fields (its parts, exact
+    /// values and categories too) again, from the filed raw resources, put each result about
     /// somebody else that was filed as the person's own in a record of its
     /// own, and read bills' and receipts' statements again, as this medrec's
     /// import does: once after an upgrade that changes them.
@@ -1303,8 +1304,8 @@ fn run(cli: &Cli) -> Result<(), CliError> {
                     println!("nothing was written; a run would do this:");
                 }
                 println!(
-                    "{} claims: {} shaped again, {} unchanged, {} with no raw file; {} bills and receipts read again; {} records gained or changed what is said of their providers; {} records and {} papers what their sources say of them; {} records keep more of what their sources gave",
-                    r.claims, r.reshaped, r.unchanged, r.without_raw, r.statements, r.providers_updated, r.statuses_updated, r.papers_updated, r.given_updated
+                    "{} claims: {} shaped again, {} unchanged, {} with no raw file; {} bills and receipts read again; {} records gained or changed what is said of their providers; {} records and {} papers what their sources say of them; {} results and reports their fields; {} records keep more of what their sources gave; {} results about somebody else put in records of their own",
+                    r.claims, r.reshaped, r.unchanged, r.without_raw, r.statements, r.providers_updated, r.statuses_updated, r.papers_updated, r.results_updated, r.given_updated, r.results_split
                 );
                 if let Some(n) = papers_unread(r.papers_unread) {
                     println!("{n}");

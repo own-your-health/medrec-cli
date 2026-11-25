@@ -2712,7 +2712,7 @@ const ANKLE: &str = "r_ankleaaaaaaaaaaaaaaa";
 const CALM: &str = "r_calmfillaaaaaaaaaaaa";
 const NOSE: &str = "r_nosefillaaaaaaaaaaaa";
 /// What a grown person does, and the papers of it.
-const GROWN: [&str; 9] = [
+const GROWN: [&str; 10] = [
     "r_lowmoodaaaaaaaaaaaaa",
     "r_codedaaaaaaaaaaaaaaa",
     "r_worryaaaaaaaaaaaaaaa",
@@ -2722,10 +2722,13 @@ const GROWN: [&str; 9] = [
     "r_askedaaaaaaaaaaaaaaa",
     "d_answersaaaaaaaaaaaaa",
     "d_sheetaaaaaaaaaaaaaaa",
+    "r_piecesaaaaaaaaaaaaaa",
 ];
 /// The words each is named by, and some a search would find it by.
-const NAMED: [&str; 10] = [
+const NAMED: [&str; 12] = [
     "Patient health",
+    "Example check-in",
+    "First piece",
     "Total score",
     "GAD-7",
     "Postnatal",
@@ -3973,9 +3976,9 @@ fn a_dry_run_counts_what_would_be_private() {
     let v = changes_of(&e, &alex);
     assert_eq!(v["against"], "0.9.5");
     let want = json!({
-        "added": {"document": 1, "report": 1, "result": 10},
-        "added_by": {"test": 11, "words": 1},
-        "questionnaires": {"anxiety": 2, "depression": 4},
+        "added": {"document": 1, "report": 1, "result": 11},
+        "added_by": {"test": 12, "words": 1},
+        "questionnaires": {"anxiety": 2, "depression": 5},
         "questionnaires_one_of_a_kind": 6,
         "opened": {"result": 1},
         "gone": {"event": 1, "record": 1},
@@ -4016,9 +4019,9 @@ fn a_dry_run_counts_what_would_be_private() {
     let text = String::from_utf8(out.stdout).unwrap();
     for line in [
         "in the views (against medrec 0.9.5's)",
-        "private, more: 1 document, 1 report, 10 result",
+        "private, more: 1 document, 1 report, 11 result",
         "private before, open now: 1 result",
-        "their questionnaires: 2 anxiety, 4 depression, 6 of a kind there is one of",
+        "their questionnaires: 2 anxiety, 5 depression, 6 of a kind there is one of",
     ] {
         assert!(text.contains(line), "{line}: {text}");
     }
@@ -4129,7 +4132,7 @@ fn a_dry_run_counts_what_would_be_private() {
     let v = changes_of(&e, &alex);
     assert!(v["against"].is_null() && v["stale"] == false, "{v}");
     let want = json!({
-        "claim": 1, "condition": 2, "document": 2, "event": 1, "report": 1, "result": 10,
+        "claim": 1, "condition": 2, "document": 2, "event": 1, "report": 1, "result": 11,
     });
     assert_eq!(v["private"]["added"], want, "{v}");
     assert_eq!(v["private"]["opened"], json!({}), "{v}");
@@ -4183,9 +4186,9 @@ fn a_dry_run_counts_what_would_be_current_and_about_another() {
     };
     born("2023-12-04");
     let v = changes_of(&e, &alex);
-    let want = json!({"said": 0, "by_age": 7, "documents": 2});
+    let want = json!({"said": 0, "by_age": 8, "documents": 2});
     assert_eq!(v["about_another"], want);
-    let want = json!({"document": 2, "report": 1, "result": 6});
+    let want = json!({"document": 2, "report": 1, "result": 7});
     assert_eq!(v["private"]["gone"], want);
     assert_eq!(v["private"]["opened"], json!({}));
     let _ = std::fs::remove_dir_all(&e.root);

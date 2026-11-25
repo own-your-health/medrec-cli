@@ -247,7 +247,7 @@ impl<'a> Kinds<'a> {
         let of = match list {
             "records" => {
                 let r = self.records.get(id)?;
-                questionnaires::of(&r.display, r.code.as_ref())
+                questionnaires::asked_by(r).first().copied()
             }
             "documents" => questionnaires::of(self.documents.get(id)?.title.as_deref()?, None),
             _ => None,

@@ -1763,7 +1763,7 @@ impl Came {
     fn of(index: &PersonIndex, rec: &Record, found: &Found, word: Option<&Word>) -> Came {
         let of = rec.provenance[0].clone();
         let raw = current(of.raw_path.as_ref());
-        let gives = given::of(&Record {
+        let gives = given::gives(&Record {
             providers: found.refs.clone(),
             ..rec.clone()
         });
