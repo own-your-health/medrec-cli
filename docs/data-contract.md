@@ -2953,19 +2953,23 @@ neither a type nor a search. A record is not counted while any of its resources
 from this source is in the export, or may be among those it left out (its type was
 withheld or cut short, it is itself among the skips, or it is a `MedicationRequest`
 and a `MedicationDispense` is), nor when it is about another person. Nor is it
-where the version filed of one of them was not read through a sign-in: files can
-have what the source gives no sign-in. A run filed before 0.9.10 does not say which it was
-(`from_files`), and is taken for a sign-in's where the provider reads no files
-(`records-files`), else for neither. So a record the source stopped giving is in
-the count of every import from then on. `not_served` (0.9.10 and later) has the
-count of each kind, `{<kind>: n}`, and is `null` when the count is.
+where the provenance of one of them is not from a sign-in's run (its `fetched_at`
+is that run's `pulled_at`): files can have what the source gives no sign-in. A
+sign-in that gives the same version again, no later, leaves the provenance as it
+was. A run says which it was (`from_files`); with neither `--from-profile` nor
+`--from-files`, a provider that reads files (`records-files`) may have read some,
+and the run is of files. One filed before 0.9.10 does not say, and is taken for a
+sign-in's where the provider reads no files, else for neither. A record that is
+counted stays in the count of each later import that can tell it. `not_served`
+(0.9.10 and later) has the count of each kind, `{<kind>: n}`, and is `null` when
+the count is.
 
 `updated` (0.9.10 and later) is a list of the records updated, `{id, kind,
 changed}`: `changed` has the names of what is other than it was, a member of the
 record (`status`, `code`, `display`, `date`, `words`, `errors`, `providers`,
-`documents`) or a field as `fields.<name>`, and no value. It is empty for a
+`lists`, `documents`) or a field as `fields.<name>`, and no value. It is empty for a
 version that differs in nothing medrec reads, or only in what no reader shows
-(`given`, `lists`, `listed_by`). Several resources of one record make one entry. A
+(`given`, `listed_by`). Several resources of one record make one entry. A
 record about another person has none, and neither does one that this same import
 first added, though `records_updated` counts a later resource that joins it.
 

@@ -42,6 +42,10 @@ pub const PROVIDER_INFO_FILES: &str =
 /// The same for a provider that needs no login.
 pub const PROVIDER_INFO_NO_LOGIN: &str =
     include_str!("../tests/fixtures/stream/fakeprov-info-no-login.json");
+
+/// The same of one that reads files and signs in nowhere.
+pub const PROVIDER_INFO_FILES_ONLY: &str =
+    include_str!("../tests/fixtures/stream/fakeprov-info-files-only.json");
 /// The fake provider's `profiles list --json`: `adult1` and `adult2`.
 pub const PROVIDER_PROFILES: &str = include_str!("../tests/fixtures/stream/fakeprov-profiles.json");
 /// A synthetic clinical summary with `{{RENDERING}}` (its timestamp and
@@ -261,8 +265,8 @@ pub fn write_dicom(dicom: &Path) {
 /// A fake `health-records/v1` provider, `fakeprov`, that prints `stream`
 /// for `records export`. Returns the directory to put on `PATH`.
 ///
-/// Its `info` is `FAKEPROV_INFO` (`unprofiled`, `no-login` or `files`, else
-/// the current one, which lists `login-profiles`). Its profiles are `adult1`
+/// Its `info` is `FAKEPROV_INFO` (`unprofiled`, `no-login`, `files` or
+/// `files-only`, else the current one, which lists `login-profiles`). Its profiles are `adult1`
 /// and `adult2`; an export that signs in without one of them is exit 2, as a
 /// provider's is, and `--files <DIR>` (with `files`) needs a directory and
 /// no `--profile`. It writes the export's arguments to `export-args`, and
@@ -292,6 +296,11 @@ pub fn write_provider(provider: &Path, stream: &str) -> PathBuf {
         PROVIDER_INFO_FILES,
     )
     .unwrap();
+    std::fs::write(
+        provider.join("fakeprov-info-files-only.json"),
+        PROVIDER_INFO_FILES_ONLY,
+    )
+    .unwrap();
     std::fs::write(provider.join("fakeprov-profiles.json"), PROVIDER_PROFILES).unwrap();
     let script = provider.join("fakeprov");
     write(
@@ -302,7 +311,7 @@ pub fn write_provider(provider: &Path, stream: &str) -> PathBuf {
 d='{0}'
 case "$1" in
   info) case "$FAKEPROV_INFO" in
-      unprofiled|no-login|files) cat "$d/fakeprov-info-$FAKEPROV_INFO.json" ;;
+      unprofiled|no-login|files|files-only) cat "$d/fakeprov-info-$FAKEPROV_INFO.json" ;;
       *) cat "$d/fakeprov-info.json" ;;
     esac ;;
   profiles) cat "$d/fakeprov-profiles.json" ;;

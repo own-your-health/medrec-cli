@@ -22,14 +22,13 @@ pub struct Updated {
 }
 
 /// What names no part of what a record says, and what no reader shows.
-const APART: [&str; 8] = [
+const APART: [&str; 7] = [
     "id",
     "kind",
     "key",
     "provenance",
     "fields_from",
     "given",
-    "lists",
     "listed_by",
 ];
 
@@ -196,6 +195,11 @@ mod tests {
         .unwrap()
     }
 
+    fn listing(by: &str, listed: &str) -> BTreeMap<String, Vec<String>> {
+        let by = format!("{DIR}/{by}.json");
+        BTreeMap::from([(by, vec![format!("{listed}.json")])])
+    }
+
     fn person() -> Person {
         serde_json::from_value(json!({"id": "p_test", "name": "Robin Example",
             "folder": "Robin Example", "created_at": "2024-01-01T00:00:00Z"}))
@@ -314,8 +318,13 @@ mod tests {
         assert_eq!(count(&idx, &[]), Some(rest.clone()));
         idx.records[1].provenance[0].fetched_at = None;
         assert_eq!(count(&idx, &[]), Some(rest.clone()));
-        // What is about somebody else has no kind.
+        // What is about somebody else has no kind, nor has a report of it.
         idx.records[1].provenance[0].fetched_at = Some(AT.into());
+        let mut report = record("a report", "report", &[(DIR, "DiagnosticReport/r")]);
+        report.lists = listing("DiagnosticReport/r", "Observation/b");
+        idx.records.push(report);
+        let with = json!({"condition": 1, "medication": 1, "report": 1, "result": 1});
+        assert_eq!(count(&idx, &[]), Some(with));
         idx.records[1]
             .fields
             .insert(about::FIELD.into(), "another".into());
@@ -335,7 +344,7 @@ mod tests {
         now.words[0].read = Some("2024-03-02".into());
         now.provenance[0].filed_at = "2024-03-02T10:00:00Z".into();
         now.given = vec![Default::default()];
-        now.lists = BTreeMap::from([(format!("{DIR}/Observation/a.json"), vec![])]);
+        now.listed_by = serde_json::from_value(json!([{"display": "Example form"}])).unwrap();
         let ids: HashSet<String> = ["one".to_string(), "new".to_string()].into();
         let names = |now: &Record| {
             let mut idx = PersonIndex::new("p_test");
@@ -358,9 +367,24 @@ mod tests {
         assert_eq!(names(&now), [of(&want)]);
         now.words[0].status = Some("amended".into());
         assert_eq!(names(&now), [of(&[&want[..], &["words"]].concat())]);
-        // Nor is one about somebody else named.
+        // What it lists is named, filed or not.
+        let mut panel = was.clone();
+        panel.lists = listing("Observation/a", "Observation/z");
+        assert_eq!(names(&panel), [of(&["lists"])]);
+        // Nor is one about somebody else named, or one that lists such.
         now.fields.insert(about::FIELD.into(), "another".into());
         assert_eq!(names(&now), []);
+        let mut report = record("a report", "report", &[(DIR, "DiagnosticReport/r")]);
+        report.lists = listing("DiagnosticReport/r", "Observation/a");
+        let mut later = report.clone();
+        later.status = Some("amended".into());
+        let ids: HashSet<String> = ["a report".to_string()].into();
+        let of = |listed: Record| {
+            let mut idx = PersonIndex::new("p_test");
+            idx.records = vec![listed, later.clone()];
+            updated(&person(), &[report.clone()], &idx, &ids).len()
+        };
+        assert_eq!((of(was.clone()), of(now)), (1, 0));
         let mut idx = PersonIndex::new("p_test");
         idx.records = vec![was.clone()];
         assert!(updated(&person(), &[was.clone()], &idx, &HashSet::new()).is_empty());

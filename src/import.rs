@@ -273,6 +273,14 @@ pub struct Request {
     pub allow_birth_date_mismatch: bool,
 }
 
+impl Request {
+    /// Whether its export is of downloaded files. One of a provider that reads
+    /// them can be with neither source named, by its own environment.
+    fn of_files(&self) -> bool {
+        self.files.is_some() || (self.reads_files && self.from_profile.is_none())
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct Report {
     pub import: String,
@@ -905,7 +913,7 @@ fn file_streamed(
     let import_id = ids::new("i");
     let mut skipped = trailer.skipped.clone();
     skipped.extend(skipped_large);
-    let whole = req.since.is_none() && header.since.is_none() && req.files.is_none();
+    let whole = req.since.is_none() && header.since.is_none() && !req.of_files();
     let here = written
         .paths
         .values()
@@ -933,7 +941,7 @@ fn file_streamed(
         organization: header.organization.id.clone(),
         patient_id: header.patient.id.clone(),
         pulled_at: header.pulled_at.clone(),
-        from_files: Some(req.files.is_some()),
+        from_files: Some(req.of_files()),
         imported_at,
         counts: counts.clone(),
         skipped: skipped.clone(),
