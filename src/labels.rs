@@ -65,8 +65,13 @@ pub enum Evidence {
     /// The directory has one provider the printed name can be.
     OnlyMatch { state: String },
     /// Of the several it can be, the directory has one of the first name
-    /// that `printed`, the text, spells out.
-    FirstName { state: String, printed: String },
+    /// that `printed`, the text, spells out, in this state and city.
+    FirstName {
+        state: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        city: Option<String>,
+        printed: String,
+    },
     /// A paper of the same event prints the name with one practice.
     Paper { document: String },
     /// The household said so.
@@ -303,6 +308,10 @@ pub struct State {
     /// By record, then by the text it prints.
     #[serde(default)]
     matched: BTreeMap<String, BTreeMap<String, Label>>,
+    /// The same, of the texts whose first name is one of several's. Apart, as
+    /// an earlier medrec reads no state whose reasons it does not know.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    first_names: BTreeMap<String, BTreeMap<String, Label>>,
     /// The state before this one did not read, and no directory has been
     /// asked of every NPI since: which of the records a label makes private is
     /// not known.
@@ -332,6 +341,7 @@ impl State {
             directory: None,
             by_npi: BTreeMap::new(),
             matched: BTreeMap::new(),
+            first_names: BTreeMap::new(),
             lost: false,
         }
     }
@@ -403,16 +413,26 @@ impl State {
                 let Some(found) = only_match(d, r, field, text) else {
                     continue;
                 };
-                let of_record = now.matched.entry(r.id.clone()).or_default();
-                match found {
-                    Some(l) => of_record.insert(text.to_string(), l),
-                    None => of_record.remove(text),
-                };
+                for kept in [&mut now.matched, &mut now.first_names] {
+                    if let Some(m) = kept.get_mut(&r.id) {
+                        m.remove(text);
+                    }
+                }
+                if let Some(l) = found {
+                    let first = |e: &Evidence| matches!(e, Evidence::FirstName { .. });
+                    let kept = match l.evidence.iter().any(first) {
+                        true => &mut now.first_names,
+                        false => &mut now.matched,
+                    };
+                    let of_record = kept.entry(r.id.clone()).or_default();
+                    of_record.insert(text.to_string(), l);
+                }
             }
         }
         now.matched.retain(|_, m| !m.is_empty());
+        now.first_names.retain(|_, m| !m.is_empty());
         now.lost &= later || !npis(idx).all(|n| now.by_npi.contains_key(n) || d.asked(n));
-        if now.by_npi.is_empty() && now.matched.is_empty() {
+        if now.by_npi.is_empty() && now.matched.is_empty() && now.first_names.is_empty() {
             now.directory = None;
         }
         now
@@ -422,20 +442,25 @@ impl State {
     fn still(mut self, idx: &PersonIndex) -> State {
         let records: HashMap<&str, &Record> =
             idx.records.iter().map(|r| (r.id.as_str(), r)).collect();
-        self.matched.retain(|id, texts| {
-            let Some(r) = records.get(id.as_str()) else {
-                return false;
-            };
-            texts.retain(|text, l| {
-                people_printed(r).any(|(field, t)| t == text && still_matches(r, field, l))
+        for kept in [&mut self.matched, &mut self.first_names] {
+            kept.retain(|id, texts| {
+                let Some(r) = records.get(id.as_str()) else {
+                    return false;
+                };
+                texts.retain(|text, l| {
+                    people_printed(r).any(|(field, t)| t == text && still_matches(r, field, l))
+                });
+                !texts.is_empty()
             });
-            !texts.is_empty()
-        });
+        }
         self
     }
 
     fn is_empty(&self) -> bool {
-        self.by_npi.is_empty() && self.matched.is_empty() && !self.lost
+        self.by_npi.is_empty()
+            && self.matched.is_empty()
+            && self.first_names.is_empty()
+            && !self.lost
     }
 
     /// What to write, when the file has `held`: none when it is to stay as
@@ -479,7 +504,9 @@ impl State {
     }
 
     fn matched(&self, r: &Record, text: &str) -> Option<&Label> {
-        self.matched.get(&r.id)?.get(text)
+        [&self.matched, &self.first_names]
+            .into_iter()
+            .find_map(|kept| kept.get(&r.id)?.get(text))
     }
 }
 
@@ -838,8 +865,13 @@ fn only_match(d: &Directory, r: &Record, field: &str, text: &str) -> Option<Opti
         [p] => (p, Evidence::OnlyMatch { state: state(p) }),
         _ => match of_first_name(&found, r, field, text) {
             Some(p) => {
-                let (state, printed) = (state(p), text.to_string());
-                (p, Evidence::FirstName { state, printed })
+                let city = cased(p.city.trim(), false);
+                let why = Evidence::FirstName {
+                    state: state(p),
+                    city: (!city.is_empty()).then_some(city),
+                    printed: text.to_string(),
+                };
+                (p, why)
             }
             None => return Some(None),
         },
@@ -897,7 +929,7 @@ fn of_first_name<'a>(
             && given[0].len() > 1
             && words.is_some_and(|k| middle_agrees(p, &given[k..]))
     });
-    (is_it && degrees_agree(p, text) && city_agrees(p, r, field)).then_some(p)
+    (is_it && degrees_agree(p, text) && city_agrees(&p.city, r, field)).then_some(p)
 }
 
 /// Whether what a text prints after the first name can be the provider's
@@ -963,9 +995,9 @@ fn degrees_agree(p: &Provider, text: &str) -> bool {
     printed.iter().any(|(k, _)| own.iter().any(|(o, _)| o == k))
 }
 
-/// Whether the provider is in a city the record's source gives this field's
-/// provider, else any of its providers, where it and the directory give one.
-fn city_agrees(p: &Provider, r: &Record, field: &str) -> bool {
+/// Whether a city is one the record's source gives this field's provider,
+/// else any of its providers, where both are known.
+fn city_agrees(city: &str, r: &Record, field: &str) -> bool {
     let cities = |own: bool| -> BTreeSet<String> {
         r.providers
             .iter()
@@ -978,21 +1010,25 @@ fn city_agrees(p: &Provider, r: &Record, field: &str) -> bool {
     if given.is_empty() {
         given = cities(false);
     }
-    let city = nppes::fold(&p.city);
+    let city = nppes::fold(city);
     given.is_empty() || city.is_empty() || given.contains(&city)
 }
 
 /// Whether a match an earlier pass made still stands for the record: its
-/// state and its service may have changed.
+/// state, its city and its service may have changed.
 fn still_matches(r: &Record, field: &str, l: &Label) -> bool {
     let states = states(r, field);
-    let in_state = l.evidence.iter().any(|e| match e {
-        Evidence::OnlyMatch { state } | Evidence::FirstName { state, .. } => {
-            states.is_empty() || states.contains(state)
+    let there = l.evidence.iter().any(|e| {
+        let in_state = |state: &String| states.is_empty() || states.contains(state);
+        match e {
+            Evidence::OnlyMatch { state } => in_state(state),
+            Evidence::FirstName { state, city, .. } => {
+                in_state(state) && city_agrees(city.as_deref().unwrap_or(""), r, field)
+            }
+            _ => false,
         }
-        _ => false,
     });
-    in_state
+    there
         && l.role
             .as_deref()
             .and_then(roles::named)
@@ -2074,7 +2110,8 @@ mod tests {
     /// (`P DUMMY`), a private paper for an open item (`L FILLER`) and for a
     /// private one (`B SPECIMEN`), a service two fit (`r_therapy…`), and an
     /// item the household marked not private whose label is in a private area
-    /// (`r_marked…`).
+    /// (`r_marked…`). `Drew Specimen, MD` spells out the first name of one of
+    /// the two.
     #[test]
     fn the_file_is_as_the_contract_has_it() {
         let c = Case::new();
@@ -3281,7 +3318,7 @@ mod tests {
             .collect()
     }
 
-    const NAMED: &str = "r_firstnameaaaaaaaaaaa";
+    const NAMED: &str = "r_namedaaaaaaaaaaaaaaa";
 
     /// A claim printing `text`, with no NPI.
     fn naming(text: &str, of: impl Fn(&mut Record)) -> Case {
@@ -3330,7 +3367,7 @@ mod tests {
             assert_eq!(l["confidence"], "likely", "{text}");
             assert_eq!(
                 l["evidence"],
-                json!([{"from": "first_name", "state": "FL", "printed": text}]),
+                json!([{"from": "first_name", "state": "FL", "city": "Exampleton", "printed": text}]),
             );
         }
         // A whole first name of two words is spelled out by both.
@@ -3475,11 +3512,24 @@ mod tests {
             Some(json!("household"))
         );
         assert_eq!(say(&mut c, json!({"wrong": true})), None);
-        // Without the directory, what it gave stays.
+        // Without the directory, what it gave stays, until the record's
+        // source gives another city.
         c.marks["providers"] = json!([]);
         c.sync(false);
         let v = c.labels();
         let id = v["claims"][NAMED].as_str().unwrap();
         assert_eq!(v["labels"][id]["evidence"][0]["from"], "first_name");
+        // It is not where an earlier medrec reads its matches.
+        assert!(c.state()["matched"].get(NAMED).is_none());
+        assert!(c.state()["first_names"].get(NAMED).is_some());
+        let of_record = |c: &mut Case, city: &str| {
+            let r = c.index.records.iter_mut().find(|r| r.id == NAMED).unwrap();
+            r.providers[0].city = Some(city.into());
+            c.sync(false);
+            c.labels()["claims"].get(NAMED).is_some()
+        };
+        assert!(of_record(&mut c, "Exampleton"));
+        assert!(!of_record(&mut c, "Sampleburg"));
+        assert!(c.state().get("first_names").is_none());
     }
 }

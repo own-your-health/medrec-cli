@@ -1230,7 +1230,7 @@ provider, of whom the household said nothing, has no `providers.json`.
   | `household` | The household said so: `id` (a correction's, in `overrides`), `by` and `at`. |
   | `npi` | The record carries the provider's National Provider Identifier, and the directory has it. Every sure label is this one. |
   | `only_match` | The directory has one person of the printed surname and first initial, in the state the record's source gives (`state`; or, when it gives none, in any state the directory was read for), whose role gives the service, and no given name the text spells out is another. A person whose role medrec has no words for counts as one it can be, and is never the label. |
-  | `first_name` | (0.9.8 and later) The directory has several such people, and the text (`printed`) spells out the first name of exactly one of them (`state`: the one it is in). It narrows only when every other has a first name it cannot be, and nothing else the record says is against the one: the state and city of its address, the service, a middle name or initial, a degree. (The directory gives a person no practice.) An initial, a nickname, a shorter form or another spelling narrows nothing: where one of the others may be so named, there is no label. |
+  | `first_name` | (0.9.8 and later) The directory has several such people, and the text (`printed`) spells out the first name of exactly one of them, who is in `state` and, where the directory gives one, `city`. It narrows only when every other is ruled out, and nothing else the record says is against the one: the state and city of its address, the service, a middle name or initial, a degree. (The directory gives a person no practice.) An initial, a nickname, a shorter form or another spelling of a name narrows nothing, and one of the others whose first, middle or other first name begins as the printed one does, or is its beginning, is not ruled out. Like any likely label it decides nothing: no amount, no private item and no two names that are one provider come of it. |
   | `paper` | A paper of the same event with a practice's own heading (a bill, receipt, visit or discharge summary, prescription or immunization record, and not a laboratory's, pharmacy's or imaging center's) prints the name, and every such paper that does is of one practice. `document` is the paper. |
 
   A reader has no words for one it does not know, and still shows the label.
@@ -1295,8 +1295,9 @@ provider, of whom the household said nothing, has no `providers.json`.
 **`provider-state.json`** (`medrec-provider-state/v1`), in the person's folder
 rather than in `views/`, is medrec's own: the label of each NPI the person's
 records carry or carried (`by_npi`), shown or not, and those of the printed
-names only one provider can be (`matched`, by record and text), with the newest
-directory's `directory`. It is not split: it holds private providers' names
+names only one provider can be (`matched`, by record and text) or a first name
+told apart (`first_names`, 0.9.8 and later, which an earlier medrec drops when it
+writes the file), with the newest directory's `directory`. It is not split: it holds private providers' names
 and roles with the rest. medrec judges what is private by it, in its own
 answers too. No other reader reads it or serves it: one compares its MD5
 (When they are written, below). Nothing else in the folder

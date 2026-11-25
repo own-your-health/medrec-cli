@@ -569,7 +569,8 @@ A claim may print a provider as `SAMPLE J` and nothing more. medrec puts a
 name, a practice, a role and a phone beside it where it has them, and says
 why: *sure* where the record carries the provider's NPI and the provider
 directory (below) has it, *likely* where the directory has one person it can
-be or a paper of the same visit prints the name. Where the household knows
+be (or several, and the claim spells out the first name of one) or a paper of
+the same visit prints the name. Where the household knows
 better, it says so, and that wins:
 
 ```sh

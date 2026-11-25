@@ -537,15 +537,18 @@ mod tests {
             refs,
             unresolved: BTreeSet::new(),
         };
-        let over = |new: ProviderRef, had: ProviderRef, shared: bool| {
-            says(vec![new]).over(&[had], &fields, &fields, shared)
+        let over = |new: &ProviderRef, had: &ProviderRef, shared: bool| -> ProviderRef {
+            let had = std::slice::from_ref(had);
+            let mut out = says(vec![new.clone()]).over(had, &fields, &fields, shared);
+            assert_eq!(out.len(), 1);
+            out.remove(0)
         };
         let (fl, ny) = (at("FL", "Exampleton"), at("NY", "Sampleburg"));
         let bare = entry("performer", None, Some("FL"));
-        assert_eq!(over(ny.clone(), fl.clone(), false), [ny.clone()]);
-        assert_eq!(over(ny.clone(), fl.clone(), true), [fl.clone()]);
-        assert_eq!(over(ny.clone(), bare.clone(), true), [bare.clone()]);
-        assert_eq!(over(fl.clone(), bare.clone(), true), [fl.clone()]);
+        assert_eq!(over(&ny, &fl, false), ny);
+        assert_eq!(over(&ny, &fl, true), fl);
+        assert_eq!(over(&ny, &bare, true), bare);
+        assert_eq!(over(&fl, &bare, true), fl);
         let npi = entry("performer", Some("0000000006"), None);
         let both = says(vec![npi.clone()]).and(says(vec![fl.clone()]));
         assert_eq!(
