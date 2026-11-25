@@ -188,11 +188,165 @@
      "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/another.json"
     }
    ]
+  },
+  {
+   "id": "r_billedaaaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|billed|2024-10-01",
+   "date": "2024-10-01",
+   "display": "Sample visit \u00b7 E SAMPLETON",
+   "status": "active",
+   "fields": {
+    "provider": "E SAMPLETON",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2024-10-01",
+     "end": "2024-10-01"
+    },
+    "type": "professional",
+    "category": "visit",
+    "amounts": {
+     "billed": {
+      "amount": "40.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "15.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "category": "visit",
+      "service": {
+       "display": "Sample visit"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "40.00",
+        "currency": "USD"
+       },
+       "you_owe": {
+        "amount": "15.00",
+        "currency": "USD"
+       }
+      },
+      "sequence": 1
+     }
+    ]
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.10",
+     "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/billed.json"
+    }
+   ]
+  },
+  {
+   "id": "r_lateraaaaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|later|2024-10-29",
+   "date": "2024-10-29",
+   "display": "Sample visit \u00b7 SAMPLETON, ED",
+   "status": "active",
+   "fields": {
+    "provider": "SAMPLETON, ED",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2024-10-29",
+     "end": "2024-10-29"
+    },
+    "type": "professional",
+    "category": "visit",
+    "amounts": {
+     "billed": {
+      "amount": "40.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "15.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "category": "visit",
+      "service": {
+       "display": "Sample visit"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "40.00",
+        "currency": "USD"
+       },
+       "you_owe": {
+        "amount": "15.00",
+        "currency": "USD"
+       }
+      },
+      "sequence": 1
+     }
+    ]
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.10",
+     "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/later.json"
+    }
+   ]
   }
  ],
  "studies": [],
  "imports": [],
  "documents": [
+  {
+   "id": "d_billaaaaaaaaaaaaaaaa",
+   "path": "Robin Example/Papers/2024/bill.pdf",
+   "sha256": "bill",
+   "md5": "bill",
+   "size": 10,
+   "media_type": "application/pdf",
+   "doc_type": "bill",
+   "date": "2024-10-01",
+   "organization": "Example Counseling",
+   "title": "Statement",
+   "filed_at": "2024-12-04T10:00:00Z",
+   "origin": {
+    "kind": "file",
+    "action": "copied"
+   },
+   "provenance": {
+    "source": {
+     "kind": "fhir",
+     "cli": "fakeprov",
+     "organization_id": "north",
+     "fhir_base": "https://north.example.test/fhir"
+    },
+    "method": "fhir-api",
+    "fetched_at": "2024-12-02T10:00:00Z",
+    "filed_at": "2024-12-04T10:00:00Z",
+    "filed_by": "medrec 0.9.10",
+    "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/bill.json"
+   }
+  },
   {
    "id": "d_statementaaaaaaaaaaa",
    "path": "Robin Example/Papers/2024/statement.pdf",

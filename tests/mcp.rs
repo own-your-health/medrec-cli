@@ -3186,7 +3186,12 @@ fn what_services_say_makes_claims_and_procedures_private() {
 /// area, in every answer and view; only the household opens it.
 #[test]
 fn a_clinician_a_paper_names_makes_claims_private_everywhere() {
-    const HELD: [&str; 2] = ["r_byorgaaaaaaaaaaaaaaa", "r_bytitleaaaaaaaaaaaaa"];
+    const HELD: [&str; 4] = [
+        "r_byorgaaaaaaaaaaaaaaa",
+        "r_bytitleaaaaaaaaaaaaa",
+        "r_billedaaaaaaaaaaaaaa",
+        "r_lateraaaaaaaaaaaaaaa",
+    ];
     let e = Env::new("clinicians");
     let dir = fixture_household(&e, "clinicians", &["index.json"]);
     raw_folders(&e, &dir);
@@ -3197,6 +3202,7 @@ fn a_clinician_a_paper_names_makes_claims_private_everywhere() {
         "EXAMPLETON",
         "Kim Placeholder",
         "Exampleton",
+        "SAMPLETON",
     ];
     let shared = || -> Vec<String> {
         let each = every_answer(&t, None).into_values();
@@ -3237,8 +3243,8 @@ fn a_clinician_a_paper_names_makes_claims_private_everywhere() {
         true
     });
     let private = changes_of(&e, &alex)["private"].clone();
-    assert_eq!(private["added"], json!({"claim": 2, "event": 2}));
-    let by = json!({"clinician": 2, "members": 2});
+    assert_eq!(private["added"], json!({"claim": 4, "event": 4}));
+    let by = json!({"clinician": 4, "members": 4});
     assert_eq!(private["added_by"], by);
 
     // Only the household opens it.
@@ -3247,7 +3253,80 @@ fn a_clinician_a_paper_names_makes_claims_private_everywhere() {
     assert!(files["private"]["records"].get(HELD[0]).is_none());
     assert!(events(&files, HELD[0]).is_null());
     assert!(shared().iter().any(|v| v.contains(HELD[0])));
-    assert!(!shared().iter().any(|v| v.contains(HELD[1])));
+    for id in &HELD[1..] {
+        assert!(!shared().iter().any(|v| v.contains(id)), "{id}");
+    }
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
+/// The practice that a bill told a clinician is of holds their other claims,
+/// whatever its source makes of the bill, or of the claim, after.
+#[test]
+fn a_practice_a_bill_told_of_holds_claims_whatever_becomes_of_it() {
+    let e = Env::new("clinician-bill");
+    let dir = fixture_household(&e, "clinicians", &["index.json"]);
+    let alex = h_id(&e, "Alex Testperson");
+    let t = e.tools();
+    let path = dir.join("index.json");
+    let was = std::fs::read(&path).unwrap();
+    let later = "r_lateraaaaaaaaaaaaaaa";
+    // With the bill and its claim as `change` has them.
+    let after = |change: &dyn Fn(&mut Value, &mut Value)| -> Value {
+        let mut v: Value = serde_json::from_slice(&was).unwrap();
+        let (mut bill, mut claim) = (Value::Null, Value::Null);
+        for (list, id, out) in [
+            ("documents", "d_billaaaaaaaaaaaaaaaa", &mut bill),
+            ("records", "r_billedaaaaaaaaaaaaaa", &mut claim),
+        ] {
+            let list = v[list].as_array_mut().unwrap();
+            let at = list.iter().position(|x| x["id"] == id).unwrap();
+            *out = list.remove(at);
+        }
+        change(&mut bill, &mut claim);
+        v["documents"].as_array_mut().unwrap().push(bill);
+        v["records"].as_array_mut().unwrap().push(claim);
+        std::fs::write(&path, serde_json::to_vec(&v).unwrap()).unwrap();
+        for (name, v) in every_answer(&t, None) {
+            assert!(!v.to_string().contains(later), "{name}: {v}");
+            assert!(!v.to_string().contains("SAMPLETON"), "{name}: {v}");
+        }
+        views_of(&e, &alex).0["private"]["records"][later].clone()
+    };
+    let why = |given: bool| {
+        let mut why = json!({"area": "mental_health", "from": "clinician"});
+        if given {
+            why["given"] = true.into();
+        }
+        why
+    };
+    assert_eq!(after(&|_, _| {}), why(false));
+    // Either is entered in error.
+    let error = |x: &mut Value| {
+        let of = x["provenance"]["raw_path"].as_str();
+        let of = of.or(x["provenance"][0]["raw_path"].as_str()).unwrap();
+        x["words"] = json!([{"raw_path": of, "status": "entered-in-error"}]);
+    };
+    assert_eq!(after(&|bill, _| error(bill)), why(false));
+    assert_eq!(after(&|_, claim| error(claim)), why(false));
+    // Either is given otherwise, or both.
+    let counseling = json!([{"organization": "Example Counseling"}]);
+    let sampleton = json!([{"fields": {"provider": "E SAMPLETON"}}]);
+    let bill_is = |bill: &mut Value| {
+        bill["organization"] = "Example Health Group".into();
+        bill["given"] = counseling.clone();
+    };
+    let claim_is = |claim: &mut Value| {
+        claim["display"] = "Sample visit \u{b7} Example Walk-in".into();
+        claim["fields"]["provider"] = "Example Walk-in".into();
+        claim["given"] = sampleton.clone();
+    };
+    assert_eq!(after(&|bill, _| bill_is(bill)), why(true));
+    assert_eq!(after(&|_, claim| claim_is(claim)), why(true));
+    let both = |bill: &mut Value, claim: &mut Value| {
+        bill_is(bill);
+        claim_is(claim);
+    };
+    assert_eq!(after(&both), why(true));
     let _ = std::fs::remove_dir_all(&e.root);
 }
 

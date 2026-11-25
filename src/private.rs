@@ -472,8 +472,7 @@ pub fn build(
     if let Some(whole) = &built.whole {
         ties.extend(crate::bills::whole_ties(p, idx, texts, whole));
     }
-    let each: Vec<&Value> = std::iter::once(&built.events).chain(&built.whole).collect();
-    let clinicians = clinicians::Clinicians::of(idx, &each);
+    let clinicians = clinicians::Clinicians::of(idx, built.practices(), &built.for_private());
     let judge = |given: bool| {
         let mut items: BTreeMap<String, Why> = BTreeMap::new();
         let label = |id: &str| {

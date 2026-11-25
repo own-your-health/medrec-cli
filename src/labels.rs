@@ -38,7 +38,7 @@ const STATE_FAMILY: &str = "medrec-provider-state/";
 /// The papers a label gives as its evidence, at most.
 const MAX_PAPERS: usize = 5;
 /// The shortest surname looked for in a paper's text.
-pub(crate) const SURNAME: usize = 3;
+const SURNAME: usize = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1114,7 +1114,17 @@ fn heading(d: &Document) -> Option<&str> {
 /// Whether a paper prints one of these names: the surname after a word of
 /// the first initial, or before one when a comma follows it. Both are
 /// written as names are.
-pub(crate) fn prints_name(body: &str, readings: &BTreeSet<(String, char)>) -> bool {
+fn prints_name(body: &str, readings: &BTreeSet<(String, char)>) -> bool {
+    let same = |printed: &str, surname: &str| surname.len() >= SURNAME && printed == surname;
+    prints(body, readings, &same)
+}
+
+/// The same, where `same` says whether a surname printed is one of them.
+pub(crate) fn prints(
+    body: &str,
+    readings: &BTreeSet<(String, char)>,
+    same: &dyn Fn(&str, &str) -> bool,
+) -> bool {
     let words: Vec<(&str, String)> = body
         .split_whitespace()
         .map(|w| (w, nppes::fold(w)))
@@ -1129,28 +1139,25 @@ pub(crate) fn prints_name(body: &str, readings: &BTreeSet<(String, char)>) -> bo
     };
     let given = |i: usize, initial: char| proper(i) && words[i].1.starts_with(initial);
     readings.iter().any(|(surname, initial)| {
-        surname.len() >= SURNAME
-            && (0..words.len()).any(|i| {
-                let Some(n) = (1..=3).find(|n| {
-                    words.get(i..i + n).is_some_and(|w| {
-                        w.iter().map(|x| x.1.as_str()).collect::<String>() == *surname
-                    })
-                }) else {
-                    return false;
-                };
-                if !proper(i) {
-                    return false;
-                }
-                let before = i.checked_sub(1).is_some_and(|b| {
-                    given(b, *initial)
-                        || (words[b].1.len() == 1
-                            && b.checked_sub(1).is_some_and(|b| given(b, *initial)))
-                });
-                let after = words[i + n - 1].0.ends_with(',')
-                    && i + n < words.len()
-                    && given(i + n, *initial);
-                before || after
+        let of = |i: usize, n: usize| {
+            words.get(i..i + n).is_some_and(|w| {
+                let printed: String = w.iter().map(|x| x.1.as_str()).collect();
+                same(&printed, surname)
             })
+        };
+        let before = |i: usize| {
+            i.checked_sub(1).is_some_and(|b| {
+                given(b, *initial)
+                    || (words[b].1.len() == 1
+                        && b.checked_sub(1).is_some_and(|b| given(b, *initial)))
+            })
+        };
+        let after = |i: usize, n: usize| {
+            words[i + n - 1].0.ends_with(',') && i + n < words.len() && given(i + n, *initial)
+        };
+        (0..words.len())
+            .filter(|i| proper(*i))
+            .any(|i| (1..=3).any(|n| of(i, n) && (before(i) || after(i, n))))
     })
 }
 

@@ -2964,6 +2964,9 @@ pub struct Built {
 pub(crate) struct Drawn {
     there: (Vec<Ev>, Vec<Alias>),
     lost: (Vec<Ev>, Vec<Alias>),
+    /// Those of the events that decide what is private, where a linked person
+    /// has something in error.
+    linked: Vec<Alias>,
     sources: Vec<crate::model::Source>,
 }
 
@@ -2990,6 +2993,19 @@ pub(crate) struct Open {
 }
 
 impl Built {
+    /// The practices that clinicians are learned to be of (N5), with what is
+    /// entered in error and without: the clinician, the practice and the paper.
+    pub(crate) fn practices(&self) -> impl Iterator<Item = [&str; 3]> {
+        let Drawn {
+            there,
+            lost,
+            linked,
+            ..
+        } = &self.drawn;
+        let all = there.1.iter().chain(&lost.1).chain(linked);
+        all.map(|a| [&*a.clinician, &*a.organization, &*a.document])
+    }
+
     /// What each event says by the items `open` holds of, as `idx` has them:
     /// now, and those in error as `whole` does.
     pub(crate) fn open(
@@ -3004,6 +3020,7 @@ impl Built {
             there,
             lost,
             sources,
+            ..
         } = &self.drawn;
         let mut out = Vec::new();
         for (idx, (evs, aliases)) in [(now, there), (whole, lost)] {
@@ -3256,8 +3273,13 @@ pub fn build_both(inp: &Input) -> Built {
     }
     // What is private is judged with a linked person's too, which is named
     // in their own file alone.
+    let mut of_linked: Vec<Alias> = Vec::new();
     let whole = match theirs.iter().any(|t| matches!(t, Cow::Owned(_))) {
-        true => Some(with(&inp.linked).0),
+        true => {
+            let (each, aliases) = with(&inp.linked);
+            of_linked = aliases;
+            Some(each)
+        }
         false => (!gone.is_empty()).then_some(mine),
     };
     let whole = whole.map(|with| {
@@ -3348,6 +3370,7 @@ pub fn build_both(inp: &Input) -> Built {
         drawn: Drawn {
             there: (b.evs, b.aliases),
             lost: lost_evs,
+            linked: of_linked,
             sources: inp.sources.to_vec(),
         },
     }

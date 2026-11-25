@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Writes index.json: an invented person's claims that print no more of a
-clinician than a surname and an initial, and papers that name two of them, one
-by its organization and one by its title. The sources are those of
-../standing/household.json."""
+clinician than a surname and an initial, papers that name two of them, one by its
+organization and one by its title, and a bill of a third's visit, from the
+practice they are of. The sources are those of ../standing/household.json."""
 
 import json
 import os
@@ -89,10 +89,13 @@ INDEX = {
         claim("byorg", "2024-09-03", "K PLACEHOLDER"),
         claim("bytitle", "2024-09-10", "EXAMPLETON, SAM"),
         claim("another", "2024-09-17", "J PLACEHOLDER"),
+        claim("billed", "2024-10-01", "E SAMPLETON"),
+        claim("later", "2024-10-29", "SAMPLETON, ED"),
     ],
     "studies": [],
     "imports": [],
     "documents": [
+        paper("bill", "2024-10-01", "bill", "Example Counseling", "Statement"),
         paper("statement", "2024-11-05", "letter", "Kim Placeholder, LCSW", "Account letter"),
         paper("reminder", "2024-11-12", "letter", "Example Counseling", "Visit with Sam Exampleton"),
         paper("notice", "2024-11-19", "letter", "Example Pediatrics", "Visit with J Placeholder"),
