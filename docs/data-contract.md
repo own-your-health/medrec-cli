@@ -292,9 +292,10 @@ one is followed only under the source's own FHIR base. A name with nothing
 more behind it has no entry. Where two sources state one record, each fills
 what the other lacks of a provider both print, and the value there first
 stands. A provider whose reference leads to something the source does not
-give keeps what the record had. `medrec reindex` reads them all again from
-the raw files, every source of a record in turn, and gives records filed
-before 0.9.6 theirs. No answer or view shows it. An earlier medrec drops it
+give keeps what the record had where nothing is read in its place. `medrec
+reindex` reads them all again from the raw files, every source of a record in
+turn, and so takes a correction that import, for a record two sources state,
+leaves as it was; it also gives records filed before 0.9.6 theirs. No answer or view shows it. An earlier medrec drops it
 from an index it saves, so run 0.9.6 or later on every machine that writes
 the folder.
 
@@ -1029,9 +1030,12 @@ what is private now, and adds none.
   item that is private. `medrec mcp` does this with `plain_name` on
   `kind: "conditions"` rows and on the summary's condition lines (Readers,
   below).
-- **A name never replaces the source's words.** It is shown first, with the
-  source's beside it, and filters, search, sorting, cursors and the check of
-  whether a question names a private item use the source's words alone.
+- **A name never replaces the source's words.** A reader leads with the
+  source's words when they are plain, and gives the name second (in Details,
+  or as `plain_name` beside `name`). The name leads only where the source
+  gives no words, a bare code, or wording in capitals or billing
+  abbreviations. Filters, search, sorting, cursors and the check of whether a
+  question names a private item use the source's words alone.
 - **Stale** as `private.json` is. Missing or stale, the source's words stand,
   with no warning. A reader need not check which table made it
   (`code_table` in `views.json`, below).

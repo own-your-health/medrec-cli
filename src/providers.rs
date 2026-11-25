@@ -152,9 +152,9 @@ impl Found {
 
     /// What a record that said `old` of its providers, and printed
     /// `old_fields`, now says. A provider printed as before keeps what it had
-    /// where this source gives its reference and not what it leads to, and
-    /// where another source states the record too (`shared`), so that two
-    /// sources do not write over each other.
+    /// where this source says nothing and gives a reference it does not
+    /// serve, and, where another source states the record too (`shared`),
+    /// whatever it had, so that two sources do not write over each other.
     pub fn over(
         self,
         old: &[ProviderRef],
@@ -172,8 +172,10 @@ impl Found {
                     .find(|r| r.field == *f && old_fields.get(*f) == Some(text));
                 let pick = |of: fn(&ProviderRef) -> Option<String>| {
                     let (new, had) = (new.and_then(of), had.and_then(of));
-                    if shared || self.unresolved.contains(f) {
+                    if shared {
                         had.or(new)
+                    } else if self.unresolved.contains(f) {
+                        new.or(had)
                     } else {
                         new
                     }
@@ -589,6 +591,23 @@ mod tests {
             says(vec![], &["performer"]).over(&old, &fields, &fields, false),
             [old[1].clone()]
         );
+        // What it says now wins, whatever else it could not read.
+        assert_eq!(
+            says(
+                vec![entry("performer", Some("0000000014"), None)],
+                &["performer"]
+            )
+            .over(&old, &fields, &fields, false),
+            [entry("performer", Some("0000000014"), Some("FL"))]
+        );
+        // A source that cannot resolve a provider does not keep another's
+        // correction out when every source is read again.
+        let again = says(vec![entry("performer", Some("0000000014"), None)], &[])
+            .and(says(vec![], &["performer"]));
+        assert_eq!(
+            again.over(&old, &fields, &fields, false),
+            [entry("performer", Some("0000000014"), Some("FL"))]
+        );
         // It says less, and another source stands behind the record.
         assert_eq!(
             says(vec![entry("performer", Some("0000000014"), None)], &[])
@@ -610,6 +629,28 @@ mod tests {
             &[],
         ));
         assert_eq!(both.over(&[], &fields, &fields, false), old);
+    }
+
+    /// A reference's own identifier counts whether or not what it leads to
+    /// is served.
+    #[test]
+    fn an_identifier_beside_a_missing_reference_is_read() {
+        let r = json!({
+            "resourceType": "ExplanationOfBenefit",
+            "provider": {
+                "reference": "Organization/gone",
+                "identifier": {"system": NPI, "value": "0000000014"},
+                "display": "Example Primary Care Group"
+            }
+        });
+        let fields = map(json!({"provider": "Example Primary Care Group"}));
+        let found = of(&r, &fields, &mut One).unwrap();
+        assert_eq!(found.unresolved, BTreeSet::from(["provider"]));
+        let old = [entry("provider", Some("0000000006"), Some("FL"))];
+        assert_eq!(
+            found.over(&old, &fields, &fields, false),
+            [entry("provider", Some("0000000014"), Some("FL"))]
+        );
     }
 
     #[test]

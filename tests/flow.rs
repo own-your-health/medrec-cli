@@ -2605,7 +2605,7 @@ fn a_record_keeps_who_its_source_says_a_provider_is() {
         .records()
         .join("Robin Testperson/Records/fakeprov-example-health");
     std::fs::write(raw.join("Practitioner/prac-one.json"), "{").unwrap();
-    std::fs::remove_file(raw.join("Location/loc-one.json")).unwrap();
+    std::fs::remove_file(raw.join("Location/loc-two.json")).unwrap();
     assert_eq!(e2.ok(&["reindex"])["providers_updated"], 0);
     assert_eq!(providers_of(&read()), want);
 }

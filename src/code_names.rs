@@ -1,9 +1,9 @@
 //! The plain names of a person's diagnosis codes
 //! (`views/<pid>/code-names.json`, `medrec-code-names/v1`): the ICD-10-CM
 //! title of each code their conditions and claims use, for a reader to show
-//! first, with the source's own words kept beside it. It only labels items
-//! a reader already shows; by itself it lists a person's conditions, so a
-//! reader never lists, searches or serves it.
+//! with the source's own words, and before them where they are not plain. It
+//! only labels items a reader already shows; by itself it lists a person's
+//! conditions, so a reader never lists, searches or serves it.
 
 use std::collections::{BTreeMap, BTreeSet};
 
