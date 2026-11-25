@@ -430,6 +430,10 @@ pub struct ProviderRef {
     /// The state of the address the source gives, as two letters.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state: Option<String>,
+    /// That address's city, as the source writes it: empty when it gives
+    /// none. Absent when an earlier medrec read the address.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub city: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

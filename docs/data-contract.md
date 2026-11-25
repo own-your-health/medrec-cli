@@ -280,14 +280,17 @@ The last column is the FHIR element the value comes from.
 
 **Providers.** A record's `providers` (0.9.6 and later) is what its sources
 say of the people and places its fields print, beyond their names: a list
-of `{field, npi, state}`, with one entry for each field that has either.
+of `{field, npi, state, city}`, with one entry for each field that has an
+`npi` or a `state`.
 `field` is the field that prints the provider: `practitioner`, `location`
 and `service_provider` of an encounter, `prescriber` and `pharmacy` of a
 medication, `performer` of an immunization, `performer` and `location` of a
 procedure, `provider` and `facility` of a claim. `npi` is a National Provider
 Identifier whose check digit holds, from the identifier of the reference
 that prints the field or from the resource it points at. `state` is two
-letters, from that resource's address. A reference is followed to a resource
+letters, from that resource's first address that gives one, and `city` (0.9.8
+and later) is that address's, as the source writes it, and empty when it gives
+none; it is absent where an earlier medrec read the address. A reference is followed to a resource
 contained in the record's own, served in the same stream, or filed by an
 earlier import of the same source, through a PractitionerRole (the person's
 NPI, the place's state) and a Location's `managingOrganization`. An absolute
@@ -298,11 +301,12 @@ stands. A provider whose reference leads to something the source does not
 give keeps what the record had where nothing is read in its place. `medrec
 reindex` reads them all again from the raw files, every source of a record in
 turn, and so takes a correction that import, for a record two sources state,
-leaves as it was; it also gives records filed before 0.9.6 theirs. No answer
+leaves as it was; it also gives records filed before 0.9.6 theirs, and those
+filed before 0.9.8 their `city`. No answer
 or view shows it; `providers.json` is made with it (Provider labels, below).
-An earlier medrec drops it
-from an index it saves, so run 0.9.6 or later on every machine that writes
-the folder.
+A medrec before 0.9.6 drops it from an index it saves, and one before 0.9.8
+drops each `city`, so run 0.9.8 or later on every machine that writes the
+folder. `medrec reindex` gives back what was dropped.
 
 A `medication` comes from a MedicationRequest (`source: request`), a
 MedicationStatement (`statement`) or a MedicationDispense (`dispense`, a
@@ -1227,6 +1231,7 @@ provider, of whom the household said nothing, has no `providers.json`.
   | `household` | The household said so: `id` (a correction's, in `overrides`), `by` and `at`. |
   | `npi` | The record carries the provider's National Provider Identifier, and the directory has it. Every sure label is this one. |
   | `only_match` | The directory has one person of the printed surname and first initial, in the state the record's source gives (`state`; or, when it gives none, in any state the directory was read for), whose role gives the service, and no given name the text spells out is another. A person whose role medrec has no words for counts as one it can be, and is never the label. |
+  | `first_name` | (0.9.8 and later) The directory has several such people, and the text (`printed`) spells out the first name of exactly one of them, who is in `state` and, where the directory gives one, `city`. It narrows only when every other is ruled out, and nothing else the record says is against the one: the state and city of its address, the service, a middle name or initial, a degree. An address with no `city` field in the record's `providers` (one an earlier medrec read) counts as against it. (The directory gives a person no practice.) An initial, a nickname, a shorter form or another spelling of a name narrows nothing, and one of the others whose first, middle or other first name begins as the printed one does, or is its beginning, is not ruled out. Like any likely label it decides nothing: no amount, no private item and no two names that are one provider come of it. A label shared by several texts has one of these for each text it came from; a reader shows a text its own, and all of them for a text that has none (one said to be the same provider's). |
   | `paper` | A paper of the same event with a practice's own heading (a bill, receipt, visit or discharge summary, prescription or immunization record, and not a laboratory's, pharmacy's or imaging center's) prints the name, and every such paper that does is of one practice. `document` is the paper. |
 
   A reader has no words for one it does not know, and still shows the label.
@@ -1278,7 +1283,10 @@ provider, of whom the household said nothing, has no `providers.json`.
 - **Machines** (README, "Provider directory"). What a directory gave is kept
   in `provider-state.json` (below), so what is labelled and what is private do
   not depend on which machine wrote last. Every machine that writes the folder
-  needs 0.9.7 or later, as for `providers` in an index. One with no directory, or an older
+  needs 0.9.8 or later, as for `providers` in an index: one before it drops
+  `first_names` from that file and every `city` from an index it saves, and no
+  label comes of a first name until `medrec reindex`, then `medrec views write`
+  on a machine with the directory. One with no directory, or an older
   one than the last, keeps what is there for the NPIs and names still printed,
   and splits it by what is private now; the older one adds providers whose NPI
   nothing is known of. A newer one replaces what it has, and takes away only
@@ -1291,8 +1299,9 @@ provider, of whom the household said nothing, has no `providers.json`.
 **`provider-state.json`** (`medrec-provider-state/v1`), in the person's folder
 rather than in `views/`, is medrec's own: the label of each NPI the person's
 records carry or carried (`by_npi`), shown or not, and those of the printed
-names only one provider can be (`matched`, by record and text), with the newest
-directory's `directory`. It is not split: it holds private providers' names
+names only one provider can be (`matched`, by record and text) or a first name
+told apart (`first_names`, 0.9.8 and later, which an earlier medrec drops when it
+writes the file), with the newest directory's `directory`. It is not split: it holds private providers' names
 and roles with the rest. medrec judges what is private by it, in its own
 answers too. No other reader reads it or serves it: one compares its MD5
 (When they are written, below). Nothing else in the folder

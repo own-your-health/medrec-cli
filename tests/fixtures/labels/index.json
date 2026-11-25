@@ -470,6 +470,26 @@
      "state": "FL"
     }
    ]
+  },
+  {
+   "id": "r_firstnameaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|firstname",
+   "date": "2026-03-03",
+   "display": "Sample service",
+   "fields": {
+    "type": "professional",
+    "category": "visit",
+    "provider": "Drew Specimen, MD"
+   },
+   "provenance": [],
+   "providers": [
+    {
+     "field": "provider",
+     "state": "FL",
+     "city": "Exampleton"
+    }
+   ]
   }
  ]
 }
