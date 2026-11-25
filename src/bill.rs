@@ -27,6 +27,39 @@ enum Field {
     Phone,
 }
 
+/// A bill's or a receipt's first page with any text, its spaces single.
+pub(crate) fn first_page(d: &Document, text: &str) -> Option<String> {
+    if !matches!(d.doc_type.as_deref(), Some("bill" | "receipt")) {
+        return None;
+    }
+    text.split('\u{c}')
+        .map(|p| p.split_whitespace().collect::<Vec<_>>().join(" "))
+        .find(|p| !p.is_empty())
+}
+
+/// What a bill charges for that no insurer is billed for, by its first page.
+pub(crate) fn self_pay(d: &Document, text: &str) -> Option<&'static str> {
+    static KINDS: OnceLock<[(Regex, &str); 2]> = OnceLock::new();
+    let kinds = KINDS.get_or_init(|| {
+        [
+            (
+                r"storage (?:fees?|charges?|renewal|plan|period)|(?:annual|yearly|monthly|quarterly|cryo\w*|tissue|specimens?|samples?|cord blood|[0-9]+[- ]?(?:months?|years?)) (?:\w+ ){0,3}storage|cryo-?storage",
+                "storage",
+            ),
+            (
+                r"(?:insurance|coverage|payer|payor|plan|financial class) ?(?:type|name|status)? ?[:#-]? ?self[- ]?pay|self[- ]?pay (?:patient|account|balance|rate|price)",
+                "stated",
+            ),
+        ]
+        .map(|(words, kind)| (Regex::new(&format!(r"(?i)\b(?:{words})\b")).unwrap(), kind))
+    });
+    let page = first_page(d, text)?;
+    kinds
+        .iter()
+        .find(|(re, _)| re.is_match(&page))
+        .map(|(_, kind)| *kind)
+}
+
 /// Every label, lower-case. Where two match at one place, the longer wins,
 /// so `please pay by` is a due date and `total amount due` one label.
 const LABELS: &[(&str, Field)] = &[

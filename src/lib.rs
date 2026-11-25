@@ -34,6 +34,7 @@ pub mod providers;
 pub mod refresh;
 pub mod reindex;
 pub mod review;
+pub mod sources;
 pub mod store;
 pub mod stream;
 pub mod summary;

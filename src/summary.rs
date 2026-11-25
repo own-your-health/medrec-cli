@@ -13,6 +13,7 @@ use serde_json::Value;
 use crate::folder::Folder;
 use crate::intake::classify;
 use crate::model::{Household, Person, PersonIndex, Record};
+use crate::sources::Sources;
 use crate::views::{is_ended, record_detail, record_source, value_text};
 
 /// Longest name or detail a summary line carries, in characters.
@@ -224,11 +225,12 @@ pub(crate) fn of_index(
     let mut records: Vec<&Record> = idx.records.iter().collect();
     records.sort_by(|a, b| b.date.cmp(&a.date).then(a.display.cmp(&b.display)));
 
+    let from = Sources::of(&h.sources, idx);
     let mut counts = BTreeMap::new();
     let mut sources: BTreeMap<String, SourceRow> = BTreeMap::new();
     for r in &records {
         *counts.entry(r.kind.clone()).or_insert(0) += 1;
-        if let Some(s) = record_source(h, r) {
+        if let Some(s) = record_source(from, r) {
             let row = sources.entry(s.clone()).or_insert(SourceRow {
                 source: s,
                 records: 0,
@@ -250,7 +252,7 @@ pub(crate) fn of_index(
             .iter()
             .filter(|r| r.kind == kind && !is_ended(r.status.as_deref()))
             .filter(|r| seen.insert(series_key(r)))
-            .map(|r| line(h, r))
+            .map(|r| line(from, r))
             .collect::<Vec<_>>()
     };
 
@@ -262,13 +264,13 @@ pub(crate) fn of_index(
         medications: Listed::cut(current("medication"), n),
         conditions: Listed::cut(current("condition"), n),
         allergies: Listed::cut(current("allergy"), n),
-        immunizations: Listed::cut(vaccines(h, &records), n),
-        latest_results: Listed::cut(latest_results(h, &records), n),
+        immunizations: Listed::cut(vaccines(from, &records), n),
+        latest_results: Listed::cut(latest_results(from, &records), n),
         recent_visits: Listed::cut(
             records
                 .iter()
                 .filter(|r| r.kind == "encounter")
-                .map(|r| line(h, r))
+                .map(|r| line(from, r))
                 .collect(),
             n,
         ),
@@ -327,7 +329,7 @@ pub(crate) fn clip(s: &str, max: usize) -> String {
     }
 }
 
-fn line(h: &Household, r: &Record) -> Line {
+fn line(from: Sources, r: &Record) -> Line {
     Line {
         name: clip(&r.display, CLIP),
         date: day(r.date.as_deref()),
@@ -335,13 +337,13 @@ fn line(h: &Household, r: &Record) -> Line {
             .filter(|d| Some(d) != r.status.as_ref())
             .map(|d| clip(&d, CLIP)),
         status: r.status.clone(),
-        source: record_source(h, r),
+        source: record_source(from, r),
         id: Some(r.id.clone()),
         name_key: crate::code_names::condition_key(r),
     }
 }
 
-fn vaccines(h: &Household, records: &[&Record]) -> Vec<Vaccine> {
+fn vaccines(from: Sources, records: &[&Record]) -> Vec<Vaccine> {
     let mut by: Vec<(String, Vaccine)> = Vec::new();
     for r in records.iter().filter(|r| r.kind == "immunization") {
         if matches!(r.status.as_deref(), Some("not-done" | "entered-in-error")) {
@@ -358,7 +360,7 @@ fn vaccines(h: &Household, records: &[&Record]) -> Vec<Vaccine> {
                     code: r.code.as_ref().and_then(|c| c.code.clone()),
                     doses: 1,
                     last_date: day(r.date.as_deref()),
-                    source: record_source(h, r),
+                    source: record_source(from, r),
                     id: Some(r.id.clone()),
                 },
             )),
@@ -381,7 +383,7 @@ pub(crate) fn reading(r: &Record) -> (Option<String>, Option<String>) {
 }
 
 /// One result as a row: the value, the lab's range and flag.
-pub(crate) fn result_row(h: &Household, r: &Record) -> ResultRow {
+pub(crate) fn result_row(from: Sources, r: &Record) -> ResultRow {
     let (value, unit) = reading(r);
     let text = |k: &str| {
         r.fields
@@ -399,7 +401,7 @@ pub(crate) fn result_row(h: &Household, r: &Record) -> ResultRow {
         unit,
         range: text("reference_range"),
         flag: text("interpretation"),
-        source: record_source(h, r),
+        source: record_source(from, r),
         results: None,
         first_date: None,
         id: Some(r.id.clone()),
@@ -408,7 +410,7 @@ pub(crate) fn result_row(h: &Household, r: &Record) -> ResultRow {
 
 /// The latest result of each test, with how many are on file and since
 /// when; `records` newest first.
-pub(crate) fn latest_results(h: &Household, records: &[&Record]) -> Vec<ResultRow> {
+pub(crate) fn latest_results(from: Sources, records: &[&Record]) -> Vec<ResultRow> {
     let mut by: Vec<(String, ResultRow)> = Vec::new();
     for r in records.iter().filter(|r| r.kind == "result") {
         let key = series_key(r);
@@ -420,7 +422,7 @@ pub(crate) fn latest_results(h: &Household, records: &[&Record]) -> Vec<ResultRo
                 }
             }
             None => {
-                let mut row = result_row(h, r);
+                let mut row = result_row(from, r);
                 row.results = Some(1);
                 row.first_date = day(r.date.as_deref());
                 by.push((key, row));

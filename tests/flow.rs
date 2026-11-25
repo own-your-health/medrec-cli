@@ -797,6 +797,118 @@ fn a_reimport_names_the_patient_by_the_providers_label() {
     let _ = std::fs::remove_dir_all(Path::new(&e.root));
 }
 
+/// One connection serves Robin two practices and Alex a third under one
+/// organization id and FHIR base. Each of Robin's visits has its own
+/// practice's name and its own practice's result, and no one's records have
+/// another person's practice.
+#[test]
+fn practices_of_one_connection_keep_their_own_names() {
+    let base = Env::new("connection");
+    setup(&base);
+    let e = provider_env(&base, medrec::testdata::STREAM);
+    medrec::testdata::write_connection(&base.root.join("provider"));
+    for (patient, person, _) in medrec::testdata::connection_streams() {
+        e.ok(&[
+            "import",
+            "--from",
+            "fakeprov",
+            "--from-profile",
+            "adult1",
+            "--patient",
+            patient,
+            "--person",
+            person,
+        ]);
+    }
+    let people = e.ok(&["people", "list"]);
+    let id = |name: &str| -> String {
+        let p = people["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["name"] == name)
+            .unwrap();
+        p["id"].as_str().unwrap().to_string()
+    };
+    let robin = id("Robin Testperson");
+    let views = e.records().join("views");
+    let read = |path: PathBuf| -> Value {
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+    };
+    let index = read(views.join("views.json"));
+    let view = |name: &str| {
+        let md5 = index["people"][&robin]["files"][name].as_str().unwrap();
+        read(
+            views
+                .join(&robin)
+                .join(medrec::viewfiles::stored_name(name, md5)),
+        )
+    };
+    let events = view("events.json");
+    let mut visits: Vec<(String, Vec<String>)> = events["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|ev| {
+            let members = ev["members"].as_array().unwrap().iter();
+            (
+                ev["place"].as_str().unwrap().to_string(),
+                members
+                    .map(|m| m["title"].as_str().unwrap().to_string())
+                    .filter(|t| t.starts_with("Sample level"))
+                    .collect(),
+            )
+        })
+        .collect();
+    visits.sort();
+    assert_eq!(visits.len(), 2, "{events}");
+    for ((place, results), (practice, patient)) in visits.iter().zip([
+        ("Example Family Practice", "family-1"),
+        ("Sample Foot Clinic", "foot-1"),
+    ]) {
+        assert_eq!(place, practice);
+        assert_eq!(results.len(), 1, "{results:?}");
+        assert!(results[0].contains(patient), "{place}: {results:?}");
+    }
+
+    // The same names on the record lists, the timeline and the views.
+    let names = |v: &Value, at: &str| -> Vec<String> {
+        let mut named: Vec<String> = v["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r.pointer(at).unwrap().as_str().unwrap().to_string())
+            .collect();
+        named.sort();
+        named
+    };
+    let both = ["Example Family Practice", "Sample Foot Clinic"];
+    let rows = e.ok(&["results", "--person", "Robin"]);
+    assert_eq!(names(&rows, "/sources/0"), both, "{rows}");
+    let visits = e.ok(&["timeline", "--person", "Robin", "--kind", "encounter"]);
+    assert_eq!(names(&visits, "/source"), both, "{visits}");
+    let labels: Vec<Value> = view("records-encounter-0.json")
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["provenance"][0]["source"]["label"].clone())
+        .collect();
+    assert_eq!(labels.len(), 2);
+    assert!(
+        both.iter().all(|b| labels.contains(&(*b).into())),
+        "{labels:?}"
+    );
+    let mut sources: Vec<String> = view("summary.json")["sources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["source"].as_str().unwrap().to_string())
+        .collect();
+    sources.sort();
+    assert_eq!(sources, both);
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
 #[test]
 fn ids_past_64_characters_and_absolute_references_are_imported() {
     // Epic's unconstrained FHIR ids run past FHIR R4's 64 characters.

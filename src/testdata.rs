@@ -10,7 +10,9 @@
 //! <DIR>/dicom/cd1/    an ultrasound study (DICOMDIR + 3 images)
 //! <DIR>/dicom/cd2/    the same study with a second series
 //! <DIR>/dicom/ct.zip  a CT study for the adult, zipped (needs bsdtar)
-//! <DIR>/provider/     a fake provider CLI (`fakeprov`) and its stream
+//! <DIR>/provider/     a fake provider CLI (`fakeprov`) and its streams: the
+//!                     one it prints, and three patients' of one connection
+//!                     (`--patient family-1`, `foot-1`, `skin-1`)
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -24,6 +26,9 @@ pub const STREAM: &str = include_str!("../tests/fixtures/stream/synthetic.ndjson
 /// A stream whose records refer to practitioners, organizations and places
 /// in each way a source does.
 pub const PROVIDERS_STREAM: &str = include_str!("../tests/fixtures/stream/providers.ndjson");
+/// One patient's stream of a records connection that serves every practice
+/// under one organization id and FHIR base ([`connection_streams`]).
+const CONNECTION_STREAM: &str = include_str!("../tests/fixtures/stream/connection.ndjson");
 /// The fake provider's `info --json`.
 pub const PROVIDER_INFO: &str = include_str!("../tests/fixtures/stream/fakeprov-info.json");
 /// The same from before login profiles: it signs in, but lists no
@@ -72,6 +77,57 @@ pub fn stream_with_summary(rendering: &str, finding: &str, version: &str) -> Str
     out
 }
 
+/// What one connection serves, as `(patient, person, stream)`: Robin at two
+/// practices, with a visit and a result at each on one day, and Alex at a
+/// third that holds no records.
+pub fn connection_streams() -> [(&'static str, &'static str, String); 3] {
+    let stream = |patient: &str, practice: &str, robin: bool, visit: &str, hour: &str| {
+        let (given, born, relationship) = match robin {
+            true => ("Robin", "2020-02-02", "proxy"),
+            false => ("Alex", "1990-01-01", "self"),
+        };
+        CONNECTION_STREAM
+            .replace("{{PATIENT}}", patient)
+            .replace("{{PRACTICE}}", practice)
+            .replace("{{LABEL}}", &format!("{given} Testperson at {practice}"))
+            .replace("{{GIVEN}}", given)
+            .replace("{{BORN}}", born)
+            .replace("{{RELATIONSHIP}}", relationship)
+            .replace("{{VISIT}}", visit)
+            .replace("{{HOUR}}", hour)
+            .replace("{{PULLED}}", &format!("2026-03-05T{hour}:00:00Z"))
+    };
+    let family = stream(
+        "family-1",
+        "Example Family Practice",
+        true,
+        "Office visit",
+        "15",
+    );
+    let foot = stream("foot-1", "Sample Foot Clinic", true, "Sample visit", "19");
+    let skin: String = stream("skin-1", "Placeholder Skin Clinic", false, "", "20")
+        .replace(r#","Encounter":1,"Observation":1"#, "")
+        .lines()
+        .filter(|l| !l.contains(r#""skin-1-"#))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    [
+        ("family-1", "Robin", family),
+        ("foot-1", "Robin", foot),
+        ("skin-1", "Alex", skin),
+    ]
+}
+
+/// Write [`connection_streams`] where `fakeprov` in `provider` finds them.
+pub fn write_connection(provider: &Path) {
+    for (patient, _, stream) in connection_streams() {
+        write(
+            &provider.join(format!("synthetic-{patient}.ndjson")),
+            stream.as_bytes(),
+        );
+    }
+}
+
 pub fn write(path: &Path, bytes: &[u8]) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, bytes).unwrap();
@@ -82,6 +138,7 @@ pub fn write_all(out: &Path) {
     write_scans(&out.join("scans"));
     write_dicom(&out.join("dicom"));
     write_provider(&out.join("provider"), STREAM);
+    write_connection(&out.join("provider"));
 }
 
 pub fn write_scans(scans: &Path) {
