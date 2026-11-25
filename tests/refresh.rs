@@ -970,7 +970,10 @@ fn a_refused_export_signs_in_again_with_the_providers_own_command_and_names_no_p
     let message = error["message"].as_str().unwrap();
     assert!(!message.contains("auth login"), "{message}");
     let provider = error["provider_message"].as_str().unwrap();
-    assert!(provider.contains("<provider profile>"), "{provider}");
+    assert_eq!(
+        provider,
+        "the session for profile <provider profile> has expired; sign in again: `fakeprov auth login --browser --profile <provider profile> --overwrite`"
+    );
     // No file in the folder names a profile, medrec's or the provider's.
     let mut named = Vec::new();
     walk(&e.records(), &mut |p| {
@@ -980,6 +983,15 @@ fn a_refused_export_signs_in_again_with_the_providers_own_command_and_names_no_p
         }
     });
     assert!(named.is_empty(), "{named:?}");
+
+    // It gave none: the key is there, and empty.
+    e.age_imports();
+    let silent = [("FAKEPROV_EXIT", "3"), ("FAKEPROV_STDERR", "")];
+    e.doc(&["refresh", "--source", &src], &silent);
+    let st = e.json_at("_status/status.json");
+    let error = &st["sources"][0]["last_attempt"]["error"];
+    assert_eq!(error["code"], "needs_person", "{error}");
+    assert_eq!(error["provider_message"], "", "{error}");
 
     // A sign-in the person does not finish leaves the source waiting on
     // one, though the status still reads as valid.

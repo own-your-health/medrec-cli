@@ -1546,6 +1546,19 @@ pub fn provider_exit(cli: &str, code: Option<i32>, stderr: &str, org: Option<&st
     }
 }
 
+/// The provider's own words in the message [`provider_exit`] gives a sign-in
+/// that ended: empty where it gave none.
+pub fn provider_words<'a>(cli: &str, message: &'a str) -> &'a str {
+    let own = message.strip_prefix(cli);
+    match own.and_then(|m| m.strip_prefix(" needs a sign-in")) {
+        Some(rest) => rest
+            .strip_prefix(" (")
+            .and_then(|r| r.strip_suffix(')'))
+            .unwrap_or(rest),
+        None => message,
+    }
+}
+
 /// A provider's sign-in remedy: the family prints an error's remedy after
 /// its message and an em dash (``not signed in — run `kp auth login --org o
 /// --label l` ``). The message, and the command when it is the provider's
@@ -3753,6 +3766,14 @@ mod tests {
              run `kp auth login --org sandbox --label adult1`, then import again"
         );
         assert_eq!(e.to_string().matches("auth login").count(), 1);
+        assert_eq!(
+            provider_words("kp", e.message()),
+            "not signed in to this organization for this patient"
+        );
+        let e = provider_exit("kp", Some(3), "", None);
+        assert_eq!(provider_words("kp", e.message()), "");
+        let e = provider_exit("kp", Some(3), "error: no session (it ended)", None);
+        assert_eq!(provider_words("kp", e.message()), "no session (it ended)");
         // A remedy that is not this provider's sign-in: medrec's own, and
         // the provider's line kept whole.
         for line in [
