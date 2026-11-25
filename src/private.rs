@@ -1602,7 +1602,7 @@ mod tests {
             )
         };
         assert_eq!(told("ST depression seen"), None);
-        // As a line of a bill's text is judged, a questionnaire's name included.
+        // As a line of a paper's text is judged, a questionnaire's name included.
         assert_eq!(told("PHQ-9 of 3"), words(MENTAL_HEALTH, "test"));
         assert_eq!(
             told("A smoker, 20 pack-years"),

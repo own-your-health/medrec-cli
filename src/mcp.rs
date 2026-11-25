@@ -511,7 +511,7 @@ impl Toolset for MedrecTools {
                  about mental health, reproductive or sexual health or substance use carry \
                  private, with its area: an answer about the whole household leaves them out \
                  and its warnings say how many, and leaves such lines out of a claim, an event \
-                 or a bill's text, which not_shown or hint says; they are in answers about that \
+                 or a paper's text, which not_shown or hint says; they are in answers about that \
                  person, or that name the item. Keep them out of anything shared. Give the date and \
                  source of each fact you use, and say when the records \
                  do not answer the question. Each result carries its lab's own reference range \
