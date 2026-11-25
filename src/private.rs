@@ -490,7 +490,7 @@ pub fn build(
             let w = w.or_else(|| label(&d.id));
             items.extend(w.map(|w| (d.id.clone(), w)));
         }
-        follow(&mut items, idx, events, &ties, marks, label);
+        follow(&mut items, idx, events, &ties, marks, given, label);
         for (study, of) in &reports {
             let mut why = of.iter().flatten();
             if let Some(w) = why.find_map(|r| items.get(r).copied()) {
@@ -606,13 +606,14 @@ fn parts_of(
 }
 
 /// What is private with what is: by the household's marks, the records and
-/// papers tied to it, and events.
+/// papers tied to it, and events. `given`: by what a panel listed before too.
 fn follow(
     items: &mut BTreeMap<String, Why>,
     idx: &PersonIndex,
     events: &Value,
     ties: &[(String, String)],
     marks: &[Mark],
+    given: bool,
     by_label: impl Fn(&str) -> Option<Why>,
 ) {
     // The household's marks on records, then the documents a private record
@@ -673,27 +674,29 @@ fn follow(
     for r in &idx.records {
         apply(items, &r.id, mark_of.get(r.id.as_str()).copied());
     }
-    // A panel or a report all of whose results are private, with those entered
-    // in error or without them.
-    let panels: Vec<(&str, Vec<&str>, Vec<&str>)> = {
-        let mut error = idx.records.iter().filter(|r| standing::record_in_error(r));
-        let error: BTreeSet<&str> = error.by_ref().map(|r| r.id.as_str()).collect();
-        let each = idx.records.iter().map(|r| (r, panels::members(r)));
-        each.filter(|(r, of)| !of.is_empty() && mark_of.get(r.id.as_str()) != Some(&false))
-            .map(|(r, of)| {
-                let now = of.iter().copied().filter(|id| !error.contains(id));
-                (r.id.as_str(), of.clone(), now.collect())
-            })
-            .collect()
-    };
-    let panel = |items: &mut BTreeMap<String, Why>| {
-        for (id, all, now) in &panels {
-            let private =
-                |of: &&Vec<&str>| !of.is_empty() && of.iter().all(|id| items.contains_key(*id));
-            let first = [all, now].into_iter().find(private).map(|of| items[of[0]]);
-            if let Some(w) = first.filter(|_| !items.contains_key(*id)) {
-                items.insert(id.to_string(), Why::of(w.area, "members"));
+    // A panel or a report one list of which has none but private results, with
+    // those entered in error or without them. To any depth.
+    let in_error = idx.records.iter().filter(|r| standing::record_in_error(r));
+    let in_error: BTreeSet<&str> = in_error.map(|r| r.id.as_str()).collect();
+    let panels: Vec<(&str, Vec<panels::List>)> = panels::every_list(&idx.records)
+        .into_iter()
+        .map(|(i, lists)| (idx.records[i].id.as_str(), lists))
+        .filter(|(id, _)| mark_of.get(id) != Some(&false))
+        .collect();
+    let panel = |items: &mut BTreeMap<String, Why>| loop {
+        let before = items.len();
+        for (id, lists) in &panels {
+            let private = |id: &str| items.contains_key(id);
+            let mut lists = lists.iter().filter(|l| given || l.now);
+            let list = lists.find(|l| panels::all(&l.ids, &in_error, &private));
+            let first = list.and_then(|l| l.ids.iter().find_map(|id| items.get(*id)));
+            let why = first.map(|w| Why::of(w.area, "members"));
+            if let Some(w) = why.filter(|_| !items.contains_key(*id)) {
+                items.insert(id.to_string(), w);
             }
+        }
+        if items.len() == before {
+            break;
         }
     };
     panel(items);

@@ -54,6 +54,16 @@ def record(kind, name, day, display, code=None, documents=(), **fields):
     return r
 
 
+def panel(name, day, display, *listed):
+    """A panel with no value, and the results that its source says it lists."""
+    r = record("result", name, day, display, category="Survey")
+    r["fields"]["members"] = [oid("r_", n) for n in listed]
+    r["lists"] = {
+        r["provenance"][0]["raw_path"]: [f"Observation/{n}.json" for n in listed]
+    }
+    return r
+
+
 def condition(name, day, code):
     """A diagnosis with a name that says nothing of what its code does."""
     r = record("condition", name, day, f"Example condition, {name}")
@@ -71,7 +81,7 @@ def visit(name, day):
 def claim(name, day, what="Office visit", kind="professional", **links):
     """A claim, with the results of its day as an import links them."""
     money = {"amount": "40.00", "currency": "USD"}
-    category = "pharmacy" if kind == "pharmacy" else "visit"
+    category = "pharmacy" if kind == "pharmacy" else "lab" if "results" in links else "visit"
     place = "Example Corner Pharmacy" if kind == "pharmacy" else "Example Hearing Room"
     line = {"sequence": 1, "category": category, "amounts": {"billed": money}}
     if "results" in links:
@@ -121,7 +131,7 @@ RESULTS = [
     ("nerves", "2024-04-15", "Anxiety screening", None),
     ("checklist", "2024-04-22", "PTSD checklist", None),
     ("drinks", "2024-05-06", "Alcohol use", None),
-    ("drugs", "2024-05-13", "DAST-10", None),
+    ("drugs", "2024-05-20", "DAST-10", None),
     ("smoke", "2024-05-27", "Tobacco smoking status", None),
     ("sunlight", "2024-05-20", "Example sunlight index", None),
 ]
@@ -161,22 +171,8 @@ with open(os.path.join(HERE, "index.json"), "w") as f:
                     ),
                     "listed_by": [{"display": "PHQ-9 panel"}],
                 },
-                record(
-                    "result",
-                    "pair",
-                    "2024-07-01",
-                    "Example pair",
-                    category="Survey",
-                    members=[oid("r_", "inner"), oid("r_", "drinks")],
-                ),
-                record(
-                    "result",
-                    "mixpanel",
-                    "2024-07-02",
-                    "Example mixed panel",
-                    category="Survey",
-                    members=[oid("r_", "sunlight"), oid("r_", "drugs")],
-                ),
+                panel("pair", "2024-07-01", "Example pair", "inner", "drinks"),
+                panel("mixpanel", "2024-07-02", "Example mixed panel", "sunlight", "drugs"),
                 condition("leaves", "2024-05-28", "Z72.0"),
                 condition("formerly", "2024-05-29", "Z87.891"),
                 condition("ankle", "2024-05-30", "S93.401A"),

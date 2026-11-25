@@ -418,6 +418,7 @@ impl Changes {
         let of_about = [
             some(about.said, "by what their source says"),
             some(about.by_age, "by the person's age"),
+            some(about.listing, "panels and reports that list no other"),
             some(about.documents, "papers"),
         ];
         let of_about: Vec<String> = of_about.into_iter().flatten().collect();

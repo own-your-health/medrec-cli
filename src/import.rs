@@ -1735,12 +1735,16 @@ fn merge(
     let lists = std::mem::take(&mut rec.lists);
     let path = rec.provenance[0].raw_path.clone();
     let merged = merge_fields(index, rec, word.as_ref(), found, filing, idless);
+    // Before what it gives is kept with what it shows.
+    let older = matches!(merged, Merge::Older);
+    let path = path.filter(|_| !older);
+    let lists = path.is_some_and(|path| panels::said(&mut index.records, &path, lists));
     let mut changed = came.keep(index);
-    if matches!(merged, Merge::Older) {
+    if older {
         return merged;
     }
+    changed |= lists;
     changed |= word.is_some_and(|w| said(index, &w));
-    changed |= path.is_some_and(|path| panels::said(&mut index.records, &path, lists));
     match merged {
         Merge::Unchanged if changed => Merge::Updated,
         m => m,
@@ -1795,6 +1799,10 @@ impl Came {
             key: rec.key.clone(),
             gives: Given {
                 raw_path: raw.clone(),
+                // An older one's is of the same raw file.
+                lists: (gives.lists.into_iter())
+                    .map(|(path, files)| (raw.clone().unwrap_or(path), files))
+                    .collect(),
                 ..gives
             },
             raw,
@@ -1852,7 +1860,17 @@ impl Came {
                     changed |= given::keep(r, left);
                 }
             }
-            if let Some(was) = was {
+            if let Some(mut was) = was {
+                // What one that has another raw file now listed is of that.
+                if let Some(path) = self.of.raw_path.as_ref().filter(|_| i == now) {
+                    let of =
+                        |f: &String| r.provenance.iter().any(|p| p.raw_path.as_ref() == Some(f));
+                    let had: Vec<String> = was.lists.keys().filter(|f| !of(f)).cloned().collect();
+                    for f in had {
+                        let files = was.lists.remove(&f).unwrap_or_default();
+                        was.lists.entry(path.clone()).or_insert(files);
+                    }
+                }
                 changed |= given::keep(r, was);
             }
         }
@@ -2588,6 +2606,15 @@ fn replace(existing: &mut Record, i: usize, incoming: Provenance) {
     for path in errors.chain(words).chain(given).chain(from) {
         if *path == had {
             path.clone_from(&now);
+        }
+    }
+    if had == now {
+        return;
+    }
+    existing.lists.remove(&had);
+    for g in &mut existing.given {
+        if let Some(files) = g.lists.remove(&had) {
+            g.lists.insert(now.clone(), files);
         }
     }
 }

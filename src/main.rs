@@ -1304,8 +1304,8 @@ fn run(cli: &Cli) -> Result<(), CliError> {
                     println!("nothing was written; a run would do this:");
                 }
                 println!(
-                    "{} claims: {} shaped again, {} unchanged, {} with no raw file; {} bills and receipts read again; {} records gained or changed what is said of their providers; {} records and {} papers what their sources say of them; {} results and reports their fields; {} records keep more of what their sources gave; {} results about somebody else put in records of their own",
-                    r.claims, r.reshaped, r.unchanged, r.without_raw, r.statements, r.providers_updated, r.statuses_updated, r.papers_updated, r.results_updated, r.given_updated, r.results_split
+                    "{} claims: {} shaped again, {} unchanged, {} with no raw file; {} bills and receipts read again; {} records gained or changed what is said of their providers; {} records and {} papers what their sources say of them; {} results and reports their fields or what they list; {} records their links to others; {} records keep more of what their sources gave; {} results about somebody else put in records of their own",
+                    r.claims, r.reshaped, r.unchanged, r.without_raw, r.statements, r.providers_updated, r.statuses_updated, r.papers_updated, r.results_updated, r.links_updated, r.given_updated, r.results_split
                 );
                 if let Some(n) = papers_unread(r.papers_unread) {
                     println!("{n}");

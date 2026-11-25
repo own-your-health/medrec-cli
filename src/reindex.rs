@@ -59,9 +59,12 @@ pub struct Reindexed {
     pub given_updated: usize,
     /// Results that were filed with one about somebody else.
     pub results_split: usize,
-    /// Results and reports whose values changed: their fields, status, name,
-    /// code or date.
+    /// Results and reports whose values, or what they list, changed: their
+    /// fields, status, name, code, date or `lists`.
     pub results_updated: usize,
+    /// Records whose links to others are made otherwise: a claim's, a panel's,
+    /// and the questionnaires that list a result.
+    pub links_updated: usize,
     /// Papers whose sources, or what one says or gave of them, changed.
     pub papers_updated: usize,
     /// Raw files of papers that do not read.
@@ -80,9 +83,12 @@ pub struct PersonReindexed {
     pub statuses_updated: usize,
     pub given_updated: usize,
     pub results_split: usize,
-    /// Results and reports whose values changed: their fields, status, name,
-    /// code or date.
+    /// Results and reports whose values, or what they list, changed: their
+    /// fields, status, name, code, date or `lists`.
     pub results_updated: usize,
+    /// Records whose links to others are made otherwise: a claim's, a panel's,
+    /// and the questionnaires that list a result.
+    pub links_updated: usize,
     pub papers_updated: usize,
     pub papers_unread: usize,
     /// Of a dry run: what would change in the person's views.
@@ -207,6 +213,12 @@ pub fn claims(
         row.papers_updated = papers.changed;
         row.papers_unread = papers.unread;
         row.statements = crate::bill::backfill(&mut idx, &folder.text(p)?);
+        // As a saved index is: this medrec's rules can link it otherwise.
+        let before = idx.records.clone();
+        crate::claims::link(&mut idx.records);
+        crate::panels::link(&mut idx.records);
+        let links = before.iter().zip(&idx.records).filter(|(a, b)| a != b);
+        row.links_updated = links.count();
         let changed = [
             row.reshaped,
             row.statements,
@@ -215,16 +227,11 @@ pub fn claims(
             row.given_updated,
             row.results_split,
             row.results_updated,
+            row.links_updated,
             row.papers_updated,
         ];
-        match (changed.iter().any(|n| *n > 0), dry_run) {
-            (true, false) => folder.save_index(p, &mut idx)?,
-            // As a saved index is.
-            (true, true) => {
-                crate::claims::link(&mut idx.records);
-                crate::panels::link(&mut idx.records);
-            }
-            (false, _) => {}
+        if !dry_run && changed.iter().any(|n| *n > 0) {
+            folder.save_index(p, &mut idx)?;
         }
         if dry_run {
             would_be.insert(p.id.clone(), idx);
@@ -235,6 +242,7 @@ pub fn claims(
         out.given_updated += row.given_updated;
         out.results_split += row.results_split;
         out.results_updated += row.results_updated;
+        out.links_updated += row.links_updated;
         out.papers_updated += row.papers_updated;
         out.papers_unread += row.papers_unread;
         out.claims += row.claims;
@@ -694,6 +702,8 @@ fn results(idx: &mut PersonIndex, tmp: &Path) -> usize {
     let each = idx.records.iter_mut();
     for r in each.filter(|r| matches!(r.kind.as_str(), "result" | "report")) {
         let mut now = r.clone();
+        let of = |f: &String| r.provenance.iter().any(|p| p.raw_path.as_ref() == Some(f));
+        now.lists.retain(|f, _| of(f));
         let mut shapes: Vec<Option<Record>> = Vec::new();
         for p in &r.provenance {
             let path = p.raw_path.as_ref();

@@ -124,19 +124,24 @@ pub fn ids(p: &Person, idx: &PersonIndex) -> BTreeSet<String> {
             out.insert(r.id.clone());
         }
     }
-    // So is a panel or a report all of whose results are.
+    // So is a panel or a report that lists none but such, or did, with those
+    // entered in error or without them. One of several sources' lists what any
+    // does: one of them hides none of the person's own.
+    let in_error = idx.records.iter().filter(|r| standing::record_in_error(r));
+    let in_error: BTreeSet<&str> = in_error.map(|r| r.id.as_str()).collect();
+    let panels = panels::every_list(&idx.records);
     loop {
-        let all = |r: &&Record| {
-            let of = panels::members(r);
-            !of.is_empty() && !out.contains(&r.id) && of.iter().all(|id| out.contains(*id))
-        };
-        let more: Vec<String> = (idx.records.iter().filter(all))
-            .map(|r| r.id.clone())
-            .collect();
-        if more.is_empty() {
+        let before = out.len();
+        for (i, lists) in &panels {
+            let about = |id: &str| out.contains(id);
+            let mut lists = panels::together(lists).into_iter();
+            if lists.any(|ids| panels::all(&ids, &in_error, &about)) {
+                out.insert(idx.records[*i].id.clone());
+            }
+        }
+        if out.len() == before {
             break;
         }
-        out.extend(more);
     }
     for d in &idx.documents {
         let links = |r: &&Record| r.documents.contains(&d.id);
@@ -157,6 +162,8 @@ pub struct Counted {
     pub said: usize,
     /// Those a grown person answers, of a day the person had not grown.
     pub by_age: usize,
+    /// Panels and reports that list none but such.
+    pub listing: usize,
     pub documents: usize,
 }
 
@@ -170,7 +177,8 @@ pub fn counted(p: &Person, idx: &PersonIndex) -> Counted {
     for r in of {
         match of_resource(r, import::wrote(r)) {
             Some(_) => out.said += 1,
-            None => out.by_age += 1,
+            None if record(p, r).is_some() => out.by_age += 1,
+            None => out.listing += 1,
         }
     }
     out

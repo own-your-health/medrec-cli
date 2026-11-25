@@ -347,8 +347,9 @@ too, with a value and without, and by the texts of their values (Private, below)
 `display`, `code`, `date` and `fields` again from the raw file they are of: of
 several sources', the one `fields_from` names, else one that an import lets write
 them and whose values agree with the record's (a `comparator` aside), else none,
-and the record stays as it is. A file that says it is entered in error, or that
-gives another `key`, writes nothing.
+and those values stay as they are. A file that says it is entered in error, or that
+gives another `key`, writes none of them. `lists` (Panels, below) is read from
+every raw file of the record that reads as its kind, those included.
 An import by a medrec before 0.9.10 drops `components` and `categories` again: a
 reading that is private by its parts alone is then open until the next
 `medrec reindex`, so run 0.9.10 or later on every machine that writes the folder.
@@ -360,19 +361,30 @@ refers to (a report's `result`, an Observation's `hasMember`, or before R4 its
 one record it is what each of them lists, that of its values first. Nothing is a
 member by its date or its name. The ids are made again on every write of the
 index, from `lists` of the record (by its raw file, the raw files that one refers
-to, under its source), so a result that comes later is a member then. An id of
-what is entered in error, or about somebody else, is not shown, and `members` is
-absent where none is left.
+to, under its source), so a result that comes later is a member then. What is
+entered in error is none, no view or answer shows the id of one about somebody
+else (`medrec records show` of one of those does), and `members` is absent where
+none is left.
 
-A result with `members` and no value is a heading: no latest result and no test
-(`latest_results`, `kind: "tests"`), and where a list has it its `detail` is
-`panel`. `results` of a report stays the number of results it refers to, filed or
-not.
+A result with no value whose `lists` is not empty is a heading, whether what it
+lists is filed or not: no latest result and no test (`latest_results`,
+`kind: "tests"`, `tests.json`), and where a list has it its `detail` is `panel`
+(`panel (H)` in the timeline's with an `interpretation`, which a tool's answer has
+as `flag`). `heading: true` on it in a view's records says so. `results` of a report
+stays the number of results it refers to, filed or not.
 
-A result that a questionnaire lists (a panel or a report, Questionnaires below) is
-of that questionnaire, as its other answers are, whatever it is named. `listed_by`
-of its record (`{display, code}`) keeps each, and one is never taken away, so
-nothing opens because a source lists it no more.
+A result that a questionnaire lists (a panel or a report, Questionnaires below: by
+its name and code, or a part's) is of that questionnaire, as its other answers are,
+whatever it is named, to any depth. `listed_by` of its record (`{display, code}`)
+keeps each, and one is never taken away. What a panel or a report listed before is
+kept too (`given`, below), so nothing opens because a source lists it no more, or
+lists more.
+
+A medrec before 0.9.10 drops `lists` and `listed_by`, and `lists` of `given`, from
+an index it saves, and keeps `members`. An answer that is private by its panel
+alone is then open until the next `medrec reindex`, which gives back what the raw
+files tell, earlier versions included: not what a raw file that is gone listed. So
+run 0.9.10 or later on every machine that writes the folder.
 
 **Words.** A condition's, an allergy's and a medicine's `words` (0.9.9 and
 later) is what each of its sources says of it that can differ between them.
@@ -476,14 +488,15 @@ there.
 **What a source gave** (0.9.9 and later). A record's `given` is what its
 sources gave of it, then or now, that the rules of what is private read and
 that the record does not show: a list of `{raw_path, cli, display, code,
-fields, npis}`, each with the parts that are other than those shown. `display`
+fields, npis, lists}`, each with the parts that are other than those shown. `display`
 is a medication's, a result's, a report's, a procedure's or a claim's, and `code`
 a condition's, a medication's, a result's, a report's or a procedure's; `fields`
 are a claim's `diagnoses`, its `payer_notes` and its `items` (of each line
 `service`, `revenue`, `payer_notes` and `counted`), a result's `about`, its
 `components` (0.9.10 and later: of each part its `code`, of those with no value
 too, and its `value` where that is a text that says an area), and the fields that print a provider (Providers, below); `npis` has the NPI of the provider a field prints,
-by that field; `cli` is that of a source that no longer has the record.
+by that field; `lists` (0.9.10 and later) is what a panel or a report listed
+otherwise, as its `lists` has it, each raw file's whole; `cli` is that of a source that no longer has the record.
 `raw_path` is the raw file of the current version of what gave it, absent
 where that is not known. A document's is `{raw_path, organization, title,
 name}`: `name` is the `original_name` of a copy that was folded into it.
@@ -502,7 +515,8 @@ name}`: `name` is the `original_name` of a copy that was folded into it.
   record is about (`about`) does not go with it. The household's own mark opens
   it (`medrec private unmark`).
 - It is of the item itself. One that is private only with another (its event,
-  its report, a record or a paper tied to it) follows that as it is. A newborn's
+  its report, a record or a paper tied to it) follows that as it is, but a panel or
+  a report is judged by what it listed before too (0.9.10 and later). A newborn's
   event that takes its place from a parent's claim (X1) is judged by the places
   that claim was given too.
 - An import keeps what a version gives, an older one served late included, and
@@ -535,8 +549,10 @@ are:
   birthday, or undated and first fetched before it. Not a laboratory's, whose
   `category` starts with `lab`, and none where the person's birth date is not
   known.
-- a panel or a report (0.9.10 and later) whose `members` (Panels, below) are all
-  about somebody else.
+- a panel or a report (0.9.10 and later) that lists none but such (Panels, above),
+  with what is entered in error or without it, or did: an earlier list of one of its
+  raw files counts in place of what that lists now. Of several sources', what any of
+  them lists counts, so one hides none of the person's own.
 - a document with the title of one, dated so, every provenance of which names a
   source's `cli`; and one that only such records list in their `documents`, no
   provenance of which is the household's own.
@@ -628,8 +644,10 @@ of, and conditions, allergies and medicines whose `status` or `fields`
 changed), `given_updated` (0.9.9 and later: records whose `given` gained
 something), `results_split` (0.9.9 and later: results about somebody else that
 were filed as the person's own, or in one record with it), `results_updated` (0.9.10
-and later: results and reports whose `fields`, `status`, `display`, `code` or
-`date` changed), `papers_updated` (0.9.9 and later: papers whose `also_from`,
+and later: results and reports whose `fields`, `status`, `display`, `code`, `date`
+or `lists` changed), `links_updated` (0.9.10 and later: records whose links to
+others are made otherwise, by the rules of this medrec: a claim's, the `members` of
+a panel or a report, and a result's `listed_by`), `papers_updated` (0.9.9 and later: papers whose `also_from`,
 `words`, `errors` or `given` changed) and `papers_unread` (0.9.9 and later: raw files of
 papers that do not read). From 0.9.9 a run makes every person's views again, even
 when no record changes.
@@ -663,7 +681,7 @@ or id of an item, and names no kind of questionnaire that there is one of.
   | `current` | of conditions, allergies and medicines, the records that a list of current ones has: `added` and `removed`. Those of a medrec before 0.9.9 are by `status` |
   | `events` | `added`, `removed`, and `changed`, those with other money |
   | `bills`, `worth_a_call`, `not_billed` | of the lists of `bills.json`, `added`, `removed`, and `changed`, those with other amounts |
-  | `about_another` | what is about somebody else: results and reports by what their source says (`said`) and by the person's age (`by_age`), and `documents` |
+  | `about_another` | what is about somebody else: results and reports by what their source says (`said`), by the person's age (`by_age`) and by what they list alone (`listing`, 0.9.10 and later), and `documents` |
   | `papers` | `filed_before`, papers filed by a medrec that did not keep every source of one, and `source_found`, those of them another source of which the raw files tell |
 
 A `claim` (an ExplanationOfBenefit) is shaped for costs (0.5.0 and later).
@@ -1842,6 +1860,9 @@ older medrec wrote. A reader shows `label`, as `medrec mcp` does. Without it, a
 view holds no `imports` to find the patient by: the sources step 2 gives
 with the patient unknown name it, by steps 3 and 4.
 
+A result that is a heading (Panels, above; 0.9.10 and later) has `heading: true`,
+and another has no `heading`.
+
 A record whose sources differ on whether it is entered in error, or that is, has
 `says` (0.9.9 and later), unless it is a condition, an allergy or a medicine
 other than a fill, whose words `standing.json` has: what each of its provenances
@@ -1867,7 +1888,7 @@ result:
 ```
 
 `entries` holds every result of the series, newest first, but those entered in
-error (0.9.9 and later). `shard` and
+error (0.9.9 and later) and headings (Panels, above; 0.9.10 and later). `shard` and
 `place` locate it in `records-result-<shard>.json` (`-1`: the undated file).
 `rank` is its place among all the person's results, newest first, then by
 name.
@@ -2412,7 +2433,7 @@ nothing is private.
   | `provider` | was made by a practice or clinician whose name or credential says its area: a claim's provider or facility, a visit's place, location or clinician, a medicine's prescriber, a result's performer, a document's organization; or is a record that prints a provider with a sure label (Provider labels, above) whose name, practice or role does, or a record, document or event that prints one the household calls so (0.9.7 and later) |
   | `medicine` | is a medicine of an area by its name or code, or (0.9.9 and later) a pharmacy claim its `display` names as one: antidepressants, antipsychotics, anxiolytics, stimulants and lithium; fertility drugs and contraceptives; HIV medicines and those for erectile dysfunction; medicines for substance use and smoking |
   | `test` | is a result or report of a test of an area: sexually transmitted infections, pregnancy and fertility, drug screens; or (0.9.9 and later) of a questionnaire of one, or of tobacco use (Questionnaires, below); by its own name and code or those of any of its parts, or by a text that is the value of a part (0.9.10 and later) |
-  | `members` | is an event with a private claim or portal visit, or whose own members are all private, or (0.9.10 and later) a panel or a report whose `members` (Panels, above) are all private, with those entered in error or without them |
+  | `members` | is an event with a private claim or portal visit, or whose own members are all private, or (0.9.10 and later) a panel or a report all of what one source lists of which (Panels, above), now or before, is private, with what is entered in error or without it |
   | `event` | is a member of a private event |
   | `words` | is a bill or receipt whose first page that has any text says an area, by a service, a medicine or a test, or any document whose title does (0.9.6 and later), or whose title is a questionnaire's, or with an `original_name` that says either (0.9.9 and later; `_`, `.` and `-` read as spaces) |
   | `record` | is a document that a private record links (`documents` in `records`), whatever else links it (0.9.5 and later) |

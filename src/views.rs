@@ -287,9 +287,9 @@ pub(crate) fn record_detail(r: &Record) -> Option<String> {
             let v = f.get("value").map(value_text).filter(|s| !s.is_empty());
             let flag = text("interpretation");
             let heads = crate::panels::heads(r).then(|| crate::panels::HEADING.to_string());
-            match (v, flag) {
+            match (v.or(heads), flag) {
                 (Some(v), Some(i)) => Some(format!("{v} ({i})")),
-                (v, i) => v.or(i).or(heads),
+                (v, i) => v.or(i),
             }
         }
         "medication" if text("source").as_deref() == Some("dispense") => {
@@ -1153,10 +1153,19 @@ pub fn record(
     id: &str,
 ) -> Result<(RecordRow, Option<String>), CliError> {
     for p in &h.people {
-        let idx = folder.whole_index(p)?;
+        let whole = folder.whole_index(p)?;
+        let Some(r) = whole.records.iter().find(|r| r.id == id) else {
+            continue;
+        };
+        let about = about::of_record(p, &whole, r);
+        // One of the person's own names nothing that is not.
+        let idx = match about {
+            Some(_) => whole,
+            None => about::shown(p, whole),
+        };
         if let Some(r) = idx.records.iter().find(|r| r.id == id) {
             let one = row(Sources::of(&h.sources, &idx), p, r.clone());
-            return Ok((one, about::of_record(p, &idx, r)));
+            return Ok((one, about));
         }
     }
     Err(CliError::NotFound(format!("no record `{id}`")))

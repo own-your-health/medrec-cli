@@ -228,8 +228,8 @@
   {
    "id": "r_drugsaaaaaaaaaaaaaaa",
    "kind": "result",
-   "key": "result|drugs|2024-05-13",
-   "date": "2024-05-13",
+   "key": "result|drugs|2024-05-20",
+   "date": "2024-05-20",
    "display": "DAST-10",
    "status": "final",
    "fields": {
@@ -411,7 +411,13 @@
      "filed_by": "medrec 0.9.9",
      "raw_path": "Robin Example/Records/north/Observation/pair.json"
     }
-   ]
+   ],
+   "lists": {
+    "Robin Example/Records/north/Observation/pair.json": [
+     "Observation/inner.json",
+     "Observation/drinks.json"
+    ]
+   }
   },
   {
    "id": "r_mixpanelaaaaaaaaaaaa",
@@ -441,7 +447,13 @@
      "filed_by": "medrec 0.9.9",
      "raw_path": "Robin Example/Records/north/Observation/mixpanel.json"
     }
-   ]
+   ],
+   "lists": {
+    "Robin Example/Records/north/Observation/mixpanel.json": [
+     "Observation/sunlight.json",
+     "Observation/drugs.json"
+    ]
+   }
   },
   {
    "id": "r_leavesaaaaaaaaaaaaaa",
@@ -581,7 +593,7 @@
     "items": [
      {
       "sequence": 1,
-      "category": "visit",
+      "category": "lab",
       "amounts": {
        "billed": {
         "amount": "40.00",
@@ -593,7 +605,7 @@
       ]
      }
     ],
-    "category": "visit",
+    "category": "lab",
     "results": [
      "r_worryaaaaaaaaaaaaaaa"
     ]
@@ -642,7 +654,7 @@
     "items": [
      {
       "sequence": 1,
-      "category": "visit",
+      "category": "lab",
       "amounts": {
        "billed": {
         "amount": "40.00",
@@ -655,7 +667,7 @@
       ]
      }
     ],
-    "category": "visit",
+    "category": "lab",
     "results": [
      "r_drugsaaaaaaaaaaaaaaa",
      "r_sunlightaaaaaaaaaaaa"

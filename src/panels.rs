@@ -11,6 +11,7 @@ use crate::import;
 use crate::model::{Code, Listed, Provenance, Record};
 use crate::providers::local;
 use crate::questionnaires;
+use crate::standing;
 
 /// The field of a panel or a report that has the ids of what it lists.
 pub const MEMBERS: &str = "members";
@@ -79,37 +80,135 @@ pub fn without(fields: &mut Map<String, Value>, gone: &BTreeSet<String>) {
     }
 }
 
-/// Give each panel and report the ids of the results it lists, and each result
-/// the questionnaires that list it. An id is of this index, so it is made
-/// again on every write of it; a questionnaire is never taken away.
-pub fn link(records: &mut [Record]) {
-    let mut by_file: BTreeMap<String, usize> = BTreeMap::new();
-    for (i, r) in records.iter().enumerate() {
-        let files = r.provenance.iter().filter_map(|p| p.raw_path.clone());
-        by_file.extend(files.filter(|_| r.kind == "result").map(|f| (f, i)));
+/// The results, by their raw files.
+struct Filed(BTreeMap<String, usize>);
+
+impl Filed {
+    fn of(records: &[Record]) -> Filed {
+        let mut out: BTreeMap<String, usize> = BTreeMap::new();
+        for (i, r) in records.iter().enumerate() {
+            let files = r.provenance.iter().filter_map(|p| p.raw_path.clone());
+            out.extend(files.filter(|_| r.kind == "result").map(|f| (f, i)));
+        }
+        Filed(out)
     }
+
+    /// Those that the raw file at `path` of the record at `i` lists, in its
+    /// order.
+    fn listed(&self, i: usize, path: &str, files: &[String]) -> Vec<usize> {
+        let dir = import::source_dir_of(path).unwrap_or_default();
+        let each = files
+            .iter()
+            .filter_map(|f| self.0.get(&format!("{dir}/{f}")));
+        each.copied().filter(|at| *at != i).collect()
+    }
+}
+
+fn lists_results(r: &Record) -> bool {
+    matches!(r.kind.as_str(), "result" | "report")
+}
+
+/// What its sources listed before, or another of a record it was of.
+fn before(r: &Record) -> impl Iterator<Item = (&String, &Vec<String>)> {
+    r.given.iter().flat_map(|g| &g.lists)
+}
+
+/// One list of a panel or a report: the ids of the results of it that are
+/// there, as a source gives it, or (`now` is false) gave it.
+pub struct List<'a> {
+    path: &'a str,
+    pub ids: Vec<&'a str>,
+    pub now: bool,
+    /// Whether it is of one of the record's own raw files.
+    own: bool,
+}
+
+/// Every list of each panel and report, by its place. One that a source takes
+/// back, or gives otherwise, still says what it is of, so nothing opens by it.
+pub fn every_list(records: &[Record]) -> Vec<(usize, Vec<List<'_>>)> {
+    let filed = Filed::of(records);
+    let each = records.iter().enumerate();
+    let each = each.filter(|(_, r)| lists_results(r)).map(|(i, r)| {
+        let own = |path: &String| {
+            let mut files = r.provenance.iter().map(|p| p.raw_path.as_ref());
+            files.any(|f| f == Some(path))
+        };
+        let list = |now: bool, (path, files): (&'_ String, &'_ Vec<String>)| {
+            let ids = filed.listed(i, path, files).into_iter();
+            (
+                ids.map(|at| records[at].id.as_str()).collect(),
+                now,
+                own(path),
+            )
+        };
+        let now = r.lists.iter().map(|l| (l.0, list(true, l)));
+        let all = now.chain(before(r).map(|l| (l.0, list(false, l))));
+        let all = all.map(|(path, (ids, now, own))| List {
+            path,
+            ids,
+            now,
+            own,
+        });
+        // An index that a medrec before 0.9.10 saved has those alone.
+        let kept = r.lists.is_empty().then(|| List {
+            path: "",
+            ids: members(r),
+            now: true,
+            own: true,
+        });
+        let all = kept.into_iter().chain(all);
+        (i, all.filter(|l| !l.ids.is_empty()).collect::<Vec<List>>())
+    });
+    each.filter(|(_, lists)| !lists.is_empty()).collect()
+}
+
+/// What a record lists of all its sources together: now, and as each list that
+/// one of them gave before has it.
+pub fn together<'a>(lists: &[List<'a>]) -> Vec<Vec<&'a str>> {
+    let now = |but: Option<&str>| -> Vec<&'a str> {
+        let others = lists.iter().filter(|l| l.now && Some(l.path) != but);
+        others.flat_map(|l| l.ids.iter().copied()).collect()
+    };
+    let before = lists.iter().filter(|l| !l.now && l.own);
+    let before = before.map(|l| [l.ids.clone(), now(Some(l.path))].concat());
+    let mut out: Vec<Vec<&str>> = before.chain([now(None)]).collect();
+    out.retain(|ids| !ids.is_empty());
+    out
+}
+
+/// Whether all of a list is so, with what is entered in error or without it.
+pub fn all(ids: &[&str], in_error: &BTreeSet<&str>, so: &dyn Fn(&str) -> bool) -> bool {
+    let stands: Vec<&&str> = ids.iter().filter(|id| !in_error.contains(**id)).collect();
+    ids.iter().all(|id| so(id)) || (!stands.is_empty() && stands.iter().all(|id| so(id)))
+}
+
+/// Give each panel and report the ids of the results it lists that are not
+/// entered in error, and each result the questionnaires that list it, or did.
+/// An id is of this index, so it is made again on every write of it; a
+/// questionnaire is never taken away.
+pub fn link(records: &mut [Record]) {
+    let filed = Filed::of(records);
+    let in_error: Vec<bool> = records.iter().map(standing::record_in_error).collect();
     let mut listing: Vec<(usize, Vec<usize>)> = Vec::new();
     for i in 0..records.len() {
         let r = &records[i];
-        if !matches!(r.kind.as_str(), "result" | "report") {
+        if !lists_results(r) {
             continue;
         }
-        let mut of: Vec<usize> = Vec::new();
         // That of its values first.
         let first = import::wrote(r);
         let mut lists: Vec<(&String, &Vec<String>)> = r.lists.iter().collect();
         lists.sort_by_key(|(path, _)| first != Some(path.as_str()));
+        let mut now: Vec<usize> = Vec::new();
         for (path, files) in lists {
-            let dir = import::source_dir_of(path).unwrap_or_default();
-            for file in files {
-                let at = by_file.get(&format!("{dir}/{file}")).copied();
-                of.extend(at.filter(|at| *at != i && !of.contains(at)));
-            }
+            let mut more = filed.listed(i, path, files);
+            more.retain(|at| !now.contains(at));
+            now.extend(more);
         }
-        let ids: Vec<Value> = of
-            .iter()
-            .map(|&at| records[at].id.as_str().into())
-            .collect();
+        let had = before(r).flat_map(|(path, files)| filed.listed(i, path, files));
+        let of: Vec<usize> = now.iter().copied().chain(had).collect();
+        let shown = now.iter().filter(|&&at| !in_error[at]);
+        let ids: Vec<Value> = shown.map(|&at| records[at].id.as_str().into()).collect();
         match ids.is_empty() {
             true => records[i].fields.remove(MEMBERS),
             false => records[i].fields.insert(MEMBERS.into(), ids.into()),
@@ -133,16 +232,14 @@ pub fn link(records: &mut [Record]) {
     }
 }
 
-/// The questionnaires a panel is of: by its names, as any source gave them,
-/// and those that list it.
+/// The questionnaires a panel is of: by what it is told by, as any source gave
+/// it, and those that list it.
 fn asks(r: &Record) -> Vec<Listed> {
-    let named = |r: &Record| Listed {
-        display: r.display.clone(),
-        code: r.code.clone(),
-    };
-    let given = given::as_given(r).map(|x| named(&x));
-    let names = std::iter::once(named(r)).chain(given);
-    let asking = names.filter(|l| questionnaires::of(&l.display, l.code.as_ref()).is_some());
+    let mut told = questionnaires::told_by(r);
+    told.extend(given::as_given(r).flat_map(|x| questionnaires::told_by(&x)));
+    let asking = told.into_iter();
+    let asking = asking.filter(|(name, code)| questionnaires::of(name, code.as_ref()).is_some());
+    let asking = asking.map(|(display, code)| Listed { display, code });
     r.listed_by.iter().cloned().chain(asking).collect()
 }
 
@@ -176,12 +273,13 @@ pub fn keep(r: &mut Record, by: Vec<Listed>) -> bool {
     r.listed_by.len() != had
 }
 
-/// Whether a result is a heading: a panel that lists results and has no value
-/// of its own.
+/// Whether a result is a heading: a panel that lists results, filed or not, and
+/// has no value of its own.
 pub fn heads(r: &Record) -> bool {
     let value = r.fields.get("value").map(crate::views::value_text);
     let own = value.is_some_and(|v| !v.is_empty());
-    r.kind == "result" && !own && r.fields.contains_key(MEMBERS)
+    let lists = !r.lists.is_empty() || r.fields.contains_key(MEMBERS);
+    r.kind == "result" && !own && lists
 }
 
 /// The names and codes of the questionnaires that list a result.
@@ -300,6 +398,88 @@ mod tests {
         all.retain(|r| r.kind != "result" || r.id == "r_panel");
         link(&mut all);
         assert!(members(&all[0]).is_empty() && !all[0].fields.contains_key(MEMBERS));
+    }
+
+    /// Each list is its own, and several sources' together.
+    #[test]
+    fn a_list_before_is_in_place_of_that_of_its_source() {
+        let mut all = vec![
+            of("result", "a", "One", &[]),
+            of("result", "b", "Two", &[]),
+            of("result", "c", "Three", &[]),
+            of("report", "north", "Example report", &["Observation/a.json"]),
+        ];
+        let mut south = of("report", "south", "", &["Observation/b.json"]);
+        let (its, path) = (
+            all[3].provenance[0].raw_path.clone().unwrap(),
+            south.provenance[0].raw_path.clone().unwrap(),
+        );
+        all[3].lists.append(&mut south.lists);
+        all[3].provenance.append(&mut south.provenance);
+        let gave = |path: &str| json!({"lists": {path: ["Observation/c.json"]}});
+        all[3].given = serde_json::from_value(json!([gave(&its), gave("elsewhere")])).unwrap();
+        all[3].given[1].lists = all[3].given[0].lists.clone();
+        let other = its.replace("/north.json", "/gone.json");
+        all[3].given[1].lists = BTreeMap::from([(other, vec!["Observation/c.json".to_string()])]);
+        let lists = every_list(&all);
+        assert_eq!(lists.len(), 1);
+        let each: Vec<(&[&str], bool)> = lists[0]
+            .1
+            .iter()
+            .map(|l| (l.ids.as_slice(), l.now))
+            .collect();
+        assert_eq!(
+            each,
+            [
+                (&["r_a"][..], true),
+                (&["r_b"], true),
+                (&["r_c"], false),
+                (&["r_c"], false)
+            ]
+        );
+        // What another resource listed is not its own.
+        assert_eq!(
+            together(&lists[0].1),
+            [vec!["r_c", "r_b"], vec!["r_a", "r_b"]]
+        );
+        assert!(its < path);
+        let is = |of: &'static [&'static str]| move |id: &str| of.contains(&id);
+        let none = BTreeSet::new();
+        assert!(super::all(&["r_a"], &none, &is(&["r_a"])));
+        assert!(!super::all(&["r_a", "r_b"], &none, &is(&["r_a"])));
+        assert!(super::all(
+            &["r_a", "r_b"],
+            &BTreeSet::from(["r_b"]),
+            &is(&["r_a"])
+        ));
+        assert!(!super::all(
+            &["r_b"],
+            &BTreeSet::from(["r_b"]),
+            &is(&["r_a"])
+        ));
+    }
+
+    /// A panel is of a questionnaire by a part of it too.
+    #[test]
+    fn a_part_says_what_a_panel_asks() {
+        let mut all = vec![
+            of("result", "a", "One", &[]),
+            of("result", "panel", "Example form", &["Observation/a.json"]),
+        ];
+        let part = json!([{"code": {"system": "http://loinc.org", "code": "44261-6"}}]);
+        all[1].fields.insert("components".into(), part.clone());
+        link(&mut all);
+        let of_it = questionnaires::asked_by(&all[0]);
+        assert_eq!(
+            of_it.iter().map(|q| q.kind).collect::<Vec<_>>(),
+            ["depression"]
+        );
+        // As a source gave it, which it does not show.
+        all[0].listed_by.clear();
+        all[1].fields.clear();
+        all[1].given = serde_json::from_value(json!([{"fields": {"components": part}}])).unwrap();
+        link(&mut all);
+        assert_eq!(all[0].listed_by.len(), 1);
     }
 
     /// What a questionnaire lists is of it, through any panel of it, by any

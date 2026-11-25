@@ -4,7 +4,7 @@
 //! Claude Desktop runs it, which must leave every file of the folder as it
 //! was. Offline, on a local folder; the Keychain service is an empty one.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Output, Stdio};
@@ -2788,6 +2788,107 @@ fn views_of(e: &Env, pid: &str) -> (BTreeMap<String, Value>, Value) {
     (out, all["people"][pid].clone())
 }
 
+/// A panel with no value is a heading, by what its source lists: no test and no
+/// latest result, under another's name or with a flag too. It names no result
+/// that is entered in error.
+#[test]
+fn a_heading_is_no_test_and_names_nothing_in_error() {
+    let e = Env::new("headings");
+    fixture_household(&e, "questionnaires", &["index.json"]);
+    let alex = h_id(&e, "Alex Testperson");
+    let path = e.records().join("Alex Testperson/index.json");
+    let mut v: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let records = v["records"].as_array_mut().unwrap();
+    let one = records.iter().find(|r| r["id"] == SUNLIGHT).unwrap();
+    let like = |name: &str, display: &str, day: &str| -> Value {
+        let mut r = one.clone();
+        r["id"] = format!("{:a<22}", format!("r_{name}")).into();
+        (r["key"], r["date"], r["display"]) = (name.into(), day.into(), display.into());
+        let path = format!("Robin Example/Records/north/Observation/{name}.json");
+        r["provenance"][0]["raw_path"] = path.into();
+        r
+    };
+    let panel = |name: &str, display: &str, day: &str, of: &[&str]| -> Value {
+        let mut r = like(name, display, day);
+        r["fields"].as_object_mut().unwrap().remove("value");
+        let files: Vec<String> = of.iter().map(|n| format!("Observation/{n}.json")).collect();
+        let path = r["provenance"][0]["raw_path"].as_str().unwrap();
+        r["lists"] = json!({ path: files });
+        r
+    };
+    let mut wrong = like("wrong", "Example wrong level", "2024-08-01");
+    wrong["status"] = "entered-in-error".into();
+    let mut flagged = panel(
+        "levels",
+        "Example levels",
+        "2024-08-02",
+        &["sunlight", "wrong"],
+    );
+    flagged["fields"]["interpretation"] = "H".into();
+    let sum = like("levelsum", "Example levels", "2024-08-01");
+    let emptied = panel("emptied", "Example emptied", "2024-08-03", &["wrong"]);
+    let ids = [&wrong, &flagged, &sum, &emptied].map(|r| r["id"].as_str().unwrap().to_string());
+    let [wrong_id, flagged_id, sum_id, emptied_id] = ids;
+    records.extend([wrong, flagged, sum, emptied]);
+    std::fs::write(&path, serde_json::to_vec(&v).unwrap()).unwrap();
+    let raw = e.records().join("Robin Example/Records/north/Observation");
+    std::fs::create_dir_all(raw).unwrap();
+    assert_eq!(e.ok(&["reindex"])["links_updated"], 1);
+
+    let t = e.tools();
+    let own = every_answer(&t, Some("Alex"));
+    let rows = |answer: &str| own[answer]["items"].as_array().unwrap().clone();
+    let of = |rows: &[Value], id: &str| rows.iter().find(|r| r["id"] == id).cloned();
+    let listed = rows("results, detailed");
+    let row = of(&listed, &flagged_id).unwrap();
+    assert_eq!(
+        (&row["detail"], &row["flag"]),
+        (&json!("panel"), &json!("H"))
+    );
+    assert_eq!(row["fields"]["members"], json!([SUNLIGHT]), "{row}");
+    let row = of(&listed, &emptied_id).unwrap();
+    assert_eq!(row["detail"], "panel", "{row}");
+    assert!(row["fields"].get("members").is_none(), "{row}");
+    let tests = rows("tests, detailed");
+    let row = of(&tests, &sum_id).unwrap();
+    assert_eq!(row["results"], 1, "{row}");
+    assert!(of(&tests, &flagged_id).is_none() && of(&tests, &emptied_id).is_none());
+    let listed = e.ok(&["timeline", "--person", "Alex"]);
+    let listed = listed["items"].as_array().unwrap();
+    let detail = |id: &str| of(listed, id).unwrap()["detail"].clone();
+    assert_eq!(
+        (detail(&flagged_id), detail(&emptied_id)),
+        (json!("panel (H)"), json!("panel"))
+    );
+    for id in [&flagged_id, &emptied_id] {
+        let shown = e.ok(&["records", "show", id]).to_string();
+        assert!(!shown.contains(&wrong_id), "{shown}");
+    }
+
+    // The views: the records say what is a heading, and no test is one.
+    let (files, _) = views_of(&e, &alex);
+    let shards: Vec<&Value> = (files.iter())
+        .filter(|(name, _)| name.starts_with("records-result"))
+        .flat_map(|(_, v)| v.as_array().unwrap())
+        .collect();
+    let heads = shards.iter().filter(|r| r["heading"] == true);
+    let heads: BTreeSet<&str> = heads.map(|r| r["id"].as_str().unwrap()).collect();
+    let want = [flagged_id.as_str(), &emptied_id, GROWN[11], MIXED];
+    assert_eq!(heads, BTreeSet::from(want));
+    assert!(!shards
+        .iter()
+        .any(|r| r["fields"]["members"].to_string().contains(&wrong_id)));
+    let entries = files["tests"].as_array().unwrap().iter();
+    let entries: usize = entries
+        .map(|s| s["entries"].as_array().unwrap().len())
+        .sum();
+    assert_eq!(entries, shards.len() - want.len() - 1);
+    assert!(!files["summary"]["latest_results"]
+        .to_string()
+        .contains("Example emptied"));
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
 /// The answers of a questionnaire are private, one test for each area: in the
 /// index's views, events, search, latest results, totals and every tool's
 /// answer about the household. Of the person they are there, marked.
@@ -4213,7 +4314,8 @@ fn a_dry_run_counts_what_would_be_current_and_about_another() {
     };
     born("2023-12-04");
     let v = changes_of(&e, &alex);
-    let want = json!({"said": 0, "by_age": 10, "documents": 2});
+    // A panel of two such is one too.
+    let want = json!({"said": 0, "by_age": 9, "listing": 1, "documents": 2});
     assert_eq!(v["about_another"], want);
     let want = json!({"document": 2, "report": 1, "result": 9});
     assert_eq!(v["private"]["gone"], want);
