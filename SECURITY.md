@@ -80,7 +80,10 @@ client's secret as not confidential, and PKCE protects each sign-in.
   the records. The titles a person's codes have and the labels of their
   providers are in `views/` (`code-names.json`, `providers.json`), inside the
   records folder. Each person's `provider-state.json` there has their
-  providers' labels by NPI, those of private ones with the rest.
+  providers' labels by NPI, those of private ones with the rest. What the
+  household says of a provider (`medrec labels`, and provider requests) is in
+  the person's `marks.json`; a handled request's `done/` file and message
+  repeat no name.
 - It never edits a filed document, a DICOM file or a raw record. A record a
   source changed is written beside the previous version, which is kept.
 - It deletes a source file only when it was moved (the inbox, `~/Downloads`,

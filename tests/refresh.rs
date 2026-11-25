@@ -2014,6 +2014,216 @@ fn private_items_follow_the_rules_until_the_household_marks_them() {
     assert_eq!(std::fs::read(&file).unwrap(), b"{not json");
 }
 
+/// A person's `providers.json`.
+fn provider_view(e: &Env, pid: &str) -> Value {
+    let views = e.json_at("views/views.json");
+    let md5 = views["people"][pid]["files"]["providers.json"]
+        .as_str()
+        .unwrap();
+    e.json_at(&format!("views/{pid}/providers.{}.json", &md5[..12]))
+}
+
+/// What the household says of providers, at a terminal and from the app.
+#[test]
+fn the_household_says_who_a_printed_name_is() {
+    let e = Env::new("labels");
+    setup(&e);
+    let alex = with_private_fixtures(&e);
+    let aid = alex["id"].as_str().unwrap();
+    e.ok(&["views", "write"]);
+    let (visit, summary) = ("r_physicalaaaaaaaaaaaa", "d_physicalavsaaaaaaaaa");
+    let practice = "Example Family Practice";
+    let file = e
+        .records()
+        .join(alex["folder"].as_str().unwrap())
+        .join("marks.json");
+    let index = std::fs::read(file.with_file_name("index.json")).unwrap();
+
+    // Mistakes change nothing, and repeat no name.
+    let set = ["labels", "set", "--person", "Alex", "--printed"];
+    let of =
+        |rest: &[&'static str]| -> Vec<&'static str> { set.iter().chain(rest).copied().collect() };
+    for (args, code) in [
+        (of(&[practice]), 2),
+        (of(&[practice, "--role", " "]), 2),
+        (of(&[practice, "--phone", "none"]), 2),
+        (of(&[practice, "--role", "clinic", "--item", "x"]), 2),
+        (of(&["Invented Name", "--role", "clinic"]), 4),
+        (
+            of(&[
+                practice,
+                "--role",
+                "clinic",
+                "--item",
+                "r_ferritinaaaaaaaaaaaa",
+            ]),
+            4,
+        ),
+        (
+            vec!["labels", "same", "--person", "Alex", "--printed", practice],
+            2,
+        ),
+        (
+            vec![
+                "labels",
+                "wrong",
+                "--person",
+                "No One",
+                "--printed",
+                practice,
+            ],
+            4,
+        ),
+        (vec!["labels", "undo", "r_physicalaaaaaaaaaaaa"], 2),
+        (vec!["labels", "undo", "o_nosuchidaaaaaaaaaaaa"], 4),
+    ] {
+        let (got, text) = e.code(&args);
+        assert_eq!(got, Some(code), "{args:?}: {text}");
+        assert!(!text.contains("Invented Name"), "{text}");
+    }
+    assert!(!file.exists(), "nothing was written");
+
+    let said = e.ok(&of(&[
+        practice,
+        "--name",
+        "Family doctors",
+        "--phone",
+        "555-010-0142",
+    ]));
+    assert_eq!(
+        (&said["status"], &said["kind"], &said["person"]),
+        (&json!("recorded"), &json!("set"), &json!(aid)),
+        "{said}"
+    );
+    let first = said["said"]["id"].as_str().unwrap().to_string();
+    let again = e.ok(&of(&[
+        practice,
+        "--name",
+        "Family doctors",
+        "--phone",
+        "555-010-0142",
+    ]));
+    assert_eq!(
+        (&again["status"], &again["said"]["id"]),
+        (&json!("unchanged"), &json!(first))
+    );
+    e.ok(&["views", "write"]);
+    let v = provider_view(&e, aid);
+    let id = v["by_name"][practice].as_str().unwrap().to_string();
+    let label = &v["labels"][&id];
+    assert_eq!(
+        (&label["name"], &label["phone"], &label["confidence"]),
+        (
+            &json!("Family doctors"),
+            &json!("555-010-0142"),
+            &json!("household")
+        ),
+        "{v}"
+    );
+    assert_eq!(v["overrides"][0]["id"], json!(first), "{v}");
+
+    // The app says the visit's is something else, and a name nothing prints.
+    decision_request(
+        &e,
+        "x_providersaaaaaaaaaaa",
+        "provider",
+        json!({"person": aid, "printed": [practice], "set": {"role": "Counselor"}, "item": visit}),
+    );
+    decision_request(
+        &e,
+        "x_providersbbbbbbbbbbb",
+        "provider",
+        json!({"person": aid, "printed": ["Invented Name"], "wrong": true}),
+    );
+    decision_request(
+        &e,
+        "x_providersccccccccccc",
+        "provider",
+        json!({"person": aid, "printed": ["Invented Name"], "maybe": true}),
+    );
+    e.ok(&["refresh", "--scheduled"]);
+    let at = |id: &str| format!("_requests/done/20261124T120000Z_{id}.json");
+    let done = e.json_at(&at("x_providersaaaaaaaaaaa"));
+    assert_eq!(done["handled"]["outcome"], "ok", "{done}");
+    assert_eq!(done["provider"], json!({"person": aid, "kind": "set"}));
+    for id in ["x_providersbbbbbbbbbbb", "x_providersccccccccccc"] {
+        let refused = e.json_at(&at(id));
+        assert_eq!(refused["handled"]["outcome"], "invalid", "{refused}");
+    }
+    for id in [
+        "x_providersaaaaaaaaaaa",
+        "x_providersbbbbbbbbbbb",
+        "x_providersccccccccccc",
+    ] {
+        let text = e.json_at(&at(id)).to_string();
+        for s in ["Invented Name", practice, "Counselor"] {
+            assert!(!text.contains(s), "{s}: {text}");
+        }
+    }
+    let marks: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    let by_app = &marks["providers"][1];
+    assert_eq!(
+        (
+            &by_app["set"],
+            &by_app["item"],
+            &by_app["by"],
+            &by_app["request"]
+        ),
+        (
+            &json!({"role": "Counselor"}),
+            &json!(visit),
+            &json!("Alex Testperson"),
+            &json!("x_providersaaaaaaaaaaa")
+        ),
+        "{marks}"
+    );
+    // A household label in a private area makes its item private, and the
+    // paper the visit links with it; the private part of the file has it.
+    let private = private_view(&e, aid);
+    assert!(private_rows(&private, "records").contains(&(
+        visit.into(),
+        "mental_health".into(),
+        "provider".into()
+    )));
+    assert!(private["documents"].get(summary).is_some(), "{private}");
+    let v = provider_view(&e, aid);
+    assert!(!json!([v["labels"], v["overrides"]])
+        .to_string()
+        .contains("Counselor"));
+    assert_eq!(v["private"]["overrides"][1]["item"], visit, "{v}");
+
+    // Listed newest first, with the person's own.
+    let listed = e.ok(&["labels", "list", "--person", "Alex"]);
+    let items = listed["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2, "{listed}");
+    assert!(items
+        .iter()
+        .all(|i| i["kind"] == "set" && i["person"] == aid));
+    let (_, table) = e.code(&["labels", "list"]);
+    assert!(
+        table.contains("Family doctors") && table.contains(practice),
+        "{table}"
+    );
+
+    // Undone, the rules are back; and no record was edited.
+    let undone = by_app["id"].as_str().unwrap();
+    assert_eq!(e.ok(&["labels", "undo", undone])["kind"], "undo");
+    assert_eq!(e.code(&["labels", "undo", undone]).0, Some(4));
+    e.ok(&["views", "write"]);
+    let private = private_view(&e, aid);
+    assert!(private["records"].get(visit).is_none());
+    assert!(private["documents"].get(summary).is_none());
+    assert_eq!(
+        std::fs::read(file.with_file_name("index.json")).unwrap(),
+        index
+    );
+
+    // A marks.json that does not read is not written over.
+    std::fs::write(&file, b"{not json").unwrap();
+    assert_ne!(e.code(&of(&[practice, "--role", "clinic"])).0, Some(0));
+    assert_eq!(std::fs::read(&file).unwrap(), b"{not json");
+}
+
 #[test]
 fn an_event_mark_follows_its_members_when_the_event_takes_a_new_id() {
     let e = Env::new("private-follow");

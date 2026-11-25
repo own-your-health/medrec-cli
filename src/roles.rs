@@ -2,6 +2,8 @@
 //! directory row gives. The code set's own descriptors are not used: they are
 //! licensed. A code with no words here has none.
 
+use std::sync::LazyLock;
+
 use crate::private::{MENTAL_HEALTH, REPRODUCTIVE, SUBSTANCE_USE};
 
 /// What kind of provider a role is, to tell which services one fits.
@@ -570,6 +572,48 @@ pub fn named(words: &str) -> Option<&'static Role> {
     ROLES.iter().find(|r| r.words.eq_ignore_ascii_case(w))
 }
 
+/// Words apart by one space, with one before and after.
+fn spaced(text: &str) -> String {
+    let words = text
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty());
+    let mut out = String::from(" ");
+    for w in words {
+        out.push_str(&w.to_lowercase());
+        out.push(' ');
+    }
+    out
+}
+
+/// The private area of a role in anyone's words: the longest role among them
+/// that has one, or a therapist or counselor of no kind known here.
+pub fn area_in(text: &str) -> Option<&'static str> {
+    static BY_LENGTH: LazyLock<Vec<(String, &Role)>> = LazyLock::new(|| {
+        let mut l: Vec<_> = ROLES.iter().map(|r| (spaced(r.words), r)).collect();
+        l.sort_by_key(|(w, _)| std::cmp::Reverse(w.len()));
+        l
+    });
+    let mut text = spaced(text);
+    for (words, role) in BY_LENGTH.iter() {
+        if text.contains(words.as_str()) {
+            if role.area.is_some() {
+                return role.area;
+            }
+            text = text.replace(words.as_str(), " | ");
+        }
+    }
+    let own = [
+        "therapist",
+        "therapists",
+        "counselors",
+        "counsellor",
+        "counsellors",
+    ];
+    text.split(' ')
+        .any(|w| own.contains(&w))
+        .then_some(MENTAL_HEALTH)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -611,6 +655,28 @@ mod tests {
             Some(MENTAL_HEALTH)
         );
         assert!(named("sample role").is_none());
+    }
+
+    #[test]
+    fn a_role_in_anyones_words_has_the_area_it_names() {
+        for r in ROLES {
+            assert_eq!(area_in(r.words), r.area, "{}", r.words);
+            let practice = format!("{}{PRACTICE}", r.words);
+            assert_eq!(area_in(&practice), r.area, "{practice}");
+        }
+        for (text, area) in [
+            ("Therapist", Some(MENTAL_HEALTH)),
+            ("my marriage counselor", Some(MENTAL_HEALTH)),
+            ("Family Counsellor", Some(MENTAL_HEALTH)),
+            ("Counselor (substance use)", Some(MENTAL_HEALTH)),
+            ("Physical Therapist", None),
+            ("physical therapist, then therapist", Some(MENTAL_HEALTH)),
+            ("genetic counselor", None),
+            ("radiologist", None),
+            ("", None),
+        ] {
+            assert_eq!(area_in(text), area, "{text}");
+        }
     }
 
     /// A machine with no directory reads a role, and its area, back from its

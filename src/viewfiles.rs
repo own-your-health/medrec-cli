@@ -483,14 +483,14 @@ pub(crate) fn sync_with(
                 text,
             });
         }
-        let mut private = crate::private::build(
-            p,
-            &me.idx,
-            &me.texts,
-            &events,
-            private_marks,
-            &state.areas(&me.idx),
-        );
+        let corrections = marks
+            .as_ref()
+            .and_then(|m| m.as_ref().ok())
+            .map(|m| m.providers.as_slice())
+            .unwrap_or_default();
+        let said = crate::labels::Said::of(&me.idx, &events, &state, corrections);
+        let mut private =
+            crate::private::build(p, &me.idx, &me.texts, &events, private_marks, &said.areas());
         if state.lost() {
             private["labels_unreadable"] = Value::Bool(true);
             private["marks_unreadable"] = Value::Bool(true);
@@ -518,6 +518,7 @@ pub(crate) fn sync_with(
             events: &events,
             private: &private,
             state: &state,
+            said: &said,
             salt: &|| salt.get_or_init(|| crate::ids::new("s")).clone(),
         });
         let from = EventsFrom {

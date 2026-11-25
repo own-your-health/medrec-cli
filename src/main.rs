@@ -102,6 +102,11 @@ enum Command {
     /// Discretion, not access control.
     #[command(subcommand)]
     Private(PrivateCmd),
+    /// What the household says of the providers its items print: a name, a
+    /// practice, a role or a phone, that two printed names are one provider
+    /// or are not, or that a label is wrong. It edits no record.
+    #[command(subcommand)]
+    Labels(LabelsCmd),
     /// Dated notes, kept in each person's notes.md.
     #[command(subcommand)]
     Note(NoteCmd),
@@ -708,6 +713,74 @@ enum PrivateCmd {
 }
 
 #[derive(Subcommand, Debug)]
+enum LabelsCmd {
+    /// What the household said, newest first.
+    List {
+        #[arg(long)]
+        person: Option<String>,
+        #[command(flatten)]
+        list: ListArgs,
+    },
+    /// Say who a printed name is: in place of what was set before, with what
+    /// is left out as medrec has it.
+    Set {
+        #[command(flatten)]
+        of: LabelOf,
+        /// What to call them.
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        practice: Option<String>,
+        /// What they do, in plain words ("radiologist").
+        #[arg(long)]
+        role: Option<String>,
+        #[arg(long)]
+        phone: Option<String>,
+    },
+    /// Say that printed names are one provider.
+    Same {
+        #[command(flatten)]
+        of: LabelsOf,
+    },
+    /// Say that printed names are not one provider.
+    Different {
+        #[command(flatten)]
+        of: LabelsOf,
+    },
+    /// Say that the label a printed name has is wrong: it has none.
+    Wrong {
+        #[command(flatten)]
+        of: LabelOf,
+    },
+    /// Take back what the household said.
+    Undo {
+        /// Its id (o_…), from `labels list`.
+        id: String,
+    },
+}
+
+#[derive(Args, Debug)]
+struct LabelOf {
+    #[arg(long)]
+    person: String,
+    /// The name, exactly as the items print it.
+    #[arg(long, required = true)]
+    printed: Vec<String>,
+    /// Only where this record, document or event prints it.
+    #[arg(long)]
+    item: Option<String>,
+}
+
+#[derive(Args, Debug)]
+struct LabelsOf {
+    #[arg(long)]
+    person: String,
+    /// A name, exactly as the items print it; two or more.
+    #[arg(long, required = true)]
+    printed: Vec<String>,
+}
+
+#[derive(Subcommand, Debug)]
 enum DocumentsCmd {
     /// Filed documents, newest first.
     List {
@@ -1144,6 +1217,7 @@ fn run(cli: &Cli) -> Result<(), CliError> {
         Command::Events(cmd) => events_cmd(cli, cmd, &store),
         Command::Bills(cmd) => bills_cmd(cli, cmd, &store),
         Command::Private(cmd) => private_cmd(cli, cmd, &store),
+        Command::Labels(cmd) => labels_cmd(cli, cmd, &store),
         Command::Note(cmd) => note_cmd(cli, cmd, &store),
         Command::Images(cmd) => images_cmd(cli, cmd, &store),
         Command::Doctor => {
@@ -1726,6 +1800,124 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
             None => "back to the rules",
         };
         println!("{} {id} {what}", v["status"].as_str().unwrap_or(""))
+    });
+    Ok(())
+}
+
+fn labels_cmd(cli: &Cli, cmd: &LabelsCmd, store: &ConfigStore) -> Result<(), CliError> {
+    use medrec::corrections::{Ask, Set, What};
+    let json = cli.common.json;
+    let say = |printed: &[String], what: What, item: &Option<String>| Ask::Say {
+        printed: printed.to_vec(),
+        what,
+        item: item.clone(),
+    };
+    let (person, ask) = match cmd {
+        LabelsCmd::List { person, list } => {
+            let (f, h) = read(store, cli)?;
+            let mut items = Vec::new();
+            for p in medrec::people::selected(&h, person.as_deref())? {
+                for c in f.marks(p)?.providers {
+                    let Some(kind) = c.kind() else { continue };
+                    let mut v = to_value(&c);
+                    v["kind"] = to_value(&kind);
+                    v["person"] = p.id.clone().into();
+                    v["person_name"] = p.name.clone().into();
+                    items.push(v);
+                }
+            }
+            items.sort_by(|a, b| b["at"].as_str().cmp(&a["at"].as_str()));
+            let shown = list.take(&items);
+            output::emit(
+                json,
+                "label-list",
+                serde_json::json!({ "items": shown }),
+                |v| {
+                    let mut v = v.clone();
+                    for i in v["items"].as_array_mut().into_iter().flatten() {
+                        let printed: Vec<&str> = i["printed"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .filter_map(|p| p.as_str())
+                            .collect();
+                        i["printed"] = printed.join(" / ").into();
+                        for part in ["name", "practice", "role", "phone"] {
+                            i[part] = i["set"][part].clone();
+                        }
+                    }
+                    table(
+                        &v,
+                        &[
+                            "id",
+                            "person_name",
+                            "kind",
+                            "printed",
+                            "name",
+                            "practice",
+                            "role",
+                            "phone",
+                            "item",
+                            "at",
+                        ],
+                    )
+                },
+            );
+            return Ok(());
+        }
+        LabelsCmd::Set {
+            of,
+            name,
+            practice,
+            role,
+            phone,
+        } => {
+            let set = What::Set(Set {
+                name: name.clone(),
+                practice: practice.clone(),
+                role: role.clone(),
+                phone: phone.clone(),
+                ..Set::default()
+            });
+            (Some(&of.person), say(&of.printed, set, &of.item))
+        }
+        LabelsCmd::Same { of } => (Some(&of.person), say(&of.printed, What::Same(true), &None)),
+        LabelsCmd::Different { of } => {
+            (Some(&of.person), say(&of.printed, What::Same(false), &None))
+        }
+        LabelsCmd::Wrong { of } => (Some(&of.person), say(&of.printed, What::Wrong, &of.item)),
+        LabelsCmd::Undo { id } => (None, Ask::Undo(id.clone())),
+    };
+    let ask = ask.checked().map_err(|why| CliError::Usage(why.into()))?;
+    let cfg = load(store, cli)?;
+    let f = Folder::open(&cfg, Access::Write)?;
+    let h = f.household()?;
+    let p = match (person, &ask) {
+        (Some(q), _) => medrec::people::resolve(&h, q)?,
+        (None, Ask::Undo(id)) => {
+            let mut found = None;
+            for p in &h.people {
+                if f.marks(p)?.providers.iter().any(|c| c.id == *id) {
+                    found = Some(p);
+                }
+            }
+            found
+                .ok_or_else(|| CliError::NotFound(format!("the household said nothing as {id}")))?
+        }
+        (None, _) => unreachable!("only an undo names no person"),
+    };
+    let (c, changed) = medrec::corrections::decide(&f, &h, p, &ask, None, None)?;
+    let v = serde_json::json!({
+        "person": p.id, "kind": ask.word(), "said": c.map(|c| to_value(&c)),
+        "status": if changed { "recorded" } else { "unchanged" },
+    });
+    output::emit(json, "label-said", v, |v| {
+        println!(
+            "{} {} {}",
+            v["status"].as_str().unwrap_or(""),
+            v["kind"].as_str().unwrap_or(""),
+            v["said"]["id"].as_str().unwrap_or("")
+        )
     });
     Ok(())
 }

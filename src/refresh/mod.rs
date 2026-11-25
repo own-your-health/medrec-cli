@@ -494,7 +494,7 @@ fn counts(r: &import::Report) -> BTreeMap<String, u64> {
 /// import's wait).
 const EVENT_LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(15);
 
-/// Apply a request's decision (an event's, or a bill marked paid) through
+/// Apply a request's decision (an event's, or one kept as a mark) through
 /// the pass's one write `folder`, whose views follow once, as it closes:
 /// `ok` once it is in the person's `overrides.json`, `invalid` when what it
 /// names is not that person's (or, for `paid`, not a bill), `failed` when
@@ -504,6 +504,22 @@ fn decision_request(
     h: &crate::model::Household,
     v: &requests::Valid,
 ) -> (&'static str, String) {
+    if let Scope::Provider { person, ask } = &v.scope {
+        let Some(p) = h.person(person) else {
+            return (
+                "invalid",
+                "its provider names no person in household.json".into(),
+            );
+        };
+        let by = v.requested_by_name();
+        return match crate::corrections::decide(folder, h, p, ask, by.as_deref(), Some(&v.id)) {
+            Ok((Some(c), true)) => ("ok", format!("recorded it as {}", c.id)),
+            Ok((Some(c), false)) => ("ok", format!("it was already recorded as {}", c.id)),
+            Ok((None, _)) => ("ok", "undone".into()),
+            Err(CliError::NotFound(m)) => ("invalid", m),
+            Err(e) => ("failed", e.message().to_string()),
+        };
+    }
     if let Scope::Private {
         person,
         item,
@@ -805,7 +821,10 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
                 .map(|e| e.source.clone())
                 .collect(),
             Scope::Source(s) => vec![s.clone()],
-            Scope::Event { .. } | Scope::Paid { .. } | Scope::Private { .. } => Vec::new(),
+            Scope::Event { .. }
+            | Scope::Paid { .. }
+            | Scope::Private { .. }
+            | Scope::Provider { .. } => Vec::new(),
         };
         for id in ids {
             let w = want.entry(id).or_default();
