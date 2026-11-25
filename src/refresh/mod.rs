@@ -1699,7 +1699,10 @@ fn import_failed(
         remedy: Some(format!("run `{command}` on this machine")),
         // Present on every needs_person error, empty when the provider said
         // nothing: the key is what marks the error as medrec's own.
-        provider_message: Some(clip(err.message(), MESSAGE_MAX)),
+        provider_message: Some(clip(
+            import::provider_words(cli, err.message()),
+            MESSAGE_MAX,
+        )),
     });
     e.sign_in.needs_person = Some(NeedsPerson {
         reason: "sign_in".into(),
