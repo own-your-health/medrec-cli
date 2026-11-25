@@ -280,14 +280,16 @@ The last column is the FHIR element the value comes from.
 
 **Providers.** A record's `providers` (0.9.6 and later) is what its sources
 say of the people and places its fields print, beyond their names: a list
-of `{field, npi, state}`, with one entry for each field that has either.
+of `{field, npi, state, city}`, with one entry for each field that has an
+`npi` or a `state`.
 `field` is the field that prints the provider: `practitioner`, `location`
 and `service_provider` of an encounter, `prescriber` and `pharmacy` of a
 medication, `performer` of an immunization, `performer` and `location` of a
 procedure, `provider` and `facility` of a claim. `npi` is a National Provider
 Identifier whose check digit holds, from the identifier of the reference
 that prints the field or from the resource it points at. `state` is two
-letters, from that resource's address. A reference is followed to a resource
+letters, from that resource's first address that gives one, and `city` (0.9.8
+and later) is that address's, as the source writes it. A reference is followed to a resource
 contained in the record's own, served in the same stream, or filed by an
 earlier import of the same source, through a PractitionerRole (the person's
 NPI, the place's state) and a Location's `managingOrganization`. An absolute
@@ -298,7 +300,8 @@ stands. A provider whose reference leads to something the source does not
 give keeps what the record had where nothing is read in its place. `medrec
 reindex` reads them all again from the raw files, every source of a record in
 turn, and so takes a correction that import, for a record two sources state,
-leaves as it was; it also gives records filed before 0.9.6 theirs. No answer
+leaves as it was; it also gives records filed before 0.9.6 theirs, and those
+filed before 0.9.8 their `city`. No answer
 or view shows it; `providers.json` is made with it (Provider labels, below).
 An earlier medrec drops it
 from an index it saves, so run 0.9.6 or later on every machine that writes
@@ -1224,6 +1227,7 @@ provider, of whom the household said nothing, has no `providers.json`.
   | `household` | The household said so: `id` (a correction's, in `overrides`), `by` and `at`. |
   | `npi` | The record carries the provider's National Provider Identifier, and the directory has it. Every sure label is this one. |
   | `only_match` | The directory has one person of the printed surname and first initial, in the state the record's source gives (`state`; or, when it gives none, in any state the directory was read for), whose role gives the service, and no given name the text spells out is another. A person whose role medrec has no words for counts as one it can be, and is never the label. |
+  | `first_name` | (0.9.8 and later) The directory has several such people, and the text (`printed`) spells out the first name of exactly one of them (`state`: the one it is in). It narrows only when every other has a first name it cannot be, and nothing else the record says is against the one: the state and city of its address, the service, a middle name or initial, a degree. (The directory gives a person no practice.) An initial, a nickname, a shorter form or another spelling narrows nothing: where one of the others may be so named, there is no label. |
   | `paper` | A paper of the same event with a practice's own heading (a bill, receipt, visit or discharge summary, prescription or immunization record, and not a laboratory's, pharmacy's or imaging center's) prints the name, and every such paper that does is of one practice. `document` is the paper. |
 
   A reader has no words for one it does not know, and still shows the label.

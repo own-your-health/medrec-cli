@@ -324,32 +324,43 @@ pub fn name_words(printed: &str) -> Vec<String> {
 /// Sample, MD`, `SAMPLE, JORDAN A` and `SAMPLE JORDAN A`. More than one when
 /// the name can be read in more than one way.
 pub fn people(printed: &str) -> BTreeSet<(String, char)> {
+    readings(printed)
+        .iter()
+        .filter_map(|(last, given)| person(last, &given[0]))
+        .collect()
+}
+
+/// The ways a printed name can be read: the surname, and the words of the
+/// given names, at least one.
+pub fn readings(printed: &str) -> Vec<(String, Vec<String>)> {
     let pieces: Vec<Vec<String>> = printed
         .split(',')
         .map(name_words)
         .filter(|p| !p.is_empty())
         .collect();
-    let mut out = BTreeSet::new();
-    let mut add = |last: &[String], first: &str| out.extend(person(&last.concat(), first));
+    let mut out = Vec::new();
+    let mut add = |last: &[String], given: &[String]| out.push((last.concat(), given.to_vec()));
     match pieces.as_slice() {
         [] => {}
         [one] => {
             let n = one.len();
             if (2..=5).contains(&n) {
-                add(&one[n - 1..], &one[0]);
-                add(&one[..1], &one[1]);
+                add(&one[n - 1..], &one[..n - 1]);
+                add(&one[..1], &one[1..]);
                 if n >= 3 {
-                    add(&one[n - 2..], &one[0]);
-                    add(&one[..2], &one[2]);
+                    add(&one[n - 2..], &one[..n - 2]);
+                    add(&one[..2], &one[2..]);
                 }
             }
         }
         [last, given, ..] => {
             if last.len() <= 3 && given.len() <= 3 {
-                add(last, &given[0]);
+                add(last, given);
                 // `Jordan Sample, Example Group`.
-                if last.len() >= 2 {
-                    add(&last[last.len() - 1..], &last[0]);
+                if let [before @ .., l] = last.as_slice() {
+                    if !before.is_empty() {
+                        add(std::slice::from_ref(l), before);
+                    }
                 }
             }
         }

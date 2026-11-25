@@ -1,5 +1,5 @@
 //! Who a record's provider fields name, as far as its source says: the
-//! National Provider Identifier and the state of the practitioner,
+//! National Provider Identifier and the state and city of the practitioner,
 //! organization or place each field's reference points at.
 
 use std::collections::BTreeSet;
@@ -123,11 +123,12 @@ pub fn of(
         if facts.unresolved {
             out.unresolved.insert(field);
         }
-        if facts.npi.is_some() || facts.state.is_some() {
+        if facts.npi.is_some() || facts.place.is_some() {
             out.refs.push(ProviderRef {
                 field: field.into(),
                 npi: facts.npi,
-                state: facts.state,
+                state: facts.place.as_ref().map(|p| p.state.clone()),
+                city: facts.place.and_then(|p| p.city),
             });
         }
     }
@@ -141,7 +142,9 @@ impl Found {
             match self.refs.iter_mut().find(|s| s.field == r.field) {
                 Some(s) => {
                     s.npi = s.npi.take().or(r.npi);
-                    s.state = s.state.take().or(r.state);
+                    if s.state.is_none() {
+                        (s.state, s.city) = (r.state, r.city);
+                    }
                 }
                 None => self.refs.push(r),
             }
@@ -181,10 +184,20 @@ impl Found {
                     }
                 };
                 let (npi, state) = (pick(|r| r.npi.clone()), pick(|r| r.state.clone()));
+                // The city of the address the state is of.
+                let of = |r: Option<&ProviderRef>| {
+                    let r = r.filter(|r| r.state.is_some() && r.state == state);
+                    r.and_then(|r| r.city.clone())
+                };
+                let city = match shared {
+                    true => of(had).or_else(|| of(new)),
+                    false => of(new).or_else(|| of(had)),
+                };
                 (npi.is_some() || state.is_some()).then(|| ProviderRef {
                     field: f.to_string(),
                     npi,
                     state,
+                    city,
                 })
             })
             .collect()
@@ -209,12 +222,19 @@ fn prescription(r: &Value, sources: &mut dyn Resolve) -> Result<Option<Value>, C
 #[derive(Debug, Default)]
 struct Facts {
     npi: Option<String>,
-    state: Option<String>,
+    place: Option<Place>,
     /// Something on the way could not be read.
     unresolved: bool,
 }
 
-/// The NPI and state a reference leads to: its own identifier, then the
+/// Where an address is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Place {
+    state: String,
+    city: Option<String>,
+}
+
+/// The NPI and address a reference leads to: its own identifier, then the
 /// resource it points at, contained in `root` or held by the source.
 fn facts(
     reference: &Value,
@@ -235,13 +255,13 @@ fn facts(
         Target::Read(v) => v,
     };
     out.npi = out.npi.or_else(|| identifiers(&v));
-    out.state = address_state(&v);
+    out.place = address(&v);
     if depth >= 2 {
         return Ok(out);
     }
     match v["resourceType"].as_str() {
-        // A person at a place: the NPI is the person's, and the state is the
-        // place's before the person's.
+        // A person at a place: the NPI is the person's, and the address is
+        // the place's before the person's.
         Some("PractitionerRole") => {
             let person = match v.get("practitioner") {
                 Some(p) => facts(p, root, sources, depth + 1)?,
@@ -250,21 +270,21 @@ fn facts(
             out.npi = out.npi.or(person.npi);
             out.unresolved |= person.unresolved;
             for part in ["location.0", "organization"] {
-                if out.state.is_none() {
+                if out.place.is_none() {
                     if let Some(p) = path(&v, part) {
-                        let place = facts(p, root, sources, depth + 1)?;
-                        out.state = place.state;
-                        out.unresolved |= place.unresolved;
+                        let at = facts(p, root, sources, depth + 1)?;
+                        out.place = at.place;
+                        out.unresolved |= at.unresolved;
                     }
                 }
             }
-            out.state = out.state.or(person.state);
+            out.place = out.place.or(person.place);
         }
-        Some("Location") if out.state.is_none() => {
+        Some("Location") if out.place.is_none() => {
             if let Some(o) = v.get("managingOrganization") {
-                let place = facts(o, root, sources, depth + 1)?;
-                out.state = place.state;
-                out.unresolved |= place.unresolved;
+                let at = facts(o, root, sources, depth + 1)?;
+                out.place = at.place;
+                out.unresolved |= at.unresolved;
             }
         }
         _ => {}
@@ -334,10 +354,16 @@ fn npi_of_one(id: &Value) -> Option<String> {
     (is_npi && npi_holds(value)).then(|| value.to_string())
 }
 
-/// The first address's state.
-fn address_state(v: &Value) -> Option<String> {
+/// The first address with a state.
+fn address(v: &Value) -> Option<Place> {
     let a = v.get("address")?;
-    let one = |a: &Value| a.get("state").and_then(Value::as_str).and_then(state);
+    let one = |a: &Value| {
+        let city = a.get("city").and_then(Value::as_str).map(str::trim);
+        Some(Place {
+            state: a.get("state").and_then(Value::as_str).and_then(state)?,
+            city: city.filter(|c| !c.is_empty()).map(str::to_string),
+        })
+    };
     match a.as_array() {
         Some(list) => list.iter().find_map(one),
         None => one(a),
@@ -471,7 +497,65 @@ mod tests {
             field: field.into(),
             npi: npi.map(str::to_string),
             state: state.map(str::to_string),
+            city: None,
         }
+    }
+
+    fn at(state: &str, city: &str) -> ProviderRef {
+        ProviderRef {
+            city: Some(city.into()),
+            ..entry("performer", None, Some(state))
+        }
+    }
+
+    /// A city is of the address the state is of.
+    #[test]
+    fn a_city_goes_with_its_state() {
+        let of = |address: Value| {
+            let r = json!({
+                "resourceType": "Procedure",
+                "performer": [{"actor": {"reference": "#who", "display": "Jordan Sample"}}],
+                "contained": [{"resourceType": "Practitioner", "id": "who", "address": address}]
+            });
+            of(&r, &map(json!({"performer": "Jordan Sample"})), &mut One)
+                .unwrap()
+                .refs
+        };
+        assert_eq!(
+            of(json!([{"city": "Sampleburg"}, {"state": "Florida", "city": " Exampleton "}])),
+            [at("FL", "Exampleton")]
+        );
+        assert_eq!(
+            of(json!([{"state": "FL", "city": " "}, {"state": "NY", "city": "Sampleburg"}])),
+            [entry("performer", None, Some("FL"))]
+        );
+        assert!(of(json!({"city": "Exampleton"})).is_empty());
+
+        // Through every way one source's word goes over another's.
+        let fields = map(json!({"performer": "Jordan Sample"}));
+        let says = |refs: Vec<ProviderRef>| Found {
+            refs,
+            unresolved: BTreeSet::new(),
+        };
+        let over = |new: ProviderRef, had: ProviderRef, shared: bool| {
+            says(vec![new]).over(&[had], &fields, &fields, shared)
+        };
+        let (fl, ny) = (at("FL", "Exampleton"), at("NY", "Sampleburg"));
+        let bare = entry("performer", None, Some("FL"));
+        assert_eq!(over(ny.clone(), fl.clone(), false), [ny.clone()]);
+        assert_eq!(over(ny.clone(), fl.clone(), true), [fl.clone()]);
+        assert_eq!(over(ny.clone(), bare.clone(), true), [bare.clone()]);
+        assert_eq!(over(fl.clone(), bare.clone(), true), [fl.clone()]);
+        let npi = entry("performer", Some("0000000006"), None);
+        let both = says(vec![npi.clone()]).and(says(vec![fl.clone()]));
+        assert_eq!(
+            both.refs,
+            [ProviderRef {
+                npi: npi.npi,
+                ..fl.clone()
+            }]
+        );
+        assert_eq!(says(vec![bare.clone()]).and(says(vec![fl])).refs, [bare]);
     }
 
     #[test]

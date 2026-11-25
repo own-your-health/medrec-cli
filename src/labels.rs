@@ -26,7 +26,7 @@ use crate::events;
 use crate::model::{Document, Person, PersonIndex, PersonText, Record};
 use crate::nppes::{self, Provider, Stored};
 use crate::private;
-use crate::roles::{self, Service};
+use crate::roles::{self, Group, Service};
 
 pub const FILE: &str = "providers.json";
 pub const SCHEMA: &str = "medrec-providers/v1";
@@ -64,6 +64,9 @@ pub enum Evidence {
     Npi,
     /// The directory has one provider the printed name can be.
     OnlyMatch { state: String },
+    /// Of the several it can be, the directory has one of the first name
+    /// that `printed`, the text, spells out.
+    FirstName { state: String, printed: String },
     /// A paper of the same event prints the name with one practice.
     Paper { document: String },
     /// The household said so.
@@ -803,9 +806,9 @@ fn states(r: &Record, field: &str) -> BTreeSet<String> {
 
 /// The one provider of the directory a printed name can be: of the surname
 /// and first initial, in the record's state, and with a role that gives the
-/// service. A provider whose role medrec has no words for counts as one it
-/// can be, and is never the label. None when the kept file is not whole in
-/// the name or the state.
+/// service; of several, the one of the first name it spells out. A provider
+/// whose role medrec has no words for counts as one it can be, and is never
+/// the label. None when the kept file is not whole in the name or the state.
 fn only_match(d: &Directory, r: &Record, field: &str, text: &str) -> Option<Option<Label>> {
     let service = service(r, field);
     let about = &d.stored.about;
@@ -829,18 +832,154 @@ fn only_match(d: &Directory, r: &Record, field: &str, text: &str) -> Option<Opti
         .filter(|p| roles::of(&p.taxonomy).is_none_or(|x| service.fits(x.group)))
         .map(|p| (p.npi.as_str(), p))
         .collect();
-    let [p] = found.into_values().collect::<Vec<_>>()[..] else {
-        return Some(None);
+    let found: Vec<&Provider> = found.into_values().collect();
+    let state = |p: &Provider| p.state.clone();
+    let (p, why) = match found[..] {
+        [p] => (p, Evidence::OnlyMatch { state: state(p) }),
+        _ => match of_first_name(&found, r, field, text) {
+            Some(p) => {
+                let (state, printed) = (state(p), text.to_string());
+                (p, Evidence::FirstName { state, printed })
+            }
+            None => return Some(None),
+        },
     };
     if roles::of(&p.taxonomy).is_none() || !given_names_agree(p, text) {
         return Some(None);
     }
     Some(of_row(p, &about.date).map(|l| Label {
-        evidence: vec![Evidence::OnlyMatch {
-            state: p.state.clone(),
-        }],
+        evidence: vec![why],
         ..l
     }))
+}
+
+/// Of the several providers a printed name can be, the one whose first name
+/// it spells out: where every other has a first name it is not, and nothing
+/// else the record says is against the one. An initial, a nickname and
+/// another spelling leave them as they are.
+fn of_first_name<'a>(
+    found: &[&'a Provider],
+    r: &Record,
+    field: &str,
+    text: &str,
+) -> Option<&'a Provider> {
+    let readings = nppes::readings(text);
+    let like = |a: &str, b: &str| a.starts_with(b) || b.starts_with(a);
+    // The given names as printed of each way to read it as the provider's,
+    // with the first name the directory has for that surname.
+    let of = |p: &Provider| -> Vec<(String, &Vec<String>)> {
+        [(&p.last, &p.first), (&p.other_last, &p.other_first)]
+            .into_iter()
+            .flat_map(|(last, first)| {
+                let key = nppes::person(last, first);
+                let of_key = readings
+                    .iter()
+                    .filter(move |(l, g)| key.is_some() && nppes::person(l, &g[0]) == key);
+                of_key.map(|(_, given)| (nppes::fold(first), given))
+            })
+            .collect()
+    };
+    let can_be = |p: &Provider| {
+        of(p).iter().any(|(_, given)| {
+            given[0].len() == 1
+                || [&p.first, &p.middle, &p.other_first]
+                    .into_iter()
+                    .flat_map(|s| s.split_whitespace())
+                    .map(nppes::fold)
+                    .any(|g| !g.is_empty() && like(&g, &given[0]))
+        })
+    };
+    let left: Vec<&Provider> = found.iter().copied().filter(|p| can_be(p)).collect();
+    let [p] = left[..] else { return None };
+    let is_it = of(p).iter().any(|(first, given)| {
+        let words = (1..=given.len()).find(|k| given[..*k].concat() == *first);
+        first.len() > 1
+            && given[0].len() > 1
+            && words.is_some_and(|k| middle_agrees(p, &given[k..]))
+    });
+    (is_it && degrees_agree(p, text) && city_agrees(p, r, field)).then_some(p)
+}
+
+/// Whether what a text prints after the first name can be the provider's
+/// middle names, where the directory has any.
+fn middle_agrees(p: &Provider, printed: &[String]) -> bool {
+    let middle: Vec<String> = [&p.middle, &p.first, &p.other_first]
+        .into_iter()
+        .flat_map(|s| s.split_whitespace())
+        .map(nppes::fold)
+        .filter(|s| !s.is_empty())
+        .collect();
+    p.middle.is_empty()
+        || printed.iter().all(|w| {
+            middle
+                .iter()
+                .any(|m| m.starts_with(w.as_str()) || w.starts_with(m.as_str()))
+        })
+}
+
+/// What kind of provider a degree is of, and the groups of roles it has.
+fn degree(word: &str) -> Option<(&'static str, &'static [Group])> {
+    use Group::*;
+    Some(match nppes::fold(word).as_str() {
+        "MD" | "MBBS" => ("MD", &[Doctor, Anesthesiologist, Eye]),
+        "DO" => ("DO", &[Doctor, Anesthesiologist, Eye]),
+        "DDS" | "DMD" => ("DDS", &[Dental]),
+        "OD" => ("OD", &[Eye]),
+        "DPM" => ("DPM", &[Foot]),
+        "DC" => ("DC", &[Chiropractic]),
+        "PA" | "PAC" => ("PA", &[Advanced]),
+        "APRN" | "ARNP" | "CNP" | "DNP" | "FNP" | "FNPBC" | "FNPC" | "NP" | "NPC" | "PNP"
+        | "WHNP" => ("NP", &[Advanced]),
+        "CNM" => ("CNM", &[Advanced]),
+        "CRNA" => ("CRNA", &[Anesthetist]),
+        "DPT" | "PT" => ("PT", &[Therapy]),
+        "PHARMD" | "RPH" => ("PHARMD", &[Pharmacist]),
+        "PSYD" => ("PSYD", &[Mind]),
+        "LCSW" => ("LCSW", &[Mind]),
+        "LMFT" => ("LMFT", &[Mind]),
+        "LMHC" | "LPC" => ("LMHC", &[Mind]),
+        _ => return None,
+    })
+}
+
+/// Whether a degree the text prints can be the provider's: one the directory
+/// gives them or, where it gives none, one their role has.
+fn degrees_agree(p: &Provider, text: &str) -> bool {
+    let of = |s: &str| -> Vec<(&'static str, &'static [Group])> {
+        s.split(|c: char| c.is_whitespace() || matches!(c, ',' | '/' | ';'))
+            .filter_map(degree)
+            .collect()
+    };
+    let (printed, own) = (of(text), of(&p.credential));
+    if printed.is_empty() {
+        return true;
+    }
+    if own.is_empty() {
+        let group = roles::of(&p.taxonomy).map(|r| r.group);
+        return printed
+            .iter()
+            .any(|(_, groups)| group.is_some_and(|g| groups.contains(&g)));
+    }
+    printed.iter().any(|(k, _)| own.iter().any(|(o, _)| o == k))
+}
+
+/// Whether the provider is in a city the record's source gives this field's
+/// provider, else any of its providers, where it and the directory give one.
+fn city_agrees(p: &Provider, r: &Record, field: &str) -> bool {
+    let cities = |own: bool| -> BTreeSet<String> {
+        r.providers
+            .iter()
+            .filter(|x| !own || x.field == field)
+            .filter_map(|x| Some(nppes::fold(x.city.as_deref()?)))
+            .filter(|c| !c.is_empty())
+            .collect()
+    };
+    let mut given = cities(true);
+    if given.is_empty() {
+        given = cities(false);
+    }
+    let city = nppes::fold(&p.city);
+    given.is_empty() || city.is_empty() || given.contains(&city)
 }
 
 /// Whether a match an earlier pass made still stands for the record: its
@@ -848,7 +987,9 @@ fn only_match(d: &Directory, r: &Record, field: &str, text: &str) -> Option<Opti
 fn still_matches(r: &Record, field: &str, l: &Label) -> bool {
     let states = states(r, field);
     let in_state = l.evidence.iter().any(|e| match e {
-        Evidence::OnlyMatch { state } => states.is_empty() || states.contains(state),
+        Evidence::OnlyMatch { state } | Evidence::FirstName { state, .. } => {
+            states.is_empty() || states.contains(state)
+        }
         _ => false,
     });
     in_state
@@ -3115,5 +3256,223 @@ mod tests {
         for text in ["Jamie Sample", "SAMPLE, JAMIE", "J PLACEHOLDER SAMPLE"] {
             assert!(!given_names_agree(&p, text), "{text}");
         }
+    }
+
+    /// The directory's lines of these providers, in Florida unless they say.
+    fn lines(rows: &[Value]) -> String {
+        rows.iter()
+            .enumerate()
+            .map(|(i, row)| {
+                let mut row = row.clone();
+                row["npi"] = json!(format!("00000002{i:02}"));
+                let mut p: Provider = serde_json::from_value(row).unwrap();
+                if p.state.is_empty() {
+                    p.state = "FL".into();
+                }
+                serde_json::to_string(&p).unwrap() + "\n"
+            })
+            .collect()
+    }
+
+    const NAMED: &str = "r_firstnameaaaaaaaaaaa";
+
+    /// A claim printing `text`, with no NPI.
+    fn naming(text: &str, of: impl Fn(&mut Record)) -> Case {
+        let mut c = Case::new();
+        c.add(NAMED, text, "");
+        let r = c.index.records.last_mut().unwrap();
+        r.providers[0].npi = None;
+        of(r);
+        c
+    }
+
+    /// Its label, of these directory rows.
+    fn named(text: &str, rows: &[Value], of: impl Fn(&mut Record)) -> Value {
+        let c = naming(text, of);
+        c.keep(&Wanted::of([&c.index]), &lines(rows));
+        c.sync(true);
+        let v = c.labels();
+        match v["claims"][NAMED].as_str() {
+            Some(id) => v["labels"][id].clone(),
+            None => Value::Null,
+        }
+    }
+
+    /// Two family doctors of one surname and first initial.
+    fn two() -> Vec<Value> {
+        vec![
+            json!({"last": "PLACEHOLDER", "first": "MORGAN", "middle": "TAYLOR", "credential": "MD",
+                "city": "EXAMPLETON", "taxonomy": "207Q00000X"}),
+            json!({"last": "PLACEHOLDER", "first": "MICAH", "credential": "MD",
+                "city": "EXAMPLETON", "taxonomy": "207Q00000X"}),
+        ]
+    }
+
+    /// The contract's `first_name`: it narrows several, and stays likely.
+    #[test]
+    fn a_spelled_out_first_name_is_the_one_it_is_of() {
+        for text in [
+            "Morgan Placeholder, MD",
+            "PLACEHOLDER, MORGAN MD",
+            "Morgan T. Placeholder, M.D.",
+            "MORGAN TAYLOR PLACEHOLDER MD",
+            "Dr. Morgan Placeholder MD",
+        ] {
+            let l = named(text, &two(), |_| ());
+            assert_eq!(l["name"], "Morgan Placeholder, MD", "{text}");
+            assert_eq!(l["confidence"], "likely", "{text}");
+            assert_eq!(
+                l["evidence"],
+                json!([{"from": "first_name", "state": "FL", "printed": text}]),
+            );
+        }
+        // A whole first name of two words is spelled out by both.
+        let mut rows = two();
+        rows[0]["first"] = json!("MORGAN LEE");
+        rows[0]["middle"] = json!("");
+        let l = named("Morgan Lee Placeholder, MD", &rows, |_| ());
+        assert_eq!(l["name"], "Morgan Lee Placeholder, MD");
+        assert!(named("Morgan Placeholder, MD", &rows, |_| ()).is_null());
+    }
+
+    /// The surname matches first: another's first name finds no one.
+    #[test]
+    fn a_first_name_alone_is_no_match() {
+        assert!(named("Morgan Template, MD", &two(), |_| ()).is_null());
+        // Read surname first, the name can be another's.
+        let mut rows = two();
+        rows.push(json!({"last": "MORGAN", "first": "PLACEHOLDER", "taxonomy": "207Q00000X"}));
+        assert!(named("Morgan Placeholder MD", &rows, |_| ()).is_null());
+        assert!(!named("Placeholder, Morgan MD", &rows, |_| ()).is_null());
+    }
+
+    /// Exactly one is left.
+    #[test]
+    fn a_first_name_two_have_narrows_nothing() {
+        let mut rows = two();
+        rows.push(rows[0].clone());
+        assert!(named("Morgan Placeholder, MD", &rows, |_| ()).is_null());
+        // Nor one another may have: an initial, a shorter form, a middle name
+        // or another name of theirs, or a provider of a role with no words.
+        for other in [
+            json!({"first": "M"}),
+            json!({"first": "MORG"}),
+            json!({"first": "MICAH", "middle": "MORGAN"}),
+            json!({"first": "MICAH", "other_first": "MORGAN", "other_last": "FILLER"}),
+            json!({"first": "MORGAN", "taxonomy": "000000000X"}),
+        ] {
+            let mut rows = two();
+            for (k, v) in other.as_object().unwrap() {
+                rows[1][k] = v.clone();
+            }
+            assert!(
+                named("Morgan Placeholder, MD", &rows, |_| ()).is_null(),
+                "{other}"
+            );
+        }
+    }
+
+    /// Nothing else is against the one.
+    #[test]
+    fn a_first_name_something_else_is_against_narrows_nothing() {
+        let is = |of: &dyn Fn(&mut Record)| named("Morgan Placeholder, MD", &two(), of);
+        // Its state and its service.
+        assert!(is(&|r| r.providers[0].state = Some("GA".into())).is_null());
+        assert!(is(&|r| r.fields["category"] = json!("dental")).is_null());
+        // Its city, the field's own before another provider's.
+        let city = |c: &str| Some(c.to_string());
+        assert!(!is(&|r| r.providers[0].city = city("Exampleton")).is_null());
+        assert!(is(&|r| r.providers[0].city = city("Sampleburg")).is_null());
+        let facility = |own: Option<String>| {
+            move |r: &mut Record| {
+                r.fields.insert("facility".into(), json!("Example Place"));
+                let mut p = r.providers[0].clone();
+                p.field = "facility".into();
+                p.city = Some("Sampleburg".into());
+                r.providers.push(p);
+                r.providers[0].city = own.clone();
+            }
+        };
+        assert!(is(&facility(None)).is_null());
+        assert!(!is(&facility(city("EXAMPLETON"))).is_null());
+        // A middle name, an initial of one, and a degree.
+        for text in [
+            "Morgan Avery Placeholder, MD",
+            "Morgan A. Placeholder, MD",
+            "Morgan Placeholder, DDS",
+            "Morgan Placeholder, NP",
+        ] {
+            assert!(named(text, &two(), |_| ()).is_null(), "{text}");
+        }
+        // Where the directory gives no degree, the role's.
+        let mut rows = two();
+        rows[0]["credential"] = json!("");
+        assert!(!named("Morgan Placeholder, DO", &rows, |_| ()).is_null());
+        assert!(named("Morgan Placeholder, DDS", &rows, |_| ()).is_null());
+    }
+
+    #[test]
+    fn an_initial_a_nickname_or_another_spelling_narrows_nothing() {
+        for text in [
+            "M PLACEHOLDER",
+            "M. Placeholder, MD",
+            "M Morgan Placeholder, MD",
+            "Morg Placeholder, MD",
+            "Mo Placeholder, MD",
+            "Morgane Placeholder, MD",
+            "Morgen Placeholder, MD",
+        ] {
+            assert!(named(text, &two(), |_| ()).is_null(), "{text}");
+        }
+    }
+
+    /// It names the provider on the page and decides nothing.
+    #[test]
+    fn a_first_names_match_makes_nothing_private_and_can_be_undone() {
+        let mut c = naming("Morgan Placeholder, MD", |_| ());
+        // The one it is of is a psychiatrist: its role is of a private area.
+        let mut rows = two();
+        rows[0]["taxonomy"] = json!("2084P0800X");
+        c.keep(&Wanted::of([&c.index]), &lines(&rows));
+        c.sync(true);
+        assert!(!c.private(NAMED));
+        // Nor is an open item shown it.
+        assert!(c.labels()["claims"].get(NAMED).is_none());
+        assert!(!c.labels()["labels"].to_string().contains("Morgan"));
+        // On a private item it is the person's to see.
+        c.mark(NAMED, Some(true));
+        c.sync(true);
+        let v = c.labels();
+        let id = v["private"]["claims"][NAMED].as_str().unwrap();
+        assert_eq!(v["private"]["labels"][id]["name"], "Morgan Placeholder, MD");
+        assert_eq!(v["private"]["labels"][id]["confidence"], "likely");
+        c.mark(NAMED, None);
+
+        // The household can accept it, as its own word, or say it is wrong.
+        c.keep(&Wanted::of([&c.index]), &lines(&two()));
+        let say = |c: &mut Case, what: Value| {
+            let mut x = json!({"id": "o_saidzaaaaaaaaaaaaaaa", "printed": ["Morgan Placeholder, MD"],
+                "at": "2026-02-04T00:00:00Z"});
+            x.as_object_mut()
+                .unwrap()
+                .extend(what.as_object().unwrap().clone());
+            c.marks["providers"] = json!([x]);
+            c.sync(true);
+            let v = c.labels();
+            let id = v["claims"][NAMED].as_str().map(str::to_string);
+            id.map(|id| v["labels"][id]["confidence"].clone())
+        };
+        c.sync(true);
+        assert_eq!(
+            say(&mut c, json!({"set": {"name": "Dr. Placeholder"}})),
+            Some(json!("household"))
+        );
+        assert_eq!(say(&mut c, json!({"wrong": true})), None);
+        // Without the directory, what it gave stays.
+        c.marks["providers"] = json!([]);
+        c.sync(false);
+        let v = c.labels();
+        let id = v["claims"][NAMED].as_str().unwrap();
+        assert_eq!(v["labels"][id]["evidence"][0]["from"], "first_name");
     }
 }

@@ -237,6 +237,7 @@ impl Labels {
             .flatten()
             .filter_map(|e| match e["from"].as_str()? {
                 "only_match" => from(e, &["state"]),
+                "first_name" => from(e, &["state", "printed"]),
                 "paper" => from(e, &["document"]),
                 "household" => from(e, &["id", "by", "at"]),
                 // One a later medrec knows has no words here.
