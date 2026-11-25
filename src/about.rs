@@ -13,6 +13,7 @@ use serde_json::Value;
 use crate::given;
 use crate::import;
 use crate::model::{Document, Person, PersonIndex, Record};
+use crate::panels;
 use crate::questionnaires::{self, Answers};
 use crate::standing;
 
@@ -123,6 +124,20 @@ pub fn ids(p: &Person, idx: &PersonIndex) -> BTreeSet<String> {
             out.insert(r.id.clone());
         }
     }
+    // So is a panel or a report all of whose results are.
+    loop {
+        let all = |r: &&Record| {
+            let of = panels::members(r);
+            !of.is_empty() && !out.contains(&r.id) && of.iter().all(|id| out.contains(*id))
+        };
+        let more: Vec<String> = (idx.records.iter().filter(all))
+            .map(|r| r.id.clone())
+            .collect();
+        if more.is_empty() {
+            break;
+        }
+        out.extend(more);
+    }
     for d in &idx.documents {
         let links = |r: &&Record| r.documents.contains(&d.id);
         let mut by = idx.records.iter().filter(links).peekable();
@@ -162,8 +177,9 @@ pub fn counted(p: &Person, idx: &PersonIndex) -> Counted {
 }
 
 /// What is said of a record opened by its id, where it is about somebody else.
-pub fn of_record(p: &Person, r: &Record) -> Option<String> {
-    record(p, r).map(|who| says(p, who))
+pub fn of_record(p: &Person, idx: &PersonIndex, r: &Record) -> Option<String> {
+    let who = || ids(p, idx).contains(&r.id).then_some(ANOTHER);
+    record(p, r).or_else(who).map(|who| says(p, who))
 }
 
 /// The same of a paper.

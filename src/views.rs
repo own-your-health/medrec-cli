@@ -286,9 +286,10 @@ pub(crate) fn record_detail(r: &Record) -> Option<String> {
         "result" => {
             let v = f.get("value").map(value_text).filter(|s| !s.is_empty());
             let flag = text("interpretation");
+            let heads = crate::panels::heads(r).then(|| crate::panels::HEADING.to_string());
             match (v, flag) {
                 (Some(v), Some(i)) => Some(format!("{v} ({i})")),
-                (v, i) => v.or(i),
+                (v, i) => v.or(i).or(heads),
             }
         }
         "medication" if text("source").as_deref() == Some("dispense") => {
@@ -1155,7 +1156,7 @@ pub fn record(
         let idx = folder.whole_index(p)?;
         if let Some(r) = idx.records.iter().find(|r| r.id == id) {
             let one = row(Sources::of(&h.sources, &idx), p, r.clone());
-            return Ok((one, about::of_record(p, r)));
+            return Ok((one, about::of_record(p, &idx, r)));
         }
     }
     Err(CliError::NotFound(format!("no record `{id}`")))

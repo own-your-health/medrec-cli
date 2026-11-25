@@ -352,6 +352,98 @@
    ]
   },
   {
+   "id": "r_inneraaaaaaaaaaaaaaa",
+   "kind": "result",
+   "key": "result|inner|2024-07-01",
+   "date": "2024-07-01",
+   "display": "Second answer",
+   "status": "final",
+   "fields": {
+    "value": "1",
+    "category": "Survey"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-07-02T10:00:00Z",
+     "filed_at": "2024-07-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/Observation/inner.json"
+    }
+   ],
+   "listed_by": [
+    {
+     "display": "PHQ-9 panel"
+    }
+   ]
+  },
+  {
+   "id": "r_pairaaaaaaaaaaaaaaaa",
+   "kind": "result",
+   "key": "result|pair|2024-07-01",
+   "date": "2024-07-01",
+   "display": "Example pair",
+   "status": "final",
+   "fields": {
+    "category": "Survey",
+    "members": [
+     "r_inneraaaaaaaaaaaaaaa",
+     "r_drinksaaaaaaaaaaaaaa"
+    ]
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-07-02T10:00:00Z",
+     "filed_at": "2024-07-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/Observation/pair.json"
+    }
+   ]
+  },
+  {
+   "id": "r_mixpanelaaaaaaaaaaaa",
+   "kind": "result",
+   "key": "result|mixpanel|2024-07-02",
+   "date": "2024-07-02",
+   "display": "Example mixed panel",
+   "status": "final",
+   "fields": {
+    "category": "Survey",
+    "members": [
+     "r_sunlightaaaaaaaaaaaa",
+     "r_drugsaaaaaaaaaaaaaaa"
+    ]
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-07-02T10:00:00Z",
+     "filed_at": "2024-07-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/Observation/mixpanel.json"
+    }
+   ]
+  },
+  {
    "id": "r_leavesaaaaaaaaaaaaaa",
    "kind": "condition",
    "key": "condition|leaves|2024-05-28",

@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Writes index.json: an invented person's results, one for each kind of
 questionnaire of "Private" in docs/data-contract.md and one that is none, a
-reading that only the code of one of its parts says is of one,
+reading that only the code of one of its parts says is of one, an answer that
+only the panel that lists it says is of one, panels of private results and of
+private and other ones,
 conditions with a code for tobacco use and one without, a report of one with its
 paper, a paper named as one, a visit and claims of some
 of those days, and two pharmacy claims. The sources are those of
@@ -152,6 +154,28 @@ with open(os.path.join(HERE, "index.json"), "w") as f:
                         part("Second piece", "44261-6", 2),
                     ],
                     category="Survey",
+                ),
+                {
+                    **record(
+                        "result", "inner", "2024-07-01", "Second answer", value="1", category="Survey"
+                    ),
+                    "listed_by": [{"display": "PHQ-9 panel"}],
+                },
+                record(
+                    "result",
+                    "pair",
+                    "2024-07-01",
+                    "Example pair",
+                    category="Survey",
+                    members=[oid("r_", "inner"), oid("r_", "drinks")],
+                ),
+                record(
+                    "result",
+                    "mixpanel",
+                    "2024-07-02",
+                    "Example mixed panel",
+                    category="Survey",
+                    members=[oid("r_", "sunlight"), oid("r_", "drugs")],
                 ),
                 condition("leaves", "2024-05-28", "Z72.0"),
                 condition("formerly", "2024-05-29", "Z87.891"),

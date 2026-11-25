@@ -1388,8 +1388,9 @@ fn a_test_its_source_says_is_of_another_person_is_in_no_list() {
         let note = format!("about {says}, in Robin Testperson's chart");
         let of = |e: &Env| e.ok(&["records", "show", &id])["notes"].clone();
         assert_eq!(of(&e), json!([note]));
+        // It, and the report that lists it alone.
         let list = e.ok(&["records", "about-another"]);
-        assert_eq!(list["items"].as_array().unwrap().len(), 1, "{list}");
+        assert_eq!(list["items"].as_array().unwrap().len(), 2, "{list}");
         // Again; by another source with nothing of it; and by the first.
         let kept = e.index().records.len();
         e.import(&test_about("one", Some(focus), 1));
@@ -1500,6 +1501,7 @@ fn a_test_an_unfinished_import_says_is_of_another_is_none_of_the_persons() {
             let listed = e.ok(&["results", "--person", "Robin"]).to_string();
             assert!(listed.contains(&own[0].id), "{own_first}, {how}");
             assert!(!listed.contains(&theirs[0].id), "{own_first}, {how}");
+            // The report of it is the person's other test's too.
             let list = e.ok(&["records", "about-another"]);
             assert_eq!(list["items"].as_array().unwrap().len(), 1, "{how}");
             e.ok(&["reindex"]);
@@ -1583,7 +1585,8 @@ fn a_test_two_sources_say_is_of_another_person_stays_so() {
         for org in ["one", "two"] {
             e.import(&test_about(org, Some(parent.clone()), 1));
         }
-        assert_eq!(count(&e), 1);
+        // It, and the report that lists it alone.
+        assert_eq!(count(&e), 2);
         for org in [first, second] {
             e.import(&test_about(org, None, 2));
             assert!(!seen(&e), "{first} {org}");

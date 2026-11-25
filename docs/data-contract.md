@@ -206,7 +206,8 @@ only a display.
 fact from two sources is one record; a fill and a claim are keyed by their
 identity instead, below), `date`, `code` (`{system, code,
 display}`), `display`, `status`, `fields` (kind-specific, with FHIR element
-names), `providers`, `words`, `errors` and `fields_from` (below), `documents`
+names), `providers`, `words`, `errors`, `fields_from`, `lists` and `listed_by`
+(below), `documents`
 (linked document ids) and `provenance` (one per source).
 
 **Fields by kind.** Every name a record's `fields` can hold. A field is
@@ -230,6 +231,7 @@ The last column is the FHIR element the value comes from.
 | `result` | `category` | text | first `category` |
 | `result` | `categories` | a list of codes, below (0.9.10 and later) | each `category` |
 | `result` | `issued` | as written | `issued` |
+| `result` | `members` | a list of record ids (0.9.10 and later) | `hasMember`: Panels, below |
 | `result` | `about` | `a parent` or `another person` (0.9.9 and later) | `focus`: About another person, below |
 | `report` | `when` | as written | `effectiveDateTime`, `effectivePeriod.start` or `issued` |
 | `report` | `conclusion` | text | `conclusion` |
@@ -237,6 +239,7 @@ The last column is the FHIR element the value comes from.
 | `report` | `categories` | a list of codes, below (0.9.10 and later) | each `category` |
 | `report` | `results` | the number of results it lists | `result` |
 | `report` | `issued` | as written | `issued` |
+| `report` | `members` | a list of record ids (0.9.10 and later) | `result`: Panels, below |
 | `condition` | `when` | as written | `onsetDateTime`, `onsetPeriod.start`, `recordedDate` or `assertedDate` |
 | `condition` | `onset` | text, below | `onset[x]` |
 | `condition` | `recorded` | as written | `recordedDate` or `assertedDate` |
@@ -349,6 +352,27 @@ gives another `key`, writes nothing.
 An import by a medrec before 0.9.10 drops `components` and `categories` again: a
 reading that is private by its parts alone is then open until the next
 `medrec reindex`, so run 0.9.10 or later on every machine that writes the folder.
+
+**Panels** (0.9.10 and later). `members` of a report, and of a result that is a
+panel, is the ids of the results it lists, in its order: those its own resource
+refers to (a report's `result`, an Observation's `hasMember`, or before R4 its
+`related` of type `has-member`) on its own source's server. Of several sources'
+one record it is what each of them lists, that of its values first. Nothing is a
+member by its date or its name. The ids are made again on every write of the
+index, from `lists` of the record (by its raw file, the raw files that one refers
+to, under its source), so a result that comes later is a member then. An id of
+what is entered in error, or about somebody else, is not shown, and `members` is
+absent where none is left.
+
+A result with `members` and no value is a heading: no latest result and no test
+(`latest_results`, `kind: "tests"`), and where a list has it its `detail` is
+`panel`. `results` of a report stays the number of results it refers to, filed or
+not.
+
+A result that a questionnaire lists (a panel or a report, Questionnaires below) is
+of that questionnaire, as its other answers are, whatever it is named. `listed_by`
+of its record (`{display, code}`) keeps each, and one is never taken away, so
+nothing opens because a source lists it no more.
 
 **Words.** A condition's, an allergy's and a medicine's `words` (0.9.9 and
 later) is what each of its sources says of it that can differ between them.
@@ -511,6 +535,8 @@ are:
   birthday, or undated and first fetched before it. Not a laboratory's, whose
   `category` starts with `lab`, and none where the person's birth date is not
   known.
+- a panel or a report (0.9.10 and later) whose `members` (Panels, below) are all
+  about somebody else.
 - a document with the title of one, dated so, every provenance of which names a
   source's `cli`; and one that only such records list in their `documents`, no
   provenance of which is the household's own.
@@ -2386,7 +2412,7 @@ nothing is private.
   | `provider` | was made by a practice or clinician whose name or credential says its area: a claim's provider or facility, a visit's place, location or clinician, a medicine's prescriber, a result's performer, a document's organization; or is a record that prints a provider with a sure label (Provider labels, above) whose name, practice or role does, or a record, document or event that prints one the household calls so (0.9.7 and later) |
   | `medicine` | is a medicine of an area by its name or code, or (0.9.9 and later) a pharmacy claim its `display` names as one: antidepressants, antipsychotics, anxiolytics, stimulants and lithium; fertility drugs and contraceptives; HIV medicines and those for erectile dysfunction; medicines for substance use and smoking |
   | `test` | is a result or report of a test of an area: sexually transmitted infections, pregnancy and fertility, drug screens; or (0.9.9 and later) of a questionnaire of one, or of tobacco use (Questionnaires, below); by its own name and code or those of any of its parts, or by a text that is the value of a part (0.9.10 and later) |
-  | `members` | is an event with a private claim or portal visit, or whose own members are all private |
+  | `members` | is an event with a private claim or portal visit, or whose own members are all private, or (0.9.10 and later) a panel or a report whose `members` (Panels, above) are all private, with those entered in error or without them |
   | `event` | is a member of a private event |
   | `words` | is a bill or receipt whose first page that has any text says an area, by a service, a medicine or a test, or any document whose title does (0.9.6 and later), or whose title is a questionnaire's, or with an `original_name` that says either (0.9.9 and later; `_`, `.` and `-` read as spaces) |
   | `record` | is a document that a private record links (`documents` in `records`), whatever else links it (0.9.5 and later) |

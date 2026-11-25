@@ -23,6 +23,7 @@ use crate::given;
 use crate::marks::{failed, Failed, Marks, LABELS, READ, READ_DECISIONS, RECORDS, WRITE};
 use crate::model::{Document, Household, Person, PersonIndex, PersonText, Record};
 use crate::normalize::COMPONENTS;
+use crate::panels;
 use crate::parts::{self, Parts};
 use crate::questionnaires;
 use crate::services;
@@ -369,10 +370,8 @@ fn record_why(r: &Record) -> Option<Why> {
         // A reading is, by any of its parts.
         "result" | "report" => questionnaires::told_by(r)
             .iter()
-            .find_map(|(name, code)| {
-                first_area(&TESTS, name)
-                    .or_else(|| questionnaires::of(name, code.as_ref()).map(|q| q.area))
-            })
+            .find_map(|(name, _)| first_area(&TESTS, name))
+            .or_else(|| questionnaires::asked_by(r).first().map(|q| q.area))
             .or_else(|| parts_say(r).find_map(words))
             .map(|area| Why::of(area, "test"))
             .or_else(|| by_names(&["performer"])),
@@ -674,6 +673,30 @@ fn follow(
     for r in &idx.records {
         apply(items, &r.id, mark_of.get(r.id.as_str()).copied());
     }
+    // A panel or a report all of whose results are private, with those entered
+    // in error or without them.
+    let panels: Vec<(&str, Vec<&str>, Vec<&str>)> = {
+        let mut error = idx.records.iter().filter(|r| standing::record_in_error(r));
+        let error: BTreeSet<&str> = error.by_ref().map(|r| r.id.as_str()).collect();
+        let each = idx.records.iter().map(|r| (r, panels::members(r)));
+        each.filter(|(r, of)| !of.is_empty() && mark_of.get(r.id.as_str()) != Some(&false))
+            .map(|(r, of)| {
+                let now = of.iter().copied().filter(|id| !error.contains(id));
+                (r.id.as_str(), of.clone(), now.collect())
+            })
+            .collect()
+    };
+    let panel = |items: &mut BTreeMap<String, Why>| {
+        for (id, all, now) in &panels {
+            let private =
+                |of: &&Vec<&str>| !of.is_empty() && of.iter().all(|id| items.contains_key(*id));
+            let first = [all, now].into_iter().find(private).map(|of| items[of[0]]);
+            if let Some(w) = first.filter(|_| !items.contains_key(*id)) {
+                items.insert(id.to_string(), Why::of(w.area, "members"));
+            }
+        }
+    };
+    panel(items);
     link(items);
     for d in &idx.documents {
         apply(items, &d.id, mark_of.get(d.id.as_str()).copied());
@@ -734,6 +757,7 @@ fn follow(
                 }
             }
         }
+        panel(items);
         link(items);
         tie(items);
         if items.len() == before {

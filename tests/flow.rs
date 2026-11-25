@@ -3024,8 +3024,9 @@ fn a_record_keeps_what_each_source_says_of_its_status() {
     assert_eq!(read()["records"], full["records"]);
 }
 
-/// A result is imported with its parts, its exact value and its categories,
-/// and `reindex` gives them to results and reports that lack them.
+/// A result is imported with its parts, its exact value, its categories and
+/// the results it lists, and `reindex` gives them to results and reports that
+/// lack them.
 #[test]
 fn a_results_parts_and_categories_come_with_an_import_and_by_reindex() {
     const READINGS: &str = include_str!("fixtures/fhir/readings.json");
@@ -3037,9 +3038,18 @@ fn a_results_parts_and_categories_come_with_an_import_and_by_reindex() {
     for (i, r) in resources.iter_mut().enumerate() {
         r["effectiveDateTime"] = format!("2024-04-{:02}T09:30:00Z", i + 1).into();
     }
+    let refs = |ids: [&str; 2]| {
+        ids.map(|id| serde_json::json!({"reference": format!("Observation/{id}")}))
+    };
+    resources.push(serde_json::json!({
+        "resourceType": "Observation", "id": "panel-1", "status": "final",
+        "code": {"text": "Example heading"}, "effectiveDateTime": "2024-04-21T09:30:00Z",
+        "hasMember": refs(["lt-1", "range-1"]),
+    }));
     resources.push(serde_json::json!({
         "resourceType": "DiagnosticReport", "id": "report-1", "status": "final",
         "code": {"text": "Example panel"}, "effectiveDateTime": "2024-04-30T09:30:00Z",
+        "result": refs(["sum-1", "not-filed"]),
         "category": [{"coding": [
             {"system": "http://terminology.hl7.org/CodeSystem/v2-0074", "code": "LAB"}]}],
     }));
@@ -3094,6 +3104,21 @@ fn a_results_parts_and_categories_come_with_an_import_and_by_reindex() {
     for text in ["128/76", "<0.5", "1:40"] {
         assert!(shown.contains(text), "{text}: {shown}");
     }
+    let id_of = |id: &str| -> Value {
+        let mut all = whole["records"].as_array().unwrap().iter();
+        let its = |r: &&Value| r["provenance"][0]["source_resource"]["id"] == id;
+        all.find(its).unwrap()["id"].clone()
+    };
+    let heading = of_day(&whole, "2024-04-21");
+    let want = serde_json::json!([id_of("lt-1"), id_of("range-1")]);
+    assert_eq!(heading["members"], want);
+    let report = of_day(&whole, "2024-04-30");
+    assert_eq!(report["members"], serde_json::json!([id_of("sum-1")]));
+    assert_eq!(report["results"], 2);
+    let rows = base.ok(&["results", "--person", "Robin"]);
+    let mut rows = rows["items"].as_array().unwrap().iter();
+    let row = rows.find(|r| r["display"] == "Example heading").unwrap();
+    assert_eq!(row["detail"], "panel", "{row}");
     // A part with no value is in what the source gave, and nowhere else.
     const ABSENT: &str = "Sample wristband reading";
     let lists = |of: &Value| -> Vec<Value> {
@@ -3151,11 +3176,13 @@ fn a_results_parts_and_categories_come_with_an_import_and_by_reindex() {
     let given = less.map(without).filter(|had| *had).count();
     assert_eq!(given, 1);
     for r in old["records"].as_array_mut().unwrap() {
+        let listing = r.as_object_mut().unwrap().remove("lists").is_some();
         let fields = r["fields"].as_object_mut().unwrap();
+        fields.remove("members");
         let parts = fields.remove("components").is_some();
         let had = fields.len();
         fields.retain(|k, v| k != "categories" && !(k == "value" && parts && v.is_string()));
-        lacking += usize::from(parts || fields.len() < had);
+        lacking += usize::from(listing || parts || fields.len() < had);
     }
     std::fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
     let r = base.ok(&["reindex", "--dry-run"]);

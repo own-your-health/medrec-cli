@@ -45,11 +45,12 @@ use crate::hash;
 use crate::ids;
 use crate::intake::{self, classify, filetype, text};
 use crate::model::{
-    filed_by, now_rfc3339, Document, Household, Identifier, ImportRun, InError, Organization,
-    Origin, Person, PersonIndex, PersonText, Provenance, ProvenanceSource, ProviderRef, Record,
-    Rendering, Source, SourceResource, Word,
+    filed_by, now_rfc3339, Document, Household, Identifier, ImportRun, InError, Listed,
+    Organization, Origin, Person, PersonIndex, PersonText, Provenance, ProvenanceSource,
+    ProviderRef, Record, Rendering, Source, SourceResource, Word,
 };
 use crate::normalize;
+use crate::panels;
 use crate::people;
 use crate::proc::{which, Bounded};
 use crate::providers::Found;
@@ -1731,12 +1732,15 @@ fn merge(
     }
     let mut came = Came::of(index, &rec, &found, word.as_ref());
     came.about = who;
+    let lists = std::mem::take(&mut rec.lists);
+    let path = rec.provenance[0].raw_path.clone();
     let merged = merge_fields(index, rec, word.as_ref(), found, filing, idless);
     let mut changed = came.keep(index);
     if matches!(merged, Merge::Older) {
         return merged;
     }
     changed |= word.is_some_and(|w| said(index, &w));
+    changed |= path.is_some_and(|path| panels::said(&mut index.records, &path, lists));
     match merged {
         Merge::Unchanged if changed => Merge::Updated,
         m => m,
@@ -1824,9 +1828,11 @@ impl Came {
                 ..Given::default()
             }
         }));
+        let mut listed: Vec<Listed> = Vec::new();
         for (i, was, had) in self.was {
             let r = &mut index.records[i];
             if had && i != now {
+                listed.extend(r.listed_by.iter().cloned());
                 let shown = was.clone().unwrap_or_else(|| showed(r));
                 let all = r.given.iter().cloned().chain([shown]);
                 moved.extend(all.map(|mut g| {
@@ -1851,6 +1857,7 @@ impl Came {
             }
         }
         let r = &mut index.records[now];
+        changed |= panels::keep(r, listed);
         for g in moved {
             changed |= given::keep(r, g);
         }
@@ -2586,13 +2593,13 @@ fn replace(existing: &mut Record, i: usize, incoming: Provenance) {
 }
 
 /// Whether two records say the same thing.
-/// A claim's links (`claims::link`) follow from other records and are left
-/// out.
+/// A claim's links (`claims::link`) and a panel's (`panels::link`) follow from
+/// other records and are left out.
 fn same_content(a: &Record, b: &Record) -> bool {
     let fields = if a.kind == "claim" {
         crate::claims::without_links(&a.fields) == crate::claims::without_links(&b.fields)
     } else {
-        a.fields == b.fields
+        panels::without_links(&a.fields) == panels::without_links(&b.fields)
     };
     a.key == b.key
         && fields

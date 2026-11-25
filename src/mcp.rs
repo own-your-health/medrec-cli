@@ -21,6 +21,7 @@ use crate::config::Config;
 use crate::folder::{Access, Folder};
 use crate::intake::classify;
 use crate::model::{today, Household, Record};
+use crate::panels;
 use crate::parts::Parts;
 use crate::people;
 use crate::provider_labels::{Asked, Labels, Printed};
@@ -1922,7 +1923,7 @@ fn record_item(from: Sources, person: &str, r: Record, detailed: bool) -> Item {
             item.range = row.range;
             item.flag = row.flag;
             // The value is in its own fields.
-            item.detail = None;
+            item.detail = item.detail.filter(|d| d == panels::HEADING);
         }
         "claim" => {
             if let Some(owes) = member_owes(&r.fields) {
