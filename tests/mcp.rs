@@ -1265,6 +1265,108 @@ fn a_printed_provider_has_its_label_beside_it() {
     let _ = std::fs::remove_dir_all(&e.root);
 }
 
+/// An event that fits a page only without its labels is still answered, with
+/// those that fit, and says so.
+#[test]
+fn a_label_yields_to_a_record_it_does_not_fit_beside() {
+    let e = Env::new("labelsyield");
+    household(&e);
+    let h: Value =
+        serde_json::from_slice(&std::fs::read(e.records().join("household.json")).unwrap())
+            .unwrap();
+    let alex = h["people"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["name"] == "Alex Testperson")
+        .unwrap()
+        .clone();
+    let folder = e.records().join(alex["folder"].as_str().unwrap());
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/labels");
+    let sample = "r_samplevisitaaaaaaaaa";
+    let t = e.tools();
+    // Visits of one day with one clinician, each printed its own way.
+    for (visits, all) in [(10, true), (120, false)] {
+        for name in ["index.json", "provider-state.json"] {
+            let mut v: Value =
+                serde_json::from_slice(&std::fs::read(fixtures.join(name)).unwrap()).unwrap();
+            v["person"] = alex["id"].clone();
+            if name == "index.json" {
+                let records = v["records"].as_array_mut().unwrap();
+                let claim = records.iter().find(|r| r["id"] == sample).unwrap().clone();
+                let mut facility = claim.clone();
+                facility["id"] = json!("r_facilityaaaaaaaaaaaa");
+                facility["key"] = json!("claim|facility");
+                facility["fields"]["type"] = json!("institutional");
+                facility["fields"]["provider"] = json!("EXAMPLE SURGERY CENTER");
+                facility["providers"] = json!([]);
+                records.push(facility);
+                for n in 0..visits {
+                    let mut c = claim.clone();
+                    let at = |n: u8| (b'a' + n) as char;
+                    let (a, b) = (at(n / 20), at(n % 20));
+                    c["id"] = json!(format!("r_many{a}{b}aaaaaaaaaaaaaa"));
+                    c["key"] = json!(format!("claim|many{n}"));
+                    c["fields"]["provider"] = json!(format!("J SAMPLE {a}{b}").to_uppercase());
+                    records.push(c);
+                }
+            }
+            std::fs::write(folder.join(name), serde_json::to_vec(&v).unwrap()).unwrap();
+        }
+        e.ok(&["views", "write"]);
+        let events = e.ok(&["events", "list", "--person", "Alex"]);
+        let one = events["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|x| x["members"].to_string().contains("r_manyaa"))
+            .unwrap();
+        let check = |v: &Value| {
+            let item = v["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|i| i["id"] == one["id"])
+                .unwrap_or_else(|| panic!("no {}", one["id"]));
+            let labels = item["provider_labels"].as_array().unwrap().len();
+            let names = one["clinicians"].as_array().unwrap().len();
+            assert!(names + 5 > usize::from(visits), "{names}");
+            assert_eq!(item["fields"]["members"], one["members"]);
+            let warned = v["warnings"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .any(|w| w["code"] == "provider-labels-left-out");
+            assert_eq!(warned, !all, "{}", v["warnings"]);
+            assert_eq!(labels >= names, all, "{labels} of {names}");
+            assert!(labels > 0);
+        };
+        let ask = |args: Value| {
+            let r = call(&t, RECORDS, args);
+            assert!(!r.is_error(), "{visits}: {}", r.text());
+            assert_fits(&t, RECORDS, &r).clone()
+        };
+        check(&ask(json!({"kind": "events", "id": one["id"]})));
+        // And a detailed list reads past it.
+        let mut args = json!({"kind": "events", "person": "Alex", "response_format": "detailed"});
+        let mut seen = 0;
+        loop {
+            let v = ask(args.clone());
+            let items = v["items"].as_array().unwrap();
+            seen += items.len();
+            if items.iter().any(|i| i["id"] == one["id"]) {
+                check(&v);
+            }
+            match v["next_cursor"].as_str() {
+                Some(c) => args["cursor"] = json!(c),
+                None => break,
+            }
+        }
+        assert_eq!(seen, events["items"].as_array().unwrap().len());
+    }
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
 #[test]
 fn a_condition_has_its_plain_name_from_the_folders_views() {
     let e = Env::new("codenames");

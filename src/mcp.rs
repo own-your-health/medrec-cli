@@ -7,6 +7,7 @@
 use std::time::Duration;
 
 use pk_cli_core::CliError;
+use pk_cli_mcp::shape::{ENVELOPE_RESERVE, SIZE_BUDGET};
 use pk_cli_mcp::{
     parse_args, ListArgs, Page, PageRequest, Server, ToolDef, ToolError, ToolOutput, Toolset,
 };
@@ -375,6 +376,9 @@ pub struct Item {
     /// Whose it is.
     #[serde(skip)]
     pub person_id: String,
+    /// Some of its `provider_labels` did not fit beside it.
+    #[serde(skip)]
+    pub labels_left_out: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -681,6 +685,7 @@ impl PrivateItems {
             let labels = Labels::read(f, h, p);
             for i in items.iter_mut().filter(theirs) {
                 i.provider_labels = self.labels(&labels, &i.id, &i.printed, whole);
+                i.fit_labels();
             }
         }
     }
@@ -716,6 +721,38 @@ impl PrivateItems {
             };
             page.warn(code, message);
         }
+    }
+}
+
+/// Characters of JSON one item of a page may have: the page's, less its
+/// brackets and the item's comma.
+const ITEM_ROOM: usize = SIZE_BUDGET - ENVELOPE_RESERVE - 3;
+
+impl Item {
+    /// A label yields to the record: an item that fits a page without its
+    /// labels is never too large for one with them. It keeps the first that
+    /// fit.
+    fn fit_labels(&mut self) {
+        let had = self.provider_labels.len();
+        let size = |i: &Item| serde_json::to_string(i).map_or(0, |j| j.chars().count());
+        while !self.provider_labels.is_empty() && size(self) > ITEM_ROOM {
+            self.provider_labels.pop();
+        }
+        self.labels_left_out = self.provider_labels.len() < had;
+    }
+}
+
+/// Says on a page how many of its items' labels did not fit.
+fn warn_labels(page: &mut Page<Item>) {
+    let n = page.items.iter().filter(|i| i.labels_left_out).count();
+    if n > 0 {
+        page.warn(
+            "provider-labels-left-out",
+            format!(
+                "{n} item{} on this page: some of the provider_labels did not fit and are left out, the rest of it is whole",
+                if n == 1 { "" } else { "s" },
+            ),
+        );
     }
 }
 
@@ -1108,6 +1145,7 @@ impl MedrecTools {
         });
         private.label(&f, &h, &selected, &page, &mut items, person.is_none());
         let mut out = page.page(items, "person, since/until, active or name")?;
+        warn_labels(&mut out);
         // Only for the people on the page, and after the private items are
         // out: what is kept is decided from the source's own words.
         if a.kind == Kind::Conditions {
@@ -1195,6 +1233,7 @@ impl MedrecTools {
         });
         private.label(&f, &h, &selected, &page, &mut items, person.is_none());
         let mut out = page.page(items, "person, since/until or name")?;
+        warn_labels(&mut out);
         private.warn(&mut out, page.offset(), &left_out);
         ToolOutput::new(&out)
     }

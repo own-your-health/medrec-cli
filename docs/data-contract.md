@@ -1882,7 +1882,10 @@ readers ship with medrec:
       said that is in `private.overrides`; a phone goes with its `phone_from`. A
       likely label left with no evidence is left out. A confidence medrec does
       not know is `likely`, and evidence it does not know is its `from` alone.
-    - They are added before a page is cut, so they count in its size. No tool
+    - They are added before a page is cut, so they count in its size. An item
+      that would be too large for a page with all of its own has the first that
+      fit, and a `provider-labels-left-out` warning says how many items on the
+      page that is: a record is never lost to its labels. No tool
       finds, sorts or filters by one, and `medrec_search` and `medrec_summary`
       have none.
   - a reader that answers from the views without a current `private.json`
