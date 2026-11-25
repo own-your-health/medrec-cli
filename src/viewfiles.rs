@@ -130,6 +130,10 @@ pub struct PersonViews {
     /// error, by kind (0.9.9 and later).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub in_error: BTreeMap<String, Vec<String>>,
+    /// The ids of what is in their chart and about somebody else, which no
+    /// view has (0.9.9 and later): a reader says how many, and no more.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub about_another: Vec<String>,
     pub row: Row,
     pub records: BTreeMap<String, Run>,
     pub timeline: Run,
@@ -389,6 +393,7 @@ pub(crate) fn sync_with(
             Some(t) => parse(t, &trel)?,
             None => PersonText::new(&p.id),
         };
+        let idx = crate::about::shown(p, idx);
         let md5 = |t: &Option<String>| t.as_deref().map(|t| md5_hex(t.as_bytes()));
         loaded.insert(
             p.id.clone(),
@@ -1278,14 +1283,14 @@ pub(crate) fn person(
         text_at.insert(&d.id, [n, pack.len(), b.len(), t.chars().count()]);
         pack.extend_from_slice(b);
     }
-    let mut linked: HashMap<&str, Vec<&str>> = HashMap::new();
+    let mut linked: HashMap<&str, Vec<&Record>> = HashMap::new();
     for r in idx.records.iter().filter(|r| !errors.contains(&r.id)) {
         let mut seen = BTreeSet::new();
         for doc in &r.documents {
             if seen.insert(doc.as_str()) {
-                let names = linked.entry(doc.as_str()).or_default();
-                if names.len() < 20 {
-                    names.push(&r.display);
+                let by = linked.entry(doc.as_str()).or_default();
+                if by.len() < 20 {
+                    by.push(r);
                 }
             }
         }
@@ -1301,8 +1306,11 @@ pub(crate) fn person(
                 if let Some(at) = text_at.get(d.id.as_str()) {
                     m.insert("text_at".into(), serde_json::json!(at));
                 }
-                if let Some(names) = linked.get(d.id.as_str()) {
+                if let Some(by) = linked.get(d.id.as_str()) {
+                    let names: Vec<&str> = by.iter().map(|r| r.display.as_str()).collect();
+                    let ids: Vec<&str> = by.iter().map(|r| r.id.as_str()).collect();
                     m.insert("linked".into(), serde_json::json!(names));
+                    m.insert("linked_ids".into(), serde_json::json!(ids));
                 }
                 let says = crate::standing::document_says(sources, d);
                 if !says.is_empty() {
@@ -1414,6 +1422,7 @@ pub(crate) fn person(
         directory: from.directory,
         provider_state: from.provider_state,
         in_error: st.in_error,
+        about_another: idx.about_another.clone(),
         row: Row {
             documents: row.documents,
             records: row.records,

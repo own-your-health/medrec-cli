@@ -86,6 +86,10 @@ enum Command {
     Allergies(RecordArgs),
     /// Immunizations.
     Immunizations(RecordArgs),
+    /// One record by its id, and the ids of what is in a chart and about
+    /// somebody else.
+    #[command(subcommand)]
+    Records(RecordsCmd),
     /// Filed documents.
     #[command(subcommand)]
     Documents(DocumentsCmd),
@@ -784,6 +788,19 @@ struct LabelsOf {
 }
 
 #[derive(Subcommand, Debug)]
+enum RecordsCmd {
+    /// One record, also one that no list shows.
+    Show { id: String },
+    /// The ids of what is in a person's chart and about somebody else: a
+    /// screening a parent answers about themselves, a result its source says
+    /// is another's. Lists only count these.
+    AboutAnother {
+        #[arg(long)]
+        person: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
 enum DocumentsCmd {
     /// Filed documents, newest first.
     List {
@@ -1235,6 +1252,7 @@ fn run(cli: &Cli) -> Result<(), CliError> {
         Command::Conditions(a) => records_cmd(cli, &store, a, &["condition"], "condition"),
         Command::Allergies(a) => records_cmd(cli, &store, a, &["allergy"], "allergy"),
         Command::Immunizations(a) => records_cmd(cli, &store, a, &["immunization"], "immunization"),
+        Command::Records(cmd) => one_record_cmd(cli, cmd, &store),
         Command::Documents(cmd) => documents_cmd(cli, cmd, &store),
         Command::Events(cmd) => events_cmd(cli, cmd, &store),
         Command::Bills(cmd) => bills_cmd(cli, cmd, &store),
@@ -3157,6 +3175,34 @@ fn records_cmd(
     Ok(())
 }
 
+fn one_record_cmd(cli: &Cli, cmd: &RecordsCmd, store: &ConfigStore) -> Result<(), CliError> {
+    let json = cli.common.json;
+    let (f, h) = read(store, cli)?;
+    match cmd {
+        RecordsCmd::Show { id } => {
+            let (row, about) = views::record(&f, &h, id)?;
+            let said: Vec<String> = about.into_iter().collect();
+            said.iter().for_each(|n| note(cli, n));
+            output::emit(json, "record", noted(to_value(&row), &said), |v| {
+                output::kv(v, 0)
+            });
+        }
+        RecordsCmd::AboutAnother { person } => {
+            let mut rows = Vec::new();
+            for p in medrec::people::selected(&h, person.as_deref())? {
+                for id in f.index(p)?.about_another {
+                    rows.push(json!({"person": p.id, "id": id}));
+                }
+            }
+            let out = json!({ "items": rows });
+            output::emit(json, "about-another-list", out, |v| {
+                table(v, &["person", "id"]);
+            });
+        }
+    }
+    Ok(())
+}
+
 /// Copy one file into a fresh private open folder and return its path.
 fn private_copy(f: &Folder, rel: &str, label: &str) -> Result<PathBuf, CliError> {
     let dir = view::new_open_dir(label)?;
@@ -3202,8 +3248,10 @@ fn documents_cmd(cli: &Cli, cmd: &DocumentsCmd, store: &ConfigStore) -> Result<(
         }
         DocumentsCmd::Open { id, no_launch } => {
             let (f, h) = read(store, cli)?;
-            let (p, d) = views::find_document(&f, &h, id)?;
-            let said: Vec<String> = views::paper_note(&f, &h, &p, &d)?.into_iter().collect();
+            let (p, d) = views::find_document(&f, &h, id, true)?;
+            let error = views::paper_note(&f, &h, &p, &d)?;
+            let about = medrec::about::of_paper(&p, &f.whole_index(&p)?, id);
+            let said: Vec<String> = error.into_iter().chain(about).collect();
             said.iter().for_each(|n| note(cli, n));
             let path = private_copy(&f, &d.path, &d.id)?;
             let launched = !*no_launch && launch(&view::Viewer::for_documents(None), &path)?;

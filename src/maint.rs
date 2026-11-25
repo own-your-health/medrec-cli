@@ -526,7 +526,7 @@ pub fn verify(folder: &Folder, deep: bool) -> Result<Verify, CliError> {
         ..Default::default()
     };
     for p in &h.people {
-        let idx = folder.index(p)?;
+        let idx = folder.whole_index(p)?;
         let listing: HashMap<String, Option<String>> = folder
             .store
             .hashes(&p.folder)?

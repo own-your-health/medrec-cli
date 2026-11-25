@@ -9,6 +9,7 @@ use serde_json::Value;
 
 use std::collections::BTreeSet;
 
+use crate::about;
 use crate::folder::Folder;
 use crate::intake::classify;
 use crate::model::{Document, Household, Note, Person, PersonIndex, PersonText, Record};
@@ -108,7 +109,24 @@ pub fn timeline(
     let errors = entered_in_error(folder, h, person)?;
     let error = |e: &mut Event| errors.contains(&e.id).then_some(Why::Error);
     let (out, left_out) = LeftOut::split(all, error);
-    Ok((out, left_out.notes()))
+    let mut notes = left_out.notes();
+    notes.extend(about_another(folder, h, person)?);
+    Ok((out, notes))
+}
+
+/// What a list of one person's says of what is about somebody else.
+pub(crate) fn about_another(
+    folder: &Folder,
+    h: &Household,
+    person: Option<&str>,
+) -> Result<Option<String>, CliError> {
+    let mut n = 0;
+    if person.is_some() {
+        for p in people::selected(h, person)? {
+            n += folder.index(p)?.about_another.len();
+        }
+    }
+    Ok(about::line(n, person))
 }
 
 /// As `timeline`, those entered in error too.
@@ -423,9 +441,13 @@ pub fn records(
     let mut out: Vec<(u8, RecordRow)> = Vec::new();
     let mut notes = Vec::new();
     let mut in_error = 0;
+    let mut aside = 0;
     let selected = people::selected(h, person)?;
     for p in &selected {
         let idx = folder.index(p)?;
+        if kinds.contains(&"result") {
+            aside += idx.about_another.len();
+        }
         let from = Sources::of(&h.sources, &idx);
         let asked =
             |r: &Record| range.holds(r.date.as_deref()) && code.is_none_or(|q| matches_code(r, q));
@@ -468,6 +490,7 @@ pub fn records(
     if in_error > 0 {
         notes.push(standing::in_error(in_error));
     }
+    notes.extend(about::line(aside, person));
     Ok((out.into_iter().map(|(_, r)| r).collect(), notes))
 }
 
@@ -947,8 +970,10 @@ pub fn documents(
     }
     let mut out = Vec::new();
     let mut in_error = 0;
+    let mut aside = 0;
     for p in people::selected(h, person)? {
         let idx = folder.index(p)?;
+        aside += idx.about_another.len();
         let from = Sources::of(&h.sources, &idx);
         let asked = |d: &&Document| {
             doc_type.is_none_or(|t| d.doc_type.as_deref() == Some(t))
@@ -982,7 +1007,8 @@ pub fn documents(
     }
     out.sort_by(|a, b| b.date.cmp(&a.date).then(a.path.cmp(&b.path)));
     let notes = (in_error > 0).then(|| standing::in_error(in_error));
-    Ok((out, notes.into_iter().collect()))
+    let notes = notes.into_iter().chain(about::line(aside, person));
+    Ok((out, notes.collect()))
 }
 
 /// What a reader says of a paper opened by its id that a source says is
@@ -1031,14 +1057,37 @@ pub fn paper_note(
     }))
 }
 
-/// A document by id, with whose it is.
+/// A record by id, whatever lists leave it out, and what is said of one about
+/// somebody else.
+pub fn record(
+    folder: &Folder,
+    h: &Household,
+    id: &str,
+) -> Result<(RecordRow, Option<String>), CliError> {
+    for p in &h.people {
+        let idx = folder.whole_index(p)?;
+        if let Some(r) = idx.records.iter().find(|r| r.id == id) {
+            let one = row(Sources::of(&h.sources, &idx), p, r.clone());
+            return Ok((one, about::of_record(p, r)));
+        }
+    }
+    Err(CliError::NotFound(format!("no record `{id}`")))
+}
+
+/// A document by id, with whose it is. `aside`: at the Mac, where one that is
+/// about somebody else is opened too.
 pub fn find_document(
     folder: &Folder,
     h: &Household,
     id: &str,
+    aside: bool,
 ) -> Result<(Person, crate::model::Document), CliError> {
     for p in &h.people {
-        if let Some(d) = folder.index(p)?.documents.into_iter().find(|d| d.id == id) {
+        let idx = match aside {
+            true => folder.whole_index(p)?,
+            false => folder.index(p)?,
+        };
+        if let Some(d) = idx.documents.into_iter().find(|d| d.id == id) {
             return Ok((p.clone(), d));
         }
     }

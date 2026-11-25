@@ -738,7 +738,7 @@ fn file_streamed(
 
     let source = source_slug(&header.source.cli, &header.organization.id);
     let source_dir = folder::records_dir(&person, &source);
-    let mut index = folder.index(&person)?;
+    let mut index = folder.whole_index(&person)?;
     let mut texts = folder.text(&person)?;
     let imported_at = now_rfc3339();
     let base_prov = Provenance {

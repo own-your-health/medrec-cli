@@ -179,7 +179,7 @@ pub fn file(folder: &Folder, req: &FileRequest) -> Result<Filed, CliError> {
     let date = class.date.value().expect("decided").to_string();
     let org = class.organization.value().map(str::to_string);
 
-    let mut index = folder.index(&person)?;
+    let mut index = folder.whole_index(&person)?;
     if let Some(dup) = index.documents.iter_mut().find(|d| d.sha256 == item.sha256) {
         // Already filed: the queued copy goes, once the filed one checks out.
         folder.check_md5(&dup.path, &dup.md5)?;

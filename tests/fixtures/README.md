@@ -70,6 +70,11 @@ real record, document, study or provider response.
   another at a place of a private area, as the contract's "What a source gave"
   keeps it, beside one that is not private. `make.py` writes `index.json`; its
   sources are those of `standing/household.json`.
+- `questionnaires/` is an invented person's results, one for each kind of
+  questionnaire the contract's "Private" lists and one that is none, with a
+  report and its paper, a paper named as one, a visit and claims of some of
+  those days, and two pharmacy claims. `make.py` writes `index.json`; its
+  sources are those of `standing/household.json`.
 - `bills/` holds invented text in the shapes `pdftotext -layout` gives a
   provider's patient statement and a payment receipt:
   `statement-columns.txt` puts the statement's fields in a header row over a

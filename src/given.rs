@@ -12,7 +12,7 @@ use serde_json::{Map, Value};
 use crate::model::{Code, Document, PersonIndex, ProviderRef, Record};
 use crate::providers::FIELDS;
 
-/// The field of a claim the rules read beside the names.
+/// The field of a claim that is read beside the names.
 const DIAGNOSES: &str = "diagnoses";
 
 /// What the rules read of a record, as a source gave it: the parts that were
@@ -49,10 +49,14 @@ pub struct GivenPaper {
 
 /// What the rules read of a record.
 pub fn of(r: &Record) -> Given {
-    let named = matches!(r.kind.as_str(), "medication" | "result" | "report");
-    let coded = matches!(r.kind.as_str(), "condition" | "medication");
+    let coded = matches!(
+        r.kind.as_str(),
+        "medication" | "result" | "report" | "condition"
+    );
+    // A pharmacy claim is named by its medicine.
+    let named = (coded && r.kind != "condition") || crate::private::dispensed(r).is_some();
     let mut fields = Map::new();
-    for f in FIELDS.iter().chain(&[DIAGNOSES]) {
+    for f in FIELDS.iter().chain(&[DIAGNOSES, crate::about::FIELD]) {
         if let Some(v) = r.fields.get(*f) {
             fields.insert(f.to_string(), v.clone());
         }

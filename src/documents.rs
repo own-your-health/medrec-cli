@@ -45,7 +45,7 @@ pub fn plan(folder: &Folder, h: &Household, duplicate: &str, into: &str) -> Resu
     }
     let (mut dup_at, mut into_at) = (None, None);
     for p in &h.people {
-        let index = folder.index(p)?;
+        let index = folder.whole_index(p)?;
         if index.documents.iter().any(|d| d.id == duplicate) {
             dup_at = Some((p.clone(), index.clone()));
         }

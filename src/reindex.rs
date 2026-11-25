@@ -94,7 +94,7 @@ pub fn claims(
         ..Reindexed::default()
     };
     for p in people::selected(h, person)? {
-        let mut idx = folder.index(p)?;
+        let mut idx = folder.whole_index(p)?;
         let raw_of = |r: &Record| r.provenance.iter().find_map(|pr| pr.raw_path.clone());
         // One copy per folder of raw files, not one call per file.
         let dirs: BTreeSet<String> = idx

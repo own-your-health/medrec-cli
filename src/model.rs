@@ -244,6 +244,10 @@ pub struct PersonIndex {
     pub studies: Vec<ImagingStudy>,
     #[serde(default)]
     pub imports: Vec<ImportRun>,
+    /// The ids left out because they are about somebody else
+    /// ([`crate::about`]): an index with any is for reading only.
+    #[serde(skip)]
+    pub about_another: Vec<String>,
 }
 
 impl PersonIndex {
@@ -256,6 +260,7 @@ impl PersonIndex {
             records: Vec::new(),
             studies: Vec::new(),
             imports: Vec::new(),
+            about_another: Vec::new(),
         }
     }
 }

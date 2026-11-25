@@ -1,6 +1,7 @@
-//! What a source says is entered in error, and what one gave and takes back
-//! (docs/data-contract.md, "Entered in error" and "What a source gave"),
-//! through the binary, on synthetic data only.
+//! What a source says is entered in error or about somebody else, and what one
+//! gave and takes back (docs/data-contract.md, "Entered in error", "About
+//! another person" and "What a source gave"), through the binary, on synthetic
+//! data only.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -1296,4 +1297,100 @@ fn what_another_source_calls_a_paper_holds_it_private() {
     e.import(&called("two", "Psychotherapy summary", OPEN, 2));
     e.import(&called("two", "Visit summary", OPEN, 3));
     assert_eq!(e.private()[&id]["given"], true);
+}
+
+/// A test as a source serves it, about somebody else by its `focus`.
+fn test_about(org: &str, focus: Option<Value>, version: u32) -> String {
+    stream(org, |id, v| {
+        if id == "obs-0001" {
+            say(v, "final", version);
+            if let Some(f) = &focus {
+                v["focus"] = json!([f]);
+            }
+        }
+        true
+    })
+}
+
+/// The test's id, in the index; and whether it is in an answer of it.
+fn the_test(e: &Env) -> (String, bool) {
+    let records = e.index().records;
+    let mut of = records.iter().filter(|r| r.display.contains("Hemoglobin"));
+    let id = of.next().unwrap().id.clone();
+    assert!(of.next().is_none());
+    let seen = [
+        e.ok(&["results", "--person", "Robin"]),
+        e.ok(&["search", "hemoglobin"]),
+        e.ok(&["timeline"]),
+    ];
+    let seen = seen.map(|v| v.to_string().contains(&id));
+    assert!(seen.iter().all(|s| *s == seen[0]), "{seen:?}");
+    (id, seen[0])
+}
+
+/// What its source says is about another person is in no list, whatever a
+/// source says later; importing it again makes no other.
+#[test]
+fn a_test_its_source_says_is_of_another_person_is_in_no_list() {
+    let parent = json!({"reference": "RelatedPerson/rp-0001", "display": "Mother"});
+    let sibling = json!({"reference": "Patient/pat-0002"});
+    for (n, (focus, says)) in [
+        (parent.clone(), "a parent"),
+        (sibling, "another person"),
+        (
+            json!({"type": "RelatedPerson", "identifier": {"value": "x"}}),
+            "another person",
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let e = Env::new(&format!("about-{n}"));
+        e.import(&test_about("one", Some(focus.clone()), 1));
+        let (id, seen) = the_test(&e);
+        assert!(!seen, "{says}");
+        let note = format!("about {says}, in Robin Testperson's chart");
+        let of = |e: &Env| e.ok(&["records", "show", &id])["notes"].clone();
+        assert_eq!(of(&e), json!([note]));
+        let list = e.ok(&["records", "about-another"]);
+        assert_eq!(list["items"].as_array().unwrap().len(), 1, "{list}");
+        // Again; by another source with nothing of it; and by the first.
+        let kept = e.index().records.len();
+        e.import(&test_about("one", Some(focus), 1));
+        assert_eq!(e.index().records.len(), kept);
+        e.import(&test_about("one", None, 2));
+        assert_eq!(e.index().records.len(), kept);
+        assert_eq!(the_test(&e), (id.clone(), false), "{says}");
+        assert_eq!(of(&e), json!([note]));
+        // Whatever writes the index keeps it, and nothing counts as missing.
+        e.ok(&["reindex"]);
+        e.ok(&["views", "write"]);
+        assert_eq!(the_test(&e), (id.clone(), false), "{says}");
+        assert_eq!(e.index().records.len(), kept);
+        let v = e.ok(&["verify"]);
+        assert_eq!(v["problems"].as_array().map_or(0, Vec::len), 0, "{v}");
+    }
+    // Of its own subject, or of a device, it is the person's.
+    for focus in [
+        json!({"reference": "Patient/pat-0001"}),
+        json!({"reference": "Device/d-0001"}),
+    ] {
+        let e = Env::new("about-own");
+        e.import(&test_about("one", Some(focus), 1));
+        assert!(the_test(&e).1);
+    }
+    // One an earlier medrec read in is, once it is imported again.
+    let e = Env::new("about-raw");
+    e.import(&test_about("one", Some(parent.clone()), 1));
+    let (id, _) = the_test(&e);
+    e.edit(|v| {
+        for r in v["records"].as_array_mut().unwrap() {
+            if let Some(f) = r["fields"].as_object_mut() {
+                f.remove("about");
+            }
+        }
+    });
+    assert!(the_test(&e).1);
+    e.import(&test_about("one", Some(parent), 1));
+    assert_eq!(the_test(&e), (id, false));
 }

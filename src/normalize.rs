@@ -4,7 +4,9 @@
 //! object.
 
 use std::collections::BTreeSet;
+use std::sync::LazyLock;
 
+use regex::Regex;
 use serde_json::{json, Map, Value};
 
 use crate::claims;
@@ -43,6 +45,7 @@ pub const FIELDS: &[(&str, &[&str])] = &[
             "interpretation",
             "category",
             "issued",
+            crate::about::FIELD,
         ],
     ),
     (
@@ -257,6 +260,7 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
                 first(r, "category").map(concept_text),
             );
             put_str(&mut fields, "issued", path_str(r, "issued"));
+            put_str(&mut fields, crate::about::FIELD, about(r));
         }
         "DiagnosticReport" => {
             put_str(&mut fields, "conclusion", path_str(r, "conclusion"));
@@ -663,6 +667,55 @@ fn age_text(q: &Value) -> Option<String> {
         code => s("unit").or(code).unwrap_or(""),
     };
     Some(format!("{value} {unit}").trim().to_string())
+}
+
+/// The person an Observation's `focus` says it is about, where that is not its
+/// subject.
+fn about(r: &Value) -> Option<&'static str> {
+    let id = |v: &Value| {
+        let of = v.get("reference")?.as_str()?;
+        Some(of.rsplit('/').next().unwrap_or(of).to_string())
+    };
+    let subject = r.get("subject").and_then(id);
+    r.get("focus")?.as_array()?.iter().find_map(|f| {
+        let of = id(f);
+        let contained = of.as_deref().and_then(|of| {
+            let all = r.get("contained").and_then(Value::as_array)?;
+            let of = of.strip_prefix('#')?;
+            all.iter().find(|c| c["id"] == of)
+        });
+        let reference = f.get("reference").and_then(Value::as_str).unwrap_or("");
+        let is = |kind: &str| {
+            let named = f.get("type").and_then(Value::as_str) == Some(kind);
+            let held = contained.is_some_and(|c| c["resourceType"] == kind);
+            named || held || reference.rsplit('/').nth(1) == Some(kind)
+        };
+        let other = is("RelatedPerson") || (is("Patient") && of.is_some() && of != subject);
+        if !other {
+            return None;
+        }
+        let relation = contained.and_then(|c| c.get("relationship")).map(all_words);
+        let display = f.get("display").and_then(Value::as_str).unwrap_or("");
+        let said = format!("{display} {}", relation.unwrap_or_default());
+        Some(match PARENT.is_match(&said) {
+            true => crate::about::PARENT,
+            false => crate::about::ANOTHER,
+        })
+    })
+}
+
+static PARENT: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\b(?:mother|father|parent|N?MTH|N?FTH|PRN|NPRN|GESTM)\b").unwrap()
+});
+
+/// Every string in a value, in order.
+fn all_words(v: &Value) -> String {
+    match v {
+        Value::String(s) => s.clone(),
+        Value::Array(a) => a.iter().map(all_words).collect::<Vec<_>>().join(" "),
+        Value::Object(o) => o.values().map(all_words).collect::<Vec<_>>().join(" "),
+        _ => String::new(),
+    }
 }
 
 /// The code of each category, else its text, in the systems' own codes before
