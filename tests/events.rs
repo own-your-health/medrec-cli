@@ -640,3 +640,185 @@ fn visits_get_plain_names_and_a_connections_name_is_never_a_place() {
         json!("Sample Ear Clinic North")
     );
 }
+
+/// A record whose only source says it is entered in error.
+fn record_in_error(idx: &mut PersonIndex, id: &str) {
+    let r = idx.records.iter_mut().find(|r| r.id == id).unwrap();
+    r.status = Some("entered-in-error".into());
+}
+
+/// A paper whose only source says so.
+fn paper_in_error(idx: &mut PersonIndex, id: &str) {
+    let d = idx.documents.iter_mut().find(|d| d.id == id).unwrap();
+    let raw = format!("Records/example-one/Binary/{id}.json");
+    d.provenance.raw_path = Some(raw.clone());
+    d.words = vec![
+        serde_json::from_value(json!({"raw_path": raw, "status": "entered-in-error"})).unwrap(),
+    ];
+}
+
+fn has(v: &Value, id: &str) -> bool {
+    let evs = v["events"].as_array().unwrap();
+    evs.iter().any(|e| ids(e).contains(&id))
+}
+
+#[test]
+fn what_is_entered_in_error_is_in_no_event_and_comes_back() {
+    let before = events_of(&world(), 0, None);
+    let was = holding(&before, ER);
+    assert!(before.get("in_error").is_none() && before.get("events_in_error").is_none());
+    let mut w = world();
+    record_in_error(&mut w.parent, "r_burndoctoraaaaaaaaaa");
+    paper_in_error(&mut w.parent, "d_burnbillaaaaaaaaaaaa");
+    let v = events_of(&w, 0, None);
+    let now = holding(&v, ER);
+    assert_eq!(now["id"], was["id"]);
+    assert_eq!(ids(now), ["r_burncareaaaaaaaaaaaa", ER]);
+    // 161.00 less the doctor's 36.00.
+    assert_eq!(was["money"]["you_owe"], "161.00");
+    assert_eq!(now["money"]["you_owe"], "125.00");
+    assert_eq!(now["clinicians"].as_array(), None);
+    assert_eq!(
+        now["in_error"],
+        json!(["d_burnbillaaaaaaaaaaaa", "r_burndoctoraaaaaaaaaa"])
+    );
+    for id in ["d_burnbillaaaaaaaaaaaa", "r_burndoctoraaaaaaaaaa"] {
+        assert_eq!(v["in_error"][id], json!({"event": was["id"]}), "{id}");
+    }
+    assert!(v.get("events_in_error").is_none());
+    // No other event changes.
+    let rest = |v: &Value| -> Vec<Value> {
+        let evs = v["events"].as_array().unwrap().iter();
+        evs.filter(|e| e["id"] != was["id"]).cloned().collect()
+    };
+    assert_eq!(rest(&v), rest(&before));
+    assert_eq!(events_of(&world(), 0, None), before);
+}
+
+#[test]
+fn an_event_of_nothing_else_is_none_and_can_be_asked_for() {
+    let before = events_of(&world(), 0, None);
+    let (cough, hearing) = ("r_coughaaaaaaaaaaaaaaa", "r_hearingaaaaaaaaaaaaa");
+    let mut w = world();
+    record_in_error(&mut w.parent, cough);
+    record_in_error(&mut w.parent, hearing);
+    paper_in_error(&mut w.parent, "d_hearingbillaaaaaaaaa");
+    let v = events_of(&w, 0, None);
+    for id in [cough, hearing, "d_hearingbillaaaaaaaaa"] {
+        assert!(!has(&v, id), "{id}");
+        assert_eq!(v["in_error"][id]["event"], holding(&before, id)["id"]);
+    }
+    let n = |v: &Value, k: &str| v[k].as_array().map_or(0, Vec::len);
+    assert_eq!(n(&v, "events"), n(&before, "events") - 2);
+    // As they would be, newest first.
+    let lost = v["events_in_error"].as_array().unwrap();
+    let of: Vec<(&Value, &Value)> = lost.iter().map(|e| (&e["id"], &e["in_error"])).collect();
+    assert_eq!(
+        of,
+        [
+            (
+                &holding(&before, hearing)["id"],
+                &json!(["d_hearingbillaaaaaaaaa", hearing])
+            ),
+            (&holding(&before, cough)["id"], &json!([cough])),
+        ]
+    );
+    assert_eq!(lost[1]["members"], holding(&before, cough)["members"]);
+    // The paper that told the clinician's practice tells nothing.
+    assert_eq!(before["aliases"].as_array().unwrap().len(), 1);
+    assert_eq!(v["aliases"], json!([]));
+}
+
+/// What the household decided of it is kept and not applied, and applies
+/// again when it comes back.
+#[test]
+fn a_decision_on_what_is_entered_in_error_is_kept() {
+    let (ear, foot) = ("r_earvisitaaaaaaaaaaaa", "r_footvisitaaaaaaaaaaa");
+    let decision = Decision {
+        id: "o_aaaaaaaaaaaaaaaaaaaa".into(),
+        kind: "together".into(),
+        members: [ear.into(), foot.into()],
+        at: "2026-05-04T12:00:00Z".into(),
+        by: None,
+        request: None,
+    };
+    let mut o = Overrides::new("p_test");
+    o.events.push(decision.clone());
+    let together = events_of(&world(), 0, Some(&o));
+    assert!(ids(holding(&together, ear)).contains(&foot));
+    assert_eq!(together["overrides"], 1);
+    let mut w = world();
+    record_in_error(&mut w.parent, foot);
+    let v = events_of(&w, 0, Some(&o));
+    assert_eq!(v["overrides"], 0);
+    assert!(!has(&v, foot));
+    let e = holding(&v, ear);
+    assert_eq!(e["in_error"], json!([foot]));
+    assert_eq!(e["not_applied"], json!([decision]));
+    assert_eq!(
+        v["in_error"],
+        json!({foot: {"event": e["id"], "not_applied": [decision]}})
+    );
+    // It puts nothing back, whichever of the two is in error.
+    let mut w = world();
+    record_in_error(&mut w.parent, ear);
+    let v = events_of(&w, 0, Some(&o));
+    assert_eq!(v["overrides"], 0);
+    assert!(has(&v, foot) && !has(&v, ear));
+    assert_eq!(v["in_error"][ear]["not_applied"], json!([decision]));
+    assert_eq!(events_of(&world(), 0, Some(&o)), together);
+}
+
+/// One its sources differ on is in its event once, with the amounts of a
+/// source that states it, and says that they differ.
+#[test]
+fn an_item_its_sources_differ_on_stays_and_says_so() {
+    let before = events_of(&world(), 0, None);
+    let mut w = world();
+    let doctor = "r_burndoctoraaaaaaaaaa";
+    let r = w
+        .parent
+        .records
+        .iter_mut()
+        .find(|r| r.id == doctor)
+        .unwrap();
+    let mut other = r.provenance[0].clone();
+    r.provenance[0].raw_path = Some("Records/example-one/ExplanationOfBenefit/1.json".into());
+    other.raw_path = Some("Records/example-two/ExplanationOfBenefit/1.json".into());
+    r.provenance.push(other);
+    r.words = serde_json::from_value(json!([
+        {"raw_path": "Records/example-one/ExplanationOfBenefit/1.json", "status": "active"},
+        {"raw_path": "Records/example-two/ExplanationOfBenefit/1.json", "status": "entered-in-error"},
+    ]))
+    .unwrap();
+    let mut v = events_of(&w, 0, None);
+    assert_eq!(member(holding(&v, ER), doctor)["differs"], true);
+    assert!(v.get("in_error").is_none());
+    let evs = v["events"].as_array_mut().unwrap();
+    let members = evs
+        .iter_mut()
+        .flat_map(|e| e["members"].as_array_mut().unwrap());
+    let mut marked = 0;
+    for m in members {
+        marked += m.as_object_mut().unwrap().remove("differs").is_some() as usize;
+    }
+    assert_eq!(marked, 1);
+    assert_eq!(v, before);
+}
+
+/// Another person's paper (X2) is named in its own person's file alone.
+#[test]
+fn a_linked_persons_paper_in_error_is_in_no_event() {
+    let paper = "d_misfiledaaaaaaaaaaaa";
+    let before = events_of(&world(), 0, None);
+    let e = holding(&before, paper);
+    assert!(member(e, paper)["person"].is_string());
+    let mut w = world();
+    paper_in_error(&mut w.child, paper);
+    let v = events_of(&w, 0, None);
+    assert!(!has(&v, paper));
+    assert!(v.get("in_error").is_none());
+    assert!(has(&v, "r_shoulderaaaaaaaaaaaa"));
+    let own = events_of(&w, 1, None);
+    assert!(own["in_error"].get(paper).is_none() || own["in_error"][paper]["event"].is_string());
+}

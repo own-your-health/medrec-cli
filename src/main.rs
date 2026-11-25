@@ -2,7 +2,7 @@
 //! (piekstra-cli/1). The command tree and output live here; the mechanisms
 //! live in the library.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
 use std::path::PathBuf;
 
@@ -1526,7 +1526,9 @@ fn bills_cmd(cli: &Cli, cmd: &BillsCmd, store: &ConfigStore) -> Result<(), CliEr
             let (f, h) = read(store, cli)?;
             let (mut items, mut calls, mut not_billed) = (Vec::new(), Vec::new(), Vec::new());
             let mut unreadable: Vec<String> = Vec::new();
-            for p in medrec::people::selected(&h, person.as_deref())? {
+            let mut notes: Vec<String> = Vec::new();
+            let selected = medrec::people::selected(&h, person.as_deref())?;
+            for p in &selected {
                 let v = medrec::bills::of_person(&f, &h, p)?;
                 if v["marks_unreadable"] == true {
                     unreadable.push(p.id.clone());
@@ -1538,6 +1540,12 @@ fn bills_cmd(cli: &Cli, cmd: &BillsCmd, store: &ConfigStore) -> Result<(), CliEr
                         ),
                     );
                 }
+                notes.extend(medrec::bills::in_error(&v, &|_| true).map(
+                    |n| match selected.len() {
+                        1 => n,
+                        _ => format!("{}: {n}", medrec::printable(&p.name)),
+                    },
+                ));
                 for (id, b) in v["bills"].as_object().into_iter().flatten() {
                     let mut row = b.clone();
                     row["document"] = id.clone().into();
@@ -1564,7 +1572,8 @@ fn bills_cmd(cli: &Cli, cmd: &BillsCmd, store: &ConfigStore) -> Result<(), CliEr
             });
             not_billed.sort_by_key(|v| std::cmp::Reverse(date(v, "start")));
             let shown = list.take(&items);
-            let mut doc = serde_json::json!({ "items": shown, "worth_a_call": calls, "not_billed": not_billed });
+            let doc = serde_json::json!({ "items": shown, "worth_a_call": calls, "not_billed": not_billed });
+            let mut doc = noted(doc, &notes);
             if !unreadable.is_empty() {
                 doc["marks_unreadable"] = unreadable.into();
             }
@@ -1603,6 +1612,7 @@ fn bills_cmd(cli: &Cli, cmd: &BillsCmd, store: &ConfigStore) -> Result<(), CliEr
                         ],
                     );
                 }
+                notes.iter().for_each(|n| note(cli, n));
             });
         }
         BillsCmd::Paid {
@@ -1634,6 +1644,14 @@ fn bills_cmd(cli: &Cli, cmd: &BillsCmd, store: &ConfigStore) -> Result<(), CliEr
                     }
                 };
             let mut v = to_value(&pm);
+            let bills = medrec::bills::of_person(&f, &h, p)?;
+            if medrec::bills::not_applied(&bills).contains(pm.id.as_str()) {
+                v["not_applied"] = true.into();
+                note(
+                    cli,
+                    "The bill is entered in error: the payment is kept and not applied.",
+                );
+            }
             v["person"] = p.id.clone().into();
             v["status"] = if new { "recorded" } else { "unchanged" }.into();
             output::emit(json, "bill-payment", v, |v| {
@@ -1650,8 +1668,13 @@ fn bills_cmd(cli: &Cli, cmd: &BillsCmd, store: &ConfigStore) -> Result<(), CliEr
             let (f, h) = read(store, cli)?;
             let mut items = Vec::new();
             for p in medrec::people::selected(&h, person.as_deref())? {
+                let bills = medrec::bills::of_person(&f, &h, p)?;
+                let kept = medrec::bills::not_applied(&bills);
                 for pm in f.marks(p)?.payments {
                     let mut v = to_value(&pm);
+                    if kept.contains(pm.id.as_str()) {
+                        v["not_applied"] = true.into();
+                    }
                     v["person"] = p.id.clone().into();
                     v["person_name"] = p.name.clone().into();
                     items.push(v);
@@ -1714,8 +1737,10 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
             let mut items = Vec::new();
             let mut unreadable: Vec<String> = Vec::new();
             let mut labels: Vec<String> = Vec::new();
+            let mut in_error = 0;
             for p in medrec::people::selected(&h, person.as_deref())? {
                 let idx = f.index(p)?;
+                let gone: BTreeSet<&str> = medrec::standing::errors(&idx).collect();
                 let (v, events) = medrec::private::with_events(&f, &h, p, &idx)?;
                 if v.get("labels_unreadable").is_some() {
                     labels.push(p.id.clone());
@@ -1723,7 +1748,7 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
                     unreadable.push(p.id.clone());
                 }
                 let event_of = |id: &str| {
-                    events["events"]
+                    events.events["events"]
                         .as_array()
                         .into_iter()
                         .flatten()
@@ -1742,6 +1767,13 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
                     ("studies", "study"),
                 ] {
                     for (id, why) in v[kind].as_object().into_iter().flatten() {
+                        if gone.contains(id.as_str()) {
+                            in_error += 1;
+                            continue;
+                        }
+                        if kind == "events" && event_of(id).is_none() {
+                            continue;
+                        }
                         let (date, title) = match kind {
                             "records" => idx
                                 .records
@@ -1790,6 +1822,11 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
             });
             let shown = list.take(&items);
             let mut doc = serde_json::json!({ "items": shown });
+            if in_error > 0 {
+                let n = medrec::standing::in_error(in_error);
+                note(cli, &n);
+                doc = noted(doc, &[n]);
+            }
             if !unreadable.is_empty() {
                 for p in h.people.iter().filter(|p| unreadable.contains(&p.id)) {
                     note(
@@ -1867,9 +1904,14 @@ fn labels_cmd(cli: &Cli, cmd: &LabelsCmd, store: &ConfigStore) -> Result<(), Cli
             let (f, h) = read(store, cli)?;
             let mut items = Vec::new();
             for p in medrec::people::selected(&h, person.as_deref())? {
+                let idx = f.index(p)?;
+                let gone: BTreeSet<&str> = medrec::standing::errors(&idx).collect();
                 for c in f.marks(p)?.providers {
                     let Some(kind) = c.kind() else { continue };
                     let mut v = to_value(&c);
+                    if c.item.as_deref().is_some_and(|i| gone.contains(i)) {
+                        v["not_applied"] = true.into();
+                    }
                     v["kind"] = to_value(&kind);
                     v["person"] = p.id.clone().into();
                     v["person_name"] = p.name.clone().into();
@@ -1988,34 +2030,37 @@ fn events_cmd(cli: &Cli, cmd: &EventsCmd, store: &ConfigStore) -> Result<(), Cli
         } => {
             let (f, h) = read(store, cli)?;
             let rows = medrec::events::list(&f, &h, person.as_deref(), &range.range())?;
-            let shown = list.take(&rows);
-            output::emit(
-                json,
-                "event-list",
-                serde_json::json!({ "items": shown }),
-                |v| {
-                    // The share as a column of the table only; the JSON
-                    // keeps it in `money`.
-                    let mut v = v.clone();
-                    for e in v["items"].as_array_mut().into_iter().flatten() {
-                        e["you_owe"] = e["money"]["you_owe"].clone();
-                    }
-                    table(
-                        &v,
-                        &[
-                            "start",
-                            "end",
-                            "person_name",
-                            "title",
-                            "place",
-                            "you_owe",
-                            "confidence",
-                            "status",
-                            "id",
-                        ],
-                    )
-                },
-            );
+            let (lost, rows): (Vec<_>, Vec<_>) = rows
+                .into_iter()
+                .partition(|e| e["entered_in_error"] == true);
+            let notes: Vec<String> = (!lost.is_empty())
+                .then(|| medrec::standing::in_error(lost.len()))
+                .into_iter()
+                .collect();
+            let out = noted(serde_json::json!({ "items": list.take(&rows) }), &notes);
+            output::emit(json, "event-list", out, |v| {
+                // The share as a column of the table only; the JSON
+                // keeps it in `money`.
+                let mut v = v.clone();
+                for e in v["items"].as_array_mut().into_iter().flatten() {
+                    e["you_owe"] = e["money"]["you_owe"].clone();
+                }
+                table(
+                    &v,
+                    &[
+                        "start",
+                        "end",
+                        "person_name",
+                        "title",
+                        "place",
+                        "you_owe",
+                        "confidence",
+                        "status",
+                        "id",
+                    ],
+                );
+                notes.iter().for_each(|n| note(cli, n));
+            });
         }
         EventsCmd::Show { id } => {
             if !medrec::ids::is_valid("e", id) {
@@ -2047,6 +2092,14 @@ fn events_cmd(cli: &Cli, cmd: &EventsCmd, store: &ConfigStore) -> Result<(), Cli
             let p = owner_of(&f, &h, a)?;
             let (d, new) = medrec::events::decide(&f, p, kind, a, b, None, None)?;
             let mut v = to_value(&d);
+            let idx = f.index(p)?;
+            if medrec::standing::errors(&idx).any(|id| id == a || id == b) {
+                v["not_applied"] = true.into();
+                note(
+                    cli,
+                    "One of them is entered in error: the decision is kept and not applied.",
+                );
+            }
             v["person"] = p.id.clone().into();
             v["status"] = if new { "recorded" } else { "unchanged" }.into();
             output::emit(json, "event-decision", v, |v| {
@@ -2063,8 +2116,13 @@ fn events_cmd(cli: &Cli, cmd: &EventsCmd, store: &ConfigStore) -> Result<(), Cli
             let (f, h) = read(store, cli)?;
             let mut items = Vec::new();
             for p in medrec::people::selected(&h, person.as_deref())? {
+                let idx = f.index(p)?;
+                let gone: BTreeSet<&str> = medrec::standing::errors(&idx).collect();
                 for d in f.overrides(p)?.events {
                     let mut v = to_value(&d);
+                    if d.members.iter().any(|m| gone.contains(m.as_str())) {
+                        v["not_applied"] = true.into();
+                    }
                     v["person"] = p.id.clone().into();
                     v["person_name"] = p.name.clone().into();
                     v["a"] = d.members[0].clone().into();
@@ -3100,14 +3158,15 @@ fn documents_cmd(cli: &Cli, cmd: &DocumentsCmd, store: &ConfigStore) -> Result<(
             list,
         } => {
             let (f, h) = read(store, cli)?;
-            let rows = views::documents(
+            let (rows, notes) = views::documents(
                 &f,
                 &h,
                 person.as_deref(),
                 doc_type.as_deref(),
                 &range.range(),
             )?;
-            output::emit(json, "document-list", items(list.take(&rows)), |v| {
+            let out = noted(items(list.take(&rows)), &notes);
+            output::emit(json, "document-list", out, |v| {
                 table(
                     v,
                     &[
@@ -3118,18 +3177,24 @@ fn documents_cmd(cli: &Cli, cmd: &DocumentsCmd, store: &ConfigStore) -> Result<(
                         "organization",
                         "title",
                     ],
-                )
+                );
+                notes.iter().for_each(|n| note(cli, n));
             });
         }
         DocumentsCmd::Open { id, no_launch } => {
             let (f, h) = read(store, cli)?;
-            let (_, d) = views::find_document(&f, &h, id)?;
+            let (p, d) = views::find_document(&f, &h, id)?;
+            let said: Vec<String> = views::paper_note(&f, &h, &p, &d)?.into_iter().collect();
+            said.iter().for_each(|n| note(cli, n));
             let path = private_copy(&f, &d.path, &d.id)?;
             let launched = !*no_launch && launch(&view::Viewer::for_documents(None), &path)?;
             output::emit(
                 json,
                 "document-open",
-                json!({ "document": d.id, "path": path.display().to_string(), "launched": launched }),
+                noted(
+                    json!({ "document": d.id, "path": path.display().to_string(), "launched": launched }),
+                    &said,
+                ),
                 |v| println!("{}", v["path"].as_str().unwrap_or("")),
             );
         }

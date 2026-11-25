@@ -1,0 +1,41 @@
+{
+ "schema": "medrec-marks/v1",
+ "person": "p_robinaaaaaaaaaaaaaaa",
+ "payments": [
+  {
+   "id": "o_paidaaaaaaaaaaaaaaaa",
+   "document": "d_skinbillaaaaaaaaaaaa",
+   "on": "2024-04-16",
+   "amount": {
+    "amount": "15.00",
+    "currency": "USD"
+   },
+   "at": "2024-04-16T12:00:00Z"
+  }
+ ],
+ "private": [
+  {
+   "id": "o_hidefootvisitaaaaaaa",
+   "item": "r_footvisitaaaaaaaaaaa",
+   "private": true,
+   "at": "2024-07-05T12:00:00Z"
+  },
+  {
+   "id": "o_hidefootbillaaaaaaaa",
+   "item": "d_footbillaaaaaaaaaaaa",
+   "private": true,
+   "at": "2024-07-05T12:00:00Z"
+  }
+ ],
+ "providers": [
+  {
+   "id": "o_deskaaaaaaaaaaaaaaaa",
+   "printed": [
+    "Example Letter Desk"
+   ],
+   "wrong": true,
+   "item": "d_letteraaaaaaaaaaaaaa",
+   "at": "2024-07-05T12:00:00Z"
+  }
+ ]
+}

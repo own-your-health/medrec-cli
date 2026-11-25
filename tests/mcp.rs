@@ -950,11 +950,17 @@ fn private_items_stay_out_of_household_wide_answers_unless_asked_about() {
 }
 
 /// The folder with Alex's records those of tests/fixtures/standing, at its
-/// three places.
+/// places.
 fn standing_household(e: &Env) {
+    fixture_household(e, "standing", &["index.json"]);
+}
+
+/// The folder with these files of a fixture as Alex's, at the places of
+/// tests/fixtures/standing. Alex's folder.
+fn fixture_household(e: &Env, fixture: &str, files: &[&str]) -> PathBuf {
     household(e);
     let read = |p: &Path| -> Value { serde_json::from_slice(&std::fs::read(p).unwrap()).unwrap() };
-    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/standing");
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let path = e.records().join("household.json");
     let mut h = read(&path);
     let alex = h["people"]
@@ -964,7 +970,7 @@ fn standing_household(e: &Env) {
         .find(|p| p["name"] == "Alex Testperson")
         .unwrap()
         .clone();
-    for s in read(&fixtures.join("household.json"))["sources"]
+    for s in read(&fixtures.join("standing/household.json"))["sources"]
         .as_array()
         .unwrap()
     {
@@ -973,10 +979,13 @@ fn standing_household(e: &Env) {
         h["sources"].as_array_mut().unwrap().push(s);
     }
     std::fs::write(&path, serde_json::to_vec(&h).unwrap()).unwrap();
-    let mut idx = read(&fixtures.join("index.json"));
-    idx["person"] = alex["id"].clone();
     let dir = e.records().join(alex["folder"].as_str().unwrap());
-    std::fs::write(dir.join("index.json"), serde_json::to_vec(&idx).unwrap()).unwrap();
+    for f in files {
+        let mut v = read(&fixtures.join(fixture).join(f));
+        v["person"] = alex["id"].clone();
+        std::fs::write(dir.join(f), serde_json::to_vec(&v).unwrap()).unwrap();
+    }
+    dir
 }
 
 fn h_id(e: &Env, name: &str) -> String {
@@ -985,6 +994,287 @@ fn h_id(e: &Env, name: &str) -> String {
     let mut people = h["people"].as_array().unwrap().iter();
     let found = people.find(|p| p["name"] == name).unwrap();
     found["id"].as_str().unwrap().to_string()
+}
+
+const ERRORS: &[&str] = &["index.json", "marks.json", "overrides.json"];
+const SKIN_VISIT: &str = "r_skinvisitaaaaaaaaaaa";
+const SKIN_BILL: &str = "d_skinbillaaaaaaaaaaaa";
+const EYE_BILL: &str = "d_eyebillaaaaaaaaaaaaa";
+const LETTER: &str = "d_letteraaaaaaaaaaaaaa";
+const EAST: &str = "Sample Clinic East: entered-in-error (read 2024-07-03)";
+const NORTH: &str = "Example Health: current (read 2024-07-02)";
+
+/// A page without what is entered in error says how many it leaves out, of
+/// those the answer could show; each is there when asked for by its id.
+#[test]
+fn what_is_entered_in_error_is_counted_and_opened_by_its_id() {
+    let e = Env::new("errors");
+    let dir = fixture_household(&e, "errors", ERRORS);
+    let t = e.tools();
+    let ask = |tool: &str, args: Value| {
+        let r = call(&t, tool, args);
+        assert!(!r.is_error(), "{tool}: {}", r.text());
+        assert_fits(&t, tool, &r).clone()
+    };
+    let ids = |v: &Value| -> Vec<String> {
+        let items = v["items"].as_array().unwrap().iter();
+        items
+            .map(|i| i["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let warned = |v: &Value, code: &str| -> Option<String> {
+        let w = v["warnings"].as_array().into_iter().flatten();
+        let found = w.into_iter().find(|w| w["code"] == code)?;
+        Some(found["message"].as_str().unwrap().to_string())
+    };
+    let item = |v: &Value, id: &str| -> Value {
+        let mut items = v["items"].as_array().unwrap().iter();
+        items.find(|i| i["id"] == id).unwrap().clone()
+    };
+    let hidden = [SKIN_BILL, LETTER, "d_footbillaaaaaaaaaaaa"];
+
+    // Of the household, a private one is not counted; of the person, it is.
+    for (person, errors, bills, events) in [
+        (
+            None,
+            "2 entered in error, not shown",
+            "1 bill entered in error, with a payment you marked",
+            "3 entered in error, not shown",
+        ),
+        (
+            Some("Alex"),
+            "3 entered in error, not shown",
+            "2 bills entered in error, 1 with a payment you marked",
+            "4 entered in error, not shown",
+        ),
+    ] {
+        let of = |kind: &str| {
+            let mut args = json!({"kind": kind});
+            if let Some(p) = person {
+                args["person"] = p.into();
+            }
+            ask(RECORDS, args)
+        };
+        for (kind, line) in [("documents", errors), ("bills", bills), ("events", events)] {
+            let v = of(kind);
+            assert!(!ids(&v).iter().any(|i| hidden.contains(&i.as_str())), "{v}");
+            assert_eq!(
+                warned(&v, "entered-in-error").as_deref(),
+                Some(line),
+                "{kind} {person:?}"
+            );
+            let private = warned(&v, "private-left-out").is_some();
+            assert_eq!(private, person.is_none(), "{kind}");
+        }
+        let v = of("bills");
+        let bill = item(&v, EYE_BILL);
+        assert_eq!(bill["standing"], "sources differ");
+        assert_eq!(bill["says"], json!(format!("{NORTH}; {EAST}")));
+        // The visit keeps its event, which says what it lost.
+        let v = of("events");
+        let visits = v["items"].as_array().unwrap().iter();
+        let visits: Vec<&Value> = visits
+            .filter(|i| i["person"] == "Alex Testperson")
+            .collect();
+        assert_eq!(visits.len(), 1, "{v}");
+        assert_eq!(visits[0]["you_owe"], "40.00 USD");
+        let detail = visits[0]["detail"].as_str().unwrap();
+        assert!(
+            detail.ends_with("2 entered in error, not shown"),
+            "{detail}"
+        );
+    }
+    let v = ask(RECORDS, json!({"kind": "results", "person": "Alex"}));
+    let differs = item(&v, "r_leveldiffersaaaaaaaa");
+    assert_eq!(differs["standing"], "sources differ");
+    assert_eq!(differs["status"], "final");
+    assert_eq!(
+        warned(&v, "entered-in-error").unwrap(),
+        "1 entered in error, not shown"
+    );
+    let v = ask(SEARCH, json!({"query": "example letter"}));
+    assert_eq!(ids(&v), Vec::<String>::new());
+    assert_eq!(
+        warned(&v, "entered-in-error").unwrap(),
+        "1 entered in error, not shown"
+    );
+
+    // The summary of the person says the same of each section.
+    let v = ask(SUMMARY, json!({"person": "Alex"}));
+    let note = |section: &str| {
+        let sections = v["summary"]["sections"].as_array().unwrap();
+        let of = sections.iter().find(|s| s["section"] == section);
+        of.unwrap()["note"].as_str().unwrap_or_default().to_string()
+    };
+    for section in ["immunizations", "latest_results", "recent_visits"] {
+        assert_eq!(note(section), "1 entered in error, not shown", "{section}");
+    }
+    assert_eq!(
+        note("bills"),
+        "2 bills entered in error, 1 with a payment you marked"
+    );
+
+    // Opened by its id, one says what each source says and what is kept.
+    let hint = |id: &str| {
+        let v = ask(DOCUMENT, json!({"id": id}));
+        v["hint"].as_str().unwrap().to_string()
+    };
+    let out = format!("Entered in error ({EAST}): it is in no list, event, bill or total.");
+    assert!(hint(SKIN_BILL).starts_with(&format!(
+        "{out} Kept and not applied: 1 payment on it. No text"
+    )));
+    assert!(hint(LETTER).starts_with(&format!(
+        "{out} Kept and not applied: 1 decision about its event, 1 correction of a provider it \
+         names. No text"
+    )));
+    assert!(hint("d_footbillaaaaaaaaaaaa").starts_with(&format!("{out} No text")));
+    let differ = format!("Its sources differ ({NORTH}; {EAST}). No text");
+    assert!(hint(EYE_BILL).starts_with(&differ), "{}", hint(EYE_BILL));
+    let events = e.ok(&["events", "list", "--person", "Alex"]);
+    let visit = events["items"][0]["id"].as_str().unwrap().to_string();
+    assert_eq!(events["items"].as_array().unwrap().len(), 1);
+    let v = ask(RECORDS, json!({"kind": "events", "id": visit}));
+    let fields = &v["items"][0]["fields"];
+    assert_eq!(fields["in_error"], json!([LETTER, SKIN_BILL]));
+    assert_eq!(fields["not_applied"][0]["id"], "o_togetheraaaaaaaaaaaa");
+    let views: Value = {
+        e.ok(&["views", "write"]);
+        let pid = h_id(&e, "Alex Testperson");
+        let dir = e.records().join("views").join(pid);
+        let file = std::fs::read_dir(dir).unwrap().find_map(|f| {
+            let f = f.unwrap().path();
+            let name = f.file_name()?.to_string_lossy().into_owned();
+            name.starts_with("events.").then_some(f)
+        });
+        serde_json::from_slice(&std::fs::read(file.unwrap()).unwrap()).unwrap()
+    };
+    let lost = views["events_in_error"].as_array().unwrap();
+    assert_eq!(lost.len(), 4);
+    for l in lost {
+        let v = ask(RECORDS, json!({"kind": "events", "id": l["id"]}));
+        assert_eq!(v["items"][0]["standing"], "entered in error");
+        assert_eq!(warned(&v, "entered-in-error"), None);
+    }
+
+    // Back as it was once its source no longer says so.
+    let path = dir.join("index.json");
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, text.replace("entered-in-error", "current")).unwrap();
+    for kind in ["documents", "bills", "events", "results"] {
+        let v = ask(RECORDS, json!({"kind": kind, "person": "Alex"}));
+        assert_eq!(warned(&v, "entered-in-error"), None, "{kind}");
+    }
+    let v = ask(RECORDS, json!({"kind": "bills", "person": "Alex"}));
+    let detail = item(&v, SKIN_BILL)["detail"].to_string();
+    assert!(detail.contains("25.00 left"), "{detail}");
+    let v = ask(RECORDS, json!({"kind": "events", "id": visit}));
+    let members = v["items"][0]["fields"]["members"].to_string();
+    assert!(members.contains(LETTER), "{members}");
+}
+
+/// The commands say the same, and what the household decided of what is in
+/// error is kept, not applied and said so.
+#[test]
+fn the_commands_count_what_is_entered_in_error_and_keep_what_was_decided() {
+    let e = Env::new("errors-cmd");
+    let dir = fixture_household(&e, "errors", ERRORS);
+    let notes = |v: &Value| -> Vec<String> {
+        let n = v["notes"].as_array().into_iter().flatten();
+        n.map(|n| n.as_str().unwrap().to_string()).collect()
+    };
+    for (args, line) in [
+        (
+            vec!["documents", "list", "--person", "Alex"],
+            "3 entered in error, not shown",
+        ),
+        (
+            vec!["events", "list", "--person", "Alex"],
+            "4 entered in error, not shown",
+        ),
+        (
+            vec!["bills", "list", "--person", "Alex"],
+            "2 bills entered in error, 1 with a payment you marked",
+        ),
+        (
+            vec!["private", "list", "--person", "Alex"],
+            "2 entered in error, not shown",
+        ),
+        (
+            vec!["bills", "list"],
+            "Alex Testperson: 2 bills entered in error, 1 with a payment you marked",
+        ),
+    ] {
+        let v = e.ok(&args);
+        assert_eq!(notes(&v), [line], "{args:?}");
+        for i in v["items"].as_array().unwrap() {
+            let of = ["id", "document", "item"].map(|k| i[k].as_str().unwrap_or_default());
+            assert!(!of.contains(&SKIN_BILL) && !of.contains(&LETTER), "{i}");
+        }
+        let out = e.run(&args);
+        let said = String::from_utf8_lossy(&out.stderr);
+        assert!(said.contains(line), "{args:?}: {said}");
+    }
+    let v = e.ok(&["bills", "list", "--person", "Alex"]);
+    let calls = v["worth_a_call"].as_array().unwrap();
+    assert!(calls.iter().all(|c| c["bill"] != SKIN_BILL), "{v}");
+    let v = e.ok(&["documents", "list", "--person", "Alex"]);
+    assert_eq!(v["items"][0]["standing"], "sources differ");
+    assert_eq!(v["items"][0]["says"], json!([NORTH, EAST]));
+
+    let kept = |args: &[&str], id: &str| {
+        let v = e.ok(args);
+        let mut items = v["items"].as_array().unwrap().iter();
+        items.find(|i| i["id"] == id).unwrap()["not_applied"] == true
+    };
+    for (args, id) in [
+        (
+            ["bills", "payments", "--person", "Alex"],
+            "o_paidaaaaaaaaaaaaaaaa",
+        ),
+        (
+            ["events", "decisions", "--person", "Alex"],
+            "o_togetheraaaaaaaaaaaa",
+        ),
+        (
+            ["labels", "list", "--person", "Alex"],
+            "o_deskaaaaaaaaaaaaaaaa",
+        ),
+    ] {
+        assert!(kept(&args, id), "{args:?}");
+    }
+    // So is what it decides now.
+    let paid = ["bills", "paid", SKIN_BILL, "--on", "2024-05-07"];
+    let v = e.ok(&[&paid[..], &["--amount", "5.00"]].concat());
+    assert_eq!(v["not_applied"], true);
+    let v = e.ok(&["events", "apart", SKIN_VISIT, SKIN_BILL]);
+    assert_eq!(v["not_applied"], true);
+    let v = e.ok(&[
+        "bills",
+        "paid",
+        EYE_BILL,
+        "--on",
+        "2024-07-09",
+        "--amount",
+        "5.00",
+    ]);
+    assert!(v.get("not_applied").is_none());
+
+    let path = dir.join("index.json");
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, text.replace("entered-in-error", "current")).unwrap();
+    assert!(!kept(
+        &["bills", "payments", "--person", "Alex"],
+        "o_paidaaaaaaaaaaaaaaaa"
+    ));
+    assert!(!kept(
+        &["events", "decisions", "--person", "Alex"],
+        "o_togetheraaaaaaaaaaaa"
+    ));
+    let v = e.ok(&["bills", "list", "--person", "Alex"]);
+    assert_eq!(notes(&v), Vec::<String>::new());
+    let bills = v["items"].as_array().unwrap();
+    let skin = bills.iter().find(|b| b["document"] == SKIN_BILL).unwrap();
+    assert_eq!(skin["paid_total"], "20.00");
 }
 
 #[test]

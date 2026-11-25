@@ -20,6 +20,7 @@
 //! and `overrides.json`, and, for the X rules, a guardian's or child's
 //! index. Nothing here is a source.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
 
@@ -30,6 +31,7 @@ use serde_json::{json, Map, Value};
 use crate::marks::{failed, Failed, READ_DECISIONS, RECORDS, WRITE_DECISIONS};
 use crate::model::{Document, Person, PersonIndex, PersonText, Record};
 use crate::sources::Sources;
+use crate::standing;
 
 pub const SCHEMA: &str = "medrec-events/v1";
 pub const OVERRIDES_SCHEMA: &str = "medrec-overrides/v1";
@@ -1330,7 +1332,8 @@ fn claim_what(c: &Record) -> Option<String> {
     })
 }
 
-const SKIPPED_STATUS: &[&str] = &["planned", "cancelled", "entered-in-error"];
+/// Those entered in error are not in the index the events are made of.
+const SKIPPED_STATUS: &[&str] = &["planned", "cancelled"];
 
 fn record_start(r: &Record) -> Option<&str> {
     r.fields
@@ -2441,11 +2444,30 @@ fn labels_of<'a>(idx: &'a PersonIndex, out: &mut Labels<'a>) {
     }
 }
 
+/// The items one source of theirs says are entered in error and another does
+/// not.
+type Differ<'a> = BTreeSet<&'a str>;
+
+fn differ_of<'a>(idx: &'a PersonIndex, out: &mut Differ<'a>) {
+    let records = idx.records.iter().filter(|r| standing::record_differs(r));
+    out.extend(records.map(|r| r.id.as_str()));
+    let papers = idx.documents.iter();
+    let papers = papers.filter(|d| standing::document_differs(d));
+    out.extend(papers.map(|d| d.id.as_str()));
+}
+
+/// The ids of a person's records and papers.
+fn ids_of(idx: &PersonIndex) -> impl Iterator<Item = &str> {
+    let records = idx.records.iter().map(|r| r.id.as_str());
+    records.chain(idx.documents.iter().map(|d| d.id.as_str()))
+}
+
 fn render(
     person: &str,
     ev: &Ev,
     recs: &BTreeMap<&str, &Record>,
     labels: &Labels,
+    differ: &Differ,
     aliases: &[Alias],
     from: Sources,
 ) -> Option<(Day, Day, String, Value)> {
@@ -2731,6 +2753,9 @@ fn render(
             if let Some(p) = &m.person {
                 v.insert("person".into(), json!(p));
             }
+            if differ.contains(m.id.as_str()) {
+                v.insert("differs".into(), Value::Bool(true));
+            }
             for (k, x) in &m.extra {
                 v.insert(k.clone(), x.clone());
             }
@@ -2763,26 +2788,20 @@ fn render(
     Some((start, end, id, Value::Object(o)))
 }
 
-/// A person's events document.
-pub fn build(inp: &Input) -> Value {
+/// The person's events as the rules and the household's decisions make them
+/// of an index, and how many of the decisions applied.
+fn grouped(inp: &Input, idx: &PersonIndex, linked: &[Linked]) -> (Base, usize) {
     let dates = Dates {
         offset: inp.utc_offset,
     };
-    let pid = &inp.person.id;
-    let from = Sources::of(inp.sources, inp.index);
-    let mut b = base(inp.index, Some(inp.texts), dates, from);
-    let recs: BTreeMap<&str, &Record> = inp
-        .index
-        .records
-        .iter()
-        .map(|r| (r.id.as_str(), r))
-        .collect();
+    let from = Sources::of(inp.sources, idx);
+    let mut b = base(idx, Some(inp.texts), dates, from);
+    let recs = records_of(idx);
 
     // X1 and X2 need the other person's events as the rules make them.
-    for l in &inp.linked {
+    for l in linked {
         let other = base(l.index, l.texts, dates, Sources::of(inp.sources, l.index));
-        let orecs: BTreeMap<&str, &Record> =
-            l.index.records.iter().map(|r| (r.id.as_str(), r)).collect();
+        let orecs = records_of(l.index);
         let stays = |evs: &[Ev]| -> Vec<(usize, Day, Day)> {
             evs.iter()
                 .enumerate()
@@ -2888,20 +2907,172 @@ pub fn build(inp: &Input) -> Value {
 
     let applied = inp
         .overrides
-        .map(|o| apply(&mut b.evs, inp.index, &o.events, dates))
+        .map(|o| apply(&mut b.evs, idx, &o.events, dates))
         .unwrap_or(0);
+    (b, applied)
+}
+
+fn newest_first(events: &mut [(Day, Day, String, Value)]) {
+    events.sort_by(|a, z| z.0.cmp(&a.0).then(z.1.cmp(&a.1)).then(a.2.cmp(&z.2)));
+}
+
+fn records_of(idx: &PersonIndex) -> BTreeMap<&str, &Record> {
+    idx.records.iter().map(|r| (r.id.as_str(), r)).collect()
+}
+
+/// A person's events document, and, when something of theirs is entered in
+/// error, the events as they are with it, each with the id of the event that
+/// has the rest of it: what tells that an item is private does not change
+/// when a source takes one back.
+pub struct Built {
+    pub events: Value,
+    pub whole: Option<Value>,
+}
+
+impl Built {
+    /// The events that decide what is private.
+    pub fn for_private(&self) -> Cow<'_, Value> {
+        let list = |v: &Value| v["events"].as_array().cloned().unwrap_or_default();
+        match &self.whole {
+            None => Cow::Borrowed(&self.events),
+            Some(whole) => {
+                let mut all = list(whole);
+                all.extend(list(&self.events));
+                Cow::Owned(json!({ "events": all }))
+            }
+        }
+    }
+}
+
+/// Where each item entered in error would be, and what the household decided
+/// of it, which is kept and not applied.
+#[derive(Default, Serialize)]
+struct Gone {
+    /// The event that has the rest of it, or the one that is none without it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    event: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    not_applied: Vec<Decision>,
+}
+
+/// A person's events document.
+pub fn build(inp: &Input) -> Value {
+    build_both(inp).events
+}
+
+pub fn build_both(inp: &Input) -> Built {
+    let pid = &inp.person.id;
+    let idx = &*standing::index(inp.index);
+    let theirs: Vec<Cow<PersonIndex>> = inp
+        .linked
+        .iter()
+        .map(|l| standing::index(l.index))
+        .collect();
+    let linked: Vec<Linked> = inp
+        .linked
+        .iter()
+        .zip(&theirs)
+        .map(|(l, index)| Linked {
+            person: l.person,
+            index,
+            texts: l.texts,
+        })
+        .collect();
+    let (b, applied) = grouped(inp, idx, &linked);
+    let from = Sources::of(inp.sources, idx);
+    let recs = records_of(idx);
 
     let mut labels = Labels::new();
     labels_of(inp.index, &mut labels);
-    for l in &inp.linked {
+    let mut differ = Differ::new();
+    differ_of(idx, &mut differ);
+    for l in &linked {
         labels_of(l.index, &mut labels);
+        differ_of(l.index, &mut differ);
     }
     let mut out: Vec<(Day, Day, String, Value)> = b
         .evs
         .iter()
-        .filter_map(|ev| render(pid, ev, &recs, &labels, &b.aliases, from))
+        .filter_map(|ev| render(pid, ev, &recs, &labels, &differ, &b.aliases, from))
         .collect();
-    out.sort_by(|a, z| z.0.cmp(&a.0).then(z.1.cmp(&a.1)).then(a.2.cmp(&z.2)));
+    newest_first(&mut out);
+
+    // With what is entered in error too: where each would be.
+    let left: BTreeSet<&str> = ids_of(idx).collect();
+    let gone: BTreeSet<&str> = ids_of(inp.index).filter(|id| !left.contains(id)).collect();
+    let mut in_error: BTreeMap<&str, Gone> = BTreeMap::new();
+    let mut lost: Vec<(Day, Day, String, Value)> = Vec::new();
+    let whole = (!gone.is_empty()).then(|| {
+        let all = records_of(inp.index);
+        let mut named = Labels::new();
+        labels_of(inp.index, &mut named);
+        for l in &linked {
+            labels_of(l.index, &mut named);
+        }
+        let (b_all, _) = grouped(inp, inp.index, &linked);
+        let shown: BTreeSet<&str> = out.iter().map(|e| e.2.as_str()).collect();
+        let now = |ev: &Ev| -> Option<String> {
+            let ids = std::iter::once(&ev.anchor).chain(ev.members.iter().map(|m| &m.id));
+            ids.filter(|id| !gone.contains(id.as_str()))
+                .filter_map(|id| b.evs.iter().find(|e| e.holds(id)))
+                .map(|e| event_id(pid, &e.anchor))
+                .find(|id| shown.contains(id.as_str()))
+        };
+        let mut events = Vec::new();
+        for ev in &b_all.evs {
+            let rendered = render(pid, ev, &all, &named, &differ, &b_all.aliases, from);
+            let Some((start, end, id, mut e)) = rendered else {
+                continue;
+            };
+            let at = now(ev);
+            let own = ev.members.iter().filter(|m| m.person.is_none());
+            let papers = own.flat_map(|m| {
+                let copies = m.extra.get("copies").and_then(Value::as_array);
+                let copies = copies.into_iter().flatten().filter_map(Value::as_str);
+                std::iter::once(m.id.as_str()).chain(copies)
+            });
+            for x in papers.filter_map(|x| gone.get(x)) {
+                in_error.entry(x).or_default().event = at.clone().or(Some(id.clone()));
+            }
+            match at {
+                Some(at) => e["id"] = json!(at),
+                None => lost.push((start, end, id, e.clone())),
+            }
+            events.push(e);
+        }
+        json!({ "events": events })
+    });
+    for d in inp
+        .overrides
+        .map(|o| o.events.as_slice())
+        .unwrap_or_default()
+    {
+        for id in d.members.iter().filter_map(|id| gone.get(id.as_str())) {
+            in_error.entry(id).or_default().not_applied.push(d.clone());
+        }
+    }
+    for (_, _, id, e) in out.iter_mut().chain(&mut lost) {
+        let of = || {
+            in_error
+                .iter()
+                .filter(|(_, g)| g.event.as_ref() == Some(id))
+        };
+        let ids: Vec<&str> = of().map(|(x, _)| *x).collect();
+        if !ids.is_empty() {
+            e["in_error"] = json!(ids);
+        }
+        let mut not_applied: Vec<&Decision> = Vec::new();
+        for d in of().flat_map(|(_, g)| &g.not_applied) {
+            if !not_applied.contains(&d) {
+                not_applied.push(d);
+            }
+        }
+        if !not_applied.is_empty() {
+            e["not_applied"] = json!(not_applied);
+        }
+    }
+    newest_first(&mut lost);
+
     let pending: Vec<Value> = b
         .pending
         .iter()
@@ -2935,7 +3106,17 @@ pub fn build(inp: &Input) -> Value {
         doc.insert("undated".into(), json!(b.undated));
     }
     doc.insert("overrides".into(), json!(applied));
-    Value::Object(doc)
+    if !lost.is_empty() {
+        let lost = lost.into_iter().map(|e| e.3).collect();
+        doc.insert("events_in_error".into(), Value::Array(lost));
+    }
+    if !in_error.is_empty() {
+        doc.insert("in_error".into(), json!(in_error));
+    }
+    Built {
+        events: Value::Object(doc),
+        whole,
+    }
 }
 
 // ---------------------------------------------------------------- the folder
@@ -2946,6 +3127,14 @@ pub fn of_person(
     h: &crate::model::Household,
     p: &Person,
 ) -> Result<Value, pk_cli_core::CliError> {
+    Ok(both(folder, h, p)?.events)
+}
+
+pub fn both(
+    folder: &crate::folder::Folder,
+    h: &crate::model::Household,
+    p: &Person,
+) -> Result<Built, pk_cli_core::CliError> {
     let idx = folder.index(p)?;
     let texts = folder.text(p)?;
     // As the views do: a decisions file that does not parse is left out;
@@ -2960,7 +3149,7 @@ pub fn of_person(
     for q in &linked_people {
         linked.push((*q, folder.index(q)?, folder.text(q)?));
     }
-    let mut v = build(&Input {
+    let mut v = build_both(&Input {
         person: p,
         index: &idx,
         texts: &texts,
@@ -2977,7 +3166,7 @@ pub fn of_person(
         utc_offset: pk_cli_core::dates::local_utc_offset,
     });
     if overrides.is_err() {
-        v["overrides_unreadable"] = Value::Bool(true);
+        v.events["overrides_unreadable"] = Value::Bool(true);
     }
     Ok(v)
 }
@@ -3060,7 +3249,8 @@ pub fn undo(
 }
 
 /// The events of the people selected, each with its `person` and
-/// `person_name`, newest first, those overlapping `range`.
+/// `person_name`, newest first, those overlapping `range`. One that is none
+/// without what is entered in error has `entered_in_error`.
 pub fn list(
     folder: &crate::folder::Folder,
     h: &crate::model::Household,
@@ -3071,7 +3261,12 @@ pub fn list(
     let mut rows = Vec::new();
     for p in crate::people::selected(h, person)? {
         let v = of_person(folder, h, p)?;
-        for mut e in v["events"].as_array().cloned().unwrap_or_default() {
+        let of = |k: &str| v[k].as_array().cloned().unwrap_or_default();
+        let mut lost = of("events_in_error");
+        for e in &mut lost {
+            e["entered_in_error"] = Value::Bool(true);
+        }
+        for mut e in of("events").into_iter().chain(lost) {
             let (start, end) = (
                 e["start"].as_str().unwrap_or("").to_string(),
                 e["end"].as_str().unwrap_or("").to_string(),

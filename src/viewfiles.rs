@@ -422,7 +422,7 @@ pub(crate) fn sync_with(
                 .ok_or(())
         });
         let me = &loaded[&p.id];
-        let mut events = crate::events::build(&crate::events::Input {
+        let mut events = crate::events::build_both(&crate::events::Input {
             person: p,
             index: &me.idx,
             texts: &me.texts,
@@ -439,7 +439,7 @@ pub(crate) fn sync_with(
             utc_offset: pk_cli_core::dates::local_utc_offset,
         });
         if matches!(overrides, Some(Err(()))) {
-            events["overrides_unreadable"] = Value::Bool(true);
+            events.events["overrides_unreadable"] = Value::Bool(true);
         }
         let mrel = crate::marks::rel(p);
         let mtext = store.read_text(&mrel)?;
@@ -455,7 +455,7 @@ pub(crate) fn sync_with(
             .and_then(|m| m.as_ref().ok())
             .map(|m| m.payments.as_slice())
             .unwrap_or_default();
-        let mut bills = crate::bills::build(p, &me.idx, &me.texts, &events, payments);
+        let mut bills = crate::bills::build(p, &me.idx, &me.texts, &events.events, payments);
         let private_marks = marks
             .as_ref()
             .and_then(|m| m.as_ref().ok())
@@ -493,9 +493,12 @@ pub(crate) fn sync_with(
             .and_then(|m| m.as_ref().ok())
             .map(|m| m.providers.as_slice())
             .unwrap_or_default();
-        let said = crate::labels::Said::of(&me.idx, &events, &state, corrections);
-        let mut private =
-            crate::private::build(p, &me.idx, &me.texts, &events, private_marks, &said.areas());
+        let mut private = {
+            let whole = events.for_private();
+            let said = crate::labels::Said::of(&me.idx, &whole, &state, corrections);
+            let (idx, texts) = (&me.idx, &me.texts);
+            crate::private::build(p, idx, texts, &events, private_marks, &said.areas())
+        };
         if state.lost() {
             private["labels_unreadable"] = Value::Bool(true);
             private["marks_unreadable"] = Value::Bool(true);
@@ -516,14 +519,23 @@ pub(crate) fn sync_with(
         };
         let code_names =
             source.and_then(|s| crate::code_names::build(p, &me.idx, &private, private_marks, &s));
+        let now = crate::standing::index(&me.idx);
+        let events = events.events;
+        let said = crate::labels::Said::of(&now, &events, &state, corrections);
+        let lost = events["events_in_error"].as_array().into_iter().flatten();
+        let gone: BTreeSet<String> = crate::standing::errors(&me.idx)
+            .chain(lost.filter_map(|e| e["id"].as_str()))
+            .map(str::to_string)
+            .collect();
         let providers = crate::labels::build(&crate::labels::Input {
             person: p,
-            index: &me.idx,
+            index: &now,
             texts: &me.texts,
             events: &events,
             private: &private,
             state: &state,
             said: &said,
+            in_error: &gone,
             salt: &|| salt.get_or_init(|| crate::ids::new("s")).clone(),
         });
         let from = EventsFrom {
@@ -916,6 +928,10 @@ fn slim(r: &Record, from: crate::sources::Sources) -> Value {
     if !r.fields.is_empty() {
         m.insert("fields".into(), Value::Object(r.fields.clone()));
     }
+    let says = crate::standing::record_says(from, r);
+    if !says.is_empty() {
+        m.insert("says".into(), serde_json::json!(says));
+    }
     let source = r
         .provenance
         .first()
@@ -1286,6 +1302,10 @@ pub(crate) fn person(
                 }
                 if let Some(names) = linked.get(d.id.as_str()) {
                     m.insert("linked".into(), serde_json::json!(names));
+                }
+                let says = crate::standing::document_says(sources, d);
+                if !says.is_empty() {
+                    m.insert("says".into(), serde_json::json!(says));
                 }
             }
             v

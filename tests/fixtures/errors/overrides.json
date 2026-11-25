@@ -1,0 +1,15 @@
+{
+ "schema": "medrec-overrides/v1",
+ "person": "p_robinaaaaaaaaaaaaaaa",
+ "events": [
+  {
+   "id": "o_togetheraaaaaaaaaaaa",
+   "kind": "together",
+   "members": [
+    "r_skinvisitaaaaaaaaaaa",
+    "d_letteraaaaaaaaaaaaaa"
+   ],
+   "at": "2024-07-05T12:00:00Z"
+  }
+ ]
+}

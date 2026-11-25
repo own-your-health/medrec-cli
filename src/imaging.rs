@@ -24,6 +24,7 @@ use crate::model::{
 };
 use crate::people;
 use crate::proc::{which, Bounded};
+use crate::standing;
 use crate::store;
 
 /// Files read from one source; a CD with its viewer software is far less.
@@ -589,6 +590,7 @@ pub fn link_reports(idx: &mut PersonIndex) -> usize {
         .documents
         .iter()
         .filter(|d| d.doc_type.as_deref() == Some("imaging_report"))
+        .filter(|d| !standing::document_in_error(d))
         .map(|d| (d.id.clone(), d.date.clone()))
         .collect();
     for s in idx.studies.iter_mut().filter(|s| s.report.is_none()) {
@@ -854,7 +856,7 @@ pub fn list(
 ) -> Result<Vec<StudyRow>, CliError> {
     let mut rows = Vec::new();
     for p in people::selected(h, person)? {
-        for s in folder.index(p)?.studies {
+        for s in standing::index(&folder.index(p)?).into_owned().studies {
             rows.push(StudyRow {
                 id: s.id,
                 person: p.id.clone(),
@@ -883,8 +885,8 @@ pub fn find(
     query: &str,
 ) -> Result<(Person, ImagingStudy), CliError> {
     for p in &h.people {
-        if let Some(s) = folder
-            .index(p)?
+        if let Some(s) = standing::index(&folder.index(p)?)
+            .into_owned()
             .studies
             .into_iter()
             .find(|s| s.id == query || s.study_uid == query)

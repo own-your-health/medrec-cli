@@ -1,0 +1,541 @@
+{
+ "schema": "medrec-index/v1",
+ "person": "p_robinaaaaaaaaaaaaaaa",
+ "rev": 1,
+ "studies": [],
+ "imports": [],
+ "records": [
+  {
+   "id": "r_skinvisitaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|skinvisit|2024-03-05",
+   "date": "2024-03-05",
+   "display": "Office visit · Example Skin Room",
+   "fields": {
+    "provider": "Example Skin Room",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2024-03-05",
+     "end": "2024-03-05"
+    },
+    "type": "professional",
+    "amounts": {
+     "billed": {
+      "amount": "90.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "40.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "sequence": 1,
+      "category": "visit",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "99212",
+       "display": "Office visit"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "90.00",
+        "currency": "USD"
+       },
+       "you_owe": {
+        "amount": "40.00",
+        "currency": "USD"
+       }
+      }
+     }
+    ],
+    "category": "visit"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-07-02T10:00:00Z",
+     "filed_at": "2024-07-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/Binary/skinvisit.json"
+    }
+   ]
+  },
+  {
+   "id": "r_eyevisitaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|eyevisit|2024-04-09",
+   "date": "2024-04-09",
+   "display": "Office visit · Sample Eye Room",
+   "fields": {
+    "provider": "Sample Eye Room",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2024-04-09",
+     "end": "2024-04-09"
+    },
+    "type": "professional",
+    "amounts": {
+     "billed": {
+      "amount": "90.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "30.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "sequence": 1,
+      "category": "visit",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "99212",
+       "display": "Office visit"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "90.00",
+        "currency": "USD"
+       },
+       "you_owe": {
+        "amount": "30.00",
+        "currency": "USD"
+       }
+      }
+     }
+    ],
+    "category": "visit"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "east",
+      "fhir_base": "https://east.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-07-03T10:00:00Z",
+     "filed_at": "2024-07-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/east/Binary/eyevisit.json"
+    }
+   ],
+   "status": "entered-in-error"
+  },
+  {
+   "id": "r_footvisitaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|footvisit|2024-05-14",
+   "date": "2024-05-14",
+   "display": "Office visit · Example Foot Room",
+   "fields": {
+    "provider": "Example Foot Room",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2024-05-14",
+     "end": "2024-05-14"
+    },
+    "type": "professional",
+    "amounts": {
+     "billed": {
+      "amount": "90.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "20.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "sequence": 1,
+      "category": "visit",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "99212",
+       "display": "Office visit"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "90.00",
+        "currency": "USD"
+       },
+       "you_owe": {
+        "amount": "20.00",
+        "currency": "USD"
+       }
+      }
+     }
+    ],
+    "category": "visit"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "east",
+      "fhir_base": "https://east.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-07-03T10:00:00Z",
+     "filed_at": "2024-07-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/east/Binary/footvisit.json"
+    }
+   ],
+   "status": "entered-in-error"
+  },
+  {
+   "id": "r_leveldiffersaaaaaaaa",
+   "kind": "result",
+   "key": "result|leveldiffers|2024-03-06",
+   "date": "2024-03-06",
+   "display": "Sample level",
+   "fields": {
+    "value": "4"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-07-02T10:00:00Z",
+     "filed_at": "2024-07-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/Binary/leveldiffers.json"
+    },
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "east",
+      "fhir_base": "https://east.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-07-03T10:00:00Z",
+     "filed_at": "2024-07-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/east/Binary/leveldiffers.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/north/Binary/leveldiffers.json",
+     "status": "final",
+     "read": "2024-07-02T10:00:00Z"
+    },
+    {
+     "raw_path": "Robin Example/Records/east/Binary/leveldiffers.json",
+     "status": "entered-in-error",
+     "read": "2024-07-03T10:00:00Z"
+    }
+   ],
+   "fields_from": "Robin Example/Records/north/Binary/leveldiffers.json",
+   "status": "final"
+  },
+  {
+   "id": "r_levelerroraaaaaaaaaa",
+   "kind": "result",
+   "key": "result|levelerror|2024-03-07",
+   "date": "2024-03-07",
+   "display": "Example level",
+   "fields": {
+    "value": "9"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "east",
+      "fhir_base": "https://east.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-07-03T10:00:00Z",
+     "filed_at": "2024-07-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/east/Binary/levelerror.json"
+    }
+   ],
+   "status": "entered-in-error"
+  },
+  {
+   "id": "r_doseerroraaaaaaaaaaa",
+   "kind": "immunization",
+   "key": "immunization|doseerror|2024-03-08",
+   "date": "2024-03-08",
+   "display": "Example vaccine",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "east",
+      "fhir_base": "https://east.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-07-03T10:00:00Z",
+     "filed_at": "2024-07-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/east/Binary/doseerror.json"
+    }
+   ],
+   "status": "entered-in-error"
+  },
+  {
+   "id": "r_checkerroraaaaaaaaaa",
+   "kind": "encounter",
+   "key": "encounter|checkerror|2024-06-18",
+   "date": "2024-06-18",
+   "display": "Example check",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "east",
+      "fhir_base": "https://east.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-07-03T10:00:00Z",
+     "filed_at": "2024-07-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/east/Binary/checkerror.json"
+    }
+   ],
+   "status": "entered-in-error"
+  }
+ ],
+ "documents": [
+  {
+   "id": "d_skinbillaaaaaaaaaaaa",
+   "path": "Robin Example/Claims/2024/skinbill.pdf",
+   "sha256": "skinbill",
+   "md5": "skinbill",
+   "size": 10,
+   "media_type": "application/pdf",
+   "doc_type": "bill",
+   "date": "2024-04-02",
+   "organization": "Example Skin Room",
+   "title": "Skin statement",
+   "filed_at": "2024-07-04T10:00:00Z",
+   "origin": {
+    "kind": "fhir",
+    "action": "imported"
+   },
+   "provenance": {
+    "source": {
+     "kind": "fhir",
+     "cli": "fakeprov",
+     "organization_id": "east",
+     "fhir_base": "https://east.example.test/fhir"
+    },
+    "method": "fhir-api",
+    "fetched_at": "2024-07-03T10:00:00Z",
+    "filed_at": "2024-07-04T10:00:00Z",
+    "filed_by": "medrec 0.9.9",
+    "raw_path": "Robin Example/Records/east/Binary/skinbill.json"
+   },
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/east/Binary/skinbill.json",
+     "status": "entered-in-error",
+     "read": "2024-07-03T10:00:00Z"
+    }
+   ],
+   "errors": [
+    {
+     "raw_path": "Robin Example/Records/east/Binary/skinbill.json",
+     "from": "2024-07-03T10:00:00Z"
+    }
+   ],
+   "statement": {
+    "statement_date": "2024-04-02",
+    "amount_due": {
+     "amount": "40.00",
+     "currency": "USD"
+    }
+   }
+  },
+  {
+   "id": "d_eyebillaaaaaaaaaaaaa",
+   "path": "Robin Example/Claims/2024/eyebill.pdf",
+   "sha256": "eyebill",
+   "md5": "eyebill",
+   "size": 10,
+   "media_type": "application/pdf",
+   "doc_type": "bill",
+   "date": "2024-06-04",
+   "organization": "Sample Eye Room",
+   "title": "Eye statement",
+   "filed_at": "2024-07-04T10:00:00Z",
+   "origin": {
+    "kind": "fhir",
+    "action": "imported"
+   },
+   "provenance": {
+    "source": {
+     "kind": "fhir",
+     "cli": "fakeprov",
+     "organization_id": "north",
+     "fhir_base": "https://north.example.test/fhir"
+    },
+    "method": "fhir-api",
+    "fetched_at": "2024-07-02T10:00:00Z",
+    "filed_at": "2024-07-04T10:00:00Z",
+    "filed_by": "medrec 0.9.9",
+    "raw_path": "Robin Example/Records/north/Binary/eyebill.json"
+   },
+   "also_from": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "east",
+      "fhir_base": "https://east.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-07-03T10:00:00Z",
+     "filed_at": "2024-07-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/east/Binary/eyebill.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/north/Binary/eyebill.json",
+     "status": "current",
+     "read": "2024-07-02T10:00:00Z"
+    },
+    {
+     "raw_path": "Robin Example/Records/east/Binary/eyebill.json",
+     "status": "entered-in-error",
+     "read": "2024-07-03T10:00:00Z"
+    }
+   ],
+   "errors": [
+    {
+     "raw_path": "Robin Example/Records/east/Binary/eyebill.json",
+     "from": "2024-07-03T10:00:00Z"
+    }
+   ],
+   "statement": {
+    "statement_date": "2024-06-04",
+    "amount_due": {
+     "amount": "30.00",
+     "currency": "USD"
+    }
+   }
+  },
+  {
+   "id": "d_footbillaaaaaaaaaaaa",
+   "path": "Robin Example/Claims/2024/footbill.pdf",
+   "sha256": "footbill",
+   "md5": "footbill",
+   "size": 10,
+   "media_type": "application/pdf",
+   "doc_type": "bill",
+   "date": "2024-06-11",
+   "organization": "Example Foot Room",
+   "title": "Foot statement",
+   "filed_at": "2024-07-04T10:00:00Z",
+   "origin": {
+    "kind": "fhir",
+    "action": "imported"
+   },
+   "provenance": {
+    "source": {
+     "kind": "fhir",
+     "cli": "fakeprov",
+     "organization_id": "east",
+     "fhir_base": "https://east.example.test/fhir"
+    },
+    "method": "fhir-api",
+    "fetched_at": "2024-07-03T10:00:00Z",
+    "filed_at": "2024-07-04T10:00:00Z",
+    "filed_by": "medrec 0.9.9",
+    "raw_path": "Robin Example/Records/east/Binary/footbill.json"
+   },
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/east/Binary/footbill.json",
+     "status": "entered-in-error",
+     "read": "2024-07-03T10:00:00Z"
+    }
+   ],
+   "errors": [
+    {
+     "raw_path": "Robin Example/Records/east/Binary/footbill.json",
+     "from": "2024-07-03T10:00:00Z"
+    }
+   ],
+   "statement": {
+    "statement_date": "2024-06-11",
+    "amount_due": {
+     "amount": "20.00",
+     "currency": "USD"
+    }
+   }
+  },
+  {
+   "id": "d_letteraaaaaaaaaaaaaa",
+   "path": "Robin Example/Claims/2024/letter.pdf",
+   "sha256": "letter",
+   "md5": "letter",
+   "size": 10,
+   "media_type": "application/pdf",
+   "doc_type": "other",
+   "date": "2024-03-12",
+   "organization": "Example Letter Desk",
+   "title": "Example letter",
+   "filed_at": "2024-07-04T10:00:00Z",
+   "origin": {
+    "kind": "fhir",
+    "action": "imported"
+   },
+   "provenance": {
+    "source": {
+     "kind": "fhir",
+     "cli": "fakeprov",
+     "organization_id": "east",
+     "fhir_base": "https://east.example.test/fhir"
+    },
+    "method": "fhir-api",
+    "fetched_at": "2024-07-03T10:00:00Z",
+    "filed_at": "2024-07-04T10:00:00Z",
+    "filed_by": "medrec 0.9.9",
+    "raw_path": "Robin Example/Records/east/Binary/letter.json"
+   },
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/east/Binary/letter.json",
+     "status": "entered-in-error",
+     "read": "2024-07-03T10:00:00Z"
+    }
+   ],
+   "errors": [
+    {
+     "raw_path": "Robin Example/Records/east/Binary/letter.json",
+     "from": "2024-07-03T10:00:00Z"
+    }
+   ]
+  }
+ ]
+}

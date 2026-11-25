@@ -603,8 +603,10 @@ struct PrivateItems {
     /// The record, document, event and study ids of those people, and
     /// every study with no report, which nothing judges.
     held: std::collections::BTreeSet<String>,
-    /// The records entered in error, which no list shows.
+    /// What is entered in error, which no list shows.
     errors: std::collections::BTreeSet<String>,
+    /// The bills entered in error the household marked a payment on.
+    paid_errors: std::collections::BTreeSet<String>,
 }
 
 impl PrivateItems {
@@ -626,9 +628,9 @@ impl PrivateItems {
                         .chain(idx.documents.iter().map(|d| d.id.clone()))
                         .chain(idx.studies.iter().map(|s| s.id.clone()))
                         .chain(
-                            events["events"]
-                                .as_array()
-                                .into_iter()
+                            ["events", "events_in_error"]
+                                .iter()
+                                .filter_map(|k| events.events[*k].as_array())
                                 .flatten()
                                 .filter_map(|e| e["id"].as_str().map(str::to_string)),
                         ),
@@ -664,6 +666,9 @@ impl PrivateItems {
             let private = ids().any(|id| self.held_back(id));
             if private && !open(i) {
                 return Some(views::Why::Private);
+            }
+            if self.paid_errors.contains(&i.id) {
+                return Some(views::Why::PaidError);
             }
             if self.errors.contains(&i.id) {
                 return Some(views::Why::Error);
@@ -723,7 +728,13 @@ impl PrivateItems {
     fn warn<T>(&self, page: &mut Page<T>, offset: usize, left_out: &views::LeftOut) {
         let (returned, last) = (page.info.returned, page.info.next_cursor.is_none());
         let n = left_out.on_page(views::Why::Error, offset, returned, last);
-        if n > 0 {
+        let paid = left_out.on_page(views::Why::PaidError, offset, returned, last);
+        if paid > 0 {
+            page.warn(
+                "entered-in-error",
+                crate::bills::in_error_line(n + paid, paid),
+            );
+        } else if n > 0 {
             page.warn("entered-in-error", standing::in_error(n));
         }
         let n = left_out.on_page(views::Why::Private, offset, returned, last);
@@ -827,6 +838,10 @@ fn event_item(e: &Value, detailed: bool) -> Item {
     if !expected.is_empty() {
         parts.push(format!("still expected: {}", expected.join(", ")));
     }
+    match e["in_error"].as_array().map_or(0, Vec::len) {
+        0 => {}
+        n => parts.push(standing::in_error(n)),
+    }
     let fields = detailed.then(|| {
         [
             "confidence",
@@ -836,6 +851,8 @@ fn event_item(e: &Value, detailed: bool) -> Item {
             "differences",
             "links",
             "could_join",
+            "in_error",
+            "not_applied",
         ]
         .into_iter()
         .filter_map(|k| {
@@ -853,6 +870,7 @@ fn event_item(e: &Value, detailed: bool) -> Item {
         title: s("title").unwrap_or_default(),
         detail: (!parts.is_empty()).then(|| clip(&parts.join("; "), CLIP)),
         status: s("status"),
+        standing: (e["entered_in_error"] == true).then(|| "entered in error".into()),
         source: s("place"),
         id: s("id").unwrap_or_default(),
         you_owe: e["money"]["you_owe"]
@@ -1001,7 +1019,7 @@ impl MedrecTools {
             |title: &str| name.is_none_or(|n| classify::fold(title).contains(&classify::fold(n)));
         let today = today();
         let mut items: Vec<Item> = Vec::new();
-        let private = PrivateItems::of(&f, &h, &selected)?;
+        let mut private = PrivateItems::of(&f, &h, &selected)?;
         let open =
             |title: &str| person.is_some() || name.is_some_and(|n| crate::private::names(title, n));
         let mut notes: Vec<String> = Vec::new();
@@ -1141,33 +1159,47 @@ impl MedrecTools {
                 let bills = a.kind == Kind::Bills;
                 for p in &selected {
                     // What is paid and left on each bill (`bills.json`).
+                    let of_bills = match bills {
+                        true => crate::bills::of_person(&f, &h, p)?,
+                        false => Value::Null,
+                    };
                     let standing: std::collections::BTreeMap<String, (bool, Option<String>)> =
-                        if bills {
-                            crate::bills::of_person(&f, &h, p)?["bills"]
-                                .as_object()
-                                .into_iter()
-                                .flatten()
-                                .map(|(id, b)| {
-                                    (
-                                        id.clone(),
-                                        (
-                                            b["settled"] == true,
-                                            b["left"].as_str().map(str::to_string),
-                                        ),
-                                    )
-                                })
-                                .collect()
-                        } else {
-                            std::collections::BTreeMap::new()
-                        };
-                    for d in f.index(p)?.documents {
-                        let is_bill = d.doc_type.as_deref() == Some("bill");
-                        if (bills && (!is_bill || d.same_statement_as.is_some()))
+                        of_bills["bills"]
+                            .as_object()
+                            .into_iter()
+                            .flatten()
+                            .map(|(id, b)| {
+                                (
+                                    id.clone(),
+                                    (b["settled"] == true, b["left"].as_str().map(str::to_string)),
+                                )
+                            })
+                            .collect();
+                    let lost = crate::bills::lost(&of_bills);
+                    private.paid_errors.extend(
+                        lost.iter()
+                            .filter(|(_, paid)| **paid)
+                            .map(|(id, _)| id.to_string()),
+                    );
+                    let mut idx = f.index(p)?;
+                    let documents = std::mem::take(&mut idx.documents);
+                    let from = Sources::of(&h.sources, &idx);
+                    for d in documents {
+                        // A bill is there by the first of its papers that
+                        // stands, else to be counted.
+                        let is_bill =
+                            standing.contains_key(&d.id) || lost.contains_key(d.id.as_str());
+                        if (bills && !is_bill)
                             || doc_type.is_some_and(|t| d.doc_type.as_deref() != Some(t))
                             || !r.holds(d.date.as_deref())
                         {
                             continue;
                         }
+                        let (differ, says) =
+                            standing::differ(&match private.errors.contains(&d.id) {
+                                true => Vec::new(),
+                                false => standing::document_says(from, &d),
+                            });
                         let title = d
                             .title
                             .clone()
@@ -1209,6 +1241,8 @@ impl MedrecTools {
                             has_text: Some(d.text.as_ref().is_some_and(|t| t.chars > 0)),
                             person_id: p.id.clone(),
                             printed: Printed::of_document(d.organization.as_deref()),
+                            standing: differ,
+                            says: joined(says),
                             ..Default::default()
                         });
                     }
@@ -1270,7 +1304,27 @@ impl MedrecTools {
         let (f, h) = self.open()?;
         let selected = people::selected(&h, person).map_err(person_error)?;
         let fold = name.map(classify::fold);
-        let items: Vec<Item> = crate::events::list(&f, &h, person, r)?
+        let mut private = PrivateItems::of(&f, &h, &selected)?;
+        let mut events = crate::events::list(&f, &h, person, r)?;
+        for e in &mut events {
+            if e["entered_in_error"] == true && id.is_none() {
+                private.errors.extend(e["id"].as_str().map(str::to_string));
+            }
+            // What an answer could not show it does not count or name.
+            if person.or(id).is_none() {
+                let shown = |x: &Value| x.as_str().is_some_and(|x| !private.held_back(x));
+                if let Some(ids) = e["in_error"].as_array_mut() {
+                    ids.retain(shown);
+                }
+                if let Some(decisions) = e["not_applied"].as_array_mut() {
+                    decisions.retain(|d| {
+                        let members = d["members"].as_array().into_iter().flatten();
+                        members.into_iter().all(shown)
+                    });
+                }
+            }
+        }
+        let items: Vec<Item> = events
             .iter()
             .filter(|e| id.is_none_or(|id| e["id"] == id))
             .filter(|e| {
@@ -1296,7 +1350,6 @@ impl MedrecTools {
                     .with_fix("List events with medrec_records kind events to find the id"),
             );
         }
-        let private = PrivateItems::of(&f, &h, &selected)?;
         let (mut items, left_out) = private.keep(items, |i| {
             person.is_some()
                 || id.is_some()
@@ -1366,6 +1419,11 @@ impl MedrecTools {
             true => Vec::new(),
             false => private.labels(&Labels::read(&f, &h, &p), &d.id, &printed, true),
         };
+        let note = views::paper_note(&f, &h, &p, &d)?;
+        let hint = |text: Option<String>| {
+            let both: Vec<String> = note.clone().into_iter().chain(text).collect();
+            (!both.is_empty()).then(|| both.join(" "))
+        };
         let mut out = DocumentOut {
             id: d.id.clone(),
             person: p.name.clone(),
@@ -1386,11 +1444,11 @@ impl MedrecTools {
             ..Default::default()
         };
         if chars.is_empty() {
-            out.hint = Some(
+            out.hint = hint(Some(
                 "No text was extracted from this document: an image without OCR, or a file \
                  medrec cannot read."
                     .into(),
-            );
+            ));
             return ToolOutput::new(&out);
         }
         let page_of = |i: usize| breaks.iter().filter(|b| **b < i).count() as u32 + 1;
@@ -1401,9 +1459,8 @@ impl MedrecTools {
             out.last_page = page_of(end.saturating_sub(1).max(start));
             out.text = marked(&chars[start..end], out.first_page);
             out.next_offset = (end < chars.len()).then_some(end);
-            out.hint = out
-                .next_offset
-                .map(|n| format!("More text follows: pass offset {n} for the next part."));
+            let more = |n| format!("More text follows: pass offset {n} for the next part.");
+            out.hint = hint(out.next_offset.map(more));
             let size = serde_json::to_string(&out)
                 .map(|s| s.chars().count())
                 .unwrap_or(0);
@@ -1615,7 +1672,10 @@ fn marked(chars: &[char], first: u32) -> String {
 }
 
 fn record_item(from: Sources, person: &str, r: Record, detailed: bool) -> Item {
+    let (standing, says) = standing::differ(&standing::record_says(from, &r));
     let mut item = Item {
+        standing,
+        says: joined(says),
         kind: r.kind.clone(),
         person: person.to_string(),
         date: if detailed {

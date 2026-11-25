@@ -11,7 +11,7 @@ use std::collections::BTreeSet;
 
 use crate::folder::Folder;
 use crate::intake::classify;
-use crate::model::{Household, Note, Person, PersonIndex, PersonText, Record};
+use crate::model::{Document, Household, Note, Person, PersonIndex, PersonText, Record};
 use crate::people;
 use crate::sources::Sources;
 use crate::standing::{self, Standings};
@@ -393,7 +393,7 @@ pub struct RecordRow {
     pub detail: Option<String>,
     pub sources: Vec<String>,
     /// What its sources' words make of a condition, an allergy or a medicine,
-    /// and what each says.
+    /// or that they differ on another, and what each says.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub standing: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -517,6 +517,7 @@ fn row(from: Sources, p: &Person, r: Record) -> RecordRow {
         .collect();
     sources.dedup();
     let detail = record_detail(&r).filter(|d| Some(d) != r.status.as_ref());
+    let (standing, says) = standing::differ(&standing::record_says(from, &r));
     RecordRow {
         detail,
         id: r.id,
@@ -528,8 +529,8 @@ fn row(from: Sources, p: &Person, r: Record) -> RecordRow {
         status: r.status,
         code: r.code.and_then(|c| c.code),
         sources,
-        standing: None,
-        says: Vec::new(),
+        standing,
+        says,
         fields: r.fields,
         documents: r.documents,
     }
@@ -619,8 +620,10 @@ fn entered_in_error(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Why {
     Private,
-    /// A record entered in error.
+    /// Entered in error.
     Error,
+    /// A bill entered in error with a payment the household marked.
+    PaidError,
 }
 
 /// Where the items a list left out sat in it, so that each page can say
@@ -917,15 +920,23 @@ pub struct DocumentRow {
     /// The bill filed before that is the same statement.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub same_statement_as: Option<String>,
+    /// That its sources differ on whether it is entered in error, and what
+    /// each says.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub standing: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub says: Vec<String>,
 }
 
+/// The papers of the people selected, newest first, and what the list says
+/// of those it does not show.
 pub fn documents(
     folder: &Folder,
     h: &Household,
     person: Option<&str>,
     doc_type: Option<&str>,
     range: &Range,
-) -> Result<Vec<DocumentRow>, CliError> {
+) -> Result<(Vec<DocumentRow>, Vec<String>), CliError> {
     range.validate()?;
     if let Some(t) = doc_type {
         if !classify::is_doc_type(t) {
@@ -933,13 +944,19 @@ pub fn documents(
         }
     }
     let mut out = Vec::new();
+    let mut in_error = 0;
     for p in people::selected(h, person)? {
-        for d in folder.index(p)?.documents {
-            if doc_type.is_some_and(|t| d.doc_type.as_deref() != Some(t))
-                || !range.holds(d.date.as_deref())
-            {
-                continue;
-            }
+        let idx = folder.index(p)?;
+        let from = Sources::of(&h.sources, &idx);
+        let asked = |d: &&Document| {
+            doc_type.is_none_or(|t| d.doc_type.as_deref() == Some(t))
+                && range.holds(d.date.as_deref())
+        };
+        let papers = idx.documents.iter().filter(asked);
+        in_error += papers.filter(|d| standing::document_in_error(d)).count();
+        for d in standing::index(&idx).documents.iter().filter(asked) {
+            let d = d.clone();
+            let (standing, says) = standing::differ(&standing::document_says(from, &d));
             out.push(DocumentRow {
                 id: d.id,
                 person: p.id.clone(),
@@ -956,11 +973,60 @@ pub fn documents(
                 near_duplicates: d.near_duplicates.into_iter().map(|n| n.document).collect(),
                 statement: d.statement,
                 same_statement_as: d.same_statement_as,
+                standing,
+                says,
             });
         }
     }
     out.sort_by(|a, b| b.date.cmp(&a.date).then(a.path.cmp(&b.path)));
-    Ok(out)
+    let notes = (in_error > 0).then(|| standing::in_error(in_error));
+    Ok((out, notes.into_iter().collect()))
+}
+
+/// What a reader says of a paper opened by its id that a source says is
+/// entered in error, with what the household decided of it, which is kept and
+/// not applied. Nothing of any other paper.
+pub fn paper_note(
+    folder: &Folder,
+    h: &Household,
+    p: &Person,
+    d: &Document,
+) -> Result<Option<String>, CliError> {
+    let idx = folder.index(p)?;
+    let note = standing::paper_note(Sources::of(&h.sources, &idx), d);
+    if note.is_none() || !standing::document_in_error(d) {
+        return Ok(note);
+    }
+    let decisions = folder.overrides(p).map(|o| o.events).unwrap_or_default();
+    let decisions = decisions.iter().filter(|x| x.members.contains(&d.id));
+    let marks = folder.marks_if_readable(p)?;
+    let labels = marks.iter().flat_map(|m| &m.providers);
+    let labels = labels.filter(|c| c.item.as_ref() == Some(&d.id) && c.kind().is_some());
+    let bills = crate::bills::of_person(folder, h, p)?;
+    let payments = crate::bills::not_applied_on(&bills, &d.id);
+    let kept: Vec<String> = [
+        (
+            decisions.count(),
+            "decision",
+            "decisions",
+            "about its event",
+        ),
+        (payments, "payment", "payments", "on it"),
+        (
+            labels.count(),
+            "correction",
+            "corrections",
+            "of a provider it names",
+        ),
+    ]
+    .into_iter()
+    .filter(|(n, ..)| *n > 0)
+    .map(|(n, one, many, of)| format!("{n} {} {of}", if n == 1 { one } else { many }))
+    .collect();
+    Ok(note.map(|note| match kept.is_empty() {
+        true => note,
+        false => format!("{note} Kept and not applied: {}.", kept.join(", ")),
+    }))
 }
 
 /// A document by id, with whose it is.
