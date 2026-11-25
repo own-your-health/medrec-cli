@@ -57,10 +57,10 @@ real record, document, study or provider response.
   the directory rows kept for it, with NPIs that start with 0. `providers.json`
   is the view they give.
 - `standing/` is an invented person's conditions, allergies and medicines, one
-  for each rule of "Standing" in `docs/data-contract.md`, at three invented
+  for each rule of "Standing" in `docs/data-contract.md`, at four invented
   places. `make.py` writes `household.json` and `index.json`, medrec gives
   `standing.json` from them, and `lists.json` is the lists a reader makes of
-  it, each with the day, the records it may show in order, and why.
+  it, each with the day, the records it may not show, and why.
 - `bills/` holds invented text in the shapes `pdftotext -layout` gives a
   provider's patient statement and a payment receipt:
   `statement-columns.txt` puts the statement's fields in a header row over a

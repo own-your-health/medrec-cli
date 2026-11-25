@@ -1,6 +1,7 @@
 """Writes tests/fixtures/standing/{household,index}.json: an invented person's
 conditions, allergies and medicines, one for each rule of "Standing" in
-docs/data-contract.md. `medrec` writes standing.json from them."""
+docs/data-contract.md, and a result. `medrec` writes standing.json from
+them."""
 import json, os
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -10,6 +11,7 @@ SOURCES = {
     "north": ("Example Health", "2024-05-02"),
     "east": ("Sample Clinic East", "2024-05-03"),
     "walkin": ("Example Walk-in", "2024-05-04"),
+    "dropin": ("Sample Drop-in", "2024-05-05"),
 }
 
 
@@ -29,21 +31,23 @@ def provenance(org, path):
     return p
 
 
-def rec(stem, kind, date, name, words, code=None, status=None, fields=None, by_hand=False):
-    """`words`: (source, what it says)."""
+def rec(stem, kind, date, name, words, code=None, status=None, fields=None, by_hand=False,
+        heard=None, wrote=0):
+    """`words`: (source, what it says). `heard`: the sources whose words it
+    keeps, else all. `wrote`: the place of the one whose its status is."""
     r = {"id": pad(stem), "kind": kind, "key": f"{kind}|{stem}|{date}", "date": date,
          "display": name, "fields": fields or {}, "provenance": []}
     said = []
     for n, (org, w) in enumerate(words):
         path = None if by_hand else f"Robin Example/Records/{org}/{stem}-{n}.json"
         r["provenance"].append(provenance(org, path))
-        if not by_hand:
+        if not by_hand and (heard is None or org in heard):
             said.append({"raw_path": path, **w})
-    if said:
+    if said and kind in (C, A, M) and fields != FILL:
         r["words"] = said
-    if len(said) > 1:
-        r["fields_from"] = said[0]["raw_path"]
-    first = status or (words[0][1].get("status") if words else None)
+        if len(words) > 1 and wrote is not None:
+            r["fields_from"] = r["provenance"][wrote]["raw_path"]
+    first = status or (words[wrote or 0][1].get("status") if words else None)
     if first:
         r["status"] = first
     if code:
@@ -51,6 +55,8 @@ def rec(stem, kind, date, name, words, code=None, status=None, fields=None, by_h
     return r
 
 
+C, A, M = "condition", "allergy", "medication"
+FILL = {"source": "dispense"}
 LIST = ["problem-list-item"]
 VISIT = ["encounter-diagnosis"]
 
@@ -77,7 +83,6 @@ def med(status=None, end=None, of=None):
     return w
 
 
-C, A, M = "condition", "allergy", "medication"
 RECORDS = [
     # Conditions
     rec("plain", C, "2024-04-20", "Sample stiffness", [("north", con("active", "confirmed"))], "C-1"),
@@ -99,6 +104,9 @@ RECORDS = [
     rec("byhand", C, "2024-04-05", "Sample bruise", [("north", {})], by_hand=True),
     rec("bothended", C, "2024-04-04", "Sample knot", [("north", con("resolved")), ("east", con("inactive"))], "C-14"),
     rec("visitended", C, "2024-04-03", "Sample blister", [("walkin", con("resolved", cats=VISIT))], "C-15"),
+    rec("wrote", C, "2024-04-02", "Sample lump", [("north", con("resolved")), ("east", con("resolved"))], "C-16", heard=["east"]),
+    rec("mayhavelist", C, "2024-04-01", "Sample hiccup", [("dropin", con("active", cats=VISIT))], "C-17"),
+    rec("mayhavelisttoo", C, "2024-03-31", "Sample graze", [("north", con("resolved")), ("dropin", con("active"))], "C-18", heard=["north"]),
     # Allergies
     rec("nut", A, "2024-03-20", "Sample nut", [("north", con("active", "confirmed", None))]),
     rec("nutagain", A, "2024-03-19", "SAMPLE NUT", [("east", con("active", "confirmed", None))]),
@@ -106,6 +114,8 @@ RECORDS = [
     rec("inactive", A, "2024-03-17", "Sample dust", [("north", con("inactive", None, None))]),
     rec("refutedallergy", A, "2024-03-16", "Sample latex", [("north", con("active", "refuted", None))]),
     rec("errorallergy", A, "2024-03-15", "Sample dye", [("north", con("active", "entered-in-error", None))]),
+    rec("oneheard", A, "2024-03-14", "Sample glue", [("north", con("active", None, None)), ("east", con("inactive", None, None))], heard=["east"], wrote=None),
+    rec("errorunheard", A, "2024-03-13", "Sample resin", [("north", con("entered-in-error", None, None)), ("east", con("active", None, None))], heard=["north"], wrote=None),
     # Medicines
     rec("noend", M, "2024-02-20", "Sample tablet", [("north", med("active"))], "M-1"),
     rec("noendtwice", M, "2024-02-19", "Sample tablet", [("east", med("active"))], "M-1"),
@@ -119,9 +129,15 @@ RECORDS = [
     rec("nottaken", M, "2024-02-11", "Sample lozenge", [("north", med("not-taken"))], "M-9"),
     rec("stoppedatone", M, "2024-02-10", "Sample powder", [("north", med("active")), ("east", med("stopped"))], "M-10"),
     rec("errormedicine", M, "2024-02-08", "Sample wafer", [("north", med("entered-in-error"))], "M-11"),
-    rec("fillbefore", M, "2024-03-05", "Sample capsule", [("east", med("completed"))], "M-2", fields={"source": "dispense"}),
-    rec("fillafter", M, "2024-05-02", "Sample capsule", [("east", med("completed"))], "M-2", fields={"source": "dispense"}),
-    rec("fillreturned", M, "2024-05-20", "Sample capsule", [("east", med("cancelled"))], "M-2", fields={"source": "dispense"}),
+    rec("noneheard", M, "2024-02-07", "Sample balm", [("north", med("stopped")), ("east", med("stopped"))], "M-12", heard=[], wrote=None),
+    rec("endsunheard", M, "2024-02-06", "Sample rinse", [("north", med("active", "2024-03-31", "prescription")), ("east", med("active"))], "M-13", heard=["north"]),
+    rec("fillbefore", M, "2024-03-05", "Sample capsule", [("east", med("completed"))], "M-2", fields=FILL),
+    rec("fillsoon", M, "2024-04-10", "Sample capsule", [("east", med("completed"))], "M-2", fields=FILL),
+    rec("fillafter", M, "2024-05-02", "Sample capsule", [("east", med("completed"))], "M-2", fields=FILL),
+    rec("fillreturned", M, "2024-05-20", "Sample capsule", [("east", med("cancelled"))], "M-2", fields=FILL),
+    rec("fillerror", M, "2024-05-21", "Sample capsule", [("east", med("entered-in-error"))], "M-2", fields=FILL),
+    # One that has no standing
+    rec("resulterror", "result", "2024-05-22", "Sample level", [("east", {"status": "entered-in-error"})], "L-1"),
 ]
 RECORDS.sort(key=lambda r: r["date"], reverse=True)
 

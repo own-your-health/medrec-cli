@@ -4,8 +4,62 @@
  "sources": [
   "Example Health",
   "Sample Clinic East",
-  "Example Walk-in"
+  "Example Walk-in",
+  "Sample Drop-in",
+  null
  ],
+ "order": {
+  "allergy": [
+   "r_nutaaaaaaaaaaaaaaaaa",
+   "r_nutagainaaaaaaaaaaaa",
+   "r_inactiveaaaaaaaaaaaa",
+   "r_refutedallergyaaaaaa",
+   "r_errorallergyaaaaaaaa",
+   "r_oneheardaaaaaaaaaaaa",
+   "r_errorunheardaaaaaaaa",
+   "r_oldpollenaaaaaaaaaaa"
+  ],
+  "condition": [
+   "r_plainaaaaaaaaaaaaaaa",
+   "r_bothsayaaaaaaaaaaaaa",
+   "r_tworecordsaaaaaaaaaa",
+   "r_tworecordsotheraaaaa",
+   "r_againaaaaaaaaaaaaaaa",
+   "r_visitonlyaaaaaaaaaaa",
+   "r_onlistaaaaaaaaaaaaaa",
+   "r_onlistvisitaaaaaaaaa",
+   "r_refutedaaaaaaaaaaaaa",
+   "r_refutedbyoneaaaaaaaa",
+   "r_erroraaaaaaaaaaaaaaa",
+   "r_provisionalaaaaaaaaa",
+   "r_suretwiceaaaaaaaaaaa",
+   "r_abatedaaaaaaaaaaaaaa",
+   "r_errorbesideaaaaaaaaa",
+   "r_byhandaaaaaaaaaaaaaa",
+   "r_bothendedaaaaaaaaaaa",
+   "r_visitendedaaaaaaaaaa",
+   "r_wroteaaaaaaaaaaaaaaa",
+   "r_mayhavelistaaaaaaaaa",
+   "r_mayhavelisttooaaaaaa",
+   "r_againbeforeaaaaaaaaa"
+  ],
+  "medication": [
+   "r_noendaaaaaaaaaaaaaaa",
+   "r_noendtwiceaaaaaaaaaa",
+   "r_endsaaaaaaaaaaaaaaaa",
+   "r_endsmonthaaaaaaaaaaa",
+   "r_endsatoneaaaaaaaaaaa",
+   "r_endstwiceaaaaaaaaaaa",
+   "r_onholdaaaaaaaaaaaaaa",
+   "r_draftaaaaaaaaaaaaaaa",
+   "r_unknownaaaaaaaaaaaaa",
+   "r_nottakenaaaaaaaaaaaa",
+   "r_stoppedatoneaaaaaaaa",
+   "r_errormedicineaaaaaaa",
+   "r_noneheardaaaaaaaaaaa",
+   "r_endsunheardaaaaaaaaa"
+  ]
+ },
  "records": {
   "r_abatedaaaaaaaaaaaaaa": {
    "kind": "condition",
@@ -103,6 +157,7 @@
   "r_draftaaaaaaaaaaaaaaa": {
    "kind": "medication",
    "is": "draft",
+   "line": "http://example.org/codes|M-7",
    "words": [
     {
      "source": 0,
@@ -115,12 +170,19 @@
   "r_endsaaaaaaaaaaaaaaaa": {
    "kind": "medication",
    "is": "current",
+   "line": "http://example.org/codes|M-2",
    "until": "2024-03-31",
    "until_of": "prescription",
-   "filled": {
-    "record": "r_fillafteraaaaaaaaaaa",
-    "date": "2024-05-02"
-   },
+   "filled": [
+    {
+     "record": "r_fillafteraaaaaaaaaaa",
+     "date": "2024-05-02"
+    },
+    {
+     "record": "r_fillsoonaaaaaaaaaaaa",
+     "date": "2024-04-10"
+    }
+   ],
    "words": [
     {
      "source": 0,
@@ -135,6 +197,7 @@
   "r_endsatoneaaaaaaaaaaa": {
    "kind": "medication",
    "is": "current",
+   "line": "http://example.org/codes|M-4",
    "differs_after": "2024-03-31",
    "words": [
     {
@@ -156,6 +219,7 @@
   "r_endsmonthaaaaaaaaaaa": {
    "kind": "medication",
    "is": "current",
+   "line": "http://example.org/codes|M-3",
    "until": "2024-06-30",
    "until_of": "dosage",
    "words": [
@@ -172,6 +236,7 @@
   "r_endstwiceaaaaaaaaaaa": {
    "kind": "medication",
    "is": "current",
+   "line": "http://example.org/codes|M-5",
    "until": "2024-06-30",
    "until_of": "taking",
    "differs_after": "2024-03-31",
@@ -192,6 +257,24 @@
      "end": "2024-06-30",
      "end_of": "taking"
     }
+   ]
+  },
+  "r_endsunheardaaaaaaaaa": {
+   "kind": "medication",
+   "is": "current",
+   "line": "http://example.org/codes|M-13",
+   "words": [
+    {
+     "source": 0,
+     "read": "2024-05-02",
+     "is": "current",
+     "status": "active",
+     "end": "2024-03-31",
+     "end_of": "prescription"
+    }
+   ],
+   "unheard": [
+    1
    ]
   },
   "r_erroraaaaaaaaaaaaaaa": {
@@ -243,6 +326,7 @@
   "r_errormedicineaaaaaaa": {
    "kind": "medication",
    "is": "error",
+   "line": "http://example.org/codes|M-11",
    "words": [
     {
      "source": 0,
@@ -250,6 +334,22 @@
      "is": "error",
      "status": "entered-in-error"
     }
+   ]
+  },
+  "r_errorunheardaaaaaaaa": {
+   "kind": "allergy",
+   "is": "current",
+   "line": "~sample resin",
+   "words": [
+    {
+     "source": 0,
+     "read": "2024-05-02",
+     "is": "error",
+     "status": "entered-in-error"
+    }
+   ],
+   "unheard": [
+    1
    ]
   },
   "r_inactiveaaaaaaaaaaaa": {
@@ -265,9 +365,39 @@
     }
    ]
   },
+  "r_mayhavelistaaaaaaaaa": {
+   "kind": "condition",
+   "is": "visit",
+   "line": "http://example.org/codes|C-17",
+   "words": [
+    {
+     "source": 3,
+     "read": "2024-05-05",
+     "is": "visit",
+     "status": "active"
+    }
+   ]
+  },
+  "r_mayhavelisttooaaaaaa": {
+   "kind": "condition",
+   "is": "current",
+   "line": "http://example.org/codes|C-18",
+   "words": [
+    {
+     "source": 0,
+     "read": "2024-05-02",
+     "is": "ended",
+     "status": "resolved"
+    }
+   ],
+   "unheard": [
+    3
+   ]
+  },
   "r_noendaaaaaaaaaaaaaaa": {
    "kind": "medication",
    "is": "current",
+   "line": "http://example.org/codes|M-1",
    "words": [
     {
      "source": 0,
@@ -280,6 +410,7 @@
   "r_noendtwiceaaaaaaaaaa": {
    "kind": "medication",
    "is": "current",
+   "line": "http://example.org/codes|M-1",
    "words": [
     {
      "source": 1,
@@ -289,9 +420,26 @@
     }
    ]
   },
+  "r_noneheardaaaaaaaaaaa": {
+   "kind": "medication",
+   "is": "current",
+   "line": "http://example.org/codes|M-12",
+   "words": [
+    {
+     "source": 4,
+     "is": "ended",
+     "status": "stopped"
+    }
+   ],
+   "unheard": [
+    0,
+    1
+   ]
+  },
   "r_nottakenaaaaaaaaaaaa": {
    "kind": "medication",
    "is": "ended",
+   "line": "http://example.org/codes|M-9",
    "words": [
     {
      "source": 0,
@@ -342,9 +490,26 @@
     }
    ]
   },
+  "r_oneheardaaaaaaaaaaaa": {
+   "kind": "allergy",
+   "is": "current",
+   "line": "~sample glue",
+   "words": [
+    {
+     "source": 1,
+     "read": "2024-05-03",
+     "is": "ended",
+     "status": "inactive"
+    }
+   ],
+   "unheard": [
+    0
+   ]
+  },
   "r_onholdaaaaaaaaaaaaaa": {
    "kind": "medication",
    "is": "on_hold",
+   "line": "http://example.org/codes|M-6",
    "words": [
     {
      "source": 0,
@@ -460,6 +625,7 @@
   "r_stoppedatoneaaaaaaaa": {
    "kind": "medication",
    "is": "current",
+   "line": "http://example.org/codes|M-10",
    "differs": true,
    "words": [
     {
@@ -527,6 +693,7 @@
   "r_unknownaaaaaaaaaaaaa": {
    "kind": "medication",
    "is": "current",
+   "line": "http://example.org/codes|M-8",
    "words": [
     {
      "source": 0,
@@ -561,7 +728,41 @@
      "status": "active"
     }
    ]
+  },
+  "r_wroteaaaaaaaaaaaaaaa": {
+   "kind": "condition",
+   "is": "ended",
+   "line": "http://example.org/codes|C-16",
+   "words": [
+    {
+     "source": 0,
+     "read": "2024-05-02",
+     "is": "ended",
+     "status": "resolved"
+    },
+    {
+     "source": 1,
+     "read": "2024-05-03",
+     "is": "ended",
+     "status": "resolved"
+    }
+   ]
   }
+ },
+ "in_error": {
+  "allergy": [
+   "r_errorallergyaaaaaaaa"
+  ],
+  "condition": [
+   "r_erroraaaaaaaaaaaaaaa"
+  ],
+  "medication": [
+   "r_fillerroraaaaaaaaaaa",
+   "r_errormedicineaaaaaaa"
+  ],
+  "result": [
+   "r_resulterroraaaaaaaaa"
+  ]
  },
  "no_problem_list": [
   {

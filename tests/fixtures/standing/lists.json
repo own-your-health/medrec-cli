@@ -5,27 +5,7 @@
    "why": "Current while any source says so; a visit's diagnosis and what is refuted, ended or in error are not in it. The source with only visits' diagnoses has no problem list.",
    "kind": "condition",
    "day": "2024-06-15",
-   "shown": [
-    "r_plainaaaaaaaaaaaaaaa",
-    "r_bothsayaaaaaaaaaaaaa",
-    "r_tworecordsaaaaaaaaaa",
-    "r_tworecordsotheraaaaa",
-    "r_againaaaaaaaaaaaaaaa",
-    "r_visitonlyaaaaaaaaaaa",
-    "r_onlistaaaaaaaaaaaaaa",
-    "r_onlistvisitaaaaaaaaa",
-    "r_refutedaaaaaaaaaaaaa",
-    "r_refutedbyoneaaaaaaaa",
-    "r_erroraaaaaaaaaaaaaaa",
-    "r_provisionalaaaaaaaaa",
-    "r_suretwiceaaaaaaaaaaa",
-    "r_abatedaaaaaaaaaaaaaa",
-    "r_errorbesideaaaaaaaaa",
-    "r_byhandaaaaaaaaaaaaaa",
-    "r_bothendedaaaaaaaaaaa",
-    "r_visitendedaaaaaaaaaa",
-    "r_againbeforeaaaaaaaaa"
-   ],
+   "hidden": [],
    "lists": {
     "current": [
      {
@@ -84,10 +64,18 @@
       "records": [
        "r_byhandaaaaaaaaaaaaaa"
       ]
+     },
+     {
+      "records": [
+       "r_mayhavelisttooaaaaaa"
+      ],
+      "unheard": [
+       3
+      ]
      }
     ],
     "in_error": 1,
-    "no_problem_list": [
+    "without_problem_list": [
      2
     ]
    }
@@ -96,24 +84,9 @@
    "why": "A record the answer may not show makes no line differ, and one that is all of its line takes the line with it.",
    "kind": "condition",
    "day": "2024-06-15",
-   "shown": [
-    "r_plainaaaaaaaaaaaaaaa",
-    "r_bothsayaaaaaaaaaaaaa",
-    "r_tworecordsaaaaaaaaaa",
-    "r_againaaaaaaaaaaaaaaa",
-    "r_visitonlyaaaaaaaaaaa",
-    "r_onlistaaaaaaaaaaaaaa",
-    "r_onlistvisitaaaaaaaaa",
-    "r_refutedaaaaaaaaaaaaa",
-    "r_refutedbyoneaaaaaaaa",
-    "r_erroraaaaaaaaaaaaaaa",
-    "r_provisionalaaaaaaaaa",
-    "r_suretwiceaaaaaaaaaaa",
-    "r_abatedaaaaaaaaaaaaaa",
-    "r_errorbesideaaaaaaaaa",
-    "r_bothendedaaaaaaaaaaa",
-    "r_visitendedaaaaaaaaaa",
-    "r_againbeforeaaaaaaaaa"
+   "hidden": [
+    "r_tworecordsotheraaaaa",
+    "r_byhandaaaaaaaaaaaaaa"
    ],
    "lists": {
     "current": [
@@ -164,10 +137,18 @@
       "records": [
        "r_errorbesideaaaaaaaaa"
       ]
+     },
+     {
+      "records": [
+       "r_mayhavelisttooaaaaaa"
+      ],
+      "unheard": [
+       3
+      ]
      }
     ],
     "in_error": 1,
-    "no_problem_list": [
+    "without_problem_list": [
      2
     ]
    }
@@ -176,23 +157,10 @@
    "why": "A source is named as sending no problem list only where one of its diagnoses may be shown.",
    "kind": "condition",
    "day": "2024-06-15",
-   "shown": [
-    "r_plainaaaaaaaaaaaaaaa",
-    "r_bothsayaaaaaaaaaaaaa",
-    "r_tworecordsaaaaaaaaaa",
-    "r_tworecordsotheraaaaa",
-    "r_againaaaaaaaaaaaaaaa",
-    "r_onlistaaaaaaaaaaaaaa",
-    "r_refutedaaaaaaaaaaaaa",
-    "r_refutedbyoneaaaaaaaa",
-    "r_erroraaaaaaaaaaaaaaa",
-    "r_provisionalaaaaaaaaa",
-    "r_suretwiceaaaaaaaaaaa",
-    "r_abatedaaaaaaaaaaaaaa",
-    "r_errorbesideaaaaaaaaa",
-    "r_byhandaaaaaaaaaaaaaa",
-    "r_bothendedaaaaaaaaaaa",
-    "r_againbeforeaaaaaaaaa"
+   "hidden": [
+    "r_visitonlyaaaaaaaaaaa",
+    "r_onlistvisitaaaaaaaaa",
+    "r_visitendedaaaaaaaaaa"
    ],
    "lists": {
     "current": [
@@ -251,6 +219,14 @@
      {
       "records": [
        "r_byhandaaaaaaaaaaaaaa"
+      ]
+     },
+     {
+      "records": [
+       "r_mayhavelisttooaaaaaa"
+      ],
+      "unheard": [
+       3
       ]
      }
     ],
@@ -261,25 +237,8 @@
    "why": "One entered in error that the answer may not show is not counted.",
    "kind": "condition",
    "day": "2024-06-15",
-   "shown": [
-    "r_plainaaaaaaaaaaaaaaa",
-    "r_bothsayaaaaaaaaaaaaa",
-    "r_tworecordsaaaaaaaaaa",
-    "r_tworecordsotheraaaaa",
-    "r_againaaaaaaaaaaaaaaa",
-    "r_visitonlyaaaaaaaaaaa",
-    "r_onlistaaaaaaaaaaaaaa",
-    "r_onlistvisitaaaaaaaaa",
-    "r_refutedaaaaaaaaaaaaa",
-    "r_refutedbyoneaaaaaaaa",
-    "r_provisionalaaaaaaaaa",
-    "r_suretwiceaaaaaaaaaaa",
-    "r_abatedaaaaaaaaaaaaaa",
-    "r_errorbesideaaaaaaaaa",
-    "r_byhandaaaaaaaaaaaaaa",
-    "r_bothendedaaaaaaaaaaa",
-    "r_visitendedaaaaaaaaaa",
-    "r_againbeforeaaaaaaaaa"
+   "hidden": [
+    "r_erroraaaaaaaaaaaaaaa"
    ],
    "lists": {
     "current": [
@@ -339,31 +298,48 @@
       "records": [
        "r_byhandaaaaaaaaaaaaaa"
       ]
+     },
+     {
+      "records": [
+       "r_mayhavelisttooaaaaaa"
+      ],
+      "unheard": [
+       3
+      ]
      }
     ],
-    "no_problem_list": [
+    "without_problem_list": [
      2
     ]
    }
   },
   {
-   "why": "Two sources' uncoded names alike are one line, newest first. No date ends an allergy.",
+   "why": "Two sources' uncoded names alike are one line, newest first. No date ends an allergy. A source not heard never lets the others' words end one.",
    "kind": "allergy",
    "day": "2024-06-15",
-   "shown": [
-    "r_nutaaaaaaaaaaaaaaaaa",
-    "r_nutagainaaaaaaaaaaaa",
-    "r_inactiveaaaaaaaaaaaa",
-    "r_refutedallergyaaaaaa",
-    "r_errorallergyaaaaaaaa",
-    "r_oldpollenaaaaaaaaaaa"
-   ],
+   "hidden": [],
    "lists": {
     "current": [
      {
       "records": [
        "r_nutaaaaaaaaaaaaaaaaa",
        "r_nutagainaaaaaaaaaaaa"
+      ]
+     },
+     {
+      "records": [
+       "r_oneheardaaaaaaaaaaaa"
+      ],
+      "unheard": [
+       0
+      ]
+     },
+     {
+      "records": [
+       "r_errorunheardaaaaaaaa"
+      ],
+      "unheard": [
+       1
       ]
      },
      {
@@ -376,26 +352,10 @@
    }
   },
   {
-   "why": "Each prescription is a line. On its last day a medicine is current.",
+   "why": "Each prescription is a line. On its last day a medicine is current. One with a source not heard is current, whatever the others say.",
    "kind": "medication",
    "day": "2024-03-31",
-   "shown": [
-    "r_fillreturnedaaaaaaaa",
-    "r_fillafteraaaaaaaaaaa",
-    "r_fillbeforeaaaaaaaaaa",
-    "r_noendaaaaaaaaaaaaaaa",
-    "r_noendtwiceaaaaaaaaaa",
-    "r_endsaaaaaaaaaaaaaaaa",
-    "r_endsmonthaaaaaaaaaaa",
-    "r_endsatoneaaaaaaaaaaa",
-    "r_endstwiceaaaaaaaaaaa",
-    "r_onholdaaaaaaaaaaaaaa",
-    "r_draftaaaaaaaaaaaaaaa",
-    "r_unknownaaaaaaaaaaaaa",
-    "r_nottakenaaaaaaaaaaaa",
-    "r_stoppedatoneaaaaaaaa",
-    "r_errormedicineaaaaaaa"
-   ],
+   "hidden": [],
    "lists": {
     "current": [
      {
@@ -438,6 +398,23 @@
        "r_stoppedatoneaaaaaaaa"
       ],
       "differs": true
+     },
+     {
+      "records": [
+       "r_noneheardaaaaaaaaaaa"
+      ],
+      "unheard": [
+       0,
+       1
+      ]
+     },
+     {
+      "records": [
+       "r_endsunheardaaaaaaaaa"
+      ],
+      "unheard": [
+       1
+      ]
      }
     ],
     "on_hold": [
@@ -447,30 +424,14 @@
       ]
      }
     ],
-    "in_error": 1
+    "in_error": 2
    }
   },
   {
    "why": "The day after, it is ended by its date; one with another source's word of no end, or of a later one, is current and differs.",
    "kind": "medication",
    "day": "2024-04-01",
-   "shown": [
-    "r_fillreturnedaaaaaaaa",
-    "r_fillafteraaaaaaaaaaa",
-    "r_fillbeforeaaaaaaaaaa",
-    "r_noendaaaaaaaaaaaaaaa",
-    "r_noendtwiceaaaaaaaaaa",
-    "r_endsaaaaaaaaaaaaaaaa",
-    "r_endsmonthaaaaaaaaaaa",
-    "r_endsatoneaaaaaaaaaaa",
-    "r_endstwiceaaaaaaaaaaa",
-    "r_onholdaaaaaaaaaaaaaa",
-    "r_draftaaaaaaaaaaaaaaa",
-    "r_unknownaaaaaaaaaaaaa",
-    "r_nottakenaaaaaaaaaaaa",
-    "r_stoppedatoneaaaaaaaa",
-    "r_errormedicineaaaaaaa"
-   ],
+   "hidden": [],
    "lists": {
     "current": [
      {
@@ -510,6 +471,23 @@
        "r_stoppedatoneaaaaaaaa"
       ],
       "differs": true
+     },
+     {
+      "records": [
+       "r_noneheardaaaaaaaaaaa"
+      ],
+      "unheard": [
+       0,
+       1
+      ]
+     },
+     {
+      "records": [
+       "r_endsunheardaaaaaaaaa"
+      ],
+      "unheard": [
+       1
+      ]
      }
     ],
     "on_hold": [
@@ -523,33 +501,21 @@
      {
       "records": [
        "r_endsaaaaaaaaaaaaaaaa"
-      ]
+      ],
+      "filled": {
+       "record": "r_fillafteraaaaaaaaaaa",
+       "date": "2024-05-02"
+      }
      }
     ],
-    "in_error": 1
+    "in_error": 2
    }
   },
   {
    "why": "A month ends with its last day.",
    "kind": "medication",
    "day": "2024-06-30",
-   "shown": [
-    "r_fillreturnedaaaaaaaa",
-    "r_fillafteraaaaaaaaaaa",
-    "r_fillbeforeaaaaaaaaaa",
-    "r_noendaaaaaaaaaaaaaaa",
-    "r_noendtwiceaaaaaaaaaa",
-    "r_endsaaaaaaaaaaaaaaaa",
-    "r_endsmonthaaaaaaaaaaa",
-    "r_endsatoneaaaaaaaaaaa",
-    "r_endstwiceaaaaaaaaaaa",
-    "r_onholdaaaaaaaaaaaaaa",
-    "r_draftaaaaaaaaaaaaaaa",
-    "r_unknownaaaaaaaaaaaaa",
-    "r_nottakenaaaaaaaaaaaa",
-    "r_stoppedatoneaaaaaaaa",
-    "r_errormedicineaaaaaaa"
-   ],
+   "hidden": [],
    "lists": {
     "current": [
      {
@@ -589,6 +555,23 @@
        "r_stoppedatoneaaaaaaaa"
       ],
       "differs": true
+     },
+     {
+      "records": [
+       "r_noneheardaaaaaaaaaaa"
+      ],
+      "unheard": [
+       0,
+       1
+      ]
+     },
+     {
+      "records": [
+       "r_endsunheardaaaaaaaaa"
+      ],
+      "unheard": [
+       1
+      ]
      }
     ],
     "on_hold": [
@@ -602,32 +585,106 @@
      {
       "records": [
        "r_endsaaaaaaaaaaaaaaaa"
-      ]
+      ],
+      "filled": {
+       "record": "r_fillafteraaaaaaaaaaa",
+       "date": "2024-05-02"
+      }
      }
     ],
-    "in_error": 1
+    "in_error": 2
    }
   },
   {
    "why": "And after the last of its ends, so is one that two sources end.",
    "kind": "medication",
    "day": "2024-07-01",
-   "shown": [
-    "r_fillreturnedaaaaaaaa",
-    "r_fillafteraaaaaaaaaaa",
-    "r_fillbeforeaaaaaaaaaa",
-    "r_noendaaaaaaaaaaaaaaa",
-    "r_noendtwiceaaaaaaaaaa",
-    "r_endsaaaaaaaaaaaaaaaa",
-    "r_endsmonthaaaaaaaaaaa",
-    "r_endsatoneaaaaaaaaaaa",
-    "r_endstwiceaaaaaaaaaaa",
-    "r_onholdaaaaaaaaaaaaaa",
-    "r_draftaaaaaaaaaaaaaaa",
-    "r_unknownaaaaaaaaaaaaa",
-    "r_nottakenaaaaaaaaaaaa",
-    "r_stoppedatoneaaaaaaaa",
-    "r_errormedicineaaaaaaa"
+   "hidden": [],
+   "lists": {
+    "current": [
+     {
+      "records": [
+       "r_noendaaaaaaaaaaaaaaa"
+      ]
+     },
+     {
+      "records": [
+       "r_noendtwiceaaaaaaaaaa"
+      ]
+     },
+     {
+      "records": [
+       "r_endsatoneaaaaaaaaaaa"
+      ],
+      "differs": true
+     },
+     {
+      "records": [
+       "r_unknownaaaaaaaaaaaaa"
+      ]
+     },
+     {
+      "records": [
+       "r_stoppedatoneaaaaaaaa"
+      ],
+      "differs": true
+     },
+     {
+      "records": [
+       "r_noneheardaaaaaaaaaaa"
+      ],
+      "unheard": [
+       0,
+       1
+      ]
+     },
+     {
+      "records": [
+       "r_endsunheardaaaaaaaaa"
+      ],
+      "unheard": [
+       1
+      ]
+     }
+    ],
+    "on_hold": [
+     {
+      "records": [
+       "r_onholdaaaaaaaaaaaaaa"
+      ]
+     }
+    ],
+    "ended_by_date": [
+     {
+      "records": [
+       "r_endsaaaaaaaaaaaaaaaa"
+      ],
+      "filled": {
+       "record": "r_fillafteraaaaaaaaaaa",
+       "date": "2024-05-02"
+      }
+     },
+     {
+      "records": [
+       "r_endsmonthaaaaaaaaaaa"
+      ]
+     },
+     {
+      "records": [
+       "r_endstwiceaaaaaaaaaaa"
+      ],
+      "differs": true
+     }
+    ],
+    "in_error": 2
+   }
+  },
+  {
+   "why": "The fill shown is the last the answer may show.",
+   "kind": "medication",
+   "day": "2024-07-01",
+   "hidden": [
+    "r_fillafteraaaaaaaaaaa"
    ],
    "lists": {
     "current": [
@@ -657,6 +714,111 @@
        "r_stoppedatoneaaaaaaaa"
       ],
       "differs": true
+     },
+     {
+      "records": [
+       "r_noneheardaaaaaaaaaaa"
+      ],
+      "unheard": [
+       0,
+       1
+      ]
+     },
+     {
+      "records": [
+       "r_endsunheardaaaaaaaaa"
+      ],
+      "unheard": [
+       1
+      ]
+     }
+    ],
+    "on_hold": [
+     {
+      "records": [
+       "r_onholdaaaaaaaaaaaaaa"
+      ]
+     }
+    ],
+    "ended_by_date": [
+     {
+      "records": [
+       "r_endsaaaaaaaaaaaaaaaa"
+      ],
+      "filled": {
+       "record": "r_fillsoonaaaaaaaaaaaa",
+       "date": "2024-04-10"
+      }
+     },
+     {
+      "records": [
+       "r_endsmonthaaaaaaaaaaa"
+      ]
+     },
+     {
+      "records": [
+       "r_endstwiceaaaaaaaaaaa"
+      ],
+      "differs": true
+     }
+    ],
+    "in_error": 2
+   }
+  },
+  {
+   "why": "With no fill it may show, none; one that is in error and may not be shown is not counted.",
+   "kind": "medication",
+   "day": "2024-07-01",
+   "hidden": [
+    "r_fillafteraaaaaaaaaaa",
+    "r_fillsoonaaaaaaaaaaaa",
+    "r_fillerroraaaaaaaaaaa"
+   ],
+   "lists": {
+    "current": [
+     {
+      "records": [
+       "r_noendaaaaaaaaaaaaaaa"
+      ]
+     },
+     {
+      "records": [
+       "r_noendtwiceaaaaaaaaaa"
+      ]
+     },
+     {
+      "records": [
+       "r_endsatoneaaaaaaaaaaa"
+      ],
+      "differs": true
+     },
+     {
+      "records": [
+       "r_unknownaaaaaaaaaaaaa"
+      ]
+     },
+     {
+      "records": [
+       "r_stoppedatoneaaaaaaaa"
+      ],
+      "differs": true
+     },
+     {
+      "records": [
+       "r_noneheardaaaaaaaaaaa"
+      ],
+      "unheard": [
+       0,
+       1
+      ]
+     },
+     {
+      "records": [
+       "r_endsunheardaaaaaaaaa"
+      ],
+      "unheard": [
+       1
+      ]
      }
     ],
     "on_hold": [

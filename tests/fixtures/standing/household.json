@@ -42,6 +42,16 @@
    "organization_name": "Example Walk-in",
    "fhir_base": "https://walkin.example.test/fhir",
    "patient_id": "pat-0001"
+  },
+  {
+   "id": "s_dropinaaaaaaaaaaaaaa",
+   "kind": "fhir",
+   "person": "p_robinaaaaaaaaaaaaaaa",
+   "cli": "fakeprov",
+   "organization": "dropin",
+   "organization_name": "Sample Drop-in",
+   "fhir_base": "https://dropin.example.test/fhir",
+   "patient_id": "pat-0001"
   }
  ]
 }

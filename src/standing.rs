@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
+use crate::import;
 use crate::model::{Person, PersonIndex, Provenance, Record, Source, Word};
 use crate::sources::Sources;
 use crate::summary::{day, series_key};
@@ -67,10 +68,9 @@ pub struct Standing {
     pub kind: String,
     /// Whatever the day: a medicine that is current is not one after `until`.
     pub is: Is,
-    /// What a condition or an allergy is the same as another by: its code, or
-    /// `~` and its folded name.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub line: Option<String>,
+    /// What it is the same as another by: its code, or `~` and its folded
+    /// name.
+    pub line: String,
     /// The last day of a current medicine, where each word that says so has
     /// an end, and which end it is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -84,10 +84,13 @@ pub struct Standing {
     /// ended and another has not.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub differs_after: Option<String>,
-    /// The last fill of the medicine after `until`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub filled: Option<Filled>,
+    /// The fills of the medicine after `until`, newest first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub filled: Vec<Filled>,
     pub words: Vec<Said>,
+    /// The sources of which the record keeps no word.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unheard: Vec<usize>,
 }
 
 /// A source that sends diagnoses of visits and no problem list.
@@ -106,7 +109,12 @@ pub struct Standings {
     /// The names of the sources, each once by its place here: two can have
     /// one name.
     pub sources: Vec<Option<String>>,
+    /// Each kind's records, newest first, then by name.
+    pub order: BTreeMap<String, Vec<String>>,
     pub records: BTreeMap<String, Standing>,
+    /// The records of every kind entered in error.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub in_error: BTreeMap<String, Vec<String>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub no_problem_list: Vec<NoProblemList>,
 }
@@ -186,21 +194,31 @@ fn is_fill(r: &Record) -> bool {
     r.kind == "medication" && r.fields.get("source") == Some(&"dispense".into())
 }
 
-/// Each word of a record with the provenance it is of. A record that keeps
-/// none (a source's file is not kept, or an earlier medrec saved it) has its
-/// own status as the word of its first.
-fn words(r: &Record) -> Vec<(Word, &Provenance)> {
-    let said: Vec<(Word, &Provenance)> = r
-        .words
-        .iter()
-        .filter_map(|w| {
-            let is = |p: &&Provenance| p.raw_path.as_ref() == Some(&w.raw_path);
-            Some((w.clone(), r.provenance.iter().find(is)?))
-        })
-        .collect();
-    if !said.is_empty() {
-        return said;
+/// Each word of a record with the provenance it is of, and the provenances it
+/// keeps none of. Its own status is the word of the one that wrote its fields
+/// or is its only one. With none of any, it is the word of one it does not
+/// say.
+#[allow(clippy::type_complexity)]
+fn words(r: &Record) -> (Vec<(Word, Option<&Provenance>)>, Vec<&Provenance>) {
+    let (mut said, mut unheard) = (Vec::new(), Vec::new());
+    let writer = import::writer(r);
+    for p in &r.provenance {
+        let path = p.raw_path.as_deref();
+        let wrote = r.provenance.len() == 1 || (path.is_some() && path == writer);
+        match r.words.iter().find(|w| path == Some(&w.raw_path)) {
+            Some(w) => said.push((w.clone(), Some(p))),
+            None if wrote => said.push((own(r), Some(p))),
+            None => unheard.push(p),
+        }
     }
+    if said.is_empty() {
+        said.push((own(r), None));
+    }
+    (said, unheard)
+}
+
+/// What a record's own status and fields say.
+fn own(r: &Record) -> Word {
     let text = |k: &str| {
         let t = r.fields.get(k).and_then(|v| v.as_str());
         t.filter(|s| !s.is_empty()).map(str::to_string)
@@ -212,7 +230,7 @@ fn words(r: &Record) -> Vec<(Word, &Provenance)> {
             .collect(),
         None => text("category").into_iter().collect(),
     };
-    let own = Word {
+    Word {
         raw_path: String::new(),
         status: r.status.clone(),
         verification: text("verification_status"),
@@ -221,8 +239,7 @@ fn words(r: &Record) -> Vec<(Word, &Provenance)> {
         end: text("end"),
         end_of: text("end_of"),
         version: None,
-    };
-    r.provenance.first().map(|p| (own, p)).into_iter().collect()
+    }
 }
 
 impl Standings {
@@ -230,48 +247,66 @@ impl Standings {
         let from = Sources::of(sources, idx);
         let mut at: BTreeMap<String, usize> = BTreeMap::new();
         let mut names: Vec<Option<String>> = Vec::new();
+        let mut place = |p: Option<&Provenance>| {
+            let key = p.map(|p| from.key(p)).unwrap_or_default();
+            *at.entry(key).or_insert_with(|| {
+                names.push(p.and_then(|p| from.label(p)));
+                names.len() - 1
+            })
+        };
         let mut records: BTreeMap<String, Standing> = BTreeMap::new();
-        // Of each source: its visits' diagnoses, and whether it says anything
-        // else of a condition.
+        let mut in_error: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        // Of each source: its visits' diagnoses, and whether it says, or may
+        // say, anything else of a condition.
         let mut diagnoses: BTreeMap<usize, Vec<String>> = BTreeMap::new();
         let mut lists: BTreeSet<usize> = BTreeSet::new();
         for r in &idx.records {
-            if !KINDS.contains(&r.kind.as_str()) || is_fill(r) {
-                continue;
-            }
-            let mut said: Vec<Said> = Vec::new();
-            for (w, p) in words(r) {
-                let source = *at.entry(from.key(p)).or_insert_with(|| {
-                    names.push(from.label(p));
-                    names.len() - 1
-                });
-                let is = of_word(&r.kind, &w);
-                if r.kind == "condition" && is != Is::Error {
-                    if is_visit_diagnosis(&w.categories) {
-                        let of = diagnoses.entry(source).or_default();
-                        if of.last() != Some(&r.id) {
-                            of.push(r.id.clone());
+            let mut error = code(r.status.as_deref()) == "entered-in-error";
+            if KINDS.contains(&r.kind.as_str()) && !is_fill(r) {
+                let (heard, unheard) = words(r);
+                let mut said: Vec<Said> = Vec::new();
+                for (w, p) in heard {
+                    let source = place(p);
+                    let is = of_word(&r.kind, &w);
+                    if r.kind == "condition" && is != Is::Error && p.is_some() {
+                        if is_visit_diagnosis(&w.categories) {
+                            let of = diagnoses.entry(source).or_default();
+                            if of.last() != Some(&r.id) {
+                                of.push(r.id.clone());
+                            }
+                        } else {
+                            lists.insert(source);
                         }
-                    } else {
+                    }
+                    said.push(Said {
+                        source,
+                        read: p.and_then(read_on),
+                        is,
+                        status: w.status,
+                        verification: w.verification,
+                        abatement: w.abatement,
+                        end: w.end,
+                        end_of: w.end_of,
+                    });
+                }
+                let mut missing: Vec<usize> = Vec::new();
+                for p in unheard {
+                    let source = place(Some(p));
+                    if !missing.contains(&source) {
+                        missing.push(source);
+                    }
+                    if r.kind == "condition" {
                         lists.insert(source);
                     }
                 }
-                said.push(Said {
-                    source,
-                    read: read_on(p),
-                    is,
-                    status: w.status,
-                    verification: w.verification,
-                    abatement: w.abatement,
-                    end: w.end,
-                    end_of: w.end_of,
-                });
+                let s = standing(r, said, missing);
+                error = s.is == Is::Error;
+                records.insert(r.id.clone(), s);
             }
-            let mut s = standing(&r.kind, said);
-            if r.kind != "medication" {
-                s.line = Some(series_key(r));
+            if error {
+                let of = in_error.entry(r.kind.clone()).or_default();
+                of.push(r.id.clone());
             }
-            records.insert(r.id.clone(), s);
         }
         let mut fills: BTreeMap<String, Vec<Filled>> = BTreeMap::new();
         for r in idx.records.iter().filter(|r| is_fill(r)) {
@@ -283,22 +318,32 @@ impl Standings {
                 });
             }
         }
-        for r in &idx.records {
-            let Some(s) = records.get_mut(&r.id) else {
+        for s in records.values_mut() {
+            let (Some(until), Some(of)) = (&s.until, fills.get(&s.line)) else {
                 continue;
             };
-            let Some(until) = &s.until else { continue };
-            let of = fills.get(&series_key(r)).into_iter().flatten();
-            s.filled = of
-                .filter(|f| f.date > *until)
-                .max_by(|a, b| (&a.date, &a.record).cmp(&(&b.date, &b.record)))
-                .cloned();
+            s.filled = of.iter().filter(|f| f.date > *until).cloned().collect();
+            s.filled
+                .sort_by(|a, b| (&b.date, &b.record).cmp(&(&a.date, &a.record)));
+        }
+        let mut listed: Vec<&Record> = idx
+            .records
+            .iter()
+            .filter(|r| records.contains_key(&r.id))
+            .collect();
+        listed.sort_by(|a, b| b.date.cmp(&a.date).then(a.display.cmp(&b.display)));
+        let mut order: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for r in listed {
+            let of = order.entry(r.kind.clone()).or_default();
+            of.push(r.id.clone());
         }
         Standings {
             schema: SCHEMA.into(),
             person: p.id.clone(),
             sources: names,
+            order,
             records,
+            in_error,
             no_problem_list: diagnoses
                 .into_iter()
                 .filter(|(source, _)| !lists.contains(source))
@@ -308,11 +353,11 @@ impl Standings {
     }
 }
 
-/// What a record's words say together.
-fn standing(kind: &str, words: Vec<Said>) -> Standing {
+/// What a record's words say together. One not heard may say it is current.
+fn standing(r: &Record, words: Vec<Said>, unheard: Vec<usize>) -> Standing {
     let all: BTreeSet<Is> = words.iter().map(|w| w.is).collect();
     let is = match () {
-        _ if all.contains(&Is::Current) => Is::Current,
+        _ if all.contains(&Is::Current) || !unheard.is_empty() => Is::Current,
         _ if all.contains(&Is::OnHold) => Is::OnHold,
         _ if all.contains(&Is::Draft) => Is::Draft,
         _ if all.contains(&Is::Ended) => Is::Ended,
@@ -331,17 +376,18 @@ fn standing(kind: &str, words: Vec<Said>) -> Standing {
     let differs = says.len() > 1 || sure.len() > 1;
 
     let mut s = Standing {
-        kind: kind.into(),
+        kind: r.kind.clone(),
         is,
-        line: None,
+        line: series_key(r),
         until: None,
         until_of: None,
         differs,
         differs_after: None,
-        filled: None,
+        filled: Vec::new(),
         words,
+        unheard,
     };
-    if kind != "medication" || is != Is::Current {
+    if r.kind != "medication" || is != Is::Current {
         return s;
     }
     let ends: Vec<Option<(String, Option<String>)>> = s
@@ -356,24 +402,31 @@ fn standing(kind: &str, words: Vec<Said>) -> Standing {
     if !differs && (!all_end || first.as_ref() != last.as_ref().map(|l| &l.0)) {
         s.differs_after = first;
     }
-    if let (true, Some((day, of))) = (all_end, last) {
+    // One not heard may not end.
+    if let (true, true, Some((day, of))) = (all_end, s.unheard.is_empty(), last) {
         s.until = Some(day);
         s.until_of = of;
     }
     s
 }
 
-/// One line of a current list: a condition or an allergy of one code or name,
-/// or one medicine.
+/// One line of a list: a condition or an allergy of one code or name, or one
+/// medicine.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Line {
-    /// Its records, in the reader's order; the first gives its name.
+    /// Its records, newest first; the first gives its name.
     pub records: Vec<String>,
     /// Its records of other sources that say otherwise.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub against: Vec<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub differs: bool,
+    /// The last fill the answer may show of one ended by its date.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filled: Option<Filled>,
+    /// Its sources not heard.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unheard: Vec<usize>,
 }
 
 /// What is current of one kind, as a reader lists it.
@@ -389,7 +442,7 @@ pub struct Lists {
     pub in_error: usize,
     /// The sources that send no problem list.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub no_problem_list: Vec<usize>,
+    pub without_problem_list: Vec<usize>,
 }
 
 fn is_zero(n: &usize) -> bool {
@@ -426,29 +479,38 @@ impl Standing {
         self.differs || self.differs_after.as_deref().is_some_and(|d| d < today)
     }
 
+    /// The last of its fills that an answer may show.
+    pub fn fill(&self, may_show: &dyn Fn(&str) -> bool) -> Option<&Filled> {
+        self.filled.iter().find(|f| may_show(&f.record))
+    }
+
     fn has(&self, source: usize, which: impl Fn(Is) -> bool) -> bool {
         self.words.iter().any(|w| w.source == source && which(w.is))
     }
 }
 
 impl Standings {
-    /// The lists of one kind, of the records a reader may show, in its order.
-    pub fn lists<'a>(
-        &self,
-        kind: &str,
-        shown: impl IntoIterator<Item = &'a str>,
-        today: &str,
-    ) -> Lists {
-        let shown: Vec<(&str, &Standing)> = shown
+    /// Every record entered in error, by id.
+    pub fn errors(&self) -> impl Iterator<Item = &String> {
+        self.in_error.values().flatten()
+    }
+
+    /// The lists of one kind ([`KINDS`]; another has none), of the records a
+    /// reader may show.
+    pub fn lists(&self, kind: &str, may_show: &dyn Fn(&str) -> bool, today: &str) -> Lists {
+        let shown: Vec<(&str, &Standing)> = self
+            .order
+            .get(kind)
             .into_iter()
-            .filter_map(|id| Some((id, self.records.get(id)?)))
-            .filter(|(_, s)| s.kind == kind)
+            .flatten()
+            .filter(|id| may_show(id))
+            .filter_map(|id| Some((id.as_str(), self.records.get(id)?)))
             .collect();
         let mut out = Lists::default();
         let mut lines: BTreeMap<&str, Vec<(&str, &Standing)>> = BTreeMap::new();
         for (id, s) in &shown {
-            if let (Some(line), true) = (&s.line, s.is != Is::Error) {
-                lines.entry(line).or_default().push((id, s));
+            if s.is != Is::Error && kind != "medication" {
+                lines.entry(&s.line).or_default().push((id, s));
             }
         }
         for (id, s) in &shown {
@@ -456,26 +518,31 @@ impl Standings {
                 records: vec![id.to_string()],
                 against: Vec::new(),
                 differs: s.differs_on(today),
+                filled: s
+                    .fill(may_show)
+                    .filter(|_| s.on(today) == At::EndedByDate)
+                    .cloned(),
+                unheard: s.unheard.clone(),
             };
-            match (s.on(today), s.line.as_deref()) {
-                (At::Error, _) => out.in_error += 1,
-                (At::All, _) => {}
-                (At::OnHold, _) => out.on_hold.push(one()),
-                (At::EndedByDate, _) => out.ended_by_date.push(one()),
-                (At::Current, None) => out.current.push(one()),
-                (At::Current, Some(line)) => {
+            match s.on(today) {
+                At::Error | At::All => {}
+                At::OnHold => out.on_hold.push(one()),
+                At::EndedByDate => out.ended_by_date.push(one()),
+                At::Current if kind == "medication" => out.current.push(one()),
+                At::Current => {
                     // At the first of its line, and once.
-                    if let Some(of) = lines.remove(line) {
+                    if let Some(of) = lines.remove(s.line.as_str()) {
                         out.current.push(merged(&of, today));
                     }
                 }
             }
         }
+        let errors = self.in_error.get(kind).into_iter().flatten();
+        out.in_error = errors.filter(|id| may_show(id)).count();
         if kind == "condition" {
-            let is_shown = |id: &String| shown.iter().any(|(s, _)| s == id);
             let named = self.no_problem_list.iter();
-            out.no_problem_list = named
-                .filter(|n| n.records.iter().any(is_shown))
+            out.without_problem_list = named
+                .filter(|n| n.records.iter().any(|id| may_show(id)))
                 .map(|n| n.source)
                 .collect();
         }
@@ -508,10 +575,18 @@ fn merged(of: &[(&str, &Standing)], today: &str) -> Line {
     let against = ids(&|s| !is_current(s) && other.iter().any(|n| s.has(*n, ended)));
     let differs =
         !against.is_empty() || of.iter().any(|(_, s)| is_current(s) && s.differs_on(today));
+    let mut unheard: Vec<usize> = Vec::new();
+    for n in of.iter().flat_map(|(_, s)| &s.unheard) {
+        if !unheard.contains(n) {
+            unheard.push(*n);
+        }
+    }
     Line {
         records,
         against,
         differs,
+        filled: None,
+        unheard,
     }
 }
 
@@ -553,6 +628,12 @@ mod tests {
         one(&fixture(), stem).on(DAY)
     }
 
+    /// The lists of these records alone.
+    fn only(s: &Standings, kind: &str, stems: &[&str]) -> Lists {
+        let ids: Vec<String> = stems.iter().map(|s| format!("r_{s:a<20}")).collect();
+        s.lists(kind, &|id| ids.iter().any(|i| i == id), DAY)
+    }
+
     #[test]
     fn the_fixture_gives_its_view() {
         let s = serde_json::to_value(fixture()).unwrap();
@@ -565,15 +646,11 @@ mod tests {
         let s = fixture();
         let v: Value = serde_json::from_str(fixture!("lists.json")).unwrap();
         for c in v["cases"].as_array().unwrap() {
-            let shown: Vec<&str> = c["shown"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|i| i.as_str().unwrap())
-                .collect();
+            let hidden = c["hidden"].as_array().unwrap();
+            let may_show = |id: &str| !hidden.iter().any(|h| h == id);
             let got = s.lists(
                 c["kind"].as_str().unwrap(),
-                shown,
+                &may_show,
                 c["day"].as_str().unwrap(),
             );
             assert_eq!(
@@ -611,11 +688,7 @@ mod tests {
     fn a_visits_diagnosis_is_current_only_where_a_problem_list_has_it() {
         assert_eq!(at("visitonly"), At::All);
         let s = fixture();
-        let l = s.lists(
-            "condition",
-            ["r_onlistvisitaaaaaaaaa", "r_onlistaaaaaaaaaaaaaa"],
-            DAY,
-        );
+        let l = only(&s, "condition", &["onlistvisit", "onlist"]);
         assert_eq!(l.current.len(), 1);
         assert_eq!(
             (l.current[0].records.len(), l.current[0].differs),
@@ -626,18 +699,18 @@ mod tests {
     #[test]
     fn a_source_with_no_problem_list_is_named_where_its_diagnosis_may_be_shown() {
         let s = fixture();
-        let named = |shown: &[&str]| -> Vec<Option<String>> {
-            let l = s.lists("condition", shown.iter().copied(), DAY);
-            l.no_problem_list
+        let named = |stem: &str| -> Vec<Option<String>> {
+            let l = only(&s, "condition", &[stem]);
+            l.without_problem_list
                 .iter()
                 .map(|n| s.sources[*n].clone())
                 .collect()
         };
-        assert_eq!(
-            named(&["r_visitonlyaaaaaaaaaaa"]),
-            [Some("Example Walk-in".to_string())]
-        );
-        assert!(named(&["r_plainaaaaaaaaaaaaaaa"]).is_empty());
+        assert_eq!(named("visitonly"), [Some("Example Walk-in".to_string())]);
+        assert!(named("plain").is_empty());
+        // Nor one that may have one, by a word not heard.
+        assert_eq!(at("mayhavelist"), At::All);
+        assert!(named("mayhavelist").is_empty());
     }
 
     #[test]
@@ -657,8 +730,13 @@ mod tests {
         let s = fixture();
         let r = one(&s, "errorbeside");
         assert_eq!((r.on(DAY), r.differs_on(DAY)), (At::Current, false));
-        let l = s.lists("allergy", ["r_errorallergyaaaaaaaa"], DAY);
+        let l = only(&s, "allergy", &["errorallergy"]);
         assert_eq!((l.current.len(), l.in_error), (0, 1));
+        // A fill and a result are by their own status, and count in theirs.
+        let l = only(&s, "medication", &["fillerror"]);
+        assert_eq!((l.current.len(), l.in_error), (0, 1));
+        assert_eq!(s.in_error["result"], ["r_resulterroraaaaaaaaa"]);
+        assert!(only(&s, "result", &["resulterror"]).in_error == 1);
     }
 
     #[test]
@@ -699,15 +777,72 @@ mod tests {
     fn a_fill_after_the_end_is_a_fact_beside_it_and_changes_nothing() {
         let s = fixture();
         let r = one(&s, "ends");
-        let f = r.filled.as_ref().unwrap();
+        let fills: Vec<(&str, &str)> = r
+            .filled
+            .iter()
+            .map(|f| (f.record.as_str(), f.date.as_str()))
+            .collect();
         assert_eq!(
-            (f.record.as_str(), f.date.as_str()),
-            ("r_fillafteraaaaaaaaaaa", "2024-05-02")
+            fills,
+            [
+                ("r_fillafteraaaaaaaaaaa", "2024-05-02"),
+                ("r_fillsoonaaaaaaaaaaaa", "2024-04-10")
+            ]
         );
         assert_eq!(r.on(DAY), At::EndedByDate);
-        for stem in ["fillbefore", "fillafter", "fillreturned"] {
+        for stem in ["fillbefore", "fillsoon", "fillafter", "fillreturned"] {
             assert!(!s.records.contains_key(&format!("r_{stem:a<20}")), "{stem}");
         }
+        // The last the answer may show.
+        let shown = |stems: &[&str]| -> Option<String> {
+            let l = only(&s, "medication", stems);
+            l.ended_by_date[0].filled.as_ref().map(|f| f.date.clone())
+        };
+        assert_eq!(
+            shown(&["ends", "fillafter", "fillsoon"]).as_deref(),
+            Some("2024-05-02")
+        );
+        assert_eq!(shown(&["ends", "fillsoon"]).as_deref(), Some("2024-04-10"));
+        assert_eq!(shown(&["ends"]), None);
+    }
+
+    #[test]
+    fn a_source_not_heard_never_lets_the_others_end_it() {
+        let s = fixture();
+        let r = one(&s, "oneheard");
+        assert_eq!((r.is, r.words.len()), (Is::Current, 1));
+        assert_eq!((r.words[0].is, r.differs), (Is::Ended, false));
+        let named: Vec<&str> = r
+            .unheard
+            .iter()
+            .map(|n| s.sources[*n].as_deref().unwrap())
+            .collect();
+        assert_eq!(named, ["Example Health"]);
+        let l = only(&s, "allergy", &["oneheard"]);
+        assert_eq!(l.current[0].unheard, r.unheard);
+        // Nor one's word that it is in error.
+        assert_eq!(at("errorunheard"), At::Current);
+        // Nor its own end.
+        let r = one(&s, "endsunheard");
+        assert_eq!(
+            (r.until.as_deref(), r.on("2099-01-01")),
+            (None, At::Current)
+        );
+        assert!(!r.differs_on("2099-01-01"));
+        // One that keeps none has its own status, of one it does not say.
+        let r = one(&s, "noneheard");
+        assert_eq!((r.is, r.words[0].is), (Is::Current, Is::Ended));
+        assert_eq!((&s.sources[r.words[0].source], r.unheard.len()), (&None, 2));
+        assert_eq!(r.words[0].read, None);
+    }
+
+    /// Its own status is its word.
+    #[test]
+    fn the_source_that_wrote_the_fields_is_heard() {
+        let s = fixture();
+        let r = one(&s, "wrote");
+        assert_eq!((r.is, r.words.len()), (Is::Ended, 2));
+        assert!(r.unheard.is_empty());
     }
 
     #[test]
@@ -768,11 +903,7 @@ mod tests {
     #[test]
     fn one_line_differs_by_another_source_and_not_by_the_same_ones_earlier_episode() {
         let s = fixture();
-        let l = |a: &str, b: &str| {
-            let ids = [format!("r_{a:a<20}"), format!("r_{b:a<20}")];
-            s.lists("condition", ids.iter().map(String::as_str), DAY)
-                .current
-        };
+        let l = |a: &str, b: &str| only(&s, "condition", &[a, b]).current;
         let rash = l("tworecords", "tworecordsother");
         assert_eq!(
             (rash.len(), rash[0].differs, rash[0].against.len()),
@@ -788,23 +919,16 @@ mod tests {
     #[test]
     fn a_medicine_is_never_one_line_with_another() {
         let s = fixture();
-        let l = s.lists(
-            "medication",
-            ["r_noendaaaaaaaaaaaaaaa", "r_noendtwiceaaaaaaaaaa"],
-            DAY,
-        );
+        let l = only(&s, "medication", &["noend", "noendtwice"]);
         assert_eq!(l.current.len(), 2);
-        assert!(one(&s, "noend").line.is_none());
+        // Of one heading, by which a reader may group them.
+        assert_eq!(one(&s, "noend").line, one(&s, "noendtwice").line);
     }
 
     #[test]
     fn uncoded_names_alike_are_one_line_and_each_source_is_named() {
         let s = fixture();
-        let l = s.lists(
-            "allergy",
-            ["r_nutaaaaaaaaaaaaaaaaa", "r_nutagainaaaaaaaaaaaa"],
-            DAY,
-        );
+        let l = only(&s, "allergy", &["nut", "nutagain"]);
         assert_eq!(l.current.len(), 1);
         let named: Vec<&str> = l.current[0]
             .records
@@ -826,7 +950,9 @@ mod tests {
             {"id": "r_twoaaaaaaaaaaaaaaaaa", "kind": "condition", "key": "k2", "display": "Sample itch",
              "fields": {"category": "encounter-diagnosis", "verification_status": "confirmed"},
              "provenance": [{"source": {"kind": "manual"}, "method": "manual",
-             "filed_at": "2024-01-02T10:00:00Z", "filed_by": "medrec 0.9.9"}]}]}),
+             "filed_at": "2024-01-02T10:00:00Z", "filed_by": "medrec 0.9.9"}]},
+            {"id": "r_threeaaaaaaaaaaaaaaa", "kind": "allergy", "key": "k3", "display": "Sample moss",
+             "fields": {}, "provenance": []}]}),
         );
         assert_eq!(one(&s, "one").on(DAY), At::All);
         let r = one(&s, "two");
@@ -834,6 +960,9 @@ mod tests {
             (r.is, r.words[0].read.as_deref()),
             (Is::Visit, Some("2024-01-02"))
         );
+        // Nor does one of no source end.
+        let r = one(&s, "three");
+        assert_eq!((r.is, r.words[0].read.as_deref()), (Is::Current, None));
     }
 
     #[test]
