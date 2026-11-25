@@ -22,6 +22,7 @@ use crate::events::Built;
 use crate::given;
 use crate::marks::{failed, Failed, Marks, LABELS, READ, READ_DECISIONS, RECORDS, WRITE};
 use crate::model::{Document, Household, Person, PersonIndex, PersonText, Record};
+use crate::questionnaires;
 use crate::standing;
 
 pub const SCHEMA: &str = "medrec-private/v1";
@@ -128,12 +129,15 @@ pub(crate) fn icd10_area(code: &str) -> Option<&'static str> {
         b'A' if (50..=64).contains(&n) => Some(SEXUAL_HEALTH),
         b'B' if n == 20 => Some(SEXUAL_HEALTH),
         b'O' if n <= 8 => Some(REPRODUCTIVE),
+        b'O' if n == 99 && c.get(3..5) == Some("33") => Some(SUBSTANCE_USE),
         b'N' if n == 46 || (96..=98).contains(&n) => Some(REPRODUCTIVE),
         b'Z' => match (n, sub) {
             (21, _) => Some(SEXUAL_HEALTH),
             (11, Some("3" | "4")) | (20, Some("2" | "6")) | (72, Some("5")) => Some(SEXUAL_HEALTH),
             (30..=32, _) | (33, Some("2")) => Some(REPRODUCTIVE),
-            (71, Some("4" | "5")) => Some(SUBSTANCE_USE),
+            (71, Some("4" | "5" | "6")) | (72, Some("0")) => Some(SUBSTANCE_USE),
+            (77, Some("2")) if c.get(4..5) == Some("2") => Some(SUBSTANCE_USE),
+            (87, Some("8")) if c.get(4..6) == Some("91") => Some(SUBSTANCE_USE),
             _ => None,
         },
         _ => None,
@@ -285,6 +289,14 @@ fn principal_diagnosis(r: &Record) -> Option<(Option<&str>, &str)> {
     ))
 }
 
+/// What a pharmacy claim names, without its provider.
+pub(crate) fn dispensed(r: &Record) -> Option<&str> {
+    let pharmacy = ["category", "type"]
+        .iter()
+        .any(|k| field(r, k) == Some("pharmacy"));
+    pharmacy.then(|| r.display.split(" · ").next()).flatten()
+}
+
 /// Why a record is private by the rules, if it is.
 fn record_why(r: &Record) -> Option<Why> {
     if let Some(area) = source_area(r) {
@@ -308,6 +320,10 @@ fn record_why(r: &Record) -> Option<Why> {
             .filter(|(system, _)| is_icd10(*system))
             .and_then(|(_, code)| icd10_area(code))
             .map(|area| Why::of(area, "code"))
+            .or_else(|| {
+                let area = first_area(&MEDICINES, dispensed(r)?)?;
+                Some(Why::of(area, "medicine"))
+            })
             .or_else(|| by_names(&["provider", "facility"])),
         "encounter" => by_names(&["service_provider", "location", "practitioner"]),
         "medication" => {
@@ -320,6 +336,7 @@ fn record_why(r: &Record) -> Option<Why> {
                 .or_else(|| by_names(&["prescriber"]))
         }
         "result" | "report" => first_area(&TESTS, &r.display)
+            .or_else(|| questionnaires::of(&r.display, r.code.as_ref()).map(|q| q.area))
             .map(|area| Why::of(area, "test"))
             .or_else(|| by_names(&["performer"])),
         _ => None,
@@ -335,7 +352,9 @@ fn document_why(d: &Document, text: Option<&str>) -> Option<Why> {
         .and_then(|o| first_area(&PLACES, o))
         .map(|area| Why::of(area, "provider"));
     let words = || {
-        let title = d.title.as_deref().and_then(|t| first_area(&PAPERS, t));
+        let title = d.title.as_deref().and_then(|t| {
+            first_area(&PAPERS, t).or_else(|| questionnaires::of(t, None).map(|q| q.area))
+        });
         let page = || {
             let page = crate::bill::first_page(d, text?)?;
             [&*PAPERS, &*MEDICINES, &*TESTS]
@@ -999,6 +1018,28 @@ const GENERIC: &[&str] = &[
     "history",
     "chronic",
     "acute",
+    "score",
+    "scale",
+    "risk",
+    "use",
+    "status",
+    "survey",
+    "assessment",
+    "questionnaire",
+    "inventory",
+    "checklist",
+    "index",
+    "item",
+    "patient",
+    "health",
+    "doing",
+    "things",
+    "having",
+    "feeling",
+    "trouble",
+    "little",
+    "often",
+    "days",
     "with",
     "without",
     "type",

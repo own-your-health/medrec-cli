@@ -3,9 +3,10 @@
 //! more take the current shape too; what the sources' raw files say of the
 //! providers each record prints ([`crate::providers`]); the fields of every
 //! condition, allergy and medicine; what each source says of every record and
-//! paper that keeps it; the other sources that served a paper's bytes; and
-//! every bill's and receipt's statement read again from its stored text for
-//! the fields it lacks. It reads only the folder.
+//! paper that keeps it; the results that are about somebody else; the other
+//! sources that served a paper's bytes; and every bill's and receipt's
+//! statement read again from its stored text for the fields it lacks. It reads
+//! only the folder.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
@@ -14,6 +15,7 @@ use pk_cli_core::CliError;
 use serde::Serialize;
 use serde_json::Value;
 
+use crate::about;
 use crate::claims::without_links;
 use crate::folder::Folder;
 use crate::given::{self, Given};
@@ -44,6 +46,8 @@ pub struct Reindexed {
     /// Records that keep something more that a source gave and they do not
     /// show.
     pub given_updated: usize,
+    /// Results that were filed with one about somebody else.
+    pub results_split: usize,
     /// Papers whose sources, or what one says or gave of them, changed.
     pub papers_updated: usize,
     /// Raw files of papers that do not read.
@@ -61,6 +65,7 @@ pub struct PersonReindexed {
     pub providers_updated: usize,
     pub statuses_updated: usize,
     pub given_updated: usize,
+    pub results_split: usize,
     pub papers_updated: usize,
     pub papers_unread: usize,
 }
@@ -94,7 +99,7 @@ pub fn claims(
         ..Reindexed::default()
     };
     for p in people::selected(h, person)? {
-        let mut idx = folder.index(p)?;
+        let mut idx = folder.whole_index(p)?;
         let raw_of = |r: &Record| r.provenance.iter().find_map(|pr| pr.raw_path.clone());
         // One copy per folder of raw files, not one call per file.
         let dirs: BTreeSet<String> = idx
@@ -116,6 +121,7 @@ pub fn claims(
         fetch(folder, &sources, tmp.path(), &dirs, RAW_TYPES)?;
         fetch_said(folder, &idx, tmp.path())?;
         let older = fetch_older(folder, &idx, &sources, tmp.path())?;
+        row.results_split = apart(&mut idx, &older, tmp.path())?;
         let showed: Vec<Given> = idx.records.iter().map(import::showed).collect();
         row.statuses_updated = statuses(&mut idx, tmp.path())?;
         for r in idx.records.iter_mut().filter(|r| r.kind == "claim") {
@@ -159,6 +165,7 @@ pub fn claims(
             row.providers_updated,
             row.statuses_updated,
             row.given_updated,
+            row.results_split,
             row.papers_updated,
         ];
         if !dry_run && changed.iter().any(|n| *n > 0) {
@@ -168,6 +175,7 @@ pub fn claims(
         out.providers_updated += row.providers_updated;
         out.statuses_updated += row.statuses_updated;
         out.given_updated += row.given_updated;
+        out.results_split += row.results_split;
         out.papers_updated += row.papers_updated;
         out.papers_unread += row.papers_unread;
         out.claims += row.claims;
@@ -301,8 +309,8 @@ fn fetch_files(
 }
 
 /// What a source gave of the records it states, by every version of its raw
-/// files: those filed by an import that did not finish were never read in.
-/// Records changed, counted.
+/// files: those filed by an import that did not finish were never read in. One
+/// that says it is about somebody else goes apart. Records changed, counted.
 pub(crate) fn given_by(
     folder: &Folder,
     idx: &mut PersonIndex,
@@ -311,13 +319,18 @@ pub(crate) fn given_by(
     let tmp = pk_cli_drive::private_temp_dir("medrec-given")?;
     let sources = BTreeSet::from([source_dir.to_string()]);
     let mut wanted: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
-    let of = idx.records.iter().flat_map(|r| &r.provenance);
-    for rel in of.filter_map(|p| p.raw_path.as_deref()) {
-        if import::source_dir_of(rel) != Some(source_dir) {
+    for r in &idx.records {
+        let files = r.provenance.iter().filter_map(|p| p.raw_path.as_deref());
+        let files: Vec<&str> = files.collect();
+        // Another source's of the same record too: it can be what is left.
+        let its = |rel: &&str| import::source_dir_of(rel) == Some(source_dir);
+        if !files.iter().any(its) {
             continue;
         }
-        if let Some((dir, _)) = rel.rsplit_once('/') {
-            wanted.entry(dir).or_default().insert(rel);
+        for rel in files {
+            if let Some((dir, _)) = rel.rsplit_once('/') {
+                wanted.entry(dir).or_default().insert(rel);
+            }
         }
     }
     for (dir, files) in wanted {
@@ -326,8 +339,110 @@ pub(crate) fn given_by(
     }
     fetch(folder, &sources, tmp.path(), &BTreeSet::new(), RAW_TYPES)?;
     let older = fetch_older(folder, idx, &sources, tmp.path())?;
+    let split = apart(idx, &older, tmp.path())?;
     let showed: Vec<Given> = idx.records.iter().map(import::showed).collect();
-    given(idx, &showed, &older, tmp.path())
+    Ok(split + given(idx, &showed, &older, tmp.path())?)
+}
+
+/// Each resource about somebody else that was filed as the person's own, or
+/// with it in one record, under a key of its own. How many records had one.
+fn apart(
+    idx: &mut PersonIndex,
+    older: &BTreeMap<String, Vec<String>>,
+    tmp: &Path,
+) -> Result<usize, CliError> {
+    let of_file = |file: &str, p: &Provenance| normalize::record(&read(tmp, file)?, p.clone());
+    let shape = |p: &Provenance| of_file(p.raw_path.as_ref()?, p);
+    // By any version of it, as an import knows it.
+    let other = |r: &Record, p: &Provenance| {
+        let path = p.raw_path.as_ref()?;
+        let mut n = shape(p)?;
+        if n.fields.contains_key(about::FIELD) {
+            return Some(n);
+        }
+        let mut before = older.get(path).into_iter().flatten();
+        let before = before.find_map(|f| about::of_resource(&of_file(f, p)?, Some(path)));
+        let who = before.or_else(|| about::of_resource(r, Some(path)))?;
+        n.key = about::key(&n.key, None);
+        n.given.push(Given {
+            raw_path: Some(path.clone()),
+            fields: [(about::FIELD.to_string(), who.into())]
+                .into_iter()
+                .collect(),
+            ..Given::default()
+        });
+        Some(n)
+    };
+    let mut moved: Vec<Record> = Vec::new();
+    let mut split = 0;
+    let mut records = Vec::new();
+    for mut r in std::mem::take(&mut idx.records) {
+        let apart = r.kind == "result" && !about::keyed(&r);
+        let each = r.provenance.iter().filter(|_| apart);
+        let mut others: Vec<Record> = each.filter_map(|p| other(&r, p)).collect();
+        if others.is_empty() {
+            records.push(r);
+            continue;
+        }
+        split += 1;
+        let wrote = import::wrote(&r).map(str::to_string);
+        let of = |n: &Record, path: &Option<String>| n.provenance[0].raw_path == *path;
+        let whole = others.len() == r.provenance.len();
+        if whole {
+            // The record is theirs, its values and all. Any other's goes.
+            let its = others.iter().position(|n| of(n, &wrote)).unwrap_or(0);
+            let key = others[its].key.clone();
+            for n in others.iter().filter(|n| n.key == key) {
+                for g in n.given.clone() {
+                    given::keep(&mut r, g);
+                }
+            }
+            others.retain(|n| n.key != key);
+            r.key = key;
+        }
+        let gone = |path: &Option<String>| path.is_some() && others.iter().any(|n| of(n, path));
+        r.provenance.retain(|p| !gone(&p.raw_path));
+        let again = gone(&wrote);
+        for n in &mut others {
+            let path = n.provenance[0].raw_path.clone();
+            let its = |p: &String| path.as_ref() == Some(p);
+            let kept = r.words.iter().filter(|w| w.in_error() && its(&w.raw_path));
+            n.words = kept.cloned().collect();
+            let kept = r.errors.iter().filter(|e| its(&e.raw_path));
+            n.errors = kept.cloned().collect();
+        }
+        let left = r.provenance.iter().filter_map(|p| p.raw_path.clone());
+        let left: Vec<String> = left.collect();
+        r.words.retain(|w| left.contains(&w.raw_path));
+        r.errors.retain(|e| left.contains(&e.raw_path));
+        if again {
+            import::values_again(&mut r, &mut |p| Ok(shape(p)))?;
+        }
+        match whole {
+            true => moved.push(r),
+            false => records.push(r),
+        }
+        moved.extend(others);
+    }
+    for n in moved {
+        let Some(r) = records.iter_mut().find(|r: &&mut Record| r.key == n.key) else {
+            records.push(n);
+            continue;
+        };
+        for g in n.given.iter().cloned().chain([import::showed(&n)]) {
+            given::keep(r, g);
+        }
+        for d in n.documents {
+            if !r.documents.contains(&d) {
+                r.documents.push(d);
+            }
+        }
+        r.provenance.extend(n.provenance);
+        r.words.extend(n.words);
+        r.errors.extend(n.errors);
+    }
+    idx.records = records;
+    Ok(split)
 }
 
 /// What the sources gave of each record that it does not show: by every
@@ -508,6 +623,7 @@ fn read(tmp: &Path, rel: &str) -> Option<Value> {
 /// The raw files providers come from: the kinds that print one, and what
 /// they point at.
 const RAW_TYPES: &[&str] = &[
+    "Observation",
     "Encounter",
     "MedicationRequest",
     "MedicationDispense",

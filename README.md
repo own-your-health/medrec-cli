@@ -296,13 +296,15 @@ medrec events list --person Robin               # what happened: one line per vi
 medrec bills list --person Robin                # each bill: its claim, what is paid and left
 medrec private list --person Robin              # what stays off shared screens, and why
 medrec labels list --person Robin               # what the household said of a provider
+medrec records about-another --person Robin    # what is in a chart about somebody else, by id alone
+medrec records show <record id>                # one record, whatever it is about
 medrec search hemoglobin
 medrec results --code 718-7
 medrec meds --active
 medrec note add Robin "Ask about the recheck" --tag question --about <record id>
 
 medrec verify                                   # every indexed file against the index
-medrec reindex                                  # claims shaped again, providers, statuses, what each source gave and what else served a paper read again from the raw files, and bills and receipts read again, after an upgrade
+medrec reindex                                  # claims shaped again, providers, statuses, what each source gave and what else served a paper read again from the raw files, results about somebody else put in a record of their own, and bills and receipts read again, after an upgrade
 medrec backup --to "/Volumes/Backup/Medical Records"
 ```
 

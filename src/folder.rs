@@ -170,8 +170,16 @@ impl Folder {
         self.write_json(HOUSEHOLD, h)
     }
 
-    /// A person's index; an empty one when none was written yet.
+    /// A person's index, without what is about somebody else
+    /// ([`crate::about`]): for everything that shows or judges it.
     pub fn index(&self, p: &Person) -> Result<PersonIndex, CliError> {
+        Ok(crate::about::shown(p, self.whole_index(p)?))
+    }
+
+    /// A person's index, all of it: for what writes it, checks its files, or
+    /// opens one item by its id at the Mac. An empty one when none was written
+    /// yet.
+    pub fn whole_index(&self, p: &Person) -> Result<PersonIndex, CliError> {
         let rel = index_rel(p);
         let idx: PersonIndex = self
             .read_json(&rel)?
@@ -196,6 +204,11 @@ impl Folder {
     /// Write a person's index, its claims' links recomputed first
     /// (`claims::link`).
     pub fn save_index(&self, p: &Person, idx: &mut PersonIndex) -> Result<(), CliError> {
+        if !idx.about_another.is_empty() {
+            return Err(CliError::Other(
+                "the index to write is not all of it; nothing was written".into(),
+            ));
+        }
         crate::claims::link(&mut idx.records);
         let rel = index_rel(p);
         let current: Option<PersonIndex> = self.read_json(&rel)?;

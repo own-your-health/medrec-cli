@@ -304,7 +304,7 @@ fn latest_import(
     let Some(person) = h.person(&src.person) else {
         return Ok(None);
     };
-    let idx = folder.index(person)?;
+    let idx = folder.whole_index(person)?;
     Ok(idx
         .imports
         .iter()

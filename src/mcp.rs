@@ -4,6 +4,7 @@
 //! writes to the folder or reaches any network but the folder's own: a
 //! Drive folder is read through medrec's own Drive sign-in, from its vault.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use pk_cli_core::CliError;
@@ -599,22 +600,25 @@ struct PrivateItems {
     /// by name as shown. Any of their items may be one the household marked
     /// private or a label makes private, so an answer about the whole
     /// household holds all of them back (`held`).
-    unreadable: Vec<(String, Unreadable)>,
+    unreadable: Vec<(String, String, Unreadable)>,
     /// The record, document, event and study ids of those people, and
     /// every study with no report, which nothing judges.
-    held: std::collections::BTreeSet<String>,
+    held: BTreeSet<String>,
     /// What is entered in error, which no list shows.
-    errors: std::collections::BTreeSet<String>,
+    errors: BTreeSet<String>,
     /// The bills entered in error the household marked a payment on.
-    paid_errors: std::collections::BTreeSet<String>,
+    paid_errors: BTreeSet<String>,
     /// Whether the list is of bills.
     bills: bool,
+    /// The people these are the items of.
+    people: BTreeSet<String>,
 }
 
 impl PrivateItems {
     fn of(f: &Folder, h: &Household, people: &[&crate::model::Person]) -> Result<Self, CliError> {
         let mut out = PrivateItems::default();
         for p in people {
+            out.people.insert(p.id.clone());
             let idx = f.index(p)?;
             let (v, events) = crate::private::with_events(f, h, p, &idx)?;
             if v.get("marks_unreadable").is_some() {
@@ -622,7 +626,8 @@ impl PrivateItems {
                     Some(_) => Unreadable::Labels,
                     None => Unreadable::Marks,
                 };
-                out.unreadable.push((crate::printable(&p.name), what));
+                let name = crate::printable(&p.name);
+                out.unreadable.push((p.id.clone(), name, what));
                 out.held.extend(
                     idx.records
                         .iter()
@@ -655,6 +660,82 @@ impl PrivateItems {
     /// that does not name it.
     fn held_back(&self, id: &str) -> bool {
         self.areas.contains_key(id) || self.held.contains(id)
+    }
+
+    /// Takes the ids of what is held back out of a value. Whether any of it
+    /// is left.
+    fn without_held(&self, v: &mut Value) -> bool {
+        match v {
+            Value::String(s) => !self.held_back(s),
+            Value::Array(list) => {
+                let all = list.len();
+                list.retain_mut(|v| self.without_held(v));
+                all == 0 || !list.is_empty()
+            }
+            Value::Object(map) => {
+                map.retain(|_, v| self.without_held(v));
+                true
+            }
+            _ => true,
+        }
+    }
+
+    /// Leaves out of an event what an answer may not show with it, counted in
+    /// `private_members`: its private members, in an answer about the whole
+    /// household (`whole`) that the event itself is not private in; and
+    /// another person's (of `self`, else `others`), in any. So with the
+    /// events it tells of. The ids of the other people whose are left out
+    /// because what is private of theirs does not read.
+    fn parts(&self, others: &PrivateItems, e: &mut Value, whole: bool) -> BTreeSet<String> {
+        let named = e["id"]
+            .as_str()
+            .is_some_and(|id| self.areas.contains_key(id));
+        let own = |id: &str| !whole || named || !self.held_back(id);
+        let of = |p: &str| {
+            let mut all = [self, others].into_iter();
+            all.find(|of| of.people.contains(p))
+        };
+        let mut unknown = BTreeSet::new();
+        let mut shown = |x: &Value, id: &Value| {
+            let Some(id) = id.as_str() else {
+                return false;
+            };
+            let Some(p) = x.get("person") else {
+                return own(id);
+            };
+            let p = p.as_str().unwrap_or_default();
+            let Some(of) = of(p) else {
+                return false;
+            };
+            let shown = !of.held_back(id);
+            if !shown && of.unreadable.iter().any(|(of, ..)| of == p) {
+                unknown.insert(p.to_string());
+            }
+            shown
+        };
+        let mut left_out = 0;
+        if let Some(members) = e["members"].as_array_mut() {
+            let all = members.len();
+            members.retain(|m| shown(m, m.get("record").unwrap_or(&m["document"])));
+            left_out = all - members.len();
+        }
+        if let Some(links) = e["links"].as_array_mut() {
+            links.retain(|l| shown(l, &l["event"]));
+        }
+        if left_out > 0 {
+            e["private_members"] = left_out.into();
+        }
+        if let Some(ids) = e["could_join"].as_array_mut() {
+            ids.retain(|x| x.as_str().is_some_and(|id| !whole || !self.held_back(id)));
+        }
+        for list in ["links", "could_join"] {
+            if e[list].as_array().is_some_and(Vec::is_empty) {
+                if let Some(e) = e.as_object_mut() {
+                    e.remove(list);
+                }
+            }
+        }
+        unknown
     }
 
     /// Marks an answer's private items with their area when the call is
@@ -725,6 +806,23 @@ impl PrivateItems {
         }
     }
 
+    /// Which other people's parts a page's events are without, since what is
+    /// private of theirs does not read.
+    fn warn_of_parts<T>(&self, page: &mut Page<T>, people: &BTreeSet<String>) {
+        for (_, name, what) in self.unreadable.iter().filter(|(p, ..)| people.contains(p)) {
+            let (code, file) = match what {
+                Unreadable::Marks => ("private-marks-unreadable", "marks.json"),
+                Unreadable::Labels => ("private-labels-unreadable", "provider-state.json"),
+            };
+            page.warn(
+                code,
+                format!(
+                    "Which of {name}'s items are private is not known (their {file} does not read): the events on this page leave out {name}'s documents and events. Ask about {name} for them"
+                ),
+            );
+        }
+    }
+
     /// Says on a page, starting at `offset`, how many items it left out,
     /// and whose marks did not read.
     fn warn<T>(&self, page: &mut Page<T>, offset: usize, left_out: &views::LeftOut) {
@@ -749,7 +847,7 @@ impl PrivateItems {
                 ),
             );
         }
-        for (name, what) in &self.unreadable {
+        for (_, name, what) in &self.unreadable {
             let (code, message) = match what {
                 Unreadable::Marks => (
                     "private-marks-unreadable",
@@ -801,6 +899,15 @@ fn warn_labels(page: &mut Page<Item>) {
     }
 }
 
+/// The people an event shows a paper or an event of beside its own.
+fn others_of(e: &Value) -> impl Iterator<Item = &str> {
+    ["members", "links"]
+        .into_iter()
+        .filter_map(|k| e[k].as_array())
+        .flatten()
+        .filter_map(|x| x["person"].as_str())
+}
+
 /// An `events.json` event as a list item: `source` is where it happened,
 /// and `detail` what it was, who, how sure the grouping is and what is
 /// still expected. `detailed` adds its money, members and evidence in
@@ -848,6 +955,7 @@ fn event_item(e: &Value, detailed: bool) -> Item {
             "confidence",
             "money",
             "members",
+            "private_members",
             "expected",
             "differences",
             "links",
@@ -1256,6 +1364,11 @@ impl MedrecTools {
             a.group.cmp(&b.group).then_with(date)
         });
         let (mut items, left_out) = private.keep(items, |i| open(&i.title));
+        if person.is_none() {
+            for fields in items.iter_mut().filter_map(|i| i.fields.as_mut()) {
+                fields.retain(|_, v| private.without_held(v));
+            }
+        }
         private.label(&f, &h, &selected, &page, &mut items, person.is_none());
         let mut out = page.page(items, "person, since/until, active or name")?;
         warn_labels(&mut out);
@@ -1277,6 +1390,15 @@ impl MedrecTools {
         }
         for note in notes {
             out.warn("no-problem-list", note);
+        }
+        let lists = matches!(
+            a.kind,
+            Kind::Results | Kind::Tests | Kind::Timeline | Kind::Documents
+        );
+        if lists && page.offset() == 0 {
+            if let Some(line) = views::about_another(&f, &h, person)? {
+                out.warn("about-another", line);
+            }
         }
         private.warn(&mut out, page.offset(), &left_out);
         ToolOutput::new(&out)
@@ -1326,6 +1448,21 @@ impl MedrecTools {
                 }
             }
         }
+        // Those the events show a paper or an event of, judged as theirs.
+        let others = {
+            let shown: BTreeSet<&str> = events.iter().flat_map(others_of).collect();
+            let others = h.people.iter().filter(|p| {
+                shown.contains(p.id.as_str()) && !selected.iter().any(|s| s.id == p.id)
+            });
+            PrivateItems::of(&f, &h, &others.collect::<Vec<_>>())?
+        };
+        let mut unknown: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        for e in &mut events {
+            let of = private.parts(&others, e, person.is_none());
+            if let (false, Some(id)) = (of.is_empty(), e["id"].as_str()) {
+                unknown.insert(id.to_string(), of);
+            }
+        }
         let items: Vec<Item> = events
             .iter()
             .filter(|e| id.is_none_or(|id| e["id"] == id))
@@ -1370,6 +1507,12 @@ impl MedrecTools {
         let mut out = page.page(items, "person, since/until or name")?;
         warn_labels(&mut out);
         private.warn(&mut out, page.offset(), &left_out);
+        // A row without detail shows no member of it.
+        if person.is_some() && detailed {
+            let of = |i: &Item| unknown.get(&i.id).into_iter().flatten();
+            let of: BTreeSet<String> = out.items.iter().flat_map(of).cloned().collect();
+            others.warn_of_parts(&mut out, &of);
+        }
         ToolOutput::new(&out)
     }
 
@@ -1382,7 +1525,7 @@ impl MedrecTools {
             return Err(ToolError::usage("pages count from 1"));
         }
         let (f, h) = self.open()?;
-        let (p, d) = views::find_document(&f, &h, id).map_err(|e| {
+        let (p, d) = views::find_document(&f, &h, id, false).map_err(|e| {
             ToolError::from(e).with_fix("Find the id with medrec_search or medrec_records")
         })?;
         let text = f.text(&p)?.texts.remove(&d.id).unwrap_or_default();
@@ -1413,6 +1556,7 @@ impl MedrecTools {
             .iter()
             .filter(|r| r.documents.contains(&d.id) && !private.errors.contains(&r.id))
             .take(20)
+            .filter(|r| private.area(&d.id).is_some() || !private.held_back(&r.id))
             .map(|r| clip(&r.display, CLIP))
             .collect();
         let s = d.statement.as_ref();

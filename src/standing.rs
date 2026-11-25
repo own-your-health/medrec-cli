@@ -234,6 +234,11 @@ pub fn record_differs(r: &Record) -> bool {
 /// next copy's, and a study whose report is has its report found again.
 pub fn index(idx: &PersonIndex) -> Cow<'_, PersonIndex> {
     let gone: BTreeSet<String> = errors(idx).map(str::to_string).collect();
+    without(idx, &gone)
+}
+
+/// The index without these, and without what it says of them.
+pub(crate) fn without<'a>(idx: &'a PersonIndex, gone: &BTreeSet<String>) -> Cow<'a, PersonIndex> {
     if gone.is_empty() {
         return Cow::Borrowed(idx);
     }

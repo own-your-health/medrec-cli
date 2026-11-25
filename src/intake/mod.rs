@@ -288,7 +288,7 @@ pub fn run(folder: &Folder, cfg: &Config, req: &Request) -> Result<(Report, bool
 
     let mut indexes: BTreeMap<String, PersonIndex> = BTreeMap::new();
     for p in &household.people {
-        indexes.insert(p.id.clone(), folder.index(p)?);
+        indexes.insert(p.id.clone(), folder.whole_index(p)?);
     }
     let mut texts: BTreeMap<String, PersonText> = BTreeMap::new();
     let mut queue = folder.review()?;

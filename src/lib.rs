@@ -2,6 +2,7 @@
 //! binary's commands live in `main.rs`; the mechanisms they use live here so
 //! the tests can reach them.
 
+pub mod about;
 pub mod batch;
 pub mod bill;
 pub mod bills;
@@ -35,6 +36,7 @@ pub mod proc;
 pub mod prompt;
 pub mod provider_labels;
 pub mod providers;
+pub mod questionnaires;
 pub mod refresh;
 pub mod reindex;
 pub mod review;

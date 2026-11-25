@@ -1,0 +1,773 @@
+{
+ "schema": "medrec-index/v1",
+ "person": "p_robinaaaaaaaaaaaaaaa",
+ "rev": 1,
+ "studies": [],
+ "imports": [],
+ "records": [
+  {
+   "id": "r_lowmoodaaaaaaaaaaaaa",
+   "kind": "result",
+   "key": "result|lowmood|2024-03-04",
+   "date": "2024-03-04",
+   "display": "Patient health questionnaire, total",
+   "status": "final",
+   "fields": {
+    "value": "4",
+    "category": "Survey"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-07-02T10:00:00Z",
+     "filed_at": "2024-07-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/Observation/lowmood.json"
+    }
+   ]
+  },
+  {
+   "id": "r_codedaaaaaaaaaaaaaaa",
+   "kind": "result",
+   "key": "result|coded|2024-03-11",
+   "date": "2024-03-11",
+   "display": "Total score",
+   "status": "final",
+   "fields": {
+    "value": "4",
+    "category": "Survey"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-07-02T10:00:00Z",
+     "filed_at": "2024-07-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/Observation/coded.json"
+    }
+   ],
+   "code": {
+    "system": "http://loinc.org",
+    "code": "44261-6"
+   }
+  },
+  {
+   "id": "r_worryaaaaaaaaaaaaaaa",
+   "kind": "result",
+   "key": "result|worry|2024-03-18",
+   "date": "2024-03-18",
+   "display": "GAD-7 total",
+   "status": "final",
+   "fields": {
+    "value": "4",
+    "category": "Survey"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-07-02T10:00:00Z",
+     "filed_at": "2024-07-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/Observation/worry.json"
+    }
+   ]
+  },
+  {
+   "id": "r_newparentaaaaaaaaaaa",
+   "kind": "result",
+   "key": "result|newparent|2024-03-25",
+   "date": "2024-03-25",
+   "display": "Postnatal depression screening",
+   "status": "final",
+   "fields": {
+    "value": "4",
+    "category": "Survey"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-07-02T10:00:00Z",
+     "filed_at": "2024-07-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/Observation/newparent.json"
+    }
+   ]
+  },
+  {
+   "id": "r_safetyaaaaaaaaaaaaaa",
+   "kind": "result",
+   "key": "result|safety|2024-04-08",
+   "date": "2024-04-08",
+   "display": "Suicide risk",
+   "status": "final",
+   "fields": {
+    "value": "4",
+    "category": "Survey"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-07-02T10:00:00Z",
+     "filed_at": "2024-07-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/Observation/safety.json"
+    }
+   ]
+  },
+  {
+   "id": "r_nervesaaaaaaaaaaaaaa",
+   "kind": "result",
+   "key": "result|nerves|2024-04-15",
+   "date": "2024-04-15",
+   "display": "Anxiety screening",
+   "status": "final",
+   "fields": {
+    "value": "4",
+    "category": "Survey"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-07-02T10:00:00Z",
+     "filed_at": "2024-07-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/Observation/nerves.json"
+    }
+   ]
+  },
+  {
+   "id": "r_checklistaaaaaaaaaaa",
+   "kind": "result",
+   "key": "result|checklist|2024-04-22",
+   "date": "2024-04-22",
+   "display": "PTSD checklist",
+   "status": "final",
+   "fields": {
+    "value": "4",
+    "category": "Survey"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-07-02T10:00:00Z",
+     "filed_at": "2024-07-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/Observation/checklist.json"
+    }
+   ]
+  },
+  {
+   "id": "r_drinksaaaaaaaaaaaaaa",
+   "kind": "result",
+   "key": "result|drinks|2024-05-06",
+   "date": "2024-05-06",
+   "display": "Alcohol use",
+   "status": "final",
+   "fields": {
+    "value": "4",
+    "category": "Survey"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-07-02T10:00:00Z",
+     "filed_at": "2024-07-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/Observation/drinks.json"
+    }
+   ]
+  },
+  {
+   "id": "r_drugsaaaaaaaaaaaaaaa",
+   "kind": "result",
+   "key": "result|drugs|2024-05-13",
+   "date": "2024-05-13",
+   "display": "DAST-10",
+   "status": "final",
+   "fields": {
+    "value": "4",
+    "category": "Survey"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-07-02T10:00:00Z",
+     "filed_at": "2024-07-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/Observation/drugs.json"
+    }
+   ]
+  },
+  {
+   "id": "r_smokeaaaaaaaaaaaaaaa",
+   "kind": "result",
+   "key": "result|smoke|2024-05-27",
+   "date": "2024-05-27",
+   "display": "Tobacco smoking status",
+   "status": "final",
+   "fields": {
+    "value": "4",
+    "category": "Survey"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-07-02T10:00:00Z",
+     "filed_at": "2024-07-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/Observation/smoke.json"
+    }
+   ]
+  },
+  {
+   "id": "r_sunlightaaaaaaaaaaaa",
+   "kind": "result",
+   "key": "result|sunlight|2024-05-20",
+   "date": "2024-05-20",
+   "display": "Example sunlight index",
+   "status": "final",
+   "fields": {
+    "value": "4",
+    "category": "Survey"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-07-02T10:00:00Z",
+     "filed_at": "2024-07-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/Observation/sunlight.json"
+    }
+   ]
+  },
+  {
+   "id": "r_leavesaaaaaaaaaaaaaa",
+   "kind": "condition",
+   "key": "condition|leaves|2024-05-28",
+   "date": "2024-05-28",
+   "display": "Example condition, leaves",
+   "status": "active",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-07-02T10:00:00Z",
+     "filed_at": "2024-07-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/Observation/leaves.json"
+    }
+   ],
+   "code": {
+    "system": "http://hl7.org/fhir/sid/icd-10-cm",
+    "code": "Z72.0"
+   }
+  },
+  {
+   "id": "r_formerlyaaaaaaaaaaaa",
+   "kind": "condition",
+   "key": "condition|formerly|2024-05-29",
+   "date": "2024-05-29",
+   "display": "Example condition, formerly",
+   "status": "active",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-07-02T10:00:00Z",
+     "filed_at": "2024-07-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/Observation/formerly.json"
+    }
+   ],
+   "code": {
+    "system": "http://hl7.org/fhir/sid/icd-10-cm",
+    "code": "Z87.891"
+   }
+  },
+  {
+   "id": "r_ankleaaaaaaaaaaaaaaa",
+   "kind": "condition",
+   "key": "condition|ankle|2024-05-30",
+   "date": "2024-05-30",
+   "display": "Example condition, ankle",
+   "status": "active",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-07-02T10:00:00Z",
+     "filed_at": "2024-07-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/Observation/ankle.json"
+    }
+   ],
+   "code": {
+    "system": "http://hl7.org/fhir/sid/icd-10-cm",
+    "code": "S93.401A"
+   }
+  },
+  {
+   "id": "r_checkupaaaaaaaaaaaaa",
+   "kind": "encounter",
+   "key": "encounter|checkup|2024-03-04",
+   "date": "2024-03-04",
+   "display": "Office visit",
+   "status": "finished",
+   "fields": {
+    "service_provider": "Example Health"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-07-02T10:00:00Z",
+     "filed_at": "2024-07-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/Observation/checkup.json"
+    }
+   ]
+  },
+  {
+   "id": "r_hearvisitaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|hearvisit|2024-03-18",
+   "date": "2024-03-18",
+   "display": "Office visit \u00b7 Example Hearing Room",
+   "status": "active",
+   "fields": {
+    "provider": "Example Hearing Room",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2024-03-18",
+     "end": "2024-03-18"
+    },
+    "type": "professional",
+    "amounts": {
+     "billed": {
+      "amount": "40.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "40.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "sequence": 1,
+      "category": "visit",
+      "amounts": {
+       "billed": {
+        "amount": "40.00",
+        "currency": "USD"
+       }
+      },
+      "records": [
+       "r_worryaaaaaaaaaaaaaaa"
+      ]
+     }
+    ],
+    "category": "visit",
+    "results": [
+     "r_worryaaaaaaaaaaaaaaa"
+    ]
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-07-02T10:00:00Z",
+     "filed_at": "2024-07-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/Observation/hearvisit.json"
+    }
+   ]
+  },
+  {
+   "id": "r_seenvisitaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|seenvisit|2024-05-20",
+   "date": "2024-05-20",
+   "display": "Office visit \u00b7 Example Hearing Room",
+   "status": "active",
+   "fields": {
+    "provider": "Example Hearing Room",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2024-05-20",
+     "end": "2024-05-20"
+    },
+    "type": "professional",
+    "amounts": {
+     "billed": {
+      "amount": "40.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "40.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "sequence": 1,
+      "category": "visit",
+      "amounts": {
+       "billed": {
+        "amount": "40.00",
+        "currency": "USD"
+       }
+      },
+      "records": [
+       "r_drugsaaaaaaaaaaaaaaa",
+       "r_sunlightaaaaaaaaaaaa"
+      ]
+     }
+    ],
+    "category": "visit",
+    "results": [
+     "r_drugsaaaaaaaaaaaaaaa",
+     "r_sunlightaaaaaaaaaaaa"
+    ]
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-07-02T10:00:00Z",
+     "filed_at": "2024-07-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/Observation/seenvisit.json"
+    }
+   ]
+  },
+  {
+   "id": "r_calmfillaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|calmfill|2024-07-08",
+   "date": "2024-07-08",
+   "display": "Buspirone 5 mg tablet \u00b7 Example Corner Pharmacy",
+   "status": "active",
+   "fields": {
+    "provider": "Example Corner Pharmacy",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2024-07-08",
+     "end": "2024-07-08"
+    },
+    "type": "pharmacy",
+    "amounts": {
+     "billed": {
+      "amount": "40.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "40.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "sequence": 1,
+      "category": "pharmacy",
+      "amounts": {
+       "billed": {
+        "amount": "40.00",
+        "currency": "USD"
+       }
+      }
+     }
+    ],
+    "category": "pharmacy"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-07-02T10:00:00Z",
+     "filed_at": "2024-07-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/Observation/calmfill.json"
+    }
+   ]
+  },
+  {
+   "id": "r_nosefillaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|nosefill|2024-07-15",
+   "date": "2024-07-15",
+   "display": "Cetirizine 10 mg tablet \u00b7 Example Corner Pharmacy",
+   "status": "active",
+   "fields": {
+    "provider": "Example Corner Pharmacy",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2024-07-15",
+     "end": "2024-07-15"
+    },
+    "type": "pharmacy",
+    "amounts": {
+     "billed": {
+      "amount": "40.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "40.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "sequence": 1,
+      "category": "pharmacy",
+      "amounts": {
+       "billed": {
+        "amount": "40.00",
+        "currency": "USD"
+       }
+      }
+     }
+    ],
+    "category": "pharmacy"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-07-02T10:00:00Z",
+     "filed_at": "2024-07-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/Observation/nosefill.json"
+    }
+   ]
+  },
+  {
+   "id": "r_askedaaaaaaaaaaaaaaa",
+   "kind": "report",
+   "key": "report|asked|2024-06-03",
+   "date": "2024-06-03",
+   "display": "Depression screening",
+   "status": "final",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-07-02T10:00:00Z",
+     "filed_at": "2024-07-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/Observation/asked.json"
+    }
+   ],
+   "documents": [
+    "d_answersaaaaaaaaaaaaa"
+   ]
+  }
+ ],
+ "documents": [
+  {
+   "id": "d_answersaaaaaaaaaaaaa",
+   "path": "Robin Example/Visits/2024/answers.pdf",
+   "sha256": "answers",
+   "md5": "answers",
+   "size": 10,
+   "media_type": "application/pdf",
+   "doc_type": "other",
+   "date": "2024-06-03",
+   "organization": "Example Health",
+   "title": "Answers",
+   "filed_at": "2024-07-04T10:00:00Z",
+   "origin": {
+    "kind": "fhir",
+    "action": "imported"
+   },
+   "provenance": {
+    "source": {
+     "kind": "fhir",
+     "cli": "fakeprov",
+     "organization_id": "north",
+     "fhir_base": "https://north.example.test/fhir"
+    },
+    "method": "fhir-api",
+    "fetched_at": "2024-07-02T10:00:00Z",
+    "filed_at": "2024-07-04T10:00:00Z",
+    "filed_by": "medrec 0.9.9",
+    "raw_path": "Robin Example/Records/north/Observation/answers.json"
+   }
+  },
+  {
+   "id": "d_sheetaaaaaaaaaaaaaaa",
+   "path": "Robin Example/Visits/2024/sheet.pdf",
+   "sha256": "sheet",
+   "md5": "sheet",
+   "size": 10,
+   "media_type": "application/pdf",
+   "doc_type": "other",
+   "date": "2024-06-10",
+   "organization": "Example Health",
+   "title": "Beck depression inventory",
+   "filed_at": "2024-07-04T10:00:00Z",
+   "origin": {
+    "kind": "fhir",
+    "action": "imported"
+   },
+   "provenance": {
+    "source": {
+     "kind": "fhir",
+     "cli": "fakeprov",
+     "organization_id": "north",
+     "fhir_base": "https://north.example.test/fhir"
+    },
+    "method": "fhir-api",
+    "fetched_at": "2024-07-02T10:00:00Z",
+    "filed_at": "2024-07-04T10:00:00Z",
+    "filed_by": "medrec 0.9.9",
+    "raw_path": "Robin Example/Records/north/Observation/sheet.json"
+   }
+  },
+  {
+   "id": "d_leafletaaaaaaaaaaaaa",
+   "path": "Robin Example/Visits/2024/leaflet.pdf",
+   "sha256": "leaflet",
+   "md5": "leaflet",
+   "size": 10,
+   "media_type": "application/pdf",
+   "doc_type": "other",
+   "date": "2024-06-17",
+   "organization": "Example Health",
+   "title": "Leaflet",
+   "filed_at": "2024-07-04T10:00:00Z",
+   "origin": {
+    "kind": "fhir",
+    "action": "imported"
+   },
+   "provenance": {
+    "source": {
+     "kind": "fhir",
+     "cli": "fakeprov",
+     "organization_id": "north",
+     "fhir_base": "https://north.example.test/fhir"
+    },
+    "method": "fhir-api",
+    "fetched_at": "2024-07-02T10:00:00Z",
+    "filed_at": "2024-07-04T10:00:00Z",
+    "filed_by": "medrec 0.9.9",
+    "raw_path": "Robin Example/Records/north/Observation/leaflet.json"
+   }
+  }
+ ]
+}

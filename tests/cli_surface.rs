@@ -103,6 +103,8 @@ fn every_command_renders_its_help() {
         &["conditions"],
         &["allergies"],
         &["immunizations"],
+        &["records", "show"],
+        &["records", "about-another"],
         &["documents", "list"],
         &["documents", "open"],
         &["note", "add"],

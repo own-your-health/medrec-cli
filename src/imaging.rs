@@ -135,7 +135,7 @@ pub fn intake(folder: &Folder, req: &IntakeRequest) -> Result<IntakeReport, CliE
     // Every person's index, once: a study already filed may be anyone's.
     let mut indexes: HashMap<String, PersonIndex> = HashMap::new();
     for p in &household.people {
-        indexes.insert(p.id.clone(), folder.index(p)?);
+        indexes.insert(p.id.clone(), folder.whole_index(p)?);
     }
     let given = req
         .person

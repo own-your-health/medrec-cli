@@ -37,6 +37,7 @@ use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+use crate::about;
 use crate::config::Config;
 use crate::folder::{self, Folder};
 use crate::given::{self, Given, GivenPaper};
@@ -738,7 +739,7 @@ fn file_streamed(
 
     let source = source_slug(&header.source.cli, &header.organization.id);
     let source_dir = folder::records_dir(&person, &source);
-    let mut index = folder.index(&person)?;
+    let mut index = folder.whole_index(&person)?;
     let mut texts = folder.text(&person)?;
     let imported_at = now_rfc3339();
     let base_prov = Provenance {
@@ -781,6 +782,7 @@ fn file_streamed(
             .filter_map(|r| written.paths.get(&raw_sub(r)).cloned())
             .collect(),
         claimed: HashSet::new(),
+        left: HashSet::new(),
     };
     let mut prescribers = stream_prescribers(&resources);
     let mut held = Held {
@@ -842,6 +844,14 @@ fn file_streamed(
         }
     }
     take_from_others(folder, &mut index)?;
+    for r in &mut index.records {
+        if idless.left.contains(&r.id) {
+            values_again(r, &mut |p| {
+                let v = read_raw(folder, p)?;
+                Ok(v.and_then(|v| normalize::record(&v, p.clone())))
+            })?;
+        }
+    }
     let eob_docs = eob_document_links(&resources);
 
     let filed = file_binaries(
@@ -1706,7 +1716,21 @@ fn merge(
     idless: &mut Idless,
 ) -> Merge {
     let word = rec.words.pop();
-    let came = Came::of(index, &rec, &found, word.as_ref());
+    // Once about somebody else, whatever a later version says.
+    let of = &rec.provenance[0];
+    let mut held = index.records.iter();
+    let held = held.find(|r| r.provenance.iter().any(|p| one_resource(p, of)));
+    let was = held.filter(|_| !rec.fields.contains_key(about::FIELD));
+    let was = was.and_then(|r| Some((r, about::was(r, of.raw_path.as_deref())?)));
+    let who = was.map(|(_, who)| who);
+    if let Some((r, _)) = was {
+        rec.key = match r.provenance.len() {
+            1 if about::keyed(r) => r.key.clone(),
+            _ => about::key(&rec.key, None),
+        };
+    }
+    let mut came = Came::of(index, &rec, &found, word.as_ref());
+    came.about = who;
     let merged = merge_fields(index, rec, word.as_ref(), found, filing, idless);
     let mut changed = came.keep(index);
     if matches!(merged, Merge::Older) {
@@ -1731,6 +1755,8 @@ struct Came {
     /// Each by its place in the index: what it showed, unless that is known
     /// to be of the same version, and whether the resource was of it.
     was: Vec<(usize, Option<Given>, bool)>,
+    /// Whom it was about before, where it does not say now.
+    about: Option<&'static str>,
 }
 
 impl Came {
@@ -1761,6 +1787,7 @@ impl Came {
                 .filter(|(_, r)| r.key == rec.key || has(r))
                 .map(|(i, r)| (i, shows(r), has(r)))
                 .collect(),
+            about: None,
             key: rec.key.clone(),
             gives: Given {
                 raw_path: raw.clone(),
@@ -1784,14 +1811,31 @@ impl Came {
             return false;
         };
         let mut changed = false;
-        // What it gave moves with it to the record it is of now.
+        // What it gave moves with it to the record it is of now. What another
+        // gave of the record it was of is as good as given by it: nothing
+        // opens because it left. But whom a result is about is each resource's.
         let mut moved: Vec<Given> = vec![self.gives];
+        moved.extend(self.about.map(|who| {
+            Given {
+                raw_path: self.raw.clone(),
+                fields: [(about::FIELD.to_string(), who.into())]
+                    .into_iter()
+                    .collect(),
+                ..Given::default()
+            }
+        }));
         for (i, was, had) in self.was {
             let r = &mut index.records[i];
             if had && i != now {
-                let of = |g: &&Given| g.raw_path.is_some() && g.raw_path == self.raw;
-                moved.extend(r.given.iter().filter(of).cloned());
-                moved.extend(was.iter().filter(of).cloned());
+                let shown = was.clone().unwrap_or_else(|| showed(r));
+                let all = r.given.iter().cloned().chain([shown]);
+                moved.extend(all.map(|mut g| {
+                    if g.raw_path.is_some() && g.raw_path != self.raw {
+                        g.fields.remove(about::FIELD);
+                    }
+                    g.raw_path = self.raw.clone();
+                    g
+                }));
                 let cli = |p: &Provenance| p.source.cli == self.of.source.cli;
                 if !r.provenance.iter().any(cli) {
                     let left = Given {
@@ -1988,6 +2032,11 @@ fn merge_fields(
             .iter_mut()
             .find(|r| r.provenance.iter().any(same_resource))
         {
+            let left = shared.provenance.iter().find(|p| same_resource(p));
+            let left = left.and_then(|p| p.raw_path.as_deref());
+            if about::of_resource(&rec, left).is_some() && wrote(shared) == left {
+                idless.left.insert(shared.id.clone());
+            }
             shared.provenance.retain(|p| !same_resource(p));
         }
         if let Some(existing) = index.records.iter_mut().find(|r| r.key == rec.key) {
@@ -2002,6 +2051,23 @@ fn merge_fields(
         return Merge::Added;
     }
     let key = rec.key.clone();
+    if rec.fields.contains_key(about::FIELD) {
+        // Filed with another's under their key, it goes to its own.
+        let its = |p: &Provenance| same_idless(p) && p.raw_path == incoming.raw_path;
+        for r in index.records.iter_mut().filter(|r| r.key != key) {
+            let Some(i) = r.provenance.iter().position(its) else {
+                continue;
+            };
+            if r.provenance.len() == 1 {
+                r.key.clone_from(&key);
+                continue;
+            }
+            if wrote(r) == incoming.raw_path.as_deref() {
+                idless.left.insert(r.id.clone());
+            }
+            r.provenance.remove(i);
+        }
+    }
     let Some(existing) = index.records.iter_mut().find(|r| r.key == rec.key) else {
         index.records.push(rec);
         idless.claimed.insert((key, 0));
@@ -2162,10 +2228,12 @@ fn request_id(reference: &str) -> Option<&str> {
 
 /// What one import knows of its resources with no id: the raw files they
 /// were filed to, and which id-less provenances on records they have taken.
+/// And the records whose values are of a resource that left them.
 #[derive(Default)]
 struct Idless {
     incoming: HashSet<String>,
     claimed: HashSet<(String, usize)>,
+    left: HashSet<String>,
 }
 
 /// A version that says a record is entered in error takes no value from it:
@@ -2238,6 +2306,47 @@ fn writes(existing: &Record, word: Option<&Word>, filing: Option<Filing>) -> boo
     let Some(word) = word else { return true };
     writer(existing).is_none_or(|w| w == word.raw_path)
         || matches!(filing, None | Some(Filing::Replaces))
+}
+
+/// The raw file a record's values are of, as far as that is known: the only
+/// one, the one it names, else that of the first resource import lets write.
+pub(crate) fn wrote(r: &Record) -> Option<&str> {
+    if let [only] = r.provenance.as_slice() {
+        return only.raw_path.as_deref();
+    }
+    let first = (0..r.provenance.len()).find(|i| can_write(r, *i));
+    writer(r).or_else(|| r.provenance[first?].raw_path.as_deref())
+}
+
+/// Takes a record's values from the first of its resources that reads, those
+/// import lets write before others. Where none does, they stay those of a
+/// resource about somebody else, and the record is about them.
+pub(crate) fn values_again(
+    r: &mut Record,
+    read: &mut dyn FnMut(&Provenance) -> Result<Option<Record>, CliError>,
+) -> Result<(), CliError> {
+    let mut order: Vec<usize> = (0..r.provenance.len()).collect();
+    order.sort_by_key(|&i| !can_write(r, i));
+    for i in order {
+        let p = r.provenance[i].clone();
+        let Some(new) = read(&p)?.filter(|n| n.key == r.key) else {
+            continue;
+        };
+        r.fields = new.fields;
+        r.display = new.display;
+        r.status = new.status;
+        r.code = new.code;
+        r.date = new.date;
+        let several = r.provenance.len() > 1 && !r.words.is_empty();
+        r.fields_from = p.raw_path.filter(|_| several);
+        return Ok(());
+    }
+    let mut given = Given::default();
+    given
+        .fields
+        .insert(about::FIELD.into(), about::ANOTHER.into());
+    r.given.push(given);
+    Ok(())
 }
 
 /// The raw file a record's fields are of, where one that can write them has
@@ -2346,17 +2455,20 @@ pub(crate) fn providers_again(
     Ok(all.over(had, &r.fields, &r.fields, false))
 }
 
+/// The resource of a provenance, from its raw file.
+fn read_raw(folder: &Folder, p: &Provenance) -> Result<Option<Value>, CliError> {
+    let text = match &p.raw_path {
+        Some(rel) => folder.store.read_text(rel)?,
+        None => None,
+    };
+    Ok(text.and_then(|t| serde_json::from_str(&t).ok()))
+}
+
 /// [`take_from_another`] and [`providers_again`] for every record of a person
 /// that a resource says, or said, is entered in error, from the raw files
 /// here now.
 fn take_from_others(folder: &Folder, index: &mut PersonIndex) -> Result<(), CliError> {
-    let read = |p: &Provenance| -> Result<Option<Value>, CliError> {
-        let text = match &p.raw_path {
-            Some(rel) => folder.store.read_text(rel)?,
-            None => None,
-        };
-        Ok(text.and_then(|t| serde_json::from_str(&t).ok()))
-    };
+    let read = |p: &Provenance| read_raw(folder, p);
     for r in &mut index.records {
         take_from_another(r, &mut |p| {
             Ok(read(p)?.and_then(|v| normalize::record(&v, p.clone())))
@@ -4140,6 +4252,7 @@ mod tests {
             let mut idless = Idless {
                 incoming: served.iter().map(|(_, p)| p.to_string()).collect(),
                 claimed: HashSet::new(),
+                left: HashSet::new(),
             };
             order
                 .iter()
