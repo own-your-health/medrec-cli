@@ -2167,9 +2167,10 @@ nothing is private.
   | `household` | was marked private by the household; its `area` is the one the rules give it, else `household` |
 
 - **What a source takes back still tells** (0.9.9 and later). Nothing opens
-  because a record or a paper is entered in error: each rule is judged with
-  what is and with what is not, events as they would be with it included, so an
-  event in `events_in_error` can be here. A study with no report, with what is
+  because a record or a paper is entered in error, the person's or one of a
+  person their events read (X1, X2): each rule is judged with what is and with
+  what is not, events as they would be with it included, so an event in
+  `events_in_error` can be here. A study with no report, with what is
   entered in error or without it, is in `unreported_studies`; so one whose only
   report is, which is in `studies` too when that report was private.
 - An event's own members are those without `person`. A paper an event shows

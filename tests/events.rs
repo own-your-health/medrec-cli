@@ -1,8 +1,11 @@
 //! The events view over an invented household of two (tests/fixtures/events,
 //! written by its make.py): one event per real-world visit, stay or fill.
 
-use medrec::events::{self, Decision, Input, Linked, Overrides};
+use medrec::corrections::Correction;
+use medrec::events::{self, Built, Decision, Input, Linked, Overrides};
+use medrec::labels::{Last, Said, State};
 use medrec::model::{Household, Person, PersonIndex, PersonText};
+use medrec::private;
 use serde_json::{json, Value};
 
 /// US Eastern in November: the zone the fixtures' days are read in.
@@ -36,6 +39,10 @@ fn world() -> World {
 }
 
 fn events_of(w: &World, who: usize, overrides: Option<&Overrides>) -> Value {
+    both_of(w, who, overrides).events
+}
+
+fn both_of(w: &World, who: usize, overrides: Option<&Overrides>) -> Built {
     let (idx, text, oidx, otext) = if who == 0 {
         (&w.parent, &w.parent_text, &w.child, &w.child_text)
     } else {
@@ -44,7 +51,7 @@ fn events_of(w: &World, who: usize, overrides: Option<&Overrides>) -> Value {
     let person = &w.h.people[who];
     let other = &w.h.people[1 - who];
     assert_eq!(events::linked_people(&w.h, person).len(), 1);
-    events::build(&Input {
+    events::build_both(&Input {
         person,
         index: idx,
         texts: text,
@@ -807,6 +814,54 @@ fn an_item_its_sources_differ_on_stays_and_says_so() {
     }
     assert_eq!(marked, 1);
     assert_eq!(v, before);
+}
+
+/// The items of the child that the household's word for a name makes private.
+fn child_private(w: &World, name: &str) -> Vec<String> {
+    let both = both_of(w, 1, None);
+    let said: Vec<Correction> = serde_json::from_value(json!([{"id": "o_aaaaaaaaaaaaaaaaaaaa",
+        "printed": [name], "set": {"role": "fertility doctor"}, "at": "2026-05-04T12:00:00Z"}]))
+    .unwrap();
+    let state = State::last(Last::None, &w.child.person);
+    let whole = both.for_private();
+    let areas = Said::of(&w.child, &whole, &state, &said).areas();
+    let person = &w.h.people[1];
+    let v = private::build(person, &w.child, &w.child_text, &both, &[], &areas);
+    let kinds = ["events", "records", "documents"].iter();
+    let items = kinds.flat_map(|k| v[*k].as_object().unwrap());
+    items.map(|(id, _)| id.clone()).collect()
+}
+
+/// What a linked person's record named an event for still tells what is
+/// private of it, and nothing of theirs is in this person's file.
+#[test]
+fn nothing_of_a_newborns_opens_because_the_parents_claim_is_in_error() {
+    let hospital = "Example Harbor Hospital";
+    let before = events_of(&world(), 1, None);
+    let newborn = holding(&before, "r_intakeoneaaaaaaaaaaa");
+    assert_eq!(newborn["place"], hospital);
+    let private = child_private(&world(), hospital);
+    assert!(private.len() > 1 && private.contains(&newborn["id"].as_str().unwrap().to_string()));
+    let parent = events_of(&world(), 0, None);
+    let stay = holding(&parent, "r_restroomaaaaaaaaaaaa");
+    let claim = stay["members"].as_array().unwrap().iter();
+    let mut claim = claim.filter(|m| m["role"] == "facility");
+    let claim = claim.next().unwrap()["record"].as_str().unwrap();
+
+    let mut w = world();
+    record_in_error(&mut w.parent, claim);
+    let v = events_of(&w, 1, None);
+    assert_ne!(holding(&v, "r_intakeoneaaaaaaaaaaa")["place"], hospital);
+    assert!(v.get("in_error").is_none() && v.get("events_in_error").is_none());
+    assert!(!v.to_string().contains(claim));
+    assert_eq!(child_private(&w, hospital), private);
+    // Nor when something of the child's own is too.
+    let paper = "d_misfiledaaaaaaaaaaaa";
+    paper_in_error(&mut w.child, paper);
+    let v = events_of(&w, 1, None);
+    assert!(!v.to_string().contains(claim));
+    let held = child_private(&w, hospital);
+    assert!(private.iter().all(|id| held.contains(id)), "{held:?}");
 }
 
 /// Another person's paper (X2) is named in its own person's file alone.

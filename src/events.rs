@@ -2920,10 +2920,10 @@ fn records_of(idx: &PersonIndex) -> BTreeMap<&str, &Record> {
     idx.records.iter().map(|r| (r.id.as_str(), r)).collect()
 }
 
-/// A person's events document, and, when something of theirs is entered in
-/// error, the events as they are with it, each with the id of the event that
-/// has the rest of it: what tells that an item is private does not change
-/// when a source takes one back.
+/// A person's events document, and, when something of theirs or of a linked
+/// person's is entered in error, the events as they are with it, each with the
+/// id of the event that has the rest of it: what tells that an item is private
+/// does not change when a source takes one back.
 pub struct Built {
     pub events: Value,
     pub whole: Option<Value>,
@@ -2942,6 +2942,14 @@ impl Built {
             }
         }
     }
+}
+
+/// An event with what is entered in error: the one that has the rest of it
+/// now, and the person's own items in it.
+struct With {
+    at: Option<String>,
+    items: Vec<String>,
+    event: (Day, Day, String, Value),
 }
 
 /// Where each item entered in error would be, and what the household decided
@@ -3022,45 +3030,65 @@ pub fn build_both(inp: &Input) -> Built {
     let gone: BTreeSet<&str> = ids_of(inp.index).filter(|id| !left.contains(id)).collect();
     let mut in_error: BTreeMap<&str, Gone> = BTreeMap::new();
     let mut lost: Vec<(Day, Day, String, Value)> = Vec::new();
-    let whole = (!gone.is_empty()).then(|| {
-        let all = records_of(inp.index);
+    let all = records_of(inp.index);
+    let shown: BTreeSet<String> = out.iter().map(|e| e.2.clone()).collect();
+    let with = |linked: &[Linked]| -> Vec<With> {
         let mut named = Labels::new();
         labels_of(inp.index, &mut named);
-        for l in &linked {
+        for l in linked {
             labels_of(l.index, &mut named);
         }
-        let (b_all, _) = grouped(inp, inp.index, &linked);
-        let shown: BTreeSet<&str> = out.iter().map(|e| e.2.as_str()).collect();
+        let (b_all, _) = grouped(inp, inp.index, linked);
         let now = |ev: &Ev| -> Option<String> {
             let ids = std::iter::once(&ev.anchor).chain(ev.members.iter().map(|m| &m.id));
             ids.filter(|id| !gone.contains(id.as_str()))
                 .filter_map(|id| b.evs.iter().find(|e| e.holds(id)))
                 .map(|e| event_id(pid, &e.anchor))
-                .find(|id| shown.contains(id.as_str()))
+                .find(|id| shown.contains(id))
         };
-        let mut events = Vec::new();
-        for ev in &b_all.evs {
+        let each = b_all.evs.iter().filter_map(|ev| {
             let rendered = render(pid, ev, &all, &named, &differ, &b_all.aliases, from);
-            let Some((start, end, id, mut e)) = rendered else {
-                continue;
-            };
-            let at = now(ev);
+            let (start, end, id, event) = rendered?;
             let own = ev.members.iter().filter(|m| m.person.is_none());
-            let papers = own.flat_map(|m| {
+            let items = own.flat_map(|m| {
                 let copies = m.extra.get("copies").and_then(Value::as_array);
                 let copies = copies.into_iter().flatten().filter_map(Value::as_str);
                 std::iter::once(m.id.as_str()).chain(copies)
             });
-            for x in papers.filter_map(|x| gone.get(x)) {
-                in_error.entry(x).or_default().event = at.clone().or(Some(id.clone()));
-            }
-            match at {
-                Some(at) => e["id"] = json!(at),
-                None => lost.push((start, end, id, e.clone())),
-            }
-            events.push(e);
+            Some(With {
+                at: now(ev),
+                items: items.map(str::to_string).collect(),
+                event: (start, end, id, event),
+            })
+        });
+        each.collect()
+    };
+    let mine = match gone.is_empty() {
+        true => Vec::new(),
+        false => with(&linked),
+    };
+    for w in &mine {
+        let (.., id, _) = &w.event;
+        for x in w.items.iter().filter_map(|x| gone.get(x.as_str())) {
+            in_error.entry(x).or_default().event = w.at.clone().or(Some(id.clone()));
         }
-        json!({ "events": events })
+        if w.at.is_none() {
+            lost.push(w.event.clone());
+        }
+    }
+    // What is private is judged with a linked person's too, which is named
+    // in their own file alone.
+    let whole = match theirs.iter().any(|t| matches!(t, Cow::Owned(_))) {
+        true => Some(with(&inp.linked)),
+        false => (!gone.is_empty()).then_some(mine),
+    };
+    let whole = whole.map(|with| {
+        let events = with.into_iter().map(|w| {
+            let (.., id, mut e) = w.event;
+            e["id"] = json!(w.at.unwrap_or(id));
+            e
+        });
+        json!({ "events": events.collect::<Vec<_>>() })
     });
     for d in inp
         .overrides
