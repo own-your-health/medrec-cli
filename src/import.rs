@@ -859,6 +859,8 @@ fn file_streamed(
         &written.paths,
     )?;
     let mut papers = paper_words(folder, &mut index, &owners, &base_prov, &source_dir)?;
+    // Before its raw files are read again, as one of the person's.
+    record_source(&mut household, &person.id, &req.from, &header);
     if written.cut_short {
         // Versions were filed that no import read in.
         crate::reindex::given_by(folder, &mut index, &source_dir)?;
@@ -897,13 +899,11 @@ fn file_streamed(
     });
     folder.save_index(&person, &mut index)?;
     folder.save_text(&person, &texts)?;
+    folder.save_household(&mut household)?;
     if written.written > 0 || written.cut_short {
         // One that stays has the next import read the raw files again.
         let _ = folder.store.delete(&unfinished(&source_dir));
     }
-
-    record_source(&mut household, &person.id, &req.from, &header);
-    folder.save_household(&mut household)?;
 
     Ok(Report {
         import: import_id,

@@ -66,7 +66,7 @@ views/                        each person's records cut into small files, for re
   version.
 - `Records/<source>/importing.json` (0.9.9 and later) is there from before an
   import of that source uploads raw files until what they give is in
-  `index.json`. One left by an import cut short has the source's next import
+  `index.json` and the source in `household.json`. One left by an import cut short has the source's next import
   read every version of its raw files again for what they gave (What a source
   gave, below), and goes when that one finishes. `{started_at}` is when the
   first of them began.

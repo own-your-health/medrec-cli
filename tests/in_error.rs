@@ -1123,12 +1123,27 @@ fn a_version_no_import_read_in_was_given() {
         assert!(!mark.exists(), "{tag}");
     }
 
-    // The first that reads in a resource the cut one filed.
+    // The first that reads in a resource the cut one filed, or its source.
     let e = Env::new("gave-unread-new");
     e.import(&stream("one", |id, _| gone(id)));
     e.import_cut_short(&visit(PRIVATE, 1));
     e.import(&visit(OPEN, 2));
     assert_eq!((shows_place(&e).as_str(), held(&e)), (OPEN, Some(true)));
+    for (first, then) in [
+        (visit(PRIVATE, 1), visit(OPEN, 2)),
+        (titled(secret, 1), titled("Visit summary", 2)),
+    ] {
+        let e = Env::new(&format!("gave-unread-first-{}", first.contains(secret)));
+        std::fs::create_dir_all(e.folder().join("Records")).unwrap();
+        e.import_cut_short(&first);
+        e.import(&then);
+        let id = match first.contains(secret) {
+            true => e.paper().id,
+            false => e.visit().id,
+        };
+        assert_eq!(e.private()[&id]["given"], true);
+        assert!(!e.raw("one", UNFINISHED).exists());
+    }
 }
 
 /// What was given before medrec kept it is read from the raw files, every
