@@ -7,12 +7,12 @@
 //! that hangs (a Keychain approval nobody gives) is stopped after
 //! [`signin::SCHEDULED_WAIT`] and the source marked as needing a person,
 //! with the command to run. It is not tried again until that has run.
-//! medrec's own Drive sign-in is held to the same rule: a scheduled pass
-//! reads it first, waiting at most [`signin::SCHEDULED_WAIT`] for the
-//! Keychain (`Vault::load_key`, no request), and a read that hangs stops the
-//! pass, naming the command a person runs. The binary that hung is not asked again until
-//! that has run. The pass shares one vault, so the folder's later reads in
-//! it use the key already read. A slow network is an ordinary error.
+//! medrec's own Drive sign-in is held to a stricter one: a scheduled pass
+//! reads its key first, without ever raising a Keychain dialog
+//! (`Vault::load_key_quietly`, no request), and one that a person has to
+//! answer ends the pass with the error that names `medrec auth key`. The
+//! pass shares one vault, so the folder's later reads in it use the key
+//! already read. A slow network is an ordinary error.
 
 pub mod contract;
 pub mod launchd;
@@ -61,11 +61,8 @@ pub enum Pick {
 #[derive(Debug, Default, Serialize)]
 pub struct PassReport {
     /// `idle`, `busy`, `ran`, `waiting` (a take-over not yet settled) or
-    /// `needs_person` (medrec's Drive sign-in waits on an approval).
+    /// `other_machine`.
     pub status: String,
-    /// What a person runs, for `needs_person`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub command: Option<String>,
     pub attempts: Vec<AttemptRow>,
     pub requests: Vec<RequestRow>,
     pub status_written: bool,
@@ -695,20 +692,12 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
     let machine = state::machine()?;
     let mut local = state::load(&location)?;
     let started = time::now();
-    let exe = signin::exe_id();
-    if let (Mode::Scheduled, Location::Drive(spec)) = (mode, &location) {
+    if let (Mode::Scheduled, Location::Drive(_)) = (mode, &location) {
+        // A key another process replaces while the pass runs is read again
+        // within a bound.
         crate::store::bound_key_reads(signin::scheduled_wait());
-        let blocked = local.drive_blocked.clone();
-        let gate = drive_gate(cfg, spec, &mut local, &exe)?;
-        if local.drive_blocked != blocked {
-            state::save(&location, &local)?;
-        }
-        if let Some(command) = gate {
-            return Ok(PassReport {
-                status: "needs_person".into(),
-                command: Some(command),
-                ..PassReport::default()
-            });
+        if let Some(failure) = crate::store::shared_vault()?.load_key_quietly()?.failure() {
+            return Err(failure);
         }
     }
     let store = Store::open(&location, Reads::Fresh, cfg.store_budget())?;
@@ -1419,47 +1408,8 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
         local.took_over_at = None;
     }
     report.status_written = writer.wrote;
-    if mode == Mode::Manual && matches!(location, Location::Drive(_)) {
-        // A person's pass read the Drive sign-in: a scheduled pass may ask
-        // again, still bounded.
-        local.drive_blocked = None;
-    }
     state::save(&location, &local)?;
     Ok(report)
-}
-
-/// Whether a scheduled pass may read the Drive sign-in: `None` when it may,
-/// or the command a person runs when the check waits on an approval.
-fn drive_gate(
-    cfg: &Config,
-    spec: &pk_cli_drive::google::DriveSpec,
-    local: &mut state::Local,
-    exe: &Option<String>,
-) -> Result<Option<String>, CliError> {
-    let command = format!(
-        "medrec --profile {} refresh",
-        cfg.profile
-            .as_ref()
-            .map(ProfileName::as_str)
-            .unwrap_or("<NAME>")
-    );
-    if exe.is_some() && local.drive_blocked == *exe {
-        return Ok(Some(command));
-    }
-    let profile = spec.profile().as_str();
-    match signin::read_drive(profile, signin::scheduled_wait()) {
-        // Signed in or not, the read answered: the pass goes on, and a
-        // missing sign-in is reported where the folder is opened.
-        signin::Read::Read { .. } => {
-            local.drive_blocked = None;
-            Ok(None)
-        }
-        signin::Read::TimedOut => {
-            local.drive_blocked = exe.clone();
-            Ok(Some(command))
-        }
-        signin::Read::Failed(m) => Err(CliError::Upstream(m)),
-    }
 }
 
 /// One source's turn in a pass.

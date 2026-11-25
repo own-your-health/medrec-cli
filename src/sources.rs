@@ -1,10 +1,10 @@
 //! Which of a person's sources a record or a document came from.
 //!
-//! One CLI, organization and FHIR base can serve several practices and
-//! several people (an aggregator's connection does), so those three alone
-//! name no practice. A source is told apart by its person and by the patient
-//! its records were imported as: the import run that filed a record says
-//! which. Where several differently named sources are left, none is the one.
+//! A CLI, an organization and a FHIR base do not name a source: sources can
+//! have all three alike and differ in their person, their patient or both. A
+//! source is told apart by its person and by the patient its records were
+//! imported as: the import run that filed a record says which. Where several
+//! differently named sources are left, none is the one.
 
 use std::collections::BTreeSet;
 
@@ -140,8 +140,7 @@ fn name_of(s: &Source) -> Option<&str> {
 }
 
 /// The name of whichever of these sources it is: the one they all have.
-/// Where they differ, no name is known to be its own; a connection's name,
-/// or none, differs from a practice's.
+/// Where they differ, or one has none, no name is known to be its own.
 fn named<'a>(sources: &[&'a Source]) -> Option<&'a str> {
     let first = name_of(sources.first()?)?;
     sources
@@ -159,37 +158,54 @@ mod tests {
     const BASE: &str = "https://records.example.test/fhir/r4";
     const ALEX: &str = "p_alexaaaaaaaaaaaaaaaa";
     const ROBIN: &str = "p_robinaaaaaaaaaaaaaaa";
+    /// A source's name that names no place.
+    const WIDE: &str = "Example Records (all practices)";
 
-    /// One connection of two practices, for two people: Alex at both, Robin
-    /// at one under the same key, whose source no record came from is last.
+    /// Four sources alike in CLI, organization and base: every person with
+    /// every patient of theirs.
     fn household() -> Household {
         let source = |id: &str, person: &str, patient: &str, name: &str| {
-            json!({"id": id, "kind": "fhir", "person": person, "cli": "athena",
-                "organization": "all", "organization_name": name,
-                "fhir_base": format!("{BASE}/"), "patient_id": patient})
+            json!({"id": id, "kind": "fhir", "person": person, "cli": "fakeprov",
+                "organization": "shared", "organization_name": name,
+                "fhir_base": format!("{BASE}//"), "patient_id": patient})
         };
         serde_json::from_value(json!({
             "schema": "medrec-household/v1", "folder_id": "f_exampleaaaaaaaaaaaaa", "format": 1, "rev": 1,
-            "created_at": "2026-01-01T00:00:00Z", "people": [], "organizations": [
-                {"id": "g_firstaaaaaaaaaaaaaaa", "name": "Example Eye Center", "fhir_base": BASE},
-                {"id": "g_secondaaaaaaaaaaaaaa", "name": "Sample Skin Studio", "fhir_base": BASE}],
+            "created_at": "2024-01-01T00:00:00Z", "people": [], "organizations": [
+                {"id": "g_northaaaaaaaaaaaaaaa", "name": "Sample Clinic North", "fhir_base": BASE}],
             "sources": [
-                source("s_alexeyeaaaaaaaaaaaaa", ALEX, "eye-1", "Example Eye Center"),
-                source("s_alexstudioaaaaaaaaaa", ALEX, "studio-1", "Sample Skin Studio"),
-                source("s_robinlastaaaaaaaaaaa", ROBIN, "last-1", "Placeholder Hearing Clinic")],
+                source("s_robineastaaaaaaaaaaa", ROBIN, "east", "Sample Clinic East"),
+                source("s_alexnorthaaaaaaaaaaa", ALEX, "north", "Sample Clinic North"),
+                source("s_robinwestaaaaaaaaaaa", ROBIN, "west", "Sample Clinic West"),
+                source("s_alexsouthaaaaaaaaaaa", ALEX, "south", "Sample Clinic South")],
         }))
         .unwrap()
     }
 
-    fn index(runs: &[(&str, &str)]) -> PersonIndex {
+    /// The household with some of the person's own sources only, renamed.
+    fn with_own(own: &[(&str, Option<&str>)]) -> Household {
+        let mut h = household();
+        h.sources.retain(|s| {
+            s.person != ALEX || own.iter().any(|(p, _)| s.patient_id.as_deref() == Some(*p))
+        });
+        for (patient, name) in own {
+            let s = h.sources.iter_mut();
+            let mut s = s.filter(|s| s.person == ALEX && s.patient_id.as_deref() == Some(*patient));
+            s.next().unwrap().organization_name = name.map(str::to_string);
+        }
+        h
+    }
+
+    /// Runs as `(imported_at, pulled_at, patient)`.
+    fn index(runs: &[(&str, &str, &str)]) -> PersonIndex {
         let mut idx = PersonIndex::new(ALEX);
         idx.imports = runs
             .iter()
-            .map(|(at, patient)| {
+            .map(|(imported, pulled, patient)| {
                 serde_json::from_value(json!({"id": "i_runaaaaaaaaaaaaaaaaa", "source_dir": "",
-                    "stream_sha256": "", "stream_bytes": 0, "cli": "athena", "cli_version": "0.6.0",
-                    "organization": "all", "patient_id": patient, "pulled_at": format!("{at}:01Z"),
-                    "imported_at": format!("{at}:30Z"), "counts": {}, "records_added": 0,
+                    "stream_sha256": "", "stream_bytes": 0, "cli": "fakeprov", "cli_version": "0.0.1",
+                    "organization": "shared", "patient_id": patient, "pulled_at": pulled,
+                    "imported_at": imported, "counts": {}, "records_added": 0,
                     "records_updated": 0, "records_unchanged": 0, "resources_written": 0,
                     "resources_unchanged": 0, "documents_added": 0}))
                 .unwrap()
@@ -199,7 +215,7 @@ mod tests {
     }
 
     fn pv(filed: &str, fetched: Option<&str>) -> Provenance {
-        let mut v = json!({"source": {"kind": "fhir", "cli": "athena", "organization_id": "all",
+        let mut v = json!({"source": {"kind": "fhir", "cli": "fakeprov", "organization_id": "shared",
                 "fhir_base": BASE}, "method": "fhir-api", "filed_at": filed, "filed_by": "medrec 0.9.6"});
         if let Some(f) = fetched {
             v["fetched_at"] = Value::from(f);
@@ -207,123 +223,148 @@ mod tests {
         serde_json::from_value(v).unwrap()
     }
 
-    const EYE: &str = "2026-02-03T10:00";
-    const STUDIO: &str = "2026-02-04T10:00";
+    // Times a run filed at, and times one read at.
+    const FILED: &str = "2024-06-11T08:00:00Z";
+    const FILED_LATER: &str = "2024-06-12T08:00:00Z";
+    const READ: &str = "2024-06-11T07:00:00Z";
+    const READ_LATER: &str = "2024-06-12T07:00:00Z";
+    const NO_RUN: &str = "2024-06-01T00:00:00Z";
 
+    /// Step 1 of the contract's "Which source".
     #[test]
-    fn the_run_that_filed_it_says_which_practice() {
+    fn the_patient_is_the_runs_that_filed_it_else_the_runs_that_read_it() {
         let h = household();
-        let idx = index(&[(EYE, "eye-1"), (STUDIO, "studio-1")]);
-        let s = Sources::of(&h.sources, &idx);
-        let (eye, studio) = (
-            pv("2026-02-03T10:00:30Z", None),
-            pv("2026-02-04T10:00:30Z", None),
-        );
-        assert_eq!(s.place(&eye), Some("Example Eye Center"));
-        assert_eq!(s.label(&studio).as_deref(), Some("Sample Skin Studio"));
-        assert_eq!(s.source(&studio).unwrap().id, "s_alexstudioaaaaaaaaaa");
-        assert_ne!(s.key(&eye), s.key(&studio));
-        // One record from both has no place.
-        assert_eq!(s.place_of([&eye, &studio]), None);
-        assert_eq!(s.place_of([&studio]), s.place(&studio));
-        assert_eq!(s.place_of([&studio, &studio]), s.place(&studio));
-        // Nor has one from a practice and from the connection itself, or from
-        // a source not known, whichever comes first.
-        let unknown = pv("2026-01-01T10:00:30Z", None);
-        let mut h = household();
-        h.sources[0].organization_name = Some("athenahealth (all practices)".into());
-        let named = Sources::of(&h.sources, &idx);
-        for (s, other) in [(&named, &eye), (&s, &unknown)] {
-            assert_eq!(s.place(other), None);
-            assert_eq!(s.place_of([&studio, other]), None);
-            assert_eq!(s.place_of([other, &studio]), None);
-        }
-        // Read again later, by whichever run: the one that filed it says.
-        let again = pv("2026-02-03T10:00:30Z", Some("2026-02-04T10:00:01Z"));
-        assert_eq!(s.place(&again), Some("Example Eye Center"));
-        assert_eq!(s.key(&again), s.key(&eye));
-        // Filed by none the index holds, read by one.
-        let read = pv("2026-01-01T10:00:30Z", Some("2026-02-04T10:00:01Z"));
-        assert_eq!(s.place(&read), Some("Sample Skin Studio"));
-    }
-
-    #[test]
-    fn two_names_are_no_name() {
-        let h = household();
-        let idx = index(&[]);
-        let s = Sources::of(&h.sources, &idx);
-        let unknown = pv("2026-02-03T10:00:30Z", None);
-        assert_eq!(s.place(&unknown), None);
-        assert_eq!(s.source(&unknown).map(|s| &s.id), None);
-        // No practice's name, and not the first organization's at the base.
-        assert_eq!(s.label(&unknown).as_deref(), Some("athena"));
-        // Two runs of two patients in one second say neither, but for one
-        // that read it.
-        let idx = index(&[(EYE, "eye-1"), (EYE, "studio-1")]);
-        let s = Sources::of(&h.sources, &idx);
-        assert_eq!(s.place(&unknown), None);
-        let mut idx = idx;
-        idx.imports[1].pulled_at = "2026-02-03T10:00:09Z".into();
-        let s = Sources::of(&h.sources, &idx);
-        let read = pv("2026-02-03T10:00:30Z", Some("2026-02-03T10:00:09Z"));
-        assert_eq!(s.place(&read), Some("Sample Skin Studio"));
-        // Nor does one of them being the connection's own name, or none.
-        for other in [Some("athenahealth (all practices)"), None] {
-            let mut h = household();
-            h.sources[1].organization_name = other.map(str::to_string);
-            let idx = index(&[]);
+        let two = [(FILED, READ, "north"), (FILED_LATER, READ_LATER, "south")];
+        let at_once = [(FILED, READ, "north"), (FILED, READ_LATER, "south")];
+        let read_by_another = [
+            (FILED, READ, "north"),
+            (FILED, READ, "south"),
+            (FILED_LATER, READ_LATER, "south"),
+        ];
+        for (runs, filed, fetched, patient) in [
+            // One patient filed it, whoever read it last.
+            (&two[..], FILED, None, Some("north")),
+            (&two, FILED_LATER, Some(READ), Some("south")),
+            // Several did: the one that a run, any run, read it as.
+            (&at_once, FILED, None, None),
+            (&at_once, FILED, Some(READ_LATER), Some("south")),
+            (&read_by_another, FILED, Some(READ_LATER), Some("south")),
+            (&read_by_another, FILED, Some(READ), None),
+            // None did: the one it was read as.
+            (&two, NO_RUN, Some(READ_LATER), Some("south")),
+            (&two, NO_RUN, None, None),
+            (&[], FILED, Some(READ), None),
+        ] {
+            let idx = index(runs);
             let s = Sources::of(&h.sources, &idx);
-            assert_eq!(s.place(&unknown), None, "{other:?}");
-            assert_eq!(s.label(&unknown).as_deref(), Some("athena"), "{other:?}");
+            let pv = pv(filed, fetched);
+            assert_eq!(s.patient(&pv), patient, "{runs:?} {filed} {fetched:?}");
+            let place = patient.map(|p| match p {
+                "north" => "Sample Clinic North",
+                _ => "Sample Clinic South",
+            });
+            assert_eq!(s.place(&pv), place);
+            assert_eq!(s.label(&pv).as_deref(), place.or(Some("fakeprov")));
         }
-        // One name twice is the name.
-        let mut h = household();
-        h.sources[1].organization_name = Some(" Example Eye Center ".into());
-        let idx = index(&[]);
-        let s = Sources::of(&h.sources, &idx);
-        assert_eq!(s.place(&unknown), Some("Example Eye Center"));
-        assert!(s.source(&unknown).is_none());
     }
 
+    /// Step 2.
     #[test]
-    fn only_the_persons_own_sources_name_what_is_theirs() {
-        let mut h = household();
-        // Alex's one source here has no name of a practice yet; Robin's has.
-        h.sources.remove(1);
-        h.sources[0].organization_name = Some("athenahealth (all practices)".into());
-        let idx = index(&[]);
-        let s = Sources::of(&h.sources, &idx);
-        let one = pv("2026-02-03T10:00:30Z", None);
-        assert_eq!(s.source(&one).unwrap().id, "s_alexeyeaaaaaaaaaaaaa");
-        assert_eq!(s.place(&one), None);
-        assert_eq!(
-            s.label(&one).as_deref(),
-            Some("athenahealth (all practices)")
-        );
-        // None of their own under the key: no one else's.
-        h.sources.remove(0);
-        let s = Sources::of(&h.sources, &idx);
-        assert_eq!(s.place(&one), None);
-        assert_eq!(s.label(&one).as_deref(), Some("athena"));
-        // Nor the one a run of another patient filed.
+    fn its_sources_are_the_persons_own_with_its_key_and_patient() {
         let h = household();
-        let idx = index(&[(EYE, "gone-1")]);
+        let idx = index(&[(FILED, READ, "south"), (FILED_LATER, READ, "east")]);
         let s = Sources::of(&h.sources, &idx);
-        assert_eq!(s.place(&one), None);
-        assert_eq!(s.label(&one).as_deref(), Some("athena"));
-    }
-
-    #[test]
-    fn what_no_cli_gave_has_a_key_and_no_source() {
-        let h = household();
-        let idx = index(&[]);
-        let s = Sources::of(&h.sources, &idx);
-        let mut scan = pv("2026-02-03T10:00:30Z", None);
+        let own = pv(FILED, None);
+        assert_eq!(s.source(&own).unwrap().id, "s_alexsouthaaaaaaaaaaa");
+        // A patient none of the person's own sources has, another person's
+        // though it is.
+        let other = pv(FILED_LATER, None);
+        assert!(s.source(&other).is_none());
+        assert_eq!(s.label(&other).as_deref(), Some("fakeprov"));
+        // Another base is another source's; with no base, any is its own.
+        let mut at = pv(FILED, None);
+        at.source.fhir_base = Some("https://other.example.test/fhir/r4".into());
+        assert!(s.source(&at).is_none());
+        at.source.fhir_base = None;
+        assert_eq!(s.source(&at).unwrap().id, "s_alexsouthaaaaaaaaaaa");
+        // What no CLI gave has a key, and no source.
+        let mut scan = pv(NO_RUN, None);
         scan.source.cli = None;
         scan.source.organization_id = None;
         scan.source.fhir_base = None;
         assert_eq!(s.key(&scan), "|||");
         assert_eq!(s.label(&scan), None);
         assert!(s.source(&scan).is_none());
+        // Nobody else's source names what is theirs.
+        let none = with_own(&[]);
+        let s = Sources::of(&none.sources, &idx);
+        assert_eq!(s.place(&own), None);
+        assert_eq!(s.label(&own).as_deref(), Some("fakeprov"));
+    }
+
+    /// Steps 3 and 4.
+    #[test]
+    fn its_name_is_the_one_its_sources_all_have() {
+        let idx = index(&[]);
+        let unknown = pv(NO_RUN, None);
+        let north = Some("Sample Clinic North");
+        for (own, name, place) in [
+            (vec![("north", north)], north, north),
+            (vec![("north", north), ("south", north)], north, north),
+            (
+                vec![("north", north), ("south", Some(" Sample Clinic North "))],
+                north,
+                north,
+            ),
+            (
+                vec![("north", north), ("south", Some("Sample Clinic South"))],
+                None,
+                None,
+            ),
+            (vec![("north", north), ("south", None)], None, None),
+            (vec![("north", None), ("south", north)], None, None),
+            (vec![("north", north), ("south", Some(" "))], None, None),
+            (vec![("north", north), ("south", Some(WIDE))], None, None),
+            // A name that names no place is a label all the same.
+            (vec![("north", Some(WIDE))], Some(WIDE), None),
+            (vec![], None, None),
+        ] {
+            let h = with_own(&own);
+            let s = Sources::of(&h.sources, &idx);
+            assert_eq!(s.place(&unknown), place, "{own:?}");
+            assert_eq!(
+                s.label(&unknown).as_deref(),
+                name.or(Some("fakeprov")),
+                "{own:?}"
+            );
+            assert_eq!(s.source(&unknown).is_some(), own.len() == 1, "{own:?}");
+        }
+    }
+
+    #[test]
+    fn what_came_from_two_sources_has_one_place_only_if_they_agree() {
+        let idx = index(&[(FILED, READ, "north"), (FILED_LATER, READ_LATER, "south")]);
+        let (first, second) = (pv(FILED, None), pv(FILED_LATER, None));
+        let unknown = pv(NO_RUN, None);
+        let h = household();
+        let s = Sources::of(&h.sources, &idx);
+        assert_eq!(s.place_of([&first]), Some("Sample Clinic North"));
+        assert_eq!(s.place_of([&first, &first]), s.place(&first));
+        assert_ne!(s.key(&first), s.key(&second));
+        for pair in [[&first, &second], [&first, &unknown], [&unknown, &first]] {
+            assert_eq!(s.place_of(pair), None);
+        }
+        // One that names no place is another place than the rest.
+        let wide = with_own(&[
+            ("north", Some("Sample Clinic North")),
+            ("south", Some(WIDE)),
+        ]);
+        let s = Sources::of(&wide.sources, &idx);
+        for pair in [[&first, &second], [&second, &first]] {
+            assert_eq!(s.place_of(pair), None);
+        }
+        // The same source, read again by another's run.
+        let again = pv(FILED, Some(READ_LATER));
+        assert_eq!(s.key(&again), s.key(&first));
     }
 }

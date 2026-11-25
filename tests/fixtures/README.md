@@ -16,10 +16,9 @@ real record, document, study or provider response.
   server and on another, by an inline identifier and by a reference to
   nothing. Its NPIs pass the check digit and start with 0, so they belong to
   nobody; one (`0000000007`) fails the check.
-- `stream/connection.ndjson` is one patient's stream of a records connection
-  that serves every practice under one organization id and FHIR base.
-  `testdata::connection_streams` fills in its `{{…}}`: three practices' streams
-  for Alex, and a fourth's, with no records, for Robin.
+- `stream/shared-key.ndjson` is one of several streams with one CLI,
+  organization and FHIR base. `testdata::shared_key_streams` fills in its
+  `{{…}}`: each of two people as each of two patients, with the same records.
 - `stream/fakeprov-info.json` is the `info --json` of `fakeprov`, the fake
   `health-records/v1` provider that `medrec::testdata::write_provider` writes.
   It lists the `login-profiles` capability. `fakeprov-info-unprofiled.json` is

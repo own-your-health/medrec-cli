@@ -9,7 +9,7 @@
 use std::sync::{Arc, Mutex};
 
 use pk_cli_auth::vault::{KeyStore, Vault};
-use pk_cli_secrets::{CredentialStore, Secret};
+use pk_cli_secrets::{AskedRead, CredentialStore, QuietRead, Secret};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -103,7 +103,8 @@ pub fn drive_cli() -> Result<DriveCli, CliError> {
 /// and keeps it, so a run that opens its folder more than once (a refresh
 /// pass, the MCP server) asks macOS at most once, whether the person chose
 /// Allow or Always Allow. `Vault::load_key` on it bounds that read
-/// ([`crate::refresh::signin::read_drive`]).
+/// ([`crate::refresh::signin::read_drive`]), and `Vault::load_key_quietly`
+/// makes it without a dialog (a scheduled pass).
 pub fn shared_vault() -> Result<Arc<Vault>, CliError> {
     static VAULT: Mutex<Option<Arc<Vault>>> = Mutex::new(None);
     let mut held = VAULT.lock().unwrap_or_else(|p| p.into_inner());
@@ -149,14 +150,31 @@ pub(crate) fn test_hook(name: &str) -> Option<std::ffi::OsString> {
 /// medrec's Keychain item, with two hooks for its tests, read in debug
 /// builds only ([`test_hook`]). `MEDREC_TEST_KEYCHAIN_LOG` makes it a
 /// keychain holding no key, which writes a line to that file for each read
-/// and never reaches the real Keychain. `MEDREC_TEST_KEYCHAIN_DELAY_SECS`
-/// holds the process's first such read that long, as a dialog holds it
-/// until someone answers.
+/// (`read` for one that may ask, `quiet` for one that may not) and never
+/// reaches the real Keychain. `MEDREC_TEST_KEYCHAIN_DELAY_SECS` makes it one
+/// that asks: a quiet read is answered that a person is needed, and the
+/// process's first other read is held that long, as a dialog holds it until
+/// someone answers.
 struct Keys(CredentialStore);
 
 impl Keys {
     fn test_log() -> Option<std::ffi::OsString> {
         test_hook("MEDREC_TEST_KEYCHAIN_LOG")
+    }
+
+    fn test_read(log: std::ffi::OsString, line: &str) {
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(log)
+        {
+            let _ = writeln!(f, "{line}");
+        }
+    }
+
+    fn test_delay() -> Option<u64> {
+        test_hook("MEDREC_TEST_KEYCHAIN_DELAY_SECS").and_then(|s| s.to_str()?.parse().ok())
     }
 }
 
@@ -165,18 +183,9 @@ impl KeyStore for Keys {
         let Some(log) = Self::test_log() else {
             return self.0.get(account);
         };
-        use std::io::Write;
         static DELAYED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-        if let Ok(mut f) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(log)
-        {
-            let _ = writeln!(f, "read");
-        }
-        let delay = test_hook("MEDREC_TEST_KEYCHAIN_DELAY_SECS")
-            .and_then(|s| s.to_str()?.parse::<u64>().ok());
-        if let Some(secs) = delay {
+        Self::test_read(log, "read");
+        if let Some(secs) = Self::test_delay() {
             if !DELAYED.swap(true, std::sync::atomic::Ordering::SeqCst) {
                 std::thread::sleep(Duration::from_secs(secs));
             }
@@ -196,6 +205,31 @@ impl KeyStore for Keys {
             return Ok(false);
         }
         self.0.delete(account)
+    }
+
+    fn get_quiet(&self, account: &str) -> Result<QuietRead, CliError> {
+        let Some(log) = Self::test_log() else {
+            return self.0.get_quiet(account);
+        };
+        Self::test_read(log, "quiet");
+        Ok(match Self::test_delay() {
+            Some(_) => QuietRead::NeedsPerson,
+            None => QuietRead::Absent,
+        })
+    }
+
+    fn get_asking(&self, account: &str) -> Result<AskedRead, CliError> {
+        if Self::test_log().is_none() {
+            return self.0.get_asking(account);
+        }
+        Ok(match self.get(account)? {
+            Some(item) => AskedRead::Found(item),
+            None => AskedRead::Absent,
+        })
+    }
+
+    fn keychain_service(&self) -> Option<&str> {
+        Some(self.0.service())
     }
 }
 

@@ -43,7 +43,15 @@ https://github.com/own-your-health/medrec-cli --locked`, or `make install` from 
 checkout. medrec keeps its Google Drive sign-ins sealed under
 `~/.config/medrec/vault/`, with the key in one Keychain item
 (`piekstra.medrec`). macOS asks to approve each newly built binary's first
-read of it, once.
+read of it, once. Make that read right after an install or an update, at the
+screen, and choose "Always Allow":
+
+```sh
+medrec auth key               # reads the key once and says whether macOS asked (auth-key/v1); no profile
+medrec auth key --no-dialog   # exit 0: the next read raises no dialog; exit 3: it would
+```
+
+`medrec --version` and `medrec info` say which commit a binary was built from.
 
 The tools it runs, all local (Homebrew on macOS; on Linux, your package
 manager's `poppler-utils` and `tesseract-ocr`):
@@ -422,16 +430,18 @@ session `auth status` still reads as valid. `medrec refresh` at the terminal
 waits up to 10 minutes for an approval. `--scheduled` runs a pass as the
 LaunchAgent does.
 
-medrec's own Drive sign-in is held to the same rule. A scheduled pass reads
-it first, waiting at most 30 seconds for the Keychain and sending nothing to
-Google. A read that does not answer in time (a new build or an update that
-macOS has not yet been allowed to let read the key) ends the pass as
-`needs_person`, and the log names `medrec --profile <NAME> refresh`. No
-scheduled pass by that binary asks again until a person has run a pass.
-Choose "Always Allow" in the Keychain dialog, so later passes by that
-binary read the key without one. Such a pass cannot reach the folder,
-so it writes nothing there: `refresher.last_pass_at` stops moving, and the
-folder's readers see the refreshing machine as offline.
+medrec's own Drive sign-in is held to a stricter rule: a scheduled pass
+raises no Keychain dialog for it. It reads the key first, with macOS's
+dialogs turned off and nothing sent to Google. A key that macOS would ask a
+person about (a new build or an update not yet allowed to read it, a locked
+keychain) ends the pass with exit 3, and its line in the log says why: run
+`medrec auth key` at the screen and choose "Always Allow". A vault whose key is
+gone is exit 1.
+The next pass looks again, without a dialog, so it goes on once the key is
+allowed. A pass that cannot read the key cannot reach the folder, so it writes
+nothing there: `refresher.last_pass_at` stops moving, and the folder's readers
+see the refreshing machine as offline. A quiet read is macOS's: elsewhere a
+scheduled pass of a folder on Drive is exit 1.
 
 `refresh sign-in <id>` runs the provider's own sign-in command, built from
 the `login_hint` its `info` gives (`uhc auth login --browser --profile
@@ -454,7 +464,8 @@ the machine it runs on, serving requests from one pass later. The agent is
 in the person's own session, and logs ids, outcomes and counts to
 `~/Library/Logs/medrec/refresh-<profile>.log`, never a name or a record.
 `medrec refresh` exits 5 when a source failed, else 3 when one needs a
-person, else 0; `--scheduled` exits 0. `refresh sign-in` exits 3 when the
+person, else 0; `--scheduled` exits 0, unless the pass could not be made
+(medrec's own key, above). `refresh sign-in` exits 3 when the
 source still needs a person. `refresh status --json` prints `"status": null`
 for a folder refresh has never run on. A subcommand that acts on one bound
 source takes its id as an argument (`refresh sign-in <id>`, `pause`,
