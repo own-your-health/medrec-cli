@@ -646,7 +646,7 @@ impl PrivateItems {
                 Unreadable::Labels => (
                     "private-labels-unreadable",
                     format!(
-                        "{name}'s provider-state.json does not read, so which items provider labels make private is not known: {name}'s items are left out of household-wide answers until medrec tables fetch nppes, then medrec views write, run on one machine"
+                        "{name}'s provider-state.json does not read, so which items provider labels make private is not known: {name}'s items are left out of household-wide answers until medrec tables fetch nppes, then medrec views write, run on one machine (a newer medrec's file needs this one updated)"
                     ),
                 ),
             };

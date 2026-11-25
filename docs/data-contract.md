@@ -1133,18 +1133,22 @@ provider has no `providers.json`.
 
 **`provider-state.json`** (`medrec-provider-state/v1`), in the person's folder
 rather than in `views/`, is medrec's own: the label of each NPI the person's
-records carry (`by_npi`), shown or not, and those of the printed names only
-one provider can be (`matched`, by record and text), with the newest
+records carry or carried (`by_npi`), shown or not, and those of the printed
+names only one provider can be (`matched`, by record and text), with the newest
 directory's `directory`. It is not split: it holds private providers' names
 and roles with the rest. medrec judges what is private by it, in its own
 answers too. No other reader reads it or serves it. Nothing else in the folder
 says it again, so it stays when the views are removed, and an earlier medrec
-leaves it alone. `people.<id>.provider_state` in `views.json` is its MD5. When
-it does not read, or is gone and the views were made with one, what labels
-make private is not known: `private.json` and medrec's own answers say
-`labels_unreadable` (Private, below), and the state says `lost`, until a pass
-has a directory that was asked of every NPI the records carry (`medrec tables
-fetch nppes`, then `medrec views write`).
+leaves it alone. `people.<id>.provider_state` in `views.json` is its MD5. A
+write is read back, and leaves a file another machine wrote since it was read.
+When it does not read, or is gone and the views were made with one (a pass
+then writes one that says `lost`), what labels make private is not known:
+`private.json` and medrec's own answers say `labels_unreadable` (Private,
+below), until a pass has a directory that was asked of every NPI the records
+carry (`medrec tables fetch nppes`, then `medrec views write`). Until then
+medrec writes nothing over a file that does not read, and then keeps its bytes
+beside the new one as `provider-state~unread-<8 hex>.json`. It never writes
+over a later `medrec-provider-state/`.
 
 ### When they are written
 

@@ -343,7 +343,7 @@ pub(crate) fn sync_with(
 
     let mut people = BTreeMap::new();
     let mut files = BTreeMap::new();
-    let mut states: Vec<(String, String)> = Vec::new();
+    let mut states: Vec<NewState> = Vec::new();
     // Each person's files read once, whoever's events need them.
     let mut loaded: BTreeMap<String, Loaded> = BTreeMap::new();
     fn load(
@@ -446,14 +446,26 @@ pub(crate) fn sync_with(
             .and_then(|o| o.people.get(&p.id));
         // A machine without the directory keeps what another's gave.
         let had = last.is_some_and(|v| v.provider_state.is_some());
-        let before = last_state(store, p, had)?;
+        let (before, held) = last_state(store, p, had)?;
         let state = crate::labels::State::of(&me.idx, directory.as_ref(), before);
-        let srel = crate::labels::state_rel(p);
-        let was = store.md5(&srel)?;
-        let text = state.text().or_else(|| was.as_ref().map(|_| state.empty()));
-        let provider_state = text.as_ref().map(|t| md5_hex(t.as_bytes()));
-        if let Some(t) = text.filter(|_| provider_state != was) {
-            states.push((srel, t));
+        let was = held.as_deref().map(|t| md5_hex(t.as_bytes()));
+        let write = state.replaces(held.as_deref());
+        let provider_state = match &write {
+            Some(t) => Some(md5_hex(t.as_bytes())),
+            None => was.clone(),
+        };
+        if let Some(text) = write {
+            states.push(NewState {
+                rel: crate::labels::state_rel(p),
+                unread: held.filter(|t| {
+                    !matches!(
+                        crate::labels::State::parse(t, &p.id),
+                        crate::labels::Last::State(_)
+                    )
+                }),
+                was,
+                text,
+            });
         }
         let mut private =
             crate::private::build(p, &me.idx, &events, private_marks, &state.areas(&me.idx));
@@ -554,8 +566,8 @@ pub(crate) fn sync_with(
     }
     // Before the views made with them: a pass cut short here leaves views
     // the next one makes again.
-    for (rel, text) in &states {
-        store.write_text(rel, text)?;
+    for s in &states {
+        s.write(store)?;
     }
     out.files_written = upload(store, &uploads)?;
     let index_bytes = json(&index);
@@ -693,13 +705,41 @@ fn last_code_names(
         .and_then(|t| crate::code_names::previous(&t, &p.id)))
 }
 
-/// What the last pass kept of the directory for the person. `had` is whether
-/// its views were made with any: a file gone since is not one that never was.
+/// A person's `provider-state.json` to write.
+struct NewState {
+    rel: String,
+    /// The MD5 of the file it is made from, none when there is none.
+    was: Option<String>,
+    /// What that says, when it does not read.
+    unread: Option<String>,
+    text: String,
+}
+
+impl NewState {
+    /// Nothing else says what the file does: one another machine wrote since
+    /// it was read stays, and the next pass makes these views again with it.
+    /// One that did not read stays beside it.
+    fn write(&self, store: &crate::store::Store) -> Result<(), CliError> {
+        if store.md5(&self.rel)? != self.was {
+            return Ok(());
+        }
+        if let Some(text) = &self.unread {
+            let aside = self.rel.trim_end_matches(".json");
+            let n = &md5_hex(text.as_bytes())[..8];
+            folder::write_back(store, &format!("{aside}~unread-{n}.json"), text)?;
+        }
+        folder::write_back(store, &self.rel, &self.text)
+    }
+}
+
+/// What the last pass kept of the directory for the person, and the file's
+/// text. `had` is whether its views were made with any: a file gone since is
+/// not one that never was.
 fn last_state(
     store: &crate::store::Store,
     p: &Person,
     had: bool,
-) -> Result<crate::labels::Last, CliError> {
+) -> Result<(crate::labels::Last, Option<String>), CliError> {
     use crate::labels::{Last, State};
     let rel = crate::labels::state_rel(p);
     let text = match store.read_text(&rel)? {
@@ -707,11 +747,12 @@ fn last_state(
         None if had => store.read_text_fresh(&rel)?,
         t => t,
     };
-    Ok(match text {
-        Some(t) => State::parse(&t, &p.id).map_or(Last::Unreadable, Last::State),
-        None if had => Last::Unreadable,
+    let last = match &text {
+        Some(t) => State::parse(t, &p.id),
+        None if had => Last::Gone,
         None => Last::None,
-    })
+    };
+    Ok((last, text))
 }
 
 /// What is kept of the directory for the person, as the last pass wrote it.
@@ -724,8 +765,8 @@ pub fn provider_state(f: &Folder, p: &Person) -> Result<crate::labels::State, Cl
             .and_then(|i| Some(i.people.get(&p.id)?.provider_state.is_some()))
             .unwrap_or(false))
     };
-    let last = match last_state(&f.store, p, false)? {
-        crate::labels::Last::None if had()? => last_state(&f.store, p, true)?,
+    let last = match last_state(&f.store, p, false)?.0 {
+        crate::labels::Last::None if had()? => last_state(&f.store, p, true)?.0,
         last => last,
     };
     Ok(crate::labels::State::last(last, &p.id))
@@ -1370,6 +1411,44 @@ mod tests {
 
     fn days(d: &[Option<&str>]) -> Vec<Option<String>> {
         d.iter().map(|x| x.map(str::to_string)).collect()
+    }
+
+    /// Another machine wrote it since it was read: it stays.
+    #[test]
+    fn a_state_another_machine_wrote_is_not_written_over() {
+        use crate::store::{Location, Reads, Store};
+        let dir = std::env::temp_dir().join(format!("medrec-state-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let loc = Location::Dir(dir.clone());
+        let st = Store::open(&loc, Reads::Fresh, Duration::from_secs(60)).unwrap();
+        let path = dir.join("provider-state.json");
+        let new = |was: Option<&str>, unread: Option<&str>| NewState {
+            rel: "provider-state.json".into(),
+            was: was.map(|t| md5_hex(t.as_bytes())),
+            unread: unread.map(str::to_string),
+            text: "ours\n".into(),
+        };
+        for (held, state, after) in [
+            (Some("theirs"), new(None, None), "theirs"),
+            (Some("theirs"), new(Some("read"), None), "theirs"),
+            (Some("theirs"), new(Some("read"), Some("read")), "theirs"),
+            (Some("read"), new(Some("read"), None), "ours\n"),
+            (None, new(None, None), "ours\n"),
+        ] {
+            let _ = std::fs::remove_file(&path);
+            if let Some(t) = held {
+                std::fs::write(&path, t).unwrap();
+            }
+            state.write(&st).unwrap();
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), after);
+        }
+        // One that is gone since is another machine's to have removed.
+        std::fs::remove_file(&path).unwrap();
+        new(Some("read"), None).write(&st).unwrap();
+        assert!(!path.exists());
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

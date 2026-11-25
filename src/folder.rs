@@ -398,7 +398,12 @@ pub fn write_json<T: Serialize>(store: &Store, rel: &str, value: &T) -> Result<(
     let mut text = serde_json::to_string_pretty(value)
         .map_err(|e| CliError::Other(format!("serializing {rel}: {e}")))?;
     text.push('\n');
-    store.write_text(rel, &text)?;
+    write_back(store, rel, &text)
+}
+
+/// Write a text, then read it back and compare.
+pub fn write_back(store: &Store, rel: &str, text: &str) -> Result<(), CliError> {
+    store.write_text(rel, text)?;
     let back = store.read_text(rel)?.ok_or_else(|| {
         CliError::Upstream(format!(
             "{} vanished right after it was written",

@@ -30,6 +30,7 @@ use crate::roles::{self, Service};
 pub const FILE: &str = "providers.json";
 pub const SCHEMA: &str = "medrec-providers/v1";
 pub const STATE_SCHEMA: &str = "medrec-provider-state/v1";
+const STATE_FAMILY: &str = "medrec-provider-state/";
 
 /// The papers a label gives as its evidence, at most.
 const MAX_PAPERS: usize = 5;
@@ -276,8 +277,12 @@ pub enum Last {
     /// None, and the views were made with none.
     None,
     State(State),
-    /// It does not read, or is gone.
+    /// There was one, and it is gone.
+    Gone,
+    /// It is there and does not read.
     Unreadable,
+    /// It is there, as only a later medrec writes it.
+    Later,
 }
 
 impl State {
@@ -292,10 +297,18 @@ impl State {
         }
     }
 
-    pub fn parse(text: &str, person: &str) -> Option<State> {
-        serde_json::from_str::<State>(text)
-            .ok()
-            .filter(|s| s.schema == STATE_SCHEMA && s.person == person)
+    pub fn parse(text: &str, person: &str) -> Last {
+        let schema = || -> Option<String> {
+            let v: Value = serde_json::from_str(text).ok()?;
+            Some(v["schema"].as_str()?.to_string())
+        };
+        match serde_json::from_str::<State>(text) {
+            Ok(s) if s.schema == STATE_SCHEMA && s.person == person => Last::State(s),
+            _ => match schema() {
+                Some(s) if s != STATE_SCHEMA && s.starts_with(STATE_FAMILY) => Last::Later,
+                _ => Last::Unreadable,
+            },
+        }
     }
 
     /// The last pass's, as it is: none when there never was one.
@@ -303,7 +316,7 @@ impl State {
         match last {
             Last::State(s) => s,
             Last::None => State::new(person),
-            Last::Unreadable => State {
+            Last::Gone | Last::Unreadable | Last::Later => State {
                 lost: true,
                 ..State::new(person)
             },
@@ -311,9 +324,12 @@ impl State {
     }
 
     /// The state now: the newer of the directory on this machine and the
-    /// last state first, then the other. What either says of an NPI stays
-    /// for as long as a record carries it.
+    /// last state first, then the other. What either says of an NPI stays,
+    /// though no record carries it any longer: an index an earlier medrec
+    /// saved has none until `reindex`.
     pub fn of(idx: &PersonIndex, directory: Option<&Directory>, last: Last) -> State {
+        // What a later medrec knows is not this one's to say is complete.
+        let later = matches!(last, Last::Later);
         let before = State::last(last, &idx.person);
         let Some(d) = directory else {
             return before.still(idx);
@@ -356,17 +372,15 @@ impl State {
             }
         }
         now.matched.retain(|_, m| !m.is_empty());
-        now.lost &= !npis(idx).all(|n| now.by_npi.contains_key(n) || d.asked(n));
+        now.lost &= later || !npis(idx).all(|n| now.by_npi.contains_key(n) || d.asked(n));
         if now.by_npi.is_empty() && now.matched.is_empty() {
             now.directory = None;
         }
         now
     }
 
-    /// What of it the records still print.
+    /// It, with the matches of what the records still print.
     fn still(mut self, idx: &PersonIndex) -> State {
-        let npis: BTreeSet<&str> = npis(idx).collect();
-        self.by_npi.retain(|npi, _| npis.contains(npi.as_str()));
         let records: HashMap<&str, &Record> =
             idx.records.iter().map(|r| (r.id.as_str(), r)).collect();
         self.matched.retain(|id, texts| {
@@ -385,15 +399,19 @@ impl State {
         self.by_npi.is_empty() && self.matched.is_empty() && !self.lost
     }
 
-    /// Its file, none when there is nothing to keep.
-    pub fn text(&self) -> Option<String> {
-        (!self.is_empty()).then(|| serde_json::to_string(self).expect("labels are plain JSON"))
-    }
-
-    /// The file of a person none of whose records name a provider any more.
-    pub fn empty(&self) -> String {
-        let s = State::new(&self.person);
-        serde_json::to_string(&s).expect("labels are plain JSON")
+    /// What to write, when the file has `held`: none when it is to stay as
+    /// it is. One that does not read is replaced only by a state that says
+    /// all there is to know.
+    pub fn replaces(&self, held: Option<&str>) -> Option<String> {
+        let reads = held.map(|t| State::parse(t, &self.person));
+        match reads {
+            Some(Last::Unreadable | Last::Later) if self.lost => return None,
+            None if self.is_empty() => return None,
+            _ => {}
+        }
+        let mut text = serde_json::to_string_pretty(self).expect("labels are plain JSON");
+        text.push('\n');
+        (held != Some(text.as_str())).then_some(text)
     }
 
     /// Whether which records a label makes private is not known.
@@ -1365,6 +1383,16 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(self.state_path()).unwrap()).unwrap()
         }
 
+        /// The states kept aside as not readable.
+        fn unread(&self) -> Vec<Vec<u8>> {
+            std::fs::read_dir(self.root.join("Robin Example"))
+                .unwrap()
+                .map(|e| e.unwrap().path())
+                .filter(|p| p.to_string_lossy().contains("provider-state~unread-"))
+                .map(|p| std::fs::read(p).unwrap())
+                .collect()
+        }
+
         /// What an answer judges private now.
         fn judged(&self) -> Value {
             let f = self.folder();
@@ -1563,11 +1591,18 @@ mod tests {
             let text = text.replace(PERSON, "p_otheraaaaaaaaaaaaaaa");
             std::fs::write(c.state_path(), text).unwrap();
         };
-        for (n, damage) in [remove, cut, another].into_iter().enumerate() {
+        // As a medrec that knows another kind of evidence writes it.
+        let evidence: Damage = |c| {
+            let text = std::fs::read_to_string(c.state_path()).unwrap();
+            let text = text.replace(r#""from": "npi""#, r#""from": "seal""#);
+            std::fs::write(c.state_path(), text).unwrap();
+        };
+        for (n, damage) in [remove, cut, another, evidence].into_iter().enumerate() {
             let mut c = Case::new();
             c.sync(true);
             assert!(c.judged().get("labels_unreadable").is_none());
             damage(&c);
+            let held = std::fs::read(c.state_path()).ok();
             for flag in ["labels_unreadable", "marks_unreadable"] {
                 assert_eq!(c.judged()[flag], true, "{n}");
             }
@@ -1582,13 +1617,32 @@ mod tests {
                 let l = c.labels();
                 assert_eq!(l["labels"], json!({}), "{n}");
                 assert!(!l.to_string().contains("sure"), "{n}");
+                // It writes nothing over one that is there.
+                if held.is_some() {
+                    assert_eq!(std::fs::read(c.state_path()).ok(), held, "{n}");
+                }
+                assert_eq!(c.sync(false), 0, "{n}");
             }
-            // One with it knows again.
+            // One with it knows again, and what did not read stays beside it.
+            assert!(c.unread().is_empty(), "{n}");
             assert_eq!(c.sync(true), 1);
             assert!(c.view("private.json").get("labels_unreadable").is_none());
             assert!(c.private("r_talkaaaaaaaaaaaaaaaa"));
             assert_eq!(c.sync(true), 0);
+            assert_eq!(c.unread(), Vec::from_iter(held), "{n}");
         }
+        // A later medrec's stays, whatever this one knows.
+        let c = Case::new();
+        c.sync(true);
+        let text = std::fs::read_to_string(c.state_path()).unwrap();
+        let text = text.replace(STATE_SCHEMA, "medrec-provider-state/v2");
+        std::fs::write(c.state_path(), &text).unwrap();
+        assert_eq!(c.sync(true), 1);
+        assert_eq!(std::fs::read_to_string(c.state_path()).unwrap(), text);
+        assert_eq!(c.view("private.json")["labels_unreadable"], true);
+        assert_eq!(c.judged()["labels_unreadable"], true);
+        assert_eq!(c.sync(true), 0);
+        assert!(c.unread().is_empty());
         // A folder whose views never had one is not held back.
         let c = Case::new();
         c.sync(false);
@@ -1618,6 +1672,29 @@ mod tests {
         c.keep_of("2026-05-10", &Wanted::of([&c.index]), &without);
         assert_eq!(c.sync(true), 1);
         assert!(c.view("private.json").get("labels_unreadable").is_none());
+    }
+
+    /// An earlier medrec saves an index without its providers, and
+    /// `reindex` gives them back: what was private by one is again.
+    #[test]
+    fn an_index_without_providers_for_a_while_loses_no_label() {
+        let mut c = Case::new();
+        c.sync(true);
+        let state = c.state();
+        let whole = c.index.clone();
+        for r in &mut c.index.records {
+            r.providers.clear();
+        }
+        c.sync(false);
+        assert_eq!(c.state()["by_npi"], state["by_npi"]);
+        c.index = whole;
+        c.sync(false);
+        assert!(c.private("r_talkaaaaaaaaaaaaaaaa"));
+        assert_eq!(c.state()["by_npi"], state["by_npi"]);
+        assert_eq!(c.labels()["by_item"], {
+            let want: Value = serde_json::from_str(fixture!("providers.json")).unwrap();
+            want["by_item"].clone()
+        });
     }
 
     /// The views are made from the state, not the state from the views.
