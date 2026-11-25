@@ -1,13 +1,21 @@
 //! The clinicians a person's papers name beside a practice or a credential
-//! that says what they treat, and the claims that print no more of one than a
-//! surname and an initial. A likely match: it only holds a claim back.
+//! that says what they treat, the days of a paper from a practice of an area
+//! and the clinicians linked to one, and the items that print one by surname
+//! and first initial: claims, visits, prescriptions, procedures and results. A
+//! likely match: it only holds an item back, and the household's word at the
+//! Mac opens a clinician (`Opened`).
 
 use std::collections::BTreeSet;
 
-use serde_json::Value;
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 
 use crate::model::{Document, PersonIndex, Record};
 use crate::{events, given, labels, nppes, private};
+
+/// A clinician as items print them: the surname in capitals, and the first
+/// initial.
+pub(crate) type Person = (String, char);
 
 /// Who a paper says is of an area.
 struct Said {
@@ -16,8 +24,6 @@ struct Said {
     text: String,
     /// Whether that is the organization, and says the area itself.
     organization: bool,
-    /// The clinician whose bill it is (N5), as the claims print them.
-    people: BTreeSet<(String, char)>,
     /// Only by what a source gave, that the paper does not show.
     gave: bool,
 }
@@ -34,7 +40,6 @@ impl Said {
                 area: area?,
                 text: text.clone()?,
                 organization,
-                people: BTreeSet::new(),
                 gave,
             })
         };
@@ -45,17 +50,6 @@ impl Said {
         each.into_iter().flatten().collect()
     }
 
-    /// The practice a bill says a clinician is of.
-    fn practice(clinician: &str, organization: &str, gave: bool) -> Option<Said> {
-        Some(Said {
-            area: private::place_area(organization)?,
-            text: String::new(),
-            organization: false,
-            people: nppes::people(clinician),
-            gave,
-        })
-    }
-
     /// Whether it names one of these people. A name that may be a place's is
     /// looked for in an organization alone.
     fn names(&self, printed: &Printed) -> bool {
@@ -63,8 +57,7 @@ impl Said {
         if !printed.a_person && !self.organization {
             return false;
         }
-        let known = |of: &(String, char)| people.iter().any(|p| same_person(of, p));
-        self.people.iter().any(known) || names(&self.text, people)
+        names(&self.text, people)
     }
 }
 
@@ -77,21 +70,34 @@ fn same_surname(a: &str, b: &str) -> bool {
     a.len() > 1 && (a == b || cut(a, b) || cut(b, a))
 }
 
-fn same_person(a: &(String, char), b: &(String, char)) -> bool {
+fn same_person(a: &Person, b: &Person) -> bool {
     a.1 == b.1 && same_surname(&a.0, &b.0)
 }
 
-/// The people a claim's provider can be.
+/// The field each kind prints its clinician in.
+pub(crate) fn printing(kind: &str) -> Option<&'static str> {
+    Some(match kind {
+        "claim" => "provider",
+        "encounter" => "practitioner",
+        "medication" => "prescriber",
+        "procedure" | "result" | "report" => "performer",
+        _ => return None,
+    })
+}
+
+/// The people an item's clinician can be.
 struct Printed {
-    people: BTreeSet<(String, char)>,
+    people: BTreeSet<Person>,
     /// Whether the text is a person's: by an initial, a degree, or a comma
-    /// after the surname. `Kim Placeholder` can be a place.
+    /// after the surname, or as a visit prints its clinician and a medicine its
+    /// prescriber. `Kim Placeholder` on a claim can be a place.
     a_person: bool,
 }
 
 impl Printed {
     fn of(r: &Record) -> Option<Printed> {
-        let text = provider(r)?;
+        let field = printing(&r.kind)?;
+        let text = r.fields.get(field).and_then(Value::as_str)?;
         let people = nppes::people(text);
         if events::says_organization(text) || people.is_empty() {
             return None;
@@ -101,20 +107,28 @@ impl Printed {
         // `PA` is a practice's as often as a degree.
         let degree = |w: &str| w != "PA" && nppes::around_a_name(w);
         let mut words = text.split(|c: char| c.is_whitespace() || c == ',');
+        // A performer can be a place, as a claim's provider can.
+        let person_field = if field == "performer" {
+            "provider"
+        } else {
+            field
+        };
         let a_person = initial
             || text.contains(',')
-            || labels::a_person("provider", text)
+            || labels::a_person(person_field, text)
             || words.any(|w| degree(&nppes::fold(w)));
         Some(Printed { people, a_person })
     }
-}
 
-fn provider(r: &Record) -> Option<&str> {
-    r.fields.get("provider").and_then(Value::as_str)
+    /// Without the clinicians the household opened.
+    fn but(mut self, opened: &BTreeSet<Person>) -> Option<Printed> {
+        self.people.retain(|p| !opened.contains(p));
+        (!self.people.is_empty()).then_some(self)
+    }
 }
 
 /// Whether a short text names one of these people, its words in either order.
-fn names(text: &str, people: &BTreeSet<(String, char)>) -> bool {
+fn names(text: &str, people: &BTreeSet<Person>) -> bool {
     if labels::prints(text, people, &same_surname) {
         return true;
     }
@@ -128,7 +142,8 @@ fn names(text: &str, people: &BTreeSet<(String, char)>) -> bool {
         .any(|read| people.iter().any(|p| same_person(&read, p)))
 }
 
-/// Whether a claim is of a day: its billable period, else its date.
+/// Whether a claim or a visit is of a day: a claim's billable period, else
+/// its date.
 fn of_day(r: &Record, day: &str) -> bool {
     fn ten(v: Option<&str>) -> Option<&str> {
         v?.get(..10)
@@ -140,84 +155,278 @@ fn of_day(r: &Record, day: &str) -> bool {
     matches!((start, end), (Some(s), Some(e)) if s <= day && day <= e)
 }
 
-/// The practice that a paper of a visit's day (one D3 joins, above) says it is,
-/// for each clinician a claim of that day prints, as each is shown and as a
-/// source gave it. Every one of them: a day with two visits holds both back.
-fn practices(idx: &PersonIndex) -> Vec<Said> {
-    let is = |text: &&str| events::is_clinician(text);
-    let claims: Vec<(&Record, Vec<(String, bool)>)> = idx
-        .records
-        .iter()
-        .filter(|r| r.kind == "claim")
-        .map(|r| {
-            let shown = provider(r).filter(is).map(|t| (t.to_string(), false));
-            let given = given::as_given(r)
-                .filter_map(|x| provider(&x).filter(is).map(|t| (t.to_string(), true)));
-            (r, shown.into_iter().chain(given).collect())
-        })
-        .collect();
-    let mut out = Vec::new();
-    for d in &idx.documents {
-        let ty = d.doc_type.as_deref().unwrap_or("other");
-        let day = d.date.as_deref().and_then(|t| t.get(..10));
-        let (true, Some(day)) = (events::of_the_days_visit(ty), day) else {
-            continue;
-        };
-        let of_day: Vec<&(&Record, Vec<(String, bool)>)> =
-            claims.iter().filter(|(r, _)| of_day(r, day)).collect();
-        if of_day.is_empty() {
-            continue;
-        }
-        let given = given::papers_as_given(d).map(|x| (x.organization, true));
-        for (organization, paper_gave) in
-            std::iter::once((d.organization.clone(), false)).chain(given)
-        {
-            let Some(organization) = organization else {
+/// The clinician a claim prints, where it is a person's: the people they can
+/// be.
+fn of_claim(r: &Record) -> Option<BTreeSet<Person>> {
+    if r.kind != "claim" {
+        return None;
+    }
+    Printed::of(r).filter(|p| p.a_person).map(|p| p.people)
+}
+
+/// The days of a paper from a practice of an area, and the clinicians linked
+/// to one.
+#[derive(Default)]
+struct Days {
+    /// Each day of a paper that D3 (above) can join to a visit, from a practice
+    /// whose organization says an area, and that area.
+    days: Vec<(String, &'static str)>,
+    /// The clinicians that two or more such days of an area have a claim of,
+    /// or one of which has no other clinician's claim.
+    linked: Vec<(Person, &'static str)>,
+}
+
+impl Days {
+    /// From the person's own papers and claims, those in error included: as
+    /// shown, or also as a source gave each (`gave`).
+    fn of(idx: &PersonIndex, gave: bool) -> Days {
+        let claims: Vec<(&Record, BTreeSet<Person>)> = idx
+            .records
+            .iter()
+            .filter(|r| r.kind == "claim")
+            .map(|r| {
+                let people = versions(r, gave)
+                    .filter_map(|x| of_claim(&x))
+                    .flatten()
+                    .collect();
+                (r, people)
+            })
+            .collect();
+        let mut out = Days::default();
+        let mut on: Vec<(Person, &str, &'static str)> = Vec::new();
+        for d in &idx.documents {
+            let ty = d.doc_type.as_deref().unwrap_or("other");
+            let day = d.date.as_deref().and_then(|t| t.get(..10));
+            let (true, Some(day)) = (events::of_the_days_visit(ty), day) else {
                 continue;
             };
-            let pharmacy = organization.to_lowercase().contains("pharmacy");
-            if pharmacy || crate::plain::is_connection(&organization) {
+            let of_day: Vec<&(&Record, BTreeSet<Person>)> =
+                claims.iter().filter(|(r, _)| of_day(r, day)).collect();
+            if of_day.is_empty() {
                 continue;
             }
-            for (_, printed) in &of_day {
-                for (text, gave) in printed {
-                    out.extend(Said::practice(text, &organization, paper_gave || *gave));
+            let given = given::papers_as_given(d).filter(|_| gave);
+            let organizations = std::iter::once(d.organization.clone())
+                .chain(given.map(|x| x.organization))
+                .flatten();
+            for organization in organizations {
+                let pharmacy = organization.to_lowercase().contains("pharmacy");
+                if pharmacy || crate::plain::is_connection(&organization) {
+                    continue;
+                }
+                let Some(area) = private::place_area(&organization) else {
+                    continue;
+                };
+                out.days.push((day.to_string(), area));
+                for (_, people) in &of_day {
+                    on.extend(people.iter().map(|p| (p.clone(), day, area)));
+                }
+                // The only clinician with a claim that day.
+                let printing: Vec<&BTreeSet<Person>> = of_day
+                    .iter()
+                    .map(|(_, people)| people)
+                    .filter(|people| !people.is_empty())
+                    .collect();
+                if let Some(first) = printing.first() {
+                    let in_each = |p: &&Person| {
+                        let has = |c: &&BTreeSet<Person>| c.iter().any(|q| same_person(p, q));
+                        printing.iter().all(has)
+                    };
+                    let only = first.iter().filter(in_each);
+                    out.linked.extend(only.map(|p| (p.clone(), area)));
                 }
             }
         }
+        for (p, _, area) in &on {
+            let days: BTreeSet<&str> = on
+                .iter()
+                .filter(|(q, _, of)| same_person(p, q) && of == area)
+                .map(|(_, day, _)| *day)
+                .collect();
+            if days.len() >= 2 {
+                out.linked.push((p.clone(), *area));
+            }
+        }
+        out
     }
-    out
+
+    /// The area of a day an item is of.
+    fn of_day(&self, r: &Record) -> Option<&'static str> {
+        let mut days = self.days.iter();
+        days.find(|(day, _)| of_day(r, day)).map(|(_, area)| *area)
+    }
+
+    /// The area of a clinician linked to one.
+    fn linked(&self, people: &BTreeSet<Person>) -> Option<&'static str> {
+        let mut linked = self.linked.iter();
+        let found = linked.find(|(p, _)| people.iter().any(|q| same_person(p, q)));
+        found.map(|(_, area)| *area)
+    }
 }
 
-pub(crate) struct Clinicians(Vec<Said>);
+/// An item as it is shown, and as each source gave it where `gave`.
+fn versions(r: &Record, gave: bool) -> impl Iterator<Item = Record> + '_ {
+    let given = given::as_given(r).filter(move |_| gave);
+    std::iter::once(r.clone()).chain(given)
+}
+
+/// The household's word that a clinician of the person's is of no private area
+/// (`marks.json` `clinicians`): none of their items is private by this rule.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Opened {
+    pub id: String,
+    /// The surname as the record printed it, in capitals.
+    pub surname: String,
+    /// The first initial.
+    pub initial: String,
+    /// The record it was said of.
+    pub item: String,
+    pub at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub by: Option<String>,
+    /// What a later medrec writes here, kept as it is.
+    #[serde(flatten)]
+    pub other: Map<String, Value>,
+}
+
+impl Opened {
+    pub(crate) fn person(&self) -> Option<Person> {
+        let mut initial = self.initial.chars();
+        match (initial.next(), initial.next()) {
+            (Some(c), None) => Some((self.surname.clone(), c)),
+            _ => None,
+        }
+    }
+}
+
+/// What ties an item's clinician to an area, the surest first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Learned {
+    /// A paper names them.
+    Paper,
+    /// They are linked to the practice of a paper of a day.
+    Linked,
+    /// The item is of the day of such a paper, and no more.
+    Day,
+}
+
+impl Learned {
+    /// What `private.json` says of it: nothing of a paper.
+    pub(crate) fn word(self) -> Option<&'static str> {
+        match self {
+            Learned::Paper => None,
+            Learned::Linked => Some("linked"),
+            Learned::Day => Some("day"),
+        }
+    }
+}
+
+/// Why an item is private by its clinician.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Named {
+    pub area: &'static str,
+    pub learned: Learned,
+}
+
+pub(crate) struct Clinicians {
+    said: Vec<Said>,
+    /// As shown, and also as a source gave it.
+    days: [Days; 2],
+    opened: BTreeSet<Person>,
+}
 
 impl Clinicians {
-    /// Of the person's own papers, and of the practices those of a visit's day
-    /// say its clinicians are of, as each is shown and as a source gave it.
-    pub(crate) fn of(idx: &PersonIndex) -> Clinicians {
-        let mut each: Vec<Said> = Vec::new();
+    /// Of the person's own papers, and of the days of a paper from a practice,
+    /// as each is shown and as a source gave it, without those the household
+    /// opened.
+    pub(crate) fn of(idx: &PersonIndex, opened: &[Opened]) -> Clinicians {
+        let mut said: Vec<Said> = Vec::new();
         for d in &idx.documents {
-            each.extend(Said::paper(d, false));
-            each.extend(given::papers_as_given(d).flat_map(|x| Said::paper(&x, true)));
+            said.extend(Said::paper(d, false));
+            said.extend(given::papers_as_given(d).flat_map(|x| Said::paper(&x, true)));
         }
-        each.extend(practices(idx));
-        Clinicians(each)
+        Clinicians {
+            said,
+            days: [Days::of(idx, false), Days::of(idx, true)],
+            opened: opened.iter().filter_map(Opened::person).collect(),
+        }
     }
 
-    /// The area of the clinician a claim prints, by a paper that names them:
-    /// as both are shown, or also as a source gave either.
-    pub(crate) fn area(&self, r: &Record, gave: bool) -> Option<&'static str> {
-        if self.0.is_empty() || r.kind != "claim" {
-            return None;
+    /// What ties these people to an area: a paper before a link.
+    fn by(&self, printed: &Printed, gave: bool) -> Option<Named> {
+        let mut said = self.said.iter().filter(|s| gave || !s.gave);
+        if let Some(s) = said.find(|s| s.names(printed)) {
+            let learned = Learned::Paper;
+            return Some(Named {
+                area: s.area,
+                learned,
+            });
         }
-        let of = |r: &Record| {
-            let printed = Printed::of(r)?;
-            let mut papers = self.0.iter().filter(|s| gave || !s.gave);
-            papers.find(|s| s.names(&printed)).map(|s| s.area)
-        };
-        let given = || given::as_given(r).find_map(|x| of(&x));
-        of(r).or_else(|| gave.then(given).flatten())
+        let area = self.days[usize::from(gave)].linked(&printed.people);
+        let area = area.filter(|_| printed.a_person)?;
+        let learned = Learned::Linked;
+        Some(Named { area, learned })
     }
+
+    /// The area of the day a claim or a visit is of, where it prints a
+    /// clinician the household did not open.
+    fn of_day(&self, r: &Record, gave: bool) -> Option<Named> {
+        let area = self.days[usize::from(gave)].of_day(r)?;
+        let mut people = versions(r, gave).filter_map(|x| of_claim(&x));
+        let open = |p: &Person| self.opened.contains(p);
+        let prints = people.any(|people| !people.iter().all(open));
+        let learned = Learned::Day;
+        prints.then_some(Named { area, learned })
+    }
+
+    /// The area of the clinician an item prints, by a paper that names them, a
+    /// link to the practice of a paper of a day, or that day: as all are shown,
+    /// or also as a source gave any (`gave`). The surest of them.
+    pub(crate) fn named(&self, r: &Record, gave: bool) -> Option<Named> {
+        let by = versions(r, gave).filter_map(|x| {
+            let printed = Printed::of(&x)?.but(&self.opened)?;
+            self.by(&printed, gave)
+        });
+        let all: Vec<Named> = by.chain(self.of_day(r, gave)).collect();
+        all.into_iter().min_by_key(|n| n.learned)
+    }
+
+    /// The area alone.
+    #[cfg(test)]
+    pub(crate) fn area(&self, r: &Record, gave: bool) -> Option<&'static str> {
+        self.named(r, gave).map(|n| n.area)
+    }
+
+    /// The clinicians an item prints, as shown or as a source gave it, that
+    /// hold it back: whom opening it opens.
+    pub(crate) fn tied(&self, r: &Record) -> BTreeSet<Person> {
+        let mut out = BTreeSet::new();
+        for x in versions(r, true) {
+            let Some(printed) = Printed::of(&x).and_then(|p| p.but(&self.opened)) else {
+                continue;
+            };
+            for one in &printed.people {
+                let alone = Printed {
+                    people: BTreeSet::from([one.clone()]),
+                    a_person: printed.a_person,
+                };
+                if self.by(&alone, true).is_some() {
+                    out.insert(one.clone());
+                }
+            }
+        }
+        if self.of_day(r, true).is_some() {
+            let each = versions(r, true).filter_map(|x| of_claim(&x));
+            out.extend(each.flatten());
+        }
+        out
+    }
+}
+
+/// Every clinician an item can print, as shown or as a source gave it.
+pub(crate) fn printed(r: &Record) -> BTreeSet<Person> {
+    let each = versions(r, true).filter_map(|x| Printed::of(&x));
+    each.flat_map(|p| p.people).collect()
 }
 
 #[cfg(test)]
@@ -243,7 +452,7 @@ mod tests {
     }
 
     fn named(idx: &PersonIndex) -> Clinicians {
-        Clinicians::of(idx)
+        Clinicians::of(idx, &[])
     }
 
     fn area(d: Document, provider: &str) -> Option<&'static str> {
@@ -337,65 +546,193 @@ mod tests {
         assert_eq!(area(paper(None, "Bill"), "K PLACEHOLDER"), None);
     }
 
-    /// By the practice whose paper is of a day the clinician's claim is of:
-    /// each clinician of that day's, whatever the events make of them.
-    #[test]
-    fn a_claim_is_of_the_practice_a_paper_of_its_day_is() {
-        let dated = |id: &str, provider: &str, day: &str| {
-            let mut r = claim(provider);
-            r.id = id.into();
-            r.date = Some(day.into());
+    /// The person's items of days, each `(id, kind, who, day)`.
+    fn items(each: &[(&str, &str, &str, &str)]) -> Vec<Record> {
+        let item = |(id, kind, who, day): &(&str, &str, &str, &str)| {
+            let mut r = claim(who);
+            (r.id, r.kind, r.date) = (id.to_string(), kind.to_string(), Some(day.to_string()));
+            if *kind == "encounter" {
+                r.fields = json!({"practitioner": who}).as_object().unwrap().clone();
+            }
             r
         };
-        let of = |organization: &str, ty: &str, day: &str, provider: &str| {
-            let mut d = paper(Some(organization), "Statement");
-            (d.doc_type, d.date) = (Some(ty.into()), Some("2024-10-01".into()));
-            let mut idx = PersonIndex::new("p_test");
-            idx.documents = vec![d];
-            idx.records = vec![
-                dated("r_billedaaaaaaaaaaaaaa", "K PLACEHOLDER", day),
-                dated("r_sameaaaaaaaaaaaaaaaa", "J SAMPLE", "2024-10-01"),
-            ];
-            named(&idx).area(&claim(provider), false)
-        };
-        let mind = Some("mental_health");
-        let counseling = "Example Counseling";
-        assert_eq!(
-            of(counseling, "bill", "2024-10-01", "PLACEHOLDER, KIM"),
-            mind
-        );
-        assert_eq!(
-            of(counseling, "visit_summary", "2024-10-01", "PLACEHOLDER, K"),
-            mind
-        );
-        // The other clinician of that day is held back too.
-        assert_eq!(of(counseling, "bill", "2024-10-01", "SAMPLE, JO"), mind);
-        assert_eq!(
-            of(counseling, "bill", "2024-10-02", "PLACEHOLDER, KIM"),
-            None
-        );
-        assert_eq!(of(counseling, "bill", "2024-10-01", "J PLACEHOLDER"), None);
-        assert_eq!(
-            of(counseling, "prescription", "2024-10-01", "K PLACEHOLDER"),
-            None
-        );
-        assert_eq!(
-            of("Example Pediatrics", "bill", "2024-10-01", "K PLACEHOLDER"),
-            None
-        );
-        let pharmacy = "Example Counseling Pharmacy";
-        assert_eq!(of(pharmacy, "receipt", "2024-10-01", "K PLACEHOLDER"), None);
+        each.iter().map(item).collect()
     }
 
-    /// Nothing but a claim: what else prints a name is judged by its own words.
-    #[test]
-    fn it_is_claims_only() {
+    /// Papers of days: `(organization, type, day)`.
+    fn dated(each: &[(&str, &str, &str)]) -> Vec<Document> {
+        let one = |(organization, ty, day): &(&str, &str, &str)| {
+            let mut d = paper(Some(organization), "Statement");
+            (d.doc_type, d.date) = (Some(ty.to_string()), Some(day.to_string()));
+            d
+        };
+        each.iter().map(one).collect()
+    }
+
+    fn of(records: Vec<Record>, papers: Vec<Document>, r: &Record) -> Option<Named> {
         let mut idx = PersonIndex::new("p_test");
-        idx.documents = vec![paper(Some("Kim Placeholder, LCSW"), "Bill")];
-        let mut r = claim("K PLACEHOLDER");
-        assert!(named(&idx).area(&r, false).is_some());
-        r.kind = "result".into();
-        assert!(named(&idx).area(&r, false).is_none());
+        (idx.records, idx.documents) = (records, papers);
+        named(&idx).named(r, false)
+    }
+
+    const COUNSELING: &str = "Example Counseling";
+    const MIND: &str = "mental_health";
+
+    /// The day of a practice's paper holds each clinician's claim of that day.
+    /// A clinician is linked to the practice, and so their items of other days,
+    /// by two such days, or by one with no other clinician's claim.
+    #[test]
+    fn a_practices_paper_holds_its_day_and_a_clinician_it_links() {
+        let day = |n: u8| format!("2024-10-0{n}");
+        let (d1, d2, d9) = (day(1), day(2), day(9));
+        let linked = Some(Named {
+            area: MIND,
+            learned: Learned::Linked,
+        });
+        let of_day = Some(Named {
+            area: MIND,
+            learned: Learned::Day,
+        });
+        let other = |who: &str| items(&[("r_otherdayaaaaaaaaaaaa", "claim", who, &d9)]).remove(0);
+        // The only clinician of the day.
+        let alone = items(&[("r_billedaaaaaaaaaaaaaa", "claim", "K PLACEHOLDER", &d1)]);
+        let paper = || dated(&[(COUNSELING, "bill", &d1)]);
+        assert_eq!(
+            of(alone.clone(), paper(), &other("PLACEHOLDER, KIM")),
+            linked
+        );
+        assert_eq!(of(alone.clone(), paper(), &other("J PLACEHOLDER")), None);
+        for (organization, ty) in [
+            ("Example Pediatrics", "bill"),
+            (COUNSELING, "prescription"),
+            ("Example Counseling Pharmacy", "receipt"),
+        ] {
+            let papers = dated(&[(organization, ty, &d1)]);
+            assert_eq!(
+                of(alone.clone(), papers, &other("K PLACEHOLDER")),
+                None,
+                "{organization}"
+            );
+        }
+        assert_eq!(
+            of(
+                alone.clone(),
+                dated(&[(COUNSELING, "bill", &d2)]),
+                &other("K PLACEHOLDER")
+            ),
+            None
+        );
+        // Two clinicians of one day: their claims of that day alone.
+        let two = items(&[
+            ("r_billedaaaaaaaaaaaaaa", "claim", "K PLACEHOLDER", &d1),
+            ("r_sameaaaaaaaaaaaaaaaa", "claim", "J SAMPLE", &d1),
+        ]);
+        assert_eq!(of(two.clone(), paper(), &two[1]), of_day);
+        assert_eq!(of(two.clone(), paper(), &other("K PLACEHOLDER")), None);
+        assert_eq!(of(two.clone(), paper(), &other("SAMPLE, JO")), None);
+        // A visit of the day is no claim: the day holds it not, and it is no
+        // other clinician's claim.
+        let visit = items(&[
+            ("r_billedaaaaaaaaaaaaaa", "claim", "K PLACEHOLDER", &d1),
+            ("r_visitaaaaaaaaaaaaaaa", "encounter", "Jo Sample", &d1),
+        ]);
+        assert_eq!(of(visit.clone(), paper(), &visit[1]), None);
+        assert_eq!(of(visit.clone(), paper(), &other("K PLACEHOLDER")), linked);
+        // Two days the clinician shares link them both.
+        let mut shared = two.clone();
+        shared.extend(items(&[
+            ("r_billedbaaaaaaaaaaaaa", "claim", "K PLACEHOLDER", &d2),
+            ("r_samebaaaaaaaaaaaaaaa", "claim", "SAMPLE, JO", &d2),
+        ]));
+        let papers = || {
+            dated(&[
+                (COUNSELING, "bill", &d1),
+                (COUNSELING, "visit_summary", &d2),
+            ])
+        };
+        assert_eq!(of(shared.clone(), papers(), &other("SAMPLE, J")), linked);
+        assert_eq!(
+            of(shared.clone(), papers(), &other("K PLACEHOLDER")),
+            linked
+        );
+        // Two days of two areas link no one.
+        let two_areas = dated(&[
+            (COUNSELING, "bill", &d1),
+            ("Example Fertility Clinic", "bill", &d2),
+        ]);
+        assert_eq!(of(shared.clone(), two_areas, &other("SAMPLE, J")), None);
+        // A paper that names them is surer than a link.
+        let mut named_too = papers();
+        named_too.extend(dated(&[("Kim Placeholder, LCSW", "letter", &d9)]));
+        let by_paper = Some(Named {
+            area: MIND,
+            learned: Learned::Paper,
+        });
+        assert_eq!(of(shared, named_too, &other("K PLACEHOLDER")), by_paper);
+    }
+
+    /// What the household opened holds nothing back: on the day, by a link or
+    /// by a paper.
+    #[test]
+    fn a_clinician_the_household_opened_is_held_by_nothing() {
+        let d1 = "2024-10-01";
+        let alone = items(&[("r_billedaaaaaaaaaaaaaa", "claim", "K PLACEHOLDER", d1)]);
+        let mut papers = dated(&[(COUNSELING, "bill", d1)]);
+        papers.push(paper(Some("Kim Placeholder, LCSW"), "Bill"));
+        let mut idx = PersonIndex::new("p_test");
+        (idx.records, idx.documents) = (alone.clone(), papers);
+        let tied = named(&idx).tied(&alone[0]);
+        assert_eq!(tied, BTreeSet::from([("PLACEHOLDER".to_string(), 'K')]));
+        let opened = Opened {
+            id: "o_openedaaaaaaaaaaaaaa".into(),
+            surname: "PLACEHOLDER".into(),
+            initial: "K".into(),
+            item: alone[0].id.clone(),
+            at: "2024-12-01T00:00:00Z".into(),
+            by: None,
+            other: Map::new(),
+        };
+        let open = Clinicians::of(&idx, std::slice::from_ref(&opened));
+        assert_eq!(open.named(&alone[0], true), None);
+        assert_eq!(open.named(&claim("PLACEHOLDER, KIM"), true), None);
+        // Another of that surname is not.
+        assert!(open.named(&claim("PLACEHOLDER, JO"), true).is_none());
+        let mut idx2 = idx.clone();
+        idx2.documents
+            .push(paper(Some("Jo Placeholder, LCSW"), "Bill"));
+        let open = Clinicians::of(&idx2, &[opened]);
+        assert!(open.named(&claim("PLACEHOLDER, JO"), true).is_some());
+        assert_eq!(
+            printed(&alone[0]),
+            BTreeSet::from([("PLACEHOLDER".to_string(), 'K')])
+        );
+    }
+
+    /// Each kind that prints a clinician: a visit's and a prescriber need no
+    /// initial, as a claim's does.
+    #[test]
+    fn visits_prescriptions_procedures_and_results_print_one_too() {
+        let mut idx = PersonIndex::new("p_test");
+        idx.documents = vec![paper(Some(COUNSELING), "Visit with Kim Placeholder")];
+        let clinicians = named(&idx);
+        let one = |kind: &str, field: &str, who: &str| {
+            let mut r = claim("unused");
+            r.kind = kind.into();
+            r.fields = json!({ field: who }).as_object().unwrap().clone();
+            clinicians.area(&r, false)
+        };
+        let mind = Some(MIND);
+        assert_eq!(one("encounter", "practitioner", "Kim Placeholder"), mind);
+        assert_eq!(one("medication", "prescriber", "Kim Placeholder"), mind);
+        assert_eq!(one("procedure", "performer", "K Placeholder"), mind);
+        assert_eq!(one("result", "performer", "PLACEHOLDER, KIM"), mind);
+        assert_eq!(one("report", "performer", "K. Placeholder"), mind);
+        // A claim's provider and a performer can be a place's.
+        assert_eq!(one("claim", "provider", "Kim Placeholder"), None);
+        assert_eq!(one("procedure", "performer", "Kim Placeholder"), None);
+        // An immunization prints a performer, and is judged by no clinician.
+        assert_eq!(one("immunization", "performer", "K Placeholder"), None);
+        assert_eq!(one("encounter", "location", "K Placeholder"), None);
     }
 
     /// What a paper said before still tells, and only where it is asked for.

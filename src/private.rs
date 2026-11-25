@@ -97,6 +97,8 @@ struct Why {
     from: &'static str,
     /// Only by what a source gave and no item shows ([`given`]).
     given: bool,
+    /// By its clinician: what ties them to the area.
+    learned: Option<clinicians::Learned>,
 }
 
 impl Why {
@@ -105,6 +107,7 @@ impl Why {
             area,
             from,
             given: false,
+            learned: None,
         }
     }
 
@@ -112,6 +115,9 @@ impl Why {
         let mut v = json!({"area": self.area, "from": self.from});
         if self.given {
             v["given"] = Value::Bool(true);
+        }
+        if let Some(word) = self.learned.and_then(clinicians::Learned::word) {
+            v["learned"] = word.into();
         }
         v
     }
@@ -597,9 +603,10 @@ pub fn build(
     idx: &PersonIndex,
     texts: &PersonText,
     built: &Built,
-    marks: &[Mark],
+    all_marks: &Marks,
     labelled: &BTreeMap<String, (&'static str, bool)>,
 ) -> Value {
+    let marks = all_marks.private.as_slice();
     let now_index = standing::index(idx);
     let events = &*built.for_private();
     // A study is private when its report is. One with no report, or a report
@@ -632,7 +639,7 @@ pub fn build(
     if let Some(whole) = &built.whole {
         ties.extend(crate::bills::whole_ties(p, idx, texts, whole));
     }
-    let clinicians = clinicians::Clinicians::of(idx);
+    let clinicians = clinicians::Clinicians::of(idx, &all_marks.clinicians);
     let judge = |given: bool| {
         let mut items: BTreeMap<String, Why> = BTreeMap::new();
         let label = |id: &str| {
@@ -643,8 +650,15 @@ pub fn build(
             let gave = || given::as_given(r).find_map(|x| record_why(&x));
             let w = record_why(r).or_else(|| gave().filter(|_| given));
             let w = w.or_else(|| label(&r.id));
-            let named = || clinicians.area(r, given);
-            let w = w.or_else(|| Some(Why::of(named()?, "clinician")));
+            let named = || {
+                let n = clinicians.named(r, given)?;
+                let learned = Some(n.learned);
+                Some(Why {
+                    learned,
+                    ..Why::of(n.area, "clinician")
+                })
+            };
+            let w = w.or_else(named);
             items.extend(w.map(|w| (r.id.clone(), w)));
         }
         for d in &idx.documents {
@@ -672,7 +686,14 @@ pub fn build(
         let shown = judge(false);
         for (id, w) in &mut items {
             *w = match shown.get(id) {
-                Some(w) => *w,
+                // What a source gave can tie its clinician more surely.
+                Some(s) => Why {
+                    learned: match (s.learned, w.learned) {
+                        (Some(a), Some(b)) => Some(a.min(b)),
+                        (a, _) => a,
+                    },
+                    ..*s
+                },
                 None => Why { given: true, ..*w },
             };
         }
@@ -984,7 +1005,7 @@ fn judged(
     state: &crate::labels::State,
 ) -> Value {
     let areas = crate::labels::areas(idx, events, state, &marks.providers);
-    build(p, idx, texts, events, &marks.private, &areas)
+    build(p, idx, texts, events, marks, &areas)
 }
 
 /// What a request would change of what the household decided.
@@ -1229,6 +1250,96 @@ pub fn mark(
     m.private.push(new.clone());
     folder.save_marks(p, &m).map_err(failed(WRITE))?;
     Ok((Some(new), true))
+}
+
+/// What the household's word on a record's clinician did.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ClinicianWord {
+    /// The ids of the marks it added, or took back.
+    pub marks: Vec<String>,
+    /// The person's items it opened, and those private again.
+    pub opened: usize,
+    pub held: usize,
+}
+
+/// Say that the clinician a record prints is of no private area (`open`):
+/// none of the person's items is private by the `clinician` rule for them. Or
+/// take that back. At the Mac alone: no request says it.
+pub fn clinician(
+    folder: &crate::folder::Folder,
+    h: &Household,
+    p: &Person,
+    item: &str,
+    open: bool,
+) -> Result<ClinicianWord, Failed> {
+    if !crate::ids::is_valid("r", item) {
+        let not = format!("{} is not a record id", crate::printable(item));
+        return Err(Failed::Refused(CliError::Usage(not)));
+    }
+    let idx = folder.index(p).map_err(failed(RECORDS))?;
+    let Some(r) = idx.records.iter().find(|r| r.id == item) else {
+        return Err(Failed::Refused(CliError::NotFound(format!(
+            "{item} is not one of {}'s records",
+            crate::printable(&p.name)
+        ))));
+    };
+    if clinicians::printing(&r.kind).is_none() {
+        let kind = crate::printable(&r.kind);
+        let none = format!("{item} is a {kind}, and prints no clinician");
+        return Err(Failed::Refused(CliError::Usage(none)));
+    }
+    let texts = folder.text(p).map_err(failed(RECORDS))?;
+    let overrides = folder.overrides(p).map_err(failed(READ_DECISIONS))?;
+    let state = known_labels(folder, p)?;
+    let built = crate::events::both_by(folder, h, p, Some(&overrides)).map_err(failed(RECORDS))?;
+    let private = |marks: &Marks| -> BTreeSet<String> {
+        let v = judged(p, &idx, &texts, &built, marks, &state);
+        Private::of(&v).items.into_keys().collect()
+    };
+    let mut marks = folder.marks(p).map_err(failed(READ))?;
+    let before = private(&marks);
+    let mut out = ClinicianWord::default();
+    if open {
+        let tied = clinicians::Clinicians::of(&idx, &marks.clinicians).tied(r);
+        let printed = clinicians::printed(r);
+        let of = |o: &clinicians::Opened| o.person().is_some_and(|x| printed.contains(&x));
+        let already = marks.clinicians.iter().any(of);
+        if tied.is_empty() && !already {
+            let not = format!("{item} is not private by a clinician it prints");
+            return Err(Failed::Refused(CliError::Usage(not)));
+        }
+        let at = crate::refresh::time::fmt(crate::refresh::time::now());
+        for (surname, initial) in tied {
+            let o = clinicians::Opened {
+                id: crate::ids::new("o"),
+                surname,
+                initial: initial.to_string(),
+                item: item.to_string(),
+                at: at.clone(),
+                by: None,
+                other: serde_json::Map::new(),
+            };
+            out.marks.push(o.id.clone());
+            marks.clinicians.push(o);
+        }
+    } else {
+        let printed = clinicians::printed(r);
+        let of = |o: &clinicians::Opened| o.person().is_some_and(|x| printed.contains(&x));
+        out.marks = marks
+            .clinicians
+            .iter()
+            .filter(|o| of(o))
+            .map(|o| o.id.clone())
+            .collect();
+        marks.clinicians.retain(|o| !of(o));
+    }
+    if !out.marks.is_empty() {
+        folder.save_marks(p, &marks).map_err(failed(WRITE))?;
+    }
+    let after = private(&marks);
+    out.opened = before.difference(&after).count();
+    out.held = after.difference(&before).count();
+    Ok(out)
 }
 
 /// Whether an item, or something in it, is private without these of the
@@ -1834,7 +1945,11 @@ mod tests {
             events: events.clone(),
             ..Built::default()
         };
-        build(p, idx, texts, &built, marks, &BTreeMap::new())
+        let marks = Marks {
+            private: marks.to_vec(),
+            ..Marks::new(&p.id)
+        };
+        build(p, idx, texts, &built, &marks, &BTreeMap::new())
     }
 
     #[test]
@@ -2222,7 +2337,14 @@ mod tests {
                 whole: Some(none()),
                 ..Built::default()
             };
-            let v = build(&person(), &idx, &texts, &both, &[], &BTreeMap::new());
+            let v = build(
+                &person(),
+                &idx,
+                &texts,
+                &both,
+                &Marks::new("p_test"),
+                &BTreeMap::new(),
+            );
             let after = areas(&v, "documents");
             for (id, area) in &before {
                 assert_eq!(after.get(id), Some(area), "{id} by {}", idx.documents[i].id);
@@ -2264,7 +2386,14 @@ mod tests {
             whole: Some(whole),
             ..Built::default()
         };
-        let v = build(&person(), &idx, &no_text(), &both, &[], &BTreeMap::new());
+        let v = build(
+            &person(),
+            &idx,
+            &no_text(),
+            &both,
+            &Marks::new("p_test"),
+            &BTreeMap::new(),
+        );
         for kind in ["records", "documents", "events", "studies"] {
             assert_eq!(areas(&v, kind), areas(&before, kind), "{kind}");
         }
@@ -2276,7 +2405,14 @@ mod tests {
             ..Built::default()
         };
         idx.records.remove(0);
-        let v = build(&person(), &idx, &no_text(), &gone, &[], &BTreeMap::new());
+        let v = build(
+            &person(),
+            &idx,
+            &no_text(),
+            &gone,
+            &Marks::new("p_test"),
+            &BTreeMap::new(),
+        );
         assert!(areas(&v, "events").is_empty(), "{v}");
     }
 

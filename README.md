@@ -591,11 +591,13 @@ ICD-10 code by what it is called, a report by its conclusion and a result by a
 value that is a text, a document by its title, the name its file came with or
 any private record that links it, a bill or receipt by its own words, with its
 copies and the statements and payments before and after it, and a study by its
-report. A claim is private too where its provider's surname and first initial
-are those of a clinician whom one of the person's papers, or a paper from a
-practice of the day of their visit, ties to what they treat, even when the claim
-spells out more of the name. That is a likely match, and `medrec private unmark
-<id>` opens one that is another's. A study with no report is left out of answers
+report. A claim, a visit, a prescription, a procedure or a result is private
+too where the clinician it prints, by surname and first initial, is one whom a
+paper of the person's ties to what they treat, even when it spells out more of
+the name. So is a claim of the day of a paper from such a practice, and an item
+of a clinician linked to one: by two such days of theirs, or by one on which
+theirs is the only clinician's claim. Each is a likely match: `medrec private
+unmark <id>` opens one item, and `--clinician` every item of that clinician's. A study with no report is left out of answers
 about the whole household too. An item stays private by what any of its sources
 gave of it, then or now, whatever it shows: the list says `given` of one that is
 private only by that. The household has the last word.
@@ -605,6 +607,8 @@ medrec private list --person Robin          # each private item, its area and wh
 medrec private mark <record, document or event id>     # private, whatever the rules say
 medrec private unmark <id>                  # not private, whatever the rules say
 medrec private reset <id>                   # back to the rules
+medrec private unmark <record id> --clinician   # its clinician is of no private area
+medrec private reset <record id> --clinician    # back to the rules for them
 ```
 
 A claim of several services, a bill and an event stay open when only a part of

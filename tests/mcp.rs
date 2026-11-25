@@ -3191,17 +3191,25 @@ fn what_services_say_makes_claims_and_procedures_private() {
     let _ = std::fs::remove_dir_all(&e.root);
 }
 
-/// A claim that prints no more of a clinician than a surname and an initial is
-/// private where a paper names them beside a practice or a credential of an
-/// area, in every answer and view; only the household opens it.
+/// An item that prints a clinician is private where a paper of the person's
+/// names them beside a practice or a credential of an area, or where they are
+/// of the day of such a practice's paper, or linked to it by such days, in every
+/// answer and view; only the household opens it, item by item or the clinician.
 #[test]
 fn a_clinician_a_paper_names_makes_claims_private_everywhere() {
-    const HELD: [&str; 4] = [
-        "r_byorgaaaaaaaaaaaaaaa",
-        "r_bytitleaaaaaaaaaaaaa",
-        "r_billedaaaaaaaaaaaaaa",
-        "r_lateraaaaaaaaaaaaaaa",
+    // Each held item, and what ties its clinician.
+    const HELD: [(&str, Option<&str>); 9] = [
+        ("r_byorgaaaaaaaaaaaaaaa", None),
+        ("r_bytitleaaaaaaaaaaaaa", None),
+        ("r_billedaaaaaaaaaaaaaa", Some("linked")),
+        ("r_lateraaaaaaaaaaaaaaa", Some("linked")),
+        ("r_sharedaaaaaaaaaaaaaa", Some("day")),
+        ("r_sharedbaaaaaaaaaaaaa", Some("day")),
+        ("r_visitaaaaaaaaaaaaaaa", None),
+        ("r_refillaaaaaaaaaaaaaa", None),
+        ("r_procedureaaaaaaaaaaa", None),
     ];
+    const CLAIMS: usize = 6;
     let e = Env::new("clinicians");
     let dir = fixture_household(&e, "clinicians", &["index.json"]);
     raw_folders(&e, &dir);
@@ -3213,13 +3221,23 @@ fn a_clinician_a_paper_names_makes_claims_private_everywhere() {
         "Kim Placeholder",
         "Exampleton",
         "SAMPLETON",
+        "R SPECIMEN",
+        "T FILLER",
+        "PLACEHOLDER, KIM",
+        "K Placeholder",
     ];
     let shared = || -> Vec<String> {
         let each = every_answer(&t, None).into_values();
         each.map(|v| v.to_string()).collect()
     };
     let (files, _) = views_of(&e, &alex);
-    let why = json!({"area": "mental_health", "from": "clinician"});
+    let why = |learned: Option<&str>| {
+        let mut why = json!({"area": "mental_health", "from": "clinician"});
+        if let Some(l) = learned {
+            why["learned"] = l.into();
+        }
+        why
+    };
     let events = |files: &BTreeMap<String, Value>, id: &str| -> Value {
         let events = files["events"]["events"].as_array().unwrap().clone();
         let mut of = events.iter();
@@ -3227,20 +3245,24 @@ fn a_clinician_a_paper_names_makes_claims_private_everywhere() {
         files["private"]["events"][event["id"].as_str().unwrap()].clone()
     };
     let own = every_answer(&t, Some("Alex"));
-    for id in HELD {
-        assert_eq!(files["private"]["records"][id], why, "{id}");
+    for (id, learned) in HELD {
+        assert_eq!(files["private"]["records"][id], why(learned), "{id}");
+        assert!(!shared().iter().any(|v| v.contains(id)), "{id}");
+    }
+    for (id, _) in &HELD[..CLAIMS] {
         assert_eq!(events(&files, id)["from"], "members", "{id}");
         let row = row_of(&own["timeline, detailed"], id);
         assert_eq!(row["private"], "mental_health", "{id}: {row}");
-        assert!(!shared().iter().any(|v| v.contains(id)), "{id}");
     }
     for name in names {
         assert!(!shared().iter().any(|v| v.contains(name)), "{name}");
     }
-    // Another initial is another clinician's, and is the household's to see.
-    let open = "r_anotheraaaaaaaaaaaaa";
-    assert!(files["private"]["records"].get(open).is_none());
-    assert!(shared().iter().any(|v| v.contains(open)));
+    // Another initial is another clinician's, and one of a shared day is held
+    // on that day alone: both are the household's to see.
+    for open in ["r_anotheraaaaaaaaaaaaa", "r_specimenaaaaaaaaaaaa"] {
+        assert!(files["private"]["records"].get(open).is_none(), "{open}");
+        assert!(shared().iter().any(|v| v.contains(open)), "{open}");
+    }
 
     // A dry run counts them apart.
     e.ok(&["views", "write"]);
@@ -3253,24 +3275,66 @@ fn a_clinician_a_paper_names_makes_claims_private_everywhere() {
         true
     });
     let private = changes_of(&e, &alex)["private"].clone();
-    assert_eq!(private["added"], json!({"claim": 4, "event": 4}));
-    let by = json!({"clinician": 4, "members": 4});
-    assert_eq!(private["added_by"], by);
+    let kinds = json!({"claim": 6, "encounter": 1, "medication": 1, "procedure": 1});
+    assert_eq!(private["clinician"], kinds, "{private}");
+    assert_eq!(private["added_by"]["clinician"], 9, "{private}");
+    assert_eq!(private["clinician_day"], 2);
+    assert_eq!(private["clinician_linked"], 2);
 
-    // Only the household opens it.
-    e.ok(&["private", "unmark", HELD[0]]);
+    // Only the household opens it: one item,
+    let first = HELD[0].0;
+    e.ok(&["private", "unmark", first]);
     let (files, _) = views_of(&e, &alex);
-    assert!(files["private"]["records"].get(HELD[0]).is_none());
-    assert!(events(&files, HELD[0]).is_null());
-    assert!(shared().iter().any(|v| v.contains(HELD[0])));
-    for id in &HELD[1..] {
+    assert!(files["private"]["records"].get(first).is_none());
+    assert!(events(&files, first).is_null());
+    assert!(shared().iter().any(|v| v.contains(first)));
+    for (id, _) in &HELD[1..] {
         assert!(!shared().iter().any(|v| v.contains(id)), "{id}");
+    }
+    // or a clinician, whatever ties them, and only at the Mac.
+    let (billed, later) = (HELD[2].0, HELD[3].0);
+    let did = e.ok(&["private", "unmark", later, "--clinician"]);
+    assert_eq!(did["status"], "recorded", "{did}");
+    assert_eq!(
+        (did["opened"].clone(), did["held"].clone()),
+        (json!(4), json!(0))
+    );
+    let (files, _) = views_of(&e, &alex);
+    for id in [billed, later] {
+        assert!(files["private"]["records"].get(id).is_none(), "{id}");
+        assert!(shared().iter().any(|v| v.contains(id)), "{id}");
+    }
+    let marks = std::fs::read_to_string(dir.join("marks.json")).unwrap();
+    let marks: Value = serde_json::from_str(&marks).unwrap();
+    assert_eq!(marks["clinicians"][0]["surname"], "SAMPLETON");
+    assert_eq!(marks["clinicians"][0]["item"], later);
+    let again = e.ok(&["private", "unmark", later, "--clinician"]);
+    assert_eq!(again["status"], "unchanged");
+    let back = e.ok(&["private", "reset", billed, "--clinician"]);
+    assert_eq!(
+        (back["opened"].clone(), back["held"].clone()),
+        (json!(0), json!(4))
+    );
+    let (files, _) = views_of(&e, &alex);
+    for (id, learned) in &HELD[2..4] {
+        assert_eq!(files["private"]["records"][id], why(*learned), "{id}");
+    }
+    // Of an item no clinician holds, or one that prints none, it is refused.
+    for (id, code) in [
+        ("r_anotheraaaaaaaaaaaaa", 2),
+        ("d_billaaaaaaaaaaaaaaaa", 2),
+        ("r_nosuchrecordaaaaaaaa", 4),
+    ] {
+        let out = e.run(&["--json", "private", "unmark", id, "--clinician"]);
+        assert_eq!(out.status.code(), Some(code), "{id}");
     }
     let _ = std::fs::remove_dir_all(&e.root);
 }
 
-/// The practice that a bill told a clinician is of holds their other claims,
-/// whatever its source makes of the bill, or of the claim, after.
+/// The practice of a bill of the only clinician of its day holds their other
+/// claims, whatever its source makes of the bill, or of the claim, after. A
+/// second clinician's claim of that day ends that, and a second day that both
+/// the bill's practice and the clinician have restores it.
 #[test]
 fn a_practice_a_bill_told_of_holds_claims_whatever_becomes_of_it() {
     let e = Env::new("clinician-bill");
@@ -3280,35 +3344,46 @@ fn a_practice_a_bill_told_of_holds_claims_whatever_becomes_of_it() {
     let path = dir.join("index.json");
     let was = std::fs::read(&path).unwrap();
     let later = "r_lateraaaaaaaaaaaaaaa";
-    // With the bill and its claim as `change` has them, and the claims `more`.
-    let after_with = |change: &dyn Fn(&mut Value, &mut Value), more: &[Value]| -> Value {
-        let mut v: Value = serde_json::from_slice(&was).unwrap();
-        v["records"]
-            .as_array_mut()
-            .unwrap()
-            .extend(more.iter().cloned());
-        let (mut bill, mut claim) = (Value::Null, Value::Null);
-        for (list, id, out) in [
-            ("documents", "d_billaaaaaaaaaaaaaaaa", &mut bill),
-            ("records", "r_billedaaaaaaaaaaaaaa", &mut claim),
-        ] {
-            let list = v[list].as_array_mut().unwrap();
-            let at = list.iter().position(|x| x["id"] == id).unwrap();
-            *out = list.remove(at);
-        }
-        change(&mut bill, &mut claim);
-        v["documents"].as_array_mut().unwrap().push(bill);
-        v["records"].as_array_mut().unwrap().push(claim);
-        std::fs::write(&path, serde_json::to_vec(&v).unwrap()).unwrap();
-        for (name, v) in every_answer(&t, None) {
-            assert!(!v.to_string().contains(later), "{name}: {v}");
-            assert!(!v.to_string().contains("SAMPLETON"), "{name}: {v}");
-        }
-        views_of(&e, &alex).0["private"]["records"][later].clone()
-    };
-    let after = |change: &dyn Fn(&mut Value, &mut Value)| after_with(change, &[]);
+    // With the bill and its claim as `change` has them, and the claims and
+    // papers `more`; `held` is whether the later claim is.
+    let after_with =
+        |change: &dyn Fn(&mut Value, &mut Value), more: &[Value], held: bool| -> Value {
+            let mut v: Value = serde_json::from_slice(&was).unwrap();
+            for x in more {
+                let list = if x["id"].as_str().unwrap().starts_with("d_") {
+                    "documents"
+                } else {
+                    "records"
+                };
+                v[list].as_array_mut().unwrap().push(x.clone());
+            }
+            let (mut bill, mut claim) = (Value::Null, Value::Null);
+            for (list, id, out) in [
+                ("documents", "d_billaaaaaaaaaaaaaaaa", &mut bill),
+                ("records", "r_billedaaaaaaaaaaaaaa", &mut claim),
+            ] {
+                let list = v[list].as_array_mut().unwrap();
+                let at = list.iter().position(|x| x["id"] == id).unwrap();
+                *out = list.remove(at);
+            }
+            change(&mut bill, &mut claim);
+            v["documents"].as_array_mut().unwrap().push(bill);
+            v["records"].as_array_mut().unwrap().push(claim);
+            std::fs::write(&path, serde_json::to_vec(&v).unwrap()).unwrap();
+            let answers = every_answer(&t, None);
+            if held {
+                for (name, v) in &answers {
+                    assert!(!v.to_string().contains(later), "{name}: {v}");
+                    assert!(!v.to_string().contains("SAMPLETON"), "{name}: {v}");
+                }
+            } else {
+                assert!(answers.values().any(|v| v.to_string().contains(later)));
+            }
+            views_of(&e, &alex).0["private"]["records"][later].clone()
+        };
+    let after = |change: &dyn Fn(&mut Value, &mut Value)| after_with(change, &[], true);
     let why = |given: bool| {
-        let mut why = json!({"area": "mental_health", "from": "clinician"});
+        let mut why = json!({"area": "mental_health", "from": "clinician", "learned": "linked"});
         if given {
             why["given"] = true.into();
         }
@@ -3342,25 +3417,57 @@ fn a_practice_a_bill_told_of_holds_claims_whatever_becomes_of_it() {
         claim_is(claim);
     };
     assert_eq!(after(&both), why(true));
+    // A source names both by one organization, so that its event joins them by
+    // it: the day holds as it did.
+    let one_organization = |bill: &mut Value, claim: &mut Value| {
+        claim_is(claim);
+        bill["organization"] = "Example Walk-in".into();
+        bill["given"] = counseling.clone();
+    };
+    assert_eq!(after(&one_organization), why(true));
     // The bill now names the claim's practice, as a source has both now.
     let walk_in = |bill: &mut Value, claim: &mut Value| {
         both(bill, claim);
         bill["organization"] = "Example Walk-in".into();
     };
     assert_eq!(after(&walk_in), why(true));
-    // Another clinician's visit of the same day: both are held back.
+    // Another clinician's visit of the same day: the bill's day holds both of
+    // that day, and links neither.
     let v: Value = serde_json::from_slice(&was).unwrap();
-    let list = v["records"].as_array().unwrap();
-    let mut second = list
-        .iter()
-        .find(|x| x["id"] == "r_billedaaaaaaaaaaaaaa")
-        .unwrap()
-        .clone();
-    second["id"] = "r_secondaaaaaaaaaaaaaa".into();
-    second["key"] = "claim|second|2024-10-01".into();
-    second["fields"]["provider"] = "J SAMPLE".into();
-    second["display"] = "Sample visit \u{b7} J SAMPLE".into();
-    assert_eq!(after_with(&|_, _| {}, &[second]), why(false));
+    let of = |list: &str, id: &str| {
+        let all = v[list].as_array().unwrap();
+        all.iter().find(|x| x["id"] == id).unwrap().clone()
+    };
+    let claim = |id: &str, day: &str, who: &str| {
+        let mut c = of("records", "r_billedaaaaaaaaaaaaaa");
+        c["id"] = id.into();
+        c["key"] = format!("claim|{id}|{day}").into();
+        c["date"] = day.into();
+        c["fields"]["billable_period"] = json!({"start": day, "end": day});
+        c["fields"]["provider"] = who.into();
+        c["display"] = format!("Sample visit \u{b7} {who}").into();
+        c
+    };
+    let second = claim("r_secondaaaaaaaaaaaaaa", "2024-10-01", "J SAMPLE");
+    assert_eq!(
+        after_with(&|_, _| {}, std::slice::from_ref(&second), false),
+        Value::Null
+    );
+    let (files, _) = views_of(&e, &alex);
+    let day = json!({"area": "mental_health", "from": "clinician", "learned": "day"});
+    assert_eq!(files["private"]["records"]["r_billedaaaaaaaaaaaaaa"], day);
+    assert_eq!(files["private"]["records"]["r_secondaaaaaaaaaaaaaa"], day);
+    // A second day of the practice's that the clinician has links them.
+    let mut receipt = of("documents", "d_billaaaaaaaaaaaaaaaa");
+    receipt["id"] = "d_receiptaaaaaaaaaaaaa".into();
+    receipt["date"] = "2024-11-12".into();
+    let more = [
+        second,
+        claim("r_thirdaaaaaaaaaaaaaaa", "2024-11-12", "E SAMPLETON"),
+        claim("r_fourthaaaaaaaaaaaaaa", "2024-11-12", "J PLACEHOLDER"),
+        receipt,
+    ];
+    assert_eq!(after_with(&|_, _| {}, &more, true), why(false));
     let _ = std::fs::remove_dir_all(&e.root);
 }
 

@@ -312,6 +312,270 @@
      "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/later.json"
     }
    ]
+  },
+  {
+   "id": "r_sharedaaaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|shareda|2024-10-15",
+   "date": "2024-10-15",
+   "display": "Sample visit \u00b7 R SPECIMEN",
+   "status": "active",
+   "fields": {
+    "provider": "R SPECIMEN",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2024-10-15",
+     "end": "2024-10-15"
+    },
+    "type": "professional",
+    "category": "visit",
+    "amounts": {
+     "billed": {
+      "amount": "40.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "15.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "category": "visit",
+      "service": {
+       "display": "Sample visit"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "40.00",
+        "currency": "USD"
+       },
+       "you_owe": {
+        "amount": "15.00",
+        "currency": "USD"
+       }
+      },
+      "sequence": 1
+     }
+    ]
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.10",
+     "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/shareda.json"
+    }
+   ]
+  },
+  {
+   "id": "r_sharedbaaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|sharedb|2024-10-15",
+   "date": "2024-10-15",
+   "display": "Sample visit \u00b7 T FILLER",
+   "status": "active",
+   "fields": {
+    "provider": "T FILLER",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2024-10-15",
+     "end": "2024-10-15"
+    },
+    "type": "professional",
+    "category": "visit",
+    "amounts": {
+     "billed": {
+      "amount": "40.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "15.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "category": "visit",
+      "service": {
+       "display": "Sample visit"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "40.00",
+        "currency": "USD"
+       },
+       "you_owe": {
+        "amount": "15.00",
+        "currency": "USD"
+       }
+      },
+      "sequence": 1
+     }
+    ]
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.10",
+     "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/sharedb.json"
+    }
+   ]
+  },
+  {
+   "id": "r_specimenaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|specimen|2024-11-26",
+   "date": "2024-11-26",
+   "display": "Sample visit \u00b7 SPECIMEN, R",
+   "status": "active",
+   "fields": {
+    "provider": "SPECIMEN, R",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2024-11-26",
+     "end": "2024-11-26"
+    },
+    "type": "professional",
+    "category": "visit",
+    "amounts": {
+     "billed": {
+      "amount": "40.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "15.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "category": "visit",
+      "service": {
+       "display": "Sample visit"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "40.00",
+        "currency": "USD"
+       },
+       "you_owe": {
+        "amount": "15.00",
+        "currency": "USD"
+       }
+      },
+      "sequence": 1
+     }
+    ]
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.10",
+     "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/specimen.json"
+    }
+   ]
+  },
+  {
+   "id": "r_visitaaaaaaaaaaaaaaa",
+   "kind": "encounter",
+   "key": "encounter|visit|2024-09-24",
+   "date": "2024-09-24",
+   "display": "Office visit",
+   "status": "completed",
+   "fields": {
+    "practitioner": "Kim Placeholder"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.10",
+     "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/visit.json"
+    }
+   ]
+  },
+  {
+   "id": "r_refillaaaaaaaaaaaaaa",
+   "kind": "medication",
+   "key": "medication|refill|2024-09-24",
+   "date": "2024-09-24",
+   "display": "Sample tablet",
+   "status": "active",
+   "fields": {
+    "prescriber": "PLACEHOLDER, KIM"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.10",
+     "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/refill.json"
+    }
+   ]
+  },
+  {
+   "id": "r_procedureaaaaaaaaaaa",
+   "kind": "procedure",
+   "key": "procedure|procedure|2024-09-24",
+   "date": "2024-09-24",
+   "display": "Sample procedure",
+   "status": "completed",
+   "fields": {
+    "performer": "K Placeholder"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.10",
+     "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/procedure.json"
+    }
+   ]
   }
  ],
  "studies": [],
@@ -345,6 +609,36 @@
     "filed_at": "2024-12-04T10:00:00Z",
     "filed_by": "medrec 0.9.10",
     "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/bill.json"
+   }
+  },
+  {
+   "id": "d_sharedaaaaaaaaaaaaaa",
+   "path": "Robin Example/Papers/2024/shared.pdf",
+   "sha256": "shared",
+   "md5": "shared",
+   "size": 10,
+   "media_type": "application/pdf",
+   "doc_type": "receipt",
+   "date": "2024-10-15",
+   "organization": "Example Counseling",
+   "title": "Receipt",
+   "filed_at": "2024-12-04T10:00:00Z",
+   "origin": {
+    "kind": "file",
+    "action": "copied"
+   },
+   "provenance": {
+    "source": {
+     "kind": "fhir",
+     "cli": "fakeprov",
+     "organization_id": "north",
+     "fhir_base": "https://north.example.test/fhir"
+    },
+    "method": "fhir-api",
+    "fetched_at": "2024-12-02T10:00:00Z",
+    "filed_at": "2024-12-04T10:00:00Z",
+    "filed_by": "medrec 0.9.10",
+    "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/shared.json"
    }
   },
   {
