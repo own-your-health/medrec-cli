@@ -944,7 +944,7 @@ with `event` in place of `scope`:
 
 - `event` holds `person` and exactly one of `apart` or `together`, each two
   different record (`r_…`) or document (`d_…`) ids. A request with more
-  than one of `scope`, `event`, `paid`, `private` and `provider` (below), or
+  than one of `scope`, `event`, `paid`, `unpaid`, `private` and `provider` (below), or
   with none, is `invalid` (rule 1), as is one whose `person` is not in
   `household.json`.
 - The next pass writes the decision to the person's `overrides.json`, and
@@ -971,13 +971,32 @@ The app's "Mark paid" is a request with `paid` in place of `scope`:
 - `amount` is a decimal string in US dollars, above zero with at most two
   places, or `{"amount", "currency"}` with a three-letter currency code.
   `on` is a `YYYY-MM-DD` day. A request with more than one of `scope`,
-  `event`, `paid`, `private` and `provider`, or whose `person` is not in
+  `event`, `paid`, `unpaid`, `private` and `provider`, or whose `person` is not in
   `household.json`, is `invalid` (rule 1).
 - It is applied as an event request is: by the next pass, to the person's
   `marks.json` `payments`, pending while another writer holds the
   folder. Its `done/` file keeps `paid`, with `amount` as two places.
   `handled.outcome` is `invalid` when the document is not one of that
   person's, or not a `bill`.
+
+### Unpaid requests (0.9.7 and later)
+
+The app's undo of "Mark paid" is a request with `unpaid` in place of `scope`:
+
+```json
+{"schema": "medrec-request/v1", "id": "x_…", "requested_at": "…",
+ "requested_by": {…}, "app": {…},
+ "unpaid": {"person": "p_…", "payment": "o_…"}}
+```
+
+- `payment` is the id of a payment the household marked, as `bills.json`
+  `paid[].id` gives it. A request whose `payment` is not an `o_…` id, or whose
+  `person` is not in `household.json`, is `invalid` (rule 1).
+- It is applied as an event request is: by the next pass, to the person's
+  `marks.json` `payments`, pending while another writer holds the folder. Its
+  `done/` file keeps `unpaid`. `handled.outcome` is `ok` when the payment is
+  not, or no longer, one of that person's: a request can be served twice, and
+  two people can undo the same one.
 
 ### Private requests (0.9.1 and later)
 
@@ -993,7 +1012,7 @@ place of `scope`:
 - `item` is one of the person's record, document or event ids (`r_…`,
   `d_…`, `e_…`). `private` is `true`, `false`, or `null` to drop the
   household's mark and leave the item to the rules. A request with more
-  than one of `scope`, `event`, `paid`, `private` and `provider`, or whose
+  than one of `scope`, `event`, `paid`, `unpaid`, `private` and `provider`, or whose
   `person` is not in `household.json`, is `invalid` (rule 1).
 - It is applied as an event request is: by the next pass, to the person's
   `marks.json` `private`, pending while another writer holds the folder.

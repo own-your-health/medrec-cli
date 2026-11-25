@@ -1724,6 +1724,39 @@ fn a_bill_marked_paid_from_the_app_or_a_terminal_is_settled_in_the_bills_view() 
         (&json!("20.00"), &json!(false)),
         "{b}"
     );
+    // From the app, by the id the bills view gives; twice is once.
+    let mine = b["paid"][0]["id"].clone();
+    let unpaid = |id: &str, payment: Value| {
+        decision_request(&e, id, "unpaid", json!({"person": aid, "payment": payment}));
+    };
+    e.ok(&["bills", "paid", bill, "--on", "2026-04-03", "--amount", "5"]);
+    unpaid("x_unpaidaaaaaaaaaaaaaa", mine.clone());
+    unpaid("x_unpaidbbbbbbbbbbbbbb", mine.clone());
+    e.ok(&["refresh", "--scheduled"]);
+    for (id, message) in [
+        (
+            "x_unpaidaaaaaaaaaaaaaa",
+            format!("undone {}", mine.as_str().unwrap()),
+        ),
+        (
+            "x_unpaidbbbbbbbbbbbbbb",
+            "there was nothing to undo".to_string(),
+        ),
+    ] {
+        let done = e.json_at(&format!("_requests/done/20261124T120000Z_{id}.json"));
+        assert_eq!(
+            (&done["handled"]["outcome"], &done["handled"]["message"]),
+            (&json!("ok"), &json!(message)),
+            "{done}"
+        );
+        assert_eq!(done["unpaid"], json!({"person": aid, "payment": mine}));
+    }
+    let b = bill_row(&bills_view(&e, aid), bill);
+    assert_eq!(
+        (&b["left"], &b["paid"].as_array().unwrap().len()),
+        (&json!("30.00"), &1),
+        "{b}"
+    );
     let o: Value =
         serde_json::from_slice(&std::fs::read(dir.join("overrides.json")).unwrap()).unwrap();
     let m: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
@@ -1751,6 +1784,33 @@ fn a_bill_marked_paid_from_the_app_or_a_terminal_is_settled_in_the_bills_view() 
     let (got, text) = e.code(&["bills", "paid", bill, "--on", "2026-04-02", "--amount", "1"]);
     assert_ne!(got, Some(0), "{text}");
     assert_eq!(std::fs::read(&file).unwrap(), b"{not json");
+
+    // Nor does what a request says of it repeat what is in it.
+    let mut odd = m.clone();
+    odd["providers"] = json!([{"id": "o_oddaaaaaaaaaaaaaaaaa", "printed": "Invented Name"}]);
+    std::fs::write(&file, serde_json::to_vec(&odd).unwrap()).unwrap();
+    let mark = json!({"person": aid, "item": bill, "private": true});
+    let paid = json!({"person": aid, "document": bill, "on": "2026-04-01", "amount": "1.00"});
+    unpaid("x_unpaidcccccccccccccc", mine);
+    decision_request(&e, "x_unpaiddddddddddddddd", "private", mark);
+    decision_request(&e, "x_unpaideeeeeeeeeeeeee", "paid", paid);
+    let pass = e.ok(&["refresh", "--scheduled"]);
+    for (n, id) in [
+        "x_unpaidcccccccccccccc",
+        "x_unpaiddddddddddddddd",
+        "x_unpaideeeeeeeeeeeeee",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let done = e.json_at(&format!("_requests/done/20261124T120000Z_{id}.json"));
+        assert_eq!(done["handled"]["outcome"], "failed", "{done}");
+        assert!(!done.to_string().contains("Invented Name"), "{done}");
+        assert_eq!(
+            pass["requests"][n]["cause"], "reading or writing the person's marks.json: other",
+            "{pass}"
+        );
+    }
     let _ = std::fs::remove_dir_all(&e.root);
 }
 
