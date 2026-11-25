@@ -124,9 +124,10 @@ enum Command {
     Verify(VerifyArgs),
     /// Shape every claim again, and read every record's providers and every
     /// condition's, allergy's and medicine's fields and what each source says
-    /// of it again, from the filed raw resources, and read bills' and
-    /// receipts' statements again, as this medrec's import does: once after
-    /// an upgrade that changes them.
+    /// of it again, from the filed raw resources, put each result about
+    /// somebody else that was filed as the person's own in a record of its
+    /// own, and read bills' and receipts' statements again, as this medrec's
+    /// import does: once after an upgrade that changes them.
     Reindex(ReindexArgs),
     /// The views: each person's records cut into small files under views/,
     /// for readers that cannot parse a whole index at once. medrec brings

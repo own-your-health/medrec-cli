@@ -51,10 +51,11 @@ pub fn of_resource(r: &Record, path: Option<&str>) -> Option<&'static str> {
     shown().or_else(|| r.given.iter().filter(of).find_map(|g| who(&g.fields)))
 }
 
-/// Whether a resource of the record's, by its raw file, says or said it is
-/// about somebody else: as any in a record that such a key names.
-pub fn was(r: &Record, path: Option<&str>) -> bool {
-    r.key.contains(KEY) || of_resource(r, path).is_some()
+/// Whom a resource of the record's, by its raw file, says or said it is about:
+/// in a record that such a key names, as any other of it.
+pub fn was(r: &Record, path: Option<&str>) -> Option<&'static str> {
+    let any = || of_resource(r, import::wrote(r)).or(Some(ANOTHER));
+    of_resource(r, path).or_else(|| any().filter(|_| r.key.contains(KEY)))
 }
 
 /// Whether the record is of a questionnaire that a grown person answers, and

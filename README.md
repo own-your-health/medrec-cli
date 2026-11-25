@@ -304,7 +304,7 @@ medrec meds --active
 medrec note add Robin "Ask about the recheck" --tag question --about <record id>
 
 medrec verify                                   # every indexed file against the index
-medrec reindex                                  # claims shaped again, providers, statuses, what each source gave and what else served a paper read again from the raw files, and bills and receipts read again, after an upgrade
+medrec reindex                                  # claims shaped again, providers, statuses, what each source gave and what else served a paper read again from the raw files, results about somebody else put in a record of their own, and bills and receipts read again, after an upgrade
 medrec backup --to "/Volumes/Backup/Medical Records"
 ```
 

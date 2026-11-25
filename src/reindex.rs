@@ -121,7 +121,7 @@ pub fn claims(
         fetch(folder, &sources, tmp.path(), &dirs, RAW_TYPES)?;
         fetch_said(folder, &idx, tmp.path())?;
         let older = fetch_older(folder, &idx, &sources, tmp.path())?;
-        row.results_split = apart(&mut idx, tmp.path())?;
+        row.results_split = apart(&mut idx, &older, tmp.path())?;
         let showed: Vec<Given> = idx.records.iter().map(import::showed).collect();
         row.statuses_updated = statuses(&mut idx, tmp.path())?;
         for r in idx.records.iter_mut().filter(|r| r.kind == "claim") {
@@ -338,57 +338,104 @@ pub(crate) fn given_by(
     given(idx, &showed, &older, tmp.path())
 }
 
-/// Each resource about somebody else that was filed with the person's own in
-/// one record, in a record of its own. How many records had one.
-fn apart(idx: &mut PersonIndex, tmp: &Path) -> Result<usize, CliError> {
-    let shape = |p: &Provenance| {
-        let v = read(tmp, p.raw_path.as_ref()?)?;
-        normalize::record(&v, p.clone())
+/// Each resource about somebody else that was filed as the person's own, or
+/// with it in one record, under a key of its own. How many records had one.
+fn apart(
+    idx: &mut PersonIndex,
+    older: &BTreeMap<String, Vec<String>>,
+    tmp: &Path,
+) -> Result<usize, CliError> {
+    let of_file = |file: &str, p: &Provenance| normalize::record(&read(tmp, file)?, p.clone());
+    let shape = |p: &Provenance| of_file(p.raw_path.as_ref()?, p);
+    // By any version of it, as an import knows it.
+    let other = |r: &Record, p: &Provenance| {
+        let path = p.raw_path.as_ref()?;
+        let mut n = shape(p)?;
+        if n.fields.contains_key(about::FIELD) {
+            return Some(n);
+        }
+        let mut before = older.get(path).into_iter().flatten();
+        let before = before.find_map(|f| about::of_resource(&of_file(f, p)?, Some(path)));
+        let who = before.or_else(|| about::of_resource(r, Some(path)))?;
+        n.key.push_str(about::KEY);
+        n.given.push(Given {
+            raw_path: Some(path.clone()),
+            fields: [(about::FIELD.to_string(), who.into())]
+                .into_iter()
+                .collect(),
+            ..Given::default()
+        });
+        Some(n)
     };
     let mut moved: Vec<Record> = Vec::new();
     let mut split = 0;
-    for r in &mut idx.records {
-        if r.kind != "result" || r.provenance.len() < 2 {
-            continue;
-        }
-        let other = |p: &Provenance| shape(p).filter(|n| n.fields.contains_key(about::FIELD));
-        let others: Vec<Record> = r.provenance.iter().filter_map(other).collect();
-        if others.is_empty() || others.len() == r.provenance.len() {
+    let mut records = Vec::new();
+    for mut r in std::mem::take(&mut idx.records) {
+        let apart = r.kind == "result" && !r.key.contains(about::KEY);
+        let each = r.provenance.iter().filter(|_| apart);
+        let mut others: Vec<Record> = each.filter_map(|p| other(&r, p)).collect();
+        if others.is_empty() {
+            records.push(r);
             continue;
         }
         split += 1;
-        let of = |path: &Option<String>| {
-            let mut others = others.iter();
-            path.is_some() && others.any(|n| n.provenance[0].raw_path == *path)
-        };
-        let wrote = of(&import::wrote(r).map(str::to_string));
-        r.provenance.retain(|p| !of(&p.raw_path));
-        for mut n in others {
+        let wrote = import::wrote(&r).map(str::to_string);
+        let of = |n: &Record, path: &Option<String>| n.provenance[0].raw_path == *path;
+        let whole = others.len() == r.provenance.len();
+        if whole {
+            // The record is theirs, its values and all. Any other's goes.
+            let its = others.iter().position(|n| of(n, &wrote)).unwrap_or(0);
+            let key = others[its].key.clone();
+            for n in others.iter().filter(|n| n.key == key) {
+                for g in n.given.clone() {
+                    given::keep(&mut r, g);
+                }
+            }
+            others.retain(|n| n.key != key);
+            r.key = key;
+        }
+        let gone = |path: &Option<String>| path.is_some() && others.iter().any(|n| of(n, path));
+        r.provenance.retain(|p| !gone(&p.raw_path));
+        let again = gone(&wrote);
+        for n in &mut others {
             let path = n.provenance[0].raw_path.clone();
             let its = |p: &String| path.as_ref() == Some(p);
             let kept = r.words.iter().filter(|w| w.in_error() && its(&w.raw_path));
             n.words = kept.cloned().collect();
             let kept = r.errors.iter().filter(|e| its(&e.raw_path));
             n.errors = kept.cloned().collect();
-            moved.push(n);
         }
-        let left: Vec<String> = r
-            .provenance
-            .iter()
-            .filter_map(|p| p.raw_path.clone())
-            .collect();
+        let left = r.provenance.iter().filter_map(|p| p.raw_path.clone());
+        let left: Vec<String> = left.collect();
         r.words.retain(|w| left.contains(&w.raw_path));
         r.errors.retain(|e| left.contains(&e.raw_path));
-        if wrote {
-            import::values_again(r, &mut |p| Ok(shape(p)))?;
+        if again {
+            import::values_again(&mut r, &mut |p| Ok(shape(p)))?;
         }
+        match whole {
+            true => moved.push(r),
+            false => records.push(r),
+        }
+        moved.extend(others);
     }
     for n in moved {
-        match idx.records.iter_mut().find(|r| r.key == n.key) {
-            Some(r) => r.provenance.extend(n.provenance),
-            None => idx.records.push(n),
+        let Some(r) = records.iter_mut().find(|r: &&mut Record| r.key == n.key) else {
+            records.push(n);
+            continue;
+        };
+        for g in n.given.iter().cloned().chain([import::showed(&n)]) {
+            given::keep(r, g);
         }
+        for d in n.documents {
+            if !r.documents.contains(&d) {
+                r.documents.push(d);
+            }
+        }
+        r.provenance.extend(n.provenance);
+        r.words.extend(n.words);
+        r.errors.extend(n.errors);
     }
+    idx.records = records;
     Ok(split)
 }
 
