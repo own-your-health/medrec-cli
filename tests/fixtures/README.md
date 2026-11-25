@@ -18,8 +18,8 @@ real record, document, study or provider response.
   nobody; one (`0000000007`) fails the check.
 - `stream/connection.ndjson` is one patient's stream of a records connection
   that serves every practice under one organization id and FHIR base.
-  `testdata::connection_streams` fills in its `{{…}}`: two practices' streams
-  for Robin, and a third's, with no records, for Alex.
+  `testdata::connection_streams` fills in its `{{…}}`: three practices' streams
+  for Alex, and a fourth's, with no records, for Robin.
 - `stream/fakeprov-info.json` is the `info --json` of `fakeprov`, the fake
   `health-records/v1` provider that `medrec::testdata::write_provider` writes.
   It lists the `login-profiles` capability. `fakeprov-info-unprofiled.json` is
@@ -38,12 +38,10 @@ real record, document, study or provider response.
   unassigned labeler `00000`. `fhir/medication-dispense-contained.json` is
   the same fill with its prescription contained, naming an `Example
   Prescriber`.
-- `fhir/replaced-line-eob.json` is an emergency claim (an
-  ExplanationOfBenefit at "Example Lakeside Hospital") whose payer replaced the
-  billed visit code: it lists the replacement, the billed code at the
-  member's whole cost, and a lab line, and its totals count the first and
-  the last. Its two processing notes, one a line points at and one no line
-  does, and its NUBC revenue code `0450` are invented.
+- `fhir/left-out-line-eob.json` is a claim (an ExplanationOfBenefit at
+  "Sample Rehab Center") of four lines, whose totals leave one out. Its two
+  processing notes, one a line points at and one no line does, and its NUBC
+  revenue code `0420` are invented.
 - `fhir/stu3.json` holds invented FHIR STU3 resources in the shapes a
   behavioral-health EHR's patient API publishes: statuses as plain codes,
   `assertedDate`, `Immunization.notGiven` and `date`, `requester.agent`, one
@@ -66,17 +64,21 @@ real record, document, study or provider response.
   masked account number, and `receipt.txt` is a payment receipt. The two
   statements are one statement, read two ways.
 
+- `bills/events.json` and `bills/papers.json` are an invented person's events
+  and papers for the bill rules: a statement with copies and receipts, a bill
+  and a later one from its biller, one no claim covers, a desk payment, and
+  claims nothing has billed.
 - `events/` holds invented people's indexes and texts for the event rules:
-  `parent` and `child` (claims, a portal visit, papers and a newborn's
-  stay), `portal` (portal records with no claim), with `make.py`.
+  `parent` and `child` (claims, portal records and papers, with each of the
+  contract's kinds and rules), with `make.py`, `portal` (portal records with
+  no claim) and `athena` (visits whose place a source does not name).
 - `private/adult.index.json` and `adult.text.json` are an invented adult's
-  records, written by `private/make.py`: a mental health condition (ICD-10
-  `F40.10`), a medicine, and a visit and letter from a behavioral health
-  practice, which the rules keep private, beside a condition, a medicine, a
-  visit, a result and a visit summary they do not.
+  records, written by `private/make.py`: one item private by each of the rules
+  `code` (ICD-10 `F17.210`), `medicine`, `test` and `provider`, beside a
+  condition, a medicine, a visit, a result and a visit summary no rule lists.
 - `private/papers.json` is a list of invented bills, receipts and other papers
-  with the text each gives: a therapist's statements, copy, rescan and
-  receipt, a pharmacy's and a laboratory's, and some no rule lists.
+  with the text each gives: some private by their words, some by the paper
+  they copy, follow or pay, and some no rule lists.
 
 The scans, DICOM studies and the fake provider script are generated at test
 time by `medrec::testdata` (and by `cargo run --example synth -- <DIR>` for

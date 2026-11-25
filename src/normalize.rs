@@ -1022,7 +1022,7 @@ mod tests {
 
     const DISPENSE: &str = include_str!("../tests/fixtures/fhir/medication-dispense.json");
     const PHARMACY_EOB: &str = include_str!("../tests/fixtures/fhir/pharmacy-eob.json");
-    const REPLACED_LINE_EOB: &str = include_str!("../tests/fixtures/fhir/replaced-line-eob.json");
+    const LEFT_OUT_LINE_EOB: &str = include_str!("../tests/fixtures/fhir/left-out-line-eob.json");
     const STU3: &str = include_str!("../tests/fixtures/fhir/stu3.json");
     const DISPENSE_CONTAINED: &str =
         include_str!("../tests/fixtures/fhir/medication-dispense-contained.json");
@@ -1135,82 +1135,72 @@ mod tests {
             json!({"category": {"coding": [{"system": system, "code": "not-counted",
                 "display": "Not counted in the claim's totals"}]}})
         };
-        let mut r: Value = serde_json::from_str(REPLACED_LINE_EOB).unwrap();
-        r["item"][2]["adjudication"]
+        let mut r: Value = serde_json::from_str(LEFT_OUT_LINE_EOB).unwrap();
+        r["item"][3]["adjudication"]
             .as_array_mut()
             .unwrap()
             .push(marker(
                 "https://github.com/own-your-health/uhc-cli/fhir/adjudication",
             ));
-        let rec = record(&r, prov()).unwrap();
-        let items = rec.fields["items"].as_array().unwrap();
+        let counted = |r: &Value| -> Vec<bool> {
+            let rec = record(r, prov()).unwrap();
+            let items = rec.fields["items"].as_array().unwrap().clone();
+            items.iter().map(|i| i.get("counted").is_none()).collect()
+        };
         // The provider's mark decides: the line the totals would leave out
         // stays counted.
-        assert_eq!(items[2]["counted"], false);
-        assert!(items[1].get("counted").is_none());
-        assert!(items[0].get("counted").is_none());
+        assert_eq!(counted(&r), [true, true, true, false]);
 
         // A mark in another code system is the payer's words, not a mark.
-        let mut r: Value = serde_json::from_str(REPLACED_LINE_EOB).unwrap();
-        r["item"][2]["adjudication"]
+        let mut r: Value = serde_json::from_str(LEFT_OUT_LINE_EOB).unwrap();
+        r["item"][3]["adjudication"]
             .as_array_mut()
             .unwrap()
             .push(marker("https://example.org/fhir/adjudication"));
-        let rec = record(&r, prov()).unwrap();
-        let items = rec.fields["items"].as_array().unwrap();
-        assert_eq!(items[1]["counted"], false);
-        assert!(items[2].get("counted").is_none());
+        assert_eq!(counted(&r), [true, true, false, true]);
     }
 
     #[test]
     fn a_line_the_totals_leave_out_is_marked_and_named_by_nothing() {
-        let r: Value = serde_json::from_str(REPLACED_LINE_EOB).unwrap();
+        let r: Value = serde_json::from_str(LEFT_OUT_LINE_EOB).unwrap();
         let rec = record(&r, prov()).unwrap();
         let f = &rec.fields;
         let items = f["items"].as_array().unwrap();
-        // The billed code the payer replaced, at the member's cost, is
-        // listed and left out of the totals; the other lines are counted.
-        assert_eq!(items[1]["counted"], false);
-        assert!(items[0].get("counted").is_none());
-        assert!(items[2].get("counted").is_none());
+        let counted: Vec<bool> = items.iter().map(|i| i["counted"] != false).collect();
+        assert_eq!(counted, [true, true, false, true]);
         // Its amounts stay as the payer wrote them; the claim's are the
         // totals.
-        assert_eq!(items[1]["amounts"]["you_owe"]["amount"], "1440.0");
-        assert_eq!(f["amounts"]["you_owe"]["amount"], "200.0");
-        assert_eq!(f["amounts"]["billed"]["amount"], "1280.0");
+        assert_eq!(items[2]["amounts"]["you_owe"]["amount"], "60.0");
+        assert_eq!(f["amounts"]["you_owe"]["amount"], "42.0");
+        assert_eq!(f["amounts"]["billed"]["amount"], "390.0");
         // A name no total gives sums the counted lines only.
         assert_eq!(f["amounts"]["not_covered"], Value::Null);
-        assert_eq!(f["amounts"]["copay"]["amount"], "200.0");
+        assert_eq!(f["amounts"]["coinsurance"]["amount"], "42.00");
         // The title names what the counted lines paid for.
-        assert_eq!(
-            rec.display,
-            "Emergency visit, moderate and Blood cell test · Example Lakeside Hospital"
-        );
+        let title = "Exercise session, Hands-on session and 1 more · Sample Rehab Center";
+        assert_eq!(rec.display, title);
         assert_eq!(f["category"], "mixed");
         // Each line keeps the processing notes it points at; the claim
         // keeps those no line points at.
         assert_eq!(
-            items[0]["payer_notes"],
-            json!(["R1 -- This line replaces the billed code under the plan's coding policy."])
+            items[1]["payer_notes"],
+            json!(["K4 -- A sample note about the session limit."])
         );
-        assert!(items[1].get("payer_notes").is_none());
-        assert_eq!(items[0]["revenue"]["code"], "0450");
-        assert!(items[2].get("revenue").is_none());
+        assert!(items[0].get("payer_notes").is_none());
+        assert_eq!(items[0]["revenue"]["code"], "0420");
+        assert!(items[3].get("revenue").is_none());
         assert_eq!(
             f["payer_notes"],
-            json!(["Z9 -- Processed under the member's plan."])
+            json!(["P7 -- A sample note about the whole claim."])
         );
 
         // Without the left-out line its claim reads the same, nothing marked.
         let mut whole = r.clone();
-        whole["item"].as_array_mut().unwrap().remove(1);
+        whole["item"].as_array_mut().unwrap().remove(2);
         let rec = record(&whole, prov()).unwrap();
         let items = rec.fields["items"].as_array().unwrap();
         assert!(items.iter().all(|i| i.get("counted").is_none()));
-        assert_eq!(
-            rec.display,
-            "Emergency visit, moderate and Blood cell test · Example Lakeside Hospital"
-        );
+        assert_eq!(rec.display, title);
     }
 
     #[test]

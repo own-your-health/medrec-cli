@@ -5,26 +5,26 @@
  "documents": [],
  "records": [
   {
-   "id": "r_kneestayaaaaaaaaaaaa",
+   "id": "r_lungstayaaaaaaaaaaaa",
    "kind": "encounter",
-   "key": "encounter|kneestay|2025-03-18",
-   "date": "2025-03-18T06:10:00Z",
+   "key": "encounter|lungstay|2024-11-05",
+   "date": "2024-11-05T07:45:00Z",
    "display": "Hospital Encounter",
    "fields": {
     "class": "inpatient",
-    "location": "Example Hospital Orthopedics",
-    "service_provider": "Example Hospital",
+    "location": "Sample Lake Hospital Ward",
+    "service_provider": "Sample Lake Hospital",
     "period": {
-     "start": "2025-03-18T06:10:00Z",
-     "end": "2025-03-20T15:00:00Z"
+     "start": "2024-11-05T07:45:00Z",
+     "end": "2024-11-08T18:00:00Z"
     }
    },
    "provenance": [
     {
      "source": {
       "kind": "fhir",
-      "cli": "mychart",
-      "organization_id": "example-hospital",
+      "cli": "fakeprov",
+      "organization_id": "example-lake",
       "fhir_base": "https://portal.example.test/fhir"
      },
      "method": "fhir-api",
@@ -34,23 +34,23 @@
    ]
   },
   {
-   "id": "r_hemoglobinaaaaaaaaaa",
+   "id": "r_oxygenaaaaaaaaaaaaaa",
    "kind": "result",
-   "key": "result|hemoglobin|2025-03-19",
-   "date": "2025-03-19T13:20:00Z",
-   "display": "Hemoglobin",
+   "key": "result|oxygen|2024-11-07",
+   "date": "2024-11-07T13:20:00Z",
+   "display": "Oxygen level",
    "fields": {
     "value": {
-     "value": 6.1,
-     "unit": "mg/dL"
+     "value": 94,
+     "unit": "%"
     }
    },
    "provenance": [
     {
      "source": {
       "kind": "fhir",
-      "cli": "mychart",
-      "organization_id": "example-hospital",
+      "cli": "fakeprov",
+      "organization_id": "example-lake",
       "fhir_base": "https://portal.example.test/fhir"
      },
      "method": "fhir-api",
@@ -60,18 +60,18 @@
    ]
   },
   {
-   "id": "r_hepaaaaaaaaaaaaaaaaa",
+   "id": "r_choleraaaaaaaaaaaaaa",
    "kind": "immunization",
-   "key": "immunization|hepa|2025-01-14",
-   "date": "2025-01-14",
-   "display": "Hepatitis A",
+   "key": "immunization|cholera|2024-02-06",
+   "date": "2024-02-06",
+   "display": "Cholera",
    "fields": {},
    "provenance": [
     {
      "source": {
       "kind": "fhir",
-      "cli": "mychart",
-      "organization_id": "example-family",
+      "cli": "fakeprov",
+      "organization_id": "example-travel",
       "fhir_base": "https://portal.example.test/fhir"
      },
      "method": "fhir-api",
@@ -81,18 +81,18 @@
    ]
   },
   {
-   "id": "r_typhoidaaaaaaaaaaaaa",
+   "id": "r_meningitisaaaaaaaaaa",
    "kind": "immunization",
-   "key": "immunization|typhoid|2025-01-14",
-   "date": "2025-01-14",
-   "display": "Typhoid",
+   "key": "immunization|meningitis|2024-02-06",
+   "date": "2024-02-06",
+   "display": "Meningitis",
    "fields": {},
    "provenance": [
     {
      "source": {
       "kind": "fhir",
-      "cli": "mychart",
-      "organization_id": "example-family",
+      "cli": "fakeprov",
+      "organization_id": "example-travel",
       "fhir_base": "https://portal.example.test/fhir"
      },
      "method": "fhir-api",
@@ -102,18 +102,18 @@
    ]
   },
   {
-   "id": "r_yellowfeveraaaaaaaaa",
+   "id": "r_polioaaaaaaaaaaaaaaa",
    "kind": "immunization",
-   "key": "immunization|yellowfever|2025-01-14",
-   "date": "2025-01-14",
-   "display": "Yellow fever",
+   "key": "immunization|polio|2024-02-06",
+   "date": "2024-02-06",
+   "display": "Polio",
    "fields": {},
    "provenance": [
     {
      "source": {
       "kind": "fhir",
-      "cli": "mychart",
-      "organization_id": "example-family",
+      "cli": "fakeprov",
+      "organization_id": "example-travel",
       "fhir_base": "https://portal.example.test/fhir"
      },
      "method": "fhir-api",
@@ -123,18 +123,18 @@
    ]
   },
   {
-   "id": "r_rabiesaaaaaaaaaaaaaa",
+   "id": "r_fluaaaaaaaaaaaaaaaaa",
    "kind": "immunization",
-   "key": "immunization|rabies|2025-01-14",
-   "date": "2025-01-14",
-   "display": "Rabies",
+   "key": "immunization|flu|2024-02-06",
+   "date": "2024-02-06",
+   "display": "Flu",
    "fields": {},
    "provenance": [
     {
      "source": {
       "kind": "fhir",
-      "cli": "mychart",
-      "organization_id": "example-family",
+      "cli": "fakeprov",
+      "organization_id": "example-corner",
       "fhir_base": "https://portal.example.test/fhir"
      },
      "method": "fhir-api",
@@ -144,32 +144,11 @@
    ]
   },
   {
-   "id": "r_shinglesaaaaaaaaaaaa",
-   "kind": "immunization",
-   "key": "immunization|shingles|2025-01-14",
-   "date": "2025-01-14",
-   "display": "Shingles",
-   "fields": {},
-   "provenance": [
-    {
-     "source": {
-      "kind": "fhir",
-      "cli": "mychart",
-      "organization_id": "example-pharmacy",
-      "fhir_base": "https://portal.example.test/fhir"
-     },
-     "method": "fhir-api",
-     "filed_at": "2026-11-20T10:00:00Z",
-     "filed_by": "medrec 0.9.0"
-    }
-   ]
-  },
-  {
-   "id": "r_cetfillaaaaaaaaaaaaa",
+   "id": "r_inhaleraaaaaaaaaaaaa",
    "kind": "medication",
-   "key": "medication|cetfill|2025-08-12",
-   "date": "2025-08-12",
-   "display": "Cetirizine 1 mg/mL oral solution",
+   "key": "medication|inhaler|2024-06-11",
+   "date": "2024-06-11",
+   "display": "Albuterol inhaler",
    "fields": {
     "source": "dispense",
     "pharmacy": "Example Pharmacy"
@@ -178,8 +157,8 @@
     {
      "source": {
       "kind": "fhir",
-      "cli": "mychart",
-      "organization_id": "example-pharmacy",
+      "cli": "fakeprov",
+      "organization_id": "example-corner",
       "fhir_base": "https://portal.example.test/fhir"
      },
      "method": "fhir-api",
@@ -189,11 +168,11 @@
    ]
   },
   {
-   "id": "r_napfillaaaaaaaaaaaaa",
+   "id": "r_thinneraaaaaaaaaaaaa",
    "kind": "medication",
-   "key": "medication|napfill|2025-08-13",
-   "date": "2025-08-13",
-   "display": "Naproxen 125 mg/5 mL oral suspension",
+   "key": "medication|thinner|2024-06-25",
+   "date": "2024-06-25",
+   "display": "Warfarin 2 mg tablet",
    "fields": {
     "source": "dispense",
     "pharmacy": "Example Pharmacy"
@@ -202,8 +181,8 @@
     {
      "source": {
       "kind": "fhir",
-      "cli": "mychart",
-      "organization_id": "example-pharmacy",
+      "cli": "fakeprov",
+      "organization_id": "example-corner",
       "fhir_base": "https://portal.example.test/fhir"
      },
      "method": "fhir-api",

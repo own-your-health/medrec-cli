@@ -1,0 +1,516 @@
+{
+ "resourceType": "ExplanationOfBenefit",
+ "id": "eob-rehab-0001",
+ "status": "active",
+ "use": "claim",
+ "outcome": "complete",
+ "type": {
+  "coding": [
+   {
+    "system": "http://terminology.hl7.org/CodeSystem/claim-type",
+    "code": "institutional",
+    "display": "Institutional"
+   }
+  ]
+ },
+ "patient": {
+  "reference": "Patient/pat-0001"
+ },
+ "billablePeriod": {
+  "start": "2024-03-12",
+  "end": "2024-03-12"
+ },
+ "created": "2024-03-26T00:00:00Z",
+ "insurer": {
+  "display": "Example Health Plan"
+ },
+ "provider": {
+  "display": "Sample Rehab Center"
+ },
+ "item": [
+  {
+   "sequence": 1,
+   "productOrService": {
+    "coding": [
+     {
+      "system": "http://www.ama-assn.org/go/cpt",
+      "code": "97110",
+      "display": "Exercise session"
+     }
+    ]
+   },
+   "servicedDate": "2024-03-12",
+   "net": {
+    "value": 200.0,
+    "currency": "USD"
+   },
+   "adjudication": [
+    {
+     "category": {
+      "coding": [
+       {
+        "system": "http://terminology.hl7.org/CodeSystem/adjudication",
+        "code": "submitted"
+       }
+      ]
+     },
+     "amount": {
+      "value": 200.0,
+      "currency": "USD"
+     }
+    },
+    {
+     "category": {
+      "coding": [
+       {
+        "system": "http://hl7.org/fhir/us/carin-bb/CodeSystem/C4BBAdjudication",
+        "code": "discount"
+       }
+      ]
+     },
+     "amount": {
+      "value": 80.0,
+      "currency": "USD"
+     }
+    },
+    {
+     "category": {
+      "coding": [
+       {
+        "system": "http://terminology.hl7.org/CodeSystem/adjudication",
+        "code": "eligible"
+       }
+      ]
+     },
+     "amount": {
+      "value": 120.0,
+      "currency": "USD"
+     }
+    },
+    {
+     "category": {
+      "coding": [
+       {
+        "system": "http://terminology.hl7.org/CodeSystem/adjudication",
+        "code": "benefit"
+       }
+      ]
+     },
+     "amount": {
+      "value": 96.0,
+      "currency": "USD"
+     }
+    },
+    {
+     "category": {
+      "coding": [
+       {
+        "system": "http://terminology.hl7.org/CodeSystem/adjudication",
+        "code": "coinsurance"
+       }
+      ]
+     },
+     "amount": {
+      "value": 24.0,
+      "currency": "USD"
+     }
+    },
+    {
+     "category": {
+      "coding": [
+       {
+        "system": "http://hl7.org/fhir/us/carin-bb/CodeSystem/C4BBAdjudication",
+        "code": "memberliability"
+       }
+      ]
+     },
+     "amount": {
+      "value": 24.0,
+      "currency": "USD"
+     }
+    }
+   ],
+   "revenue": {
+    "coding": [
+     {
+      "system": "https://www.nubc.org/CodeSystem/RevenueCodes",
+      "code": "0420",
+      "display": "Therapy"
+     }
+    ]
+   }
+  },
+  {
+   "sequence": 2,
+   "productOrService": {
+    "coding": [
+     {
+      "system": "http://www.ama-assn.org/go/cpt",
+      "code": "97140",
+      "display": "Hands-on session"
+     }
+    ]
+   },
+   "servicedDate": "2024-03-12",
+   "noteNumber": [
+    2
+   ],
+   "net": {
+    "value": 150.0,
+    "currency": "USD"
+   },
+   "adjudication": [
+    {
+     "category": {
+      "coding": [
+       {
+        "system": "http://terminology.hl7.org/CodeSystem/adjudication",
+        "code": "submitted"
+       }
+      ]
+     },
+     "amount": {
+      "value": 150.0,
+      "currency": "USD"
+     }
+    },
+    {
+     "category": {
+      "coding": [
+       {
+        "system": "http://hl7.org/fhir/us/carin-bb/CodeSystem/C4BBAdjudication",
+        "code": "discount"
+       }
+      ]
+     },
+     "amount": {
+      "value": 60.0,
+      "currency": "USD"
+     }
+    },
+    {
+     "category": {
+      "coding": [
+       {
+        "system": "http://terminology.hl7.org/CodeSystem/adjudication",
+        "code": "eligible"
+       }
+      ]
+     },
+     "amount": {
+      "value": 90.0,
+      "currency": "USD"
+     }
+    },
+    {
+     "category": {
+      "coding": [
+       {
+        "system": "http://terminology.hl7.org/CodeSystem/adjudication",
+        "code": "benefit"
+       }
+      ]
+     },
+     "amount": {
+      "value": 72.0,
+      "currency": "USD"
+     }
+    },
+    {
+     "category": {
+      "coding": [
+       {
+        "system": "http://terminology.hl7.org/CodeSystem/adjudication",
+        "code": "coinsurance"
+       }
+      ]
+     },
+     "amount": {
+      "value": 18.0,
+      "currency": "USD"
+     }
+    },
+    {
+     "category": {
+      "coding": [
+       {
+        "system": "http://hl7.org/fhir/us/carin-bb/CodeSystem/C4BBAdjudication",
+        "code": "memberliability"
+       }
+      ]
+     },
+     "amount": {
+      "value": 18.0,
+      "currency": "USD"
+     }
+    }
+   ],
+   "revenue": {
+    "coding": [
+     {
+      "system": "https://www.nubc.org/CodeSystem/RevenueCodes",
+      "code": "0420",
+      "display": "Therapy"
+     }
+    ]
+   }
+  },
+  {
+   "sequence": 3,
+   "productOrService": {
+    "coding": [
+     {
+      "system": "http://www.ama-assn.org/go/cpt",
+      "code": "97035",
+      "display": "Warm-up session"
+     }
+    ]
+   },
+   "servicedDate": "2024-03-12",
+   "net": {
+    "value": 60.0,
+    "currency": "USD"
+   },
+   "adjudication": [
+    {
+     "category": {
+      "coding": [
+       {
+        "system": "http://terminology.hl7.org/CodeSystem/adjudication",
+        "code": "submitted"
+       }
+      ]
+     },
+     "amount": {
+      "value": 60.0,
+      "currency": "USD"
+     }
+    },
+    {
+     "category": {
+      "coding": [
+       {
+        "system": "http://terminology.hl7.org/CodeSystem/adjudication",
+        "code": "eligible"
+       }
+      ]
+     },
+     "amount": {
+      "value": 60.0,
+      "currency": "USD"
+     }
+    },
+    {
+     "category": {
+      "coding": [
+       {
+        "system": "http://terminology.hl7.org/CodeSystem/adjudication",
+        "code": "benefit"
+       }
+      ]
+     },
+     "amount": {
+      "value": 0.0,
+      "currency": "USD"
+     }
+    },
+    {
+     "category": {
+      "coding": [
+       {
+        "system": "http://hl7.org/fhir/us/carin-bb/CodeSystem/C4BBAdjudication",
+        "code": "noncovered"
+       }
+      ]
+     },
+     "amount": {
+      "value": 60.0,
+      "currency": "USD"
+     }
+    },
+    {
+     "category": {
+      "coding": [
+       {
+        "system": "http://hl7.org/fhir/us/carin-bb/CodeSystem/C4BBAdjudication",
+        "code": "memberliability"
+       }
+      ]
+     },
+     "amount": {
+      "value": 60.0,
+      "currency": "USD"
+     }
+    }
+   ],
+   "revenue": {
+    "coding": [
+     {
+      "system": "https://www.nubc.org/CodeSystem/RevenueCodes",
+      "code": "0420",
+      "display": "Therapy"
+     }
+    ]
+   }
+  },
+  {
+   "sequence": 4,
+   "productOrService": {
+    "coding": [
+     {
+      "system": "http://www.ama-assn.org/go/cpt",
+      "code": "73560",
+      "display": "Knee x-ray"
+     }
+    ]
+   },
+   "servicedDate": "2024-03-12",
+   "net": {
+    "value": 40.0,
+    "currency": "USD"
+   },
+   "adjudication": [
+    {
+     "category": {
+      "coding": [
+       {
+        "system": "http://terminology.hl7.org/CodeSystem/adjudication",
+        "code": "submitted"
+       }
+      ]
+     },
+     "amount": {
+      "value": 40.0,
+      "currency": "USD"
+     }
+    },
+    {
+     "category": {
+      "coding": [
+       {
+        "system": "http://hl7.org/fhir/us/carin-bb/CodeSystem/C4BBAdjudication",
+        "code": "discount"
+       }
+      ]
+     },
+     "amount": {
+      "value": 22.0,
+      "currency": "USD"
+     }
+    },
+    {
+     "category": {
+      "coding": [
+       {
+        "system": "http://terminology.hl7.org/CodeSystem/adjudication",
+        "code": "eligible"
+       }
+      ]
+     },
+     "amount": {
+      "value": 18.0,
+      "currency": "USD"
+     }
+    },
+    {
+     "category": {
+      "coding": [
+       {
+        "system": "http://terminology.hl7.org/CodeSystem/adjudication",
+        "code": "benefit"
+       }
+      ]
+     },
+     "amount": {
+      "value": 18.0,
+      "currency": "USD"
+     }
+    },
+    {
+     "category": {
+      "coding": [
+       {
+        "system": "http://hl7.org/fhir/us/carin-bb/CodeSystem/C4BBAdjudication",
+        "code": "memberliability"
+       }
+      ]
+     },
+     "amount": {
+      "value": 0.0,
+      "currency": "USD"
+     }
+    }
+   ]
+  }
+ ],
+ "total": [
+  {
+   "category": {
+    "coding": [
+     {
+      "system": "http://terminology.hl7.org/CodeSystem/adjudication",
+      "code": "submitted"
+     }
+    ]
+   },
+   "amount": {
+    "value": 390.0,
+    "currency": "USD"
+   }
+  },
+  {
+   "category": {
+    "coding": [
+     {
+      "system": "http://hl7.org/fhir/us/carin-bb/CodeSystem/C4BBAdjudication",
+      "code": "discount"
+     }
+    ]
+   },
+   "amount": {
+    "value": 162.0,
+    "currency": "USD"
+   }
+  },
+  {
+   "category": {
+    "coding": [
+     {
+      "system": "http://terminology.hl7.org/CodeSystem/adjudication",
+      "code": "benefit"
+     }
+    ]
+   },
+   "amount": {
+    "value": 186.0,
+    "currency": "USD"
+   }
+  },
+  {
+   "category": {
+    "coding": [
+     {
+      "system": "http://hl7.org/fhir/us/carin-bb/CodeSystem/C4BBAdjudication",
+      "code": "memberliability"
+     }
+    ]
+   },
+   "amount": {
+    "value": 42.0,
+    "currency": "USD"
+   }
+  }
+ ],
+ "processNote": [
+  {
+   "number": 1,
+   "type": "print",
+   "text": "P7 -- A sample note about the whole claim."
+  },
+  {
+   "number": 2,
+   "type": "print",
+   "text": "K4 -- A sample note about the session limit."
+  }
+ ]
+}
