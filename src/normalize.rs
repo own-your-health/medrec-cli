@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 use serde_json::{json, Map, Value};
 
 use crate::claims;
-use crate::model::{Code, Provenance, Record};
+use crate::model::{Code, Provenance, Record, Word};
 use crate::providers::printed;
 
 pub const LOINC: &str = "http://loinc.org";
@@ -51,15 +51,30 @@ pub const FIELDS: &[(&str, &[&str])] = &[
     ),
     (
         "condition",
-        &["when", "verification_status", "category", "abatement"],
+        &[
+            "when",
+            "onset",
+            "recorded",
+            "verification_status",
+            "category",
+            "categories",
+            "abatement",
+            "abatement_text",
+        ],
     ),
     (
         "medication",
         &[
             "when",
+            "start",
+            "end",
+            "end_of",
             "dosage",
             "prescriber",
             "intent",
+            "categories",
+            "status_reason",
+            "reported",
             "quantity",
             "days_supply",
             "pharmacy",
@@ -68,7 +83,17 @@ pub const FIELDS: &[(&str, &[&str])] = &[
             "source",
         ],
     ),
-    ("allergy", &["when", "criticality", "reaction"]),
+    (
+        "allergy",
+        &[
+            "when",
+            "onset",
+            "recorded",
+            "verification_status",
+            "criticality",
+            "reaction",
+        ],
+    ),
     (
         "immunization",
         &["when", "lot_number", "site", "route", "performer"],
@@ -250,19 +275,35 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
             put_str(&mut fields, "issued", path_str(r, "issued"));
         }
         "Condition" => {
-            put(
-                &mut fields,
-                "verification_status",
-                r.get("verificationStatus").map(code_or_concept_text),
-            );
+            stated(&mut fields, r);
             put(
                 &mut fields,
                 "category",
                 first(r, "category").map(concept_text),
             );
+            put(&mut fields, "categories", categories(r));
             put_str(&mut fields, "abatement", path_str(r, "abatementDateTime"));
+            if !fields.contains_key("abatement") {
+                put(&mut fields, "abatement_text", when_text(r, "abatement"));
+            }
         }
         "MedicationRequest" => {
+            let (start, end) = dosage_bounds(r);
+            let valid = |k: &str| path_str(r, &format!("dispenseRequest.validityPeriod.{k}"));
+            put_str(&mut fields, "start", start.or_else(|| valid("start")));
+            ends(
+                &mut fields,
+                [(end, "dosage"), (valid("end"), "prescription")],
+            );
+            put(&mut fields, "categories", categories(r));
+            put(
+                &mut fields,
+                "status_reason",
+                r.get("statusReason").map(concept_text),
+            );
+            let reported = r.get("reportedBoolean") == Some(&json!(true))
+                || r.get("reportedReference").is_some();
+            put(&mut fields, "reported", reported.then(|| json!(true)));
             put_str(
                 &mut fields,
                 "dosage",
@@ -273,6 +314,17 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
             put(&mut fields, "source", Some(json!("request")));
         }
         "MedicationStatement" => {
+            put_str(&mut fields, "start", path_str(r, "effectivePeriod.start"));
+            ends(
+                &mut fields,
+                [(path_str(r, "effectivePeriod.end"), "taking")],
+            );
+            put(&mut fields, "categories", categories(r));
+            put(
+                &mut fields,
+                "status_reason",
+                first(r, "statusReason").map(concept_text),
+            );
             put_str(&mut fields, "dosage", path_str(r, "dosage.0.text"));
             put(&mut fields, "source", Some(json!("statement")));
         }
@@ -295,6 +347,7 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
             put(&mut fields, "source", Some(json!("dispense")));
         }
         "AllergyIntolerance" => {
+            stated(&mut fields, r);
             put_str(&mut fields, "criticality", path_str(r, "criticality"));
             let reactions: Vec<Value> = r
                 .get("reaction")
@@ -486,6 +539,7 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
         "a {kind} field is not in FIELDS: {:?}",
         fields.keys().collect::<Vec<_>>()
     );
+    let words = word(r, rt, status.as_deref(), &fields, &provenance);
     Some(Record {
         id: crate::ids::new("r"),
         kind: kind.into(),
@@ -496,9 +550,167 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
         status,
         fields,
         providers: Vec::new(),
+        words: words.into_iter().collect(),
+        fields_from: None,
         documents: Vec::new(),
         provenance: vec![provenance],
     })
+}
+
+/// What the source of one condition, allergy or medicine says of it, when its
+/// raw file is kept. A fill says only that it was filled.
+fn word(
+    r: &Value,
+    resource_type: &str,
+    status: Option<&str>,
+    fields: &Map<String, Value>,
+    provenance: &Provenance,
+) -> Option<Word> {
+    if !WORD_TYPES.contains(&resource_type) {
+        return None;
+    }
+    let text = |k: &str| fields.get(k).and_then(Value::as_str).map(str::to_string);
+    Some(Word {
+        raw_path: provenance.raw_path.clone()?,
+        status: status.map(str::to_string),
+        verification: r.get("verificationStatus").and_then(status_code),
+        categories: fields
+            .get("categories")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|c| c.as_str().map(str::to_string))
+            .collect(),
+        abatement: text("abatement").or_else(|| text("abatement_text")),
+        end: text("end"),
+        end_of: text("end_of"),
+        version: None,
+    })
+}
+
+/// The resources whose source's word a record keeps.
+pub const WORD_TYPES: &[&str] = &[
+    "Condition",
+    "AllergyIntolerance",
+    "MedicationRequest",
+    "MedicationStatement",
+];
+
+/// What a condition and an allergy say alike: when it began, when it was
+/// written down, and how sure they are.
+fn stated(fields: &mut Map<String, Value>, r: &Value) {
+    put(fields, "onset", when_text(r, "onset"));
+    put_str(
+        fields,
+        "recorded",
+        path_str(r, "recordedDate").or_else(|| path_str(r, "assertedDate")),
+    );
+    put(
+        fields,
+        "verification_status",
+        r.get("verificationStatus").map(code_or_concept_text),
+    );
+}
+
+/// A FHIR `onset[x]` or `abatement[x]` as text: a date as written, a period
+/// and a range as their ends, an age with its unit, the source's own words,
+/// and `yes` for one it only says there was.
+fn when_text(r: &Value, name: &str) -> Option<Value> {
+    let at = |suffix: &str| r.get(format!("{name}{suffix}")).filter(|v| !v.is_null());
+    let between = |from: Option<String>, to: Option<String>| match (from, to) {
+        (Some(a), Some(b)) => Some(format!("{a} – {b}")),
+        (Some(a), None) => Some(format!("from {a}")),
+        (None, Some(b)) => Some(format!("until {b}")),
+        (None, None) => None,
+    };
+    let text = |v: &Value| v.as_str().filter(|s| !s.is_empty()).map(str::to_string);
+    let side = |v: &Value, k: &str| v.get(k).and_then(text);
+    at("DateTime")
+        .and_then(text)
+        .or_else(|| at("Period").and_then(|p| between(side(p, "start"), side(p, "end"))))
+        .or_else(|| at("Age").and_then(age_text))
+        .or_else(|| {
+            let range = at("Range")?;
+            let age = |k: &str| range.get(k).and_then(age_text);
+            between(age("low"), age("high"))
+        })
+        .or_else(|| at("String").and_then(text))
+        .or_else(|| (at("Boolean") == Some(&json!(true))).then(|| "yes".to_string()))
+        .map(Value::String)
+}
+
+/// A quantity of time with its unit: `12 years`.
+fn age_text(q: &Value) -> Option<String> {
+    let value = match q.get("value")? {
+        Value::Number(n) => n.to_string(),
+        Value::String(s) if !s.is_empty() => s.clone(),
+        _ => return None,
+    };
+    let s = |k: &str| q.get(k).and_then(Value::as_str);
+    let unit = match s("code") {
+        Some("a") => "years",
+        Some("mo") => "months",
+        Some("wk") => "weeks",
+        Some("d") => "days",
+        Some("h") => "hours",
+        code => s("unit").or(code).unwrap_or(""),
+    };
+    Some(format!("{value} {unit}").trim().to_string())
+}
+
+/// The code of each category, else its text, in the systems' own codes before
+/// a vendor's.
+fn categories(r: &Value) -> Option<Value> {
+    const PREFER: &[&str] = &[
+        "http://terminology.hl7.org/CodeSystem/condition-category",
+        "http://hl7.org/fhir/us/core/CodeSystem/condition-category",
+        "http://hl7.org/fhir/condition-category",
+        "http://terminology.hl7.org/CodeSystem/medicationrequest-category",
+        "http://terminology.hl7.org/CodeSystem/medication-statement-category",
+    ];
+    let list: Vec<&Value> = match r.get("category")? {
+        Value::Array(a) => a.iter().collect(),
+        one => vec![one],
+    };
+    let mut out: Vec<String> = Vec::new();
+    for c in list {
+        let code = match c {
+            Value::String(s) => Some(s.clone()),
+            _ => codeable(c, PREFER).and_then(|c| c.code.or(c.display)),
+        };
+        if let Some(code) = code.filter(|s| !s.is_empty() && !out.contains(s)) {
+            out.push(code);
+        }
+    }
+    (!out.is_empty()).then(|| json!(out))
+}
+
+/// The first start of a prescription's dosages, and the last end when each
+/// that has a period has an end: by their days, since times as written do not
+/// sort.
+fn dosage_bounds(r: &Value) -> (Option<&str>, Option<&str>) {
+    let periods: Vec<&Value> = r
+        .get("dosageInstruction")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|d| path(d, "timing.repeat.boundsPeriod"))
+        .collect();
+    let day = |s: &&str| s.get(..10).unwrap_or(s).to_string();
+    let starts = periods.iter().filter_map(|p| path_str(p, "start"));
+    let ends: Option<Vec<&str>> = periods.iter().map(|p| path_str(p, "end")).collect();
+    (
+        starts.min_by_key(day),
+        ends.and_then(|e| e.into_iter().max_by_key(day)),
+    )
+}
+
+/// The first end a medicine's source gives, and what of it ends.
+fn ends<const N: usize>(fields: &mut Map<String, Value>, of: [(Option<&str>, &str); N]) {
+    if let Some((end, what)) = of.into_iter().find_map(|(e, w)| Some((e?, w))) {
+        put_str(fields, "end", Some(end));
+        put_str(fields, "end_of", Some(what));
+    }
 }
 
 fn default_display(kind: &str) -> &'static str {
@@ -1024,6 +1236,7 @@ mod tests {
     const PHARMACY_EOB: &str = include_str!("../tests/fixtures/fhir/pharmacy-eob.json");
     const LEFT_OUT_LINE_EOB: &str = include_str!("../tests/fixtures/fhir/left-out-line-eob.json");
     const STU3: &str = include_str!("../tests/fixtures/fhir/stu3.json");
+    const STATUS: &str = include_str!("../tests/fixtures/fhir/status.json");
     const DISPENSE_CONTAINED: &str =
         include_str!("../tests/fixtures/fhir/medication-dispense-contained.json");
 
@@ -1039,6 +1252,118 @@ mod tests {
             .fields
             .get("prescriber")
             .is_none());
+    }
+
+    #[test]
+    fn a_status_is_read_in_every_form_a_source_gives() {
+        let all: Vec<Value> = serde_json::from_str(STATUS).unwrap();
+        let rec = |id: &str| {
+            let r = all.iter().find(|r| r["id"] == id).unwrap();
+            let mut p = prov();
+            p.raw_path = Some(format!("{id}.json"));
+            record(r, p).unwrap()
+        };
+        let fields = |id: &str, of: &[&str]| -> Value {
+            let r = rec(id);
+            let some = of.iter().filter_map(|k| {
+                let v = r.fields.get(*k)?;
+                Some((k.to_string(), v.clone()))
+            });
+            Value::Object(some.collect())
+        };
+        const CONDITION: &[&str] = &[
+            "onset",
+            "recorded",
+            "verification_status",
+            "categories",
+            "abatement",
+            "abatement_text",
+        ];
+        assert_eq!(
+            fields("cond-period", CONDITION),
+            json!({"onset": "2019-04 – 2019-06", "recorded": "2020-01-15",
+                "verification_status": "Confirmed",
+                "categories": ["problem-list-item", "health-concern", "Example words"],
+                "abatement_text": "until 2021-02-03"})
+        );
+        assert_eq!(
+            fields("cond-age", CONDITION),
+            json!({"onset": "12 years", "recorded": "2020-01-15",
+                "categories": ["encounter-diagnosis"], "abatement_text": "14 years – 15 years"})
+        );
+        assert_eq!(
+            fields("cond-words", CONDITION),
+            json!({"onset": "some years ago", "recorded": "2018-03-04",
+                "verification_status": "entered-in-error",
+                "categories": ["problem-list-item"], "abatement_text": "yes"})
+        );
+        assert_eq!(
+            fields("allergy-refuted", CONDITION),
+            json!({"onset": "5 years", "recorded": "2017-05-06", "verification_status": "refuted"})
+        );
+        // Who wrote it down is no field: a provider a record prints is one its
+        // privacy is judged by.
+        for r in ["cond-period", "cond-age", "allergy-refuted"] {
+            let text = serde_json::to_string(&rec(r).fields).unwrap();
+            assert!(!text.contains("Example Recorder") && !text.contains("Example Asserter"));
+        }
+        let mut dated = all[0].clone();
+        dated["abatementDateTime"] = json!("2021-02-03");
+        let dated = record(&dated, prov()).unwrap().fields;
+        assert_eq!(dated["abatement"], "2021-02-03");
+        assert!(!dated.contains_key("abatement_text"));
+        const MEDICINE: &[&str] = &[
+            "start",
+            "end",
+            "end_of",
+            "categories",
+            "status_reason",
+            "reported",
+        ];
+        assert_eq!(
+            fields("med-dosage", MEDICINE),
+            json!({"start": "2024-01-10", "end": "2024-03-11T09:30:00Z", "end_of": "dosage",
+                "categories": ["community"], "status_reason": "Sample reason", "reported": true})
+        );
+        // Written with and without a time, the days decide.
+        let mut mixed = all[4].clone();
+        let bounds = |m: &mut Value, i: usize, start: &str, end: &str| {
+            m["dosageInstruction"][i]["timing"]["repeat"]["boundsPeriod"] =
+                json!({"start": start, "end": end});
+        };
+        bounds(&mut mixed, 0, "2024-01-10T23:00:00-05:00", "2024-03-11");
+        bounds(&mut mixed, 1, "2024-01-11", "2024-03-10T23:30:00-05:00");
+        let mixed = record(&mixed, prov()).unwrap().fields;
+        assert_eq!(mixed["start"], "2024-01-10T23:00:00-05:00");
+        assert_eq!(mixed["end"], "2024-03-11");
+        // One dosage goes on: the prescription's own end is the one there is.
+        assert_eq!(
+            fields("med-prescription", MEDICINE),
+            json!({"start": "2024-01-10", "end": "2025-01-01", "end_of": "prescription"})
+        );
+        assert_eq!(
+            fields("med-taking", MEDICINE),
+            json!({"start": "2023-01-02", "end": "2023-04-05", "end_of": "taking",
+                "categories": ["patientspecified"], "status_reason": "Sample reason"})
+        );
+        // What its source says, by code, when its raw file is kept.
+        let words = |id: &str| serde_json::to_value(rec(id).words).unwrap();
+        assert_eq!(
+            words("cond-period"),
+            json!([{"raw_path": "cond-period.json", "status": "resolved",
+                "verification": "confirmed", "abatement": "until 2021-02-03",
+                "categories": ["problem-list-item", "health-concern", "Example words"]}])
+        );
+        assert_eq!(
+            words("med-taking"),
+            json!([{"raw_path": "med-taking.json", "status": "active", "end": "2023-04-05",
+                "end_of": "taking", "categories": ["patientspecified"]}])
+        );
+        assert!(record(&all[0], prov()).unwrap().words.is_empty());
+        let fill: Value = serde_json::from_str(DISPENSE).unwrap();
+        let mut p = prov();
+        p.raw_path = Some("fill.json".into());
+        assert!(record(&fill, p).unwrap().words.is_empty());
     }
 
     #[test]

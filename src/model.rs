@@ -391,7 +391,7 @@ pub struct NearDuplicate {
 
 /// A normalized clinical fact (one row of the index), derived from raw
 /// resources, which stay beside it verbatim.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Record {
     pub id: String,
     /// `encounter`, `result`, `report`, `condition`, `medication`,
@@ -414,9 +414,70 @@ pub struct Record {
     /// names.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub providers: Vec<ProviderRef>,
+    /// What each of its sources says of a condition, an allergy or a medicine
+    /// that can differ between them. A fill has none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub words: Vec<Word>,
+    /// The raw file its status and fields are of, where it has words and
+    /// several provenances.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fields_from: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub documents: Vec<String>,
     pub provenance: Vec<Provenance>,
+}
+
+impl Record {
+    /// Put a source's word in place of the one it had, the words in the order
+    /// of the provenances they are of; one whose provenance is gone goes.
+    /// Whether that changes them.
+    pub fn say(&mut self, word: &Word) -> bool {
+        let of = |p: &Provenance| {
+            let path = p.raw_path.as_ref()?;
+            let had = self.words.iter().find(|w| w.raw_path == *path);
+            if *path == word.raw_path {
+                Some(word)
+            } else {
+                had
+            }
+            .cloned()
+        };
+        let words: Vec<Word> = self.provenance.iter().filter_map(of).collect();
+        let changed = words != self.words;
+        self.words = words;
+        changed
+    }
+}
+
+/// What one source says of a condition, an allergy or a medicine.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Word {
+    /// The raw file it is read from, which is one of the record's
+    /// provenances'.
+    pub raw_path: String,
+    /// The source's own code: a condition's or an allergy's clinical status,
+    /// a medicine's status.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    /// The code of the verification status.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verification: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub categories: Vec<String>,
+    /// When a condition ended, as a date or as the source puts it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub abatement: Option<String>,
+    /// The day a medicine ends, and what of it does (`dosage`,
+    /// `prescription` or `taking`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_of: Option<String>,
+    /// The version import read into the record: the first 16 hex of its
+    /// content's digest. Reindex leaves it, so an import cut short after its
+    /// raw files is seen by the next.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
 }
 
 /// Who a field of a record prints, as its source identifies them.
