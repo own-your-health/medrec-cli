@@ -4,16 +4,16 @@
  "rev": 1,
  "documents": [
   {
-   "id": "d_counselletteraaaaaaa",
-   "path": "Documents/2025/2025-08-16_counselletter.pdf",
+   "id": "d_quitnoticeaaaaaaaaaa",
+   "path": "Documents/2025/2025-04-08_quitnotice.pdf",
    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
    "md5": "00000000000000000000000000000000",
    "size": 1000,
    "media_type": "application/pdf",
    "doc_type": "letter",
-   "date": "2025-08-16",
-   "organization": "Example Counseling Center",
-   "filed_at": "2025-08-16T12:00:00Z",
+   "date": "2025-04-08",
+   "organization": "Sample Addiction Services",
+   "filed_at": "2025-04-08T12:00:00Z",
    "origin": {
     "kind": "file",
     "action": "copied"
@@ -29,16 +29,16 @@
    "title": "Letter"
   },
   {
-   "id": "d_physicalavsaaaaaaaaa",
-   "path": "Documents/2025/2025-04-15_physicalavs.pdf",
+   "id": "d_headsummaryaaaaaaaaa",
+   "path": "Documents/2025/2025-03-18_headsummary.pdf",
    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
    "md5": "00000000000000000000000000000000",
    "size": 1000,
    "media_type": "application/pdf",
    "doc_type": "visit_summary",
-   "date": "2025-04-15",
-   "organization": "Example Family Practice",
-   "filed_at": "2025-04-15T12:00:00Z",
+   "date": "2025-03-18",
+   "organization": "Sample Headache Clinic",
+   "filed_at": "2025-03-18T12:00:00Z",
    "origin": {
     "kind": "file",
     "action": "copied"
@@ -56,18 +56,18 @@
  ],
  "records": [
   {
-   "id": "r_phobiaaaaaaaaaaaaaaa",
+   "id": "r_smokingaaaaaaaaaaaaa",
    "kind": "condition",
-   "key": "condition|phobia|2025-07-07",
-   "date": "2025-07-07",
-   "display": "Social phobia, unspecified",
+   "key": "condition|smoking|2025-01-14",
+   "date": "2025-01-14",
+   "display": "Nicotine dependence, cigarettes",
    "fields": {},
    "provenance": [
     {
      "source": {
       "kind": "fhir",
-      "cli": "mychart",
-      "organization_id": "example-family",
+      "cli": "fakeprov",
+      "organization_id": "sample-neighborhood",
       "fhir_base": "https://portal.example.test/fhir"
      },
      "method": "fhir-api",
@@ -77,24 +77,24 @@
    ],
    "code": {
     "system": "http://hl7.org/fhir/sid/icd-10-cm",
-    "code": "F40.10",
-    "display": "Social phobia, unspecified"
+    "code": "F17.210",
+    "display": "Nicotine dependence, cigarettes, uncomplicated"
    },
    "status": "active"
   },
   {
-   "id": "r_anemiaaaaaaaaaaaaaaa",
+   "id": "r_migraineaaaaaaaaaaaa",
    "kind": "condition",
-   "key": "condition|anemia|2025-03-04",
-   "date": "2025-03-04",
-   "display": "Iron deficiency anemia",
+   "key": "condition|migraine|2024-11-12",
+   "date": "2024-11-12",
+   "display": "Migraine headache",
    "fields": {},
    "provenance": [
     {
      "source": {
       "kind": "fhir",
-      "cli": "mychart",
-      "organization_id": "example-family",
+      "cli": "fakeprov",
+      "organization_id": "sample-headache",
       "fhir_base": "https://portal.example.test/fhir"
      },
      "method": "fhir-api",
@@ -104,24 +104,24 @@
    ],
    "code": {
     "system": "http://hl7.org/fhir/sid/icd-10-cm",
-    "code": "D50.9",
-    "display": "Iron deficiency anemia, unspecified"
+    "code": "G43.909",
+    "display": "Migraine, unspecified, not intractable"
    },
    "status": "active"
   },
   {
-   "id": "r_escitalopramaaaaaaaa",
+   "id": "r_vareniclineaaaaaaaaa",
    "kind": "medication",
-   "key": "medication|escitalopram|2025-07-08",
-   "date": "2025-07-08",
-   "display": "Escitalopram 10 mg tablet",
+   "key": "medication|varenicline|2025-01-15",
+   "date": "2025-01-15",
+   "display": "Varenicline 1 mg tablet",
    "fields": {},
    "provenance": [
     {
      "source": {
       "kind": "fhir",
-      "cli": "mychart",
-      "organization_id": "example-family",
+      "cli": "fakeprov",
+      "organization_id": "sample-neighborhood",
       "fhir_base": "https://portal.example.test/fhir"
      },
      "method": "fhir-api",
@@ -132,18 +132,18 @@
    "status": "active"
   },
   {
-   "id": "r_ferrousaaaaaaaaaaaaa",
+   "id": "r_sumatriptanaaaaaaaaa",
    "kind": "medication",
-   "key": "medication|ferrous|2025-03-05",
-   "date": "2025-03-05",
-   "display": "Ferrous sulfate 325 mg tablet",
+   "key": "medication|sumatriptan|2024-11-13",
+   "date": "2024-11-13",
+   "display": "Sumatriptan 50 mg tablet",
    "fields": {},
    "provenance": [
     {
      "source": {
       "kind": "fhir",
-      "cli": "mychart",
-      "organization_id": "example-family",
+      "cli": "fakeprov",
+      "organization_id": "sample-headache",
       "fhir_base": "https://portal.example.test/fhir"
      },
      "method": "fhir-api",
@@ -154,25 +154,25 @@
    "status": "active"
   },
   {
-   "id": "r_counselvisitaaaaaaaa",
+   "id": "r_quitvisitaaaaaaaaaaa",
    "kind": "encounter",
-   "key": "encounter|counselvisit|2025-08-12",
-   "date": "2025-08-12T14:00:00Z",
-   "display": "Office Visit",
+   "key": "encounter|quitvisit|2025-02-20",
+   "date": "2025-02-20T17:00:00Z",
+   "display": "Group Visit",
    "fields": {
     "class": "AMB",
-    "service_provider": "Example Behavioral Health",
+    "service_provider": "Example Recovery Center",
     "period": {
-     "start": "2025-08-12T14:00:00Z",
-     "end": "2025-08-12T15:00:00Z"
+     "start": "2025-02-20T17:00:00Z",
+     "end": "2025-02-20T18:30:00Z"
     }
    },
    "provenance": [
     {
      "source": {
       "kind": "fhir",
-      "cli": "mychart",
-      "organization_id": "example-behavioral",
+      "cli": "fakeprov",
+      "organization_id": "example-recovery",
       "fhir_base": "https://portal.example.test/fhir"
      },
      "method": "fhir-api",
@@ -182,25 +182,25 @@
    ]
   },
   {
-   "id": "r_physicalaaaaaaaaaaaa",
+   "id": "r_headvisitaaaaaaaaaaa",
    "kind": "encounter",
-   "key": "encounter|physical|2025-04-15",
-   "date": "2025-04-15T13:00:00Z",
-   "display": "Office Visit",
+   "key": "encounter|headvisit|2025-03-18",
+   "date": "2025-03-18T15:00:00Z",
+   "display": "Follow-up Visit",
    "fields": {
     "class": "AMB",
-    "service_provider": "Example Family Practice",
+    "service_provider": "Sample Headache Clinic",
     "period": {
-     "start": "2025-04-15T13:00:00Z",
-     "end": "2025-04-15T13:30:00Z"
+     "start": "2025-03-18T15:00:00Z",
+     "end": "2025-03-18T15:20:00Z"
     }
    },
    "provenance": [
     {
      "source": {
       "kind": "fhir",
-      "cli": "mychart",
-      "organization_id": "example-family",
+      "cli": "fakeprov",
+      "organization_id": "sample-headache",
       "fhir_base": "https://portal.example.test/fhir"
      },
      "method": "fhir-api",
@@ -210,24 +210,47 @@
    ]
   },
   {
-   "id": "r_ferritinaaaaaaaaaaaa",
+   "id": "r_magnesiumaaaaaaaaaaa",
    "kind": "result",
-   "key": "result|ferritin|2025-04-15",
-   "date": "2025-04-15T13:20:00Z",
-   "display": "Ferritin",
+   "key": "result|magnesium|2025-03-18",
+   "date": "2025-03-18T15:10:00Z",
+   "display": "Magnesium",
    "fields": {
     "value": {
-     "value": 40,
-     "unit": "ng/mL"
+     "value": 2,
+     "unit": "mg/dL"
     },
-    "reference_range": "15-150 ng/mL"
+    "reference_range": "1.7-2.4 mg/dL"
    },
    "provenance": [
     {
      "source": {
       "kind": "fhir",
-      "cli": "mychart",
-      "organization_id": "example-family",
+      "cli": "fakeprov",
+      "organization_id": "sample-headache",
+      "fhir_base": "https://portal.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "filed_at": "2026-11-20T10:00:00Z",
+     "filed_by": "medrec 0.9.0"
+    }
+   ]
+  },
+  {
+   "id": "r_screenaaaaaaaaaaaaaa",
+   "kind": "result",
+   "key": "result|screen|2025-03-18",
+   "date": "2025-03-18T15:10:00Z",
+   "display": "Drug screen",
+   "fields": {
+    "value_text": "None found"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "sample-headache",
       "fhir_base": "https://portal.example.test/fhir"
      },
      "method": "fhir-api",

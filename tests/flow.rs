@@ -797,8 +797,8 @@ fn a_reimport_names_the_patient_by_the_providers_label() {
     let _ = std::fs::remove_dir_all(Path::new(&e.root));
 }
 
-/// One connection serves Robin two practices and Alex a third under one
-/// organization id and FHIR base. Each of Robin's visits has its own
+/// One connection serves Alex three practices and Robin a fourth under one
+/// organization id and FHIR base. Each of Alex's visits has its own
 /// practice's name and its own practice's result, and no one's records have
 /// another person's practice.
 #[test]
@@ -830,17 +830,17 @@ fn practices_of_one_connection_keep_their_own_names() {
             .unwrap();
         p["id"].as_str().unwrap().to_string()
     };
-    let robin = id("Robin Testperson");
+    let alex = id("Alex Testperson");
     let views = e.records().join("views");
     let read = |path: PathBuf| -> Value {
         serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
     };
     let index = read(views.join("views.json"));
     let view = |name: &str| {
-        let md5 = index["people"][&robin]["files"][name].as_str().unwrap();
+        let md5 = index["people"][&alex]["files"][name].as_str().unwrap();
         read(
             views
-                .join(&robin)
+                .join(&alex)
                 .join(medrec::viewfiles::stored_name(name, md5)),
         )
     };
@@ -861,10 +861,11 @@ fn practices_of_one_connection_keep_their_own_names() {
         })
         .collect();
     visits.sort();
-    assert_eq!(visits.len(), 2, "{events}");
+    assert_eq!(visits.len(), 3, "{events}");
     for ((place, results), (practice, patient)) in visits.iter().zip([
-        ("Example Family Practice", "family-1"),
-        ("Sample Foot Clinic", "foot-1"),
+        ("Example Eye Center", "eye-1"),
+        ("Placeholder Hearing Clinic", "hearing-1"),
+        ("Sample Skin Studio", "studio-1"),
     ]) {
         assert_eq!(place, practice);
         assert_eq!(results.len(), 1, "{results:?}");
@@ -882,20 +883,24 @@ fn practices_of_one_connection_keep_their_own_names() {
         named.sort();
         named
     };
-    let both = ["Example Family Practice", "Sample Foot Clinic"];
-    let rows = e.ok(&["results", "--person", "Robin"]);
-    assert_eq!(names(&rows, "/sources/0"), both, "{rows}");
-    let visits = e.ok(&["timeline", "--person", "Robin", "--kind", "encounter"]);
-    assert_eq!(names(&visits, "/source"), both, "{visits}");
+    let all = [
+        "Example Eye Center",
+        "Placeholder Hearing Clinic",
+        "Sample Skin Studio",
+    ];
+    let rows = e.ok(&["results", "--person", "Alex"]);
+    assert_eq!(names(&rows, "/sources/0"), all, "{rows}");
+    let visits = e.ok(&["timeline", "--person", "Alex", "--kind", "encounter"]);
+    assert_eq!(names(&visits, "/source"), all, "{visits}");
     let labels: Vec<Value> = view("records-encounter-0.json")
         .as_array()
         .unwrap()
         .iter()
         .map(|r| r["provenance"][0]["source"]["label"].clone())
         .collect();
-    assert_eq!(labels.len(), 2);
+    assert_eq!(labels.len(), 3);
     assert!(
-        both.iter().all(|b| labels.contains(&(*b).into())),
+        all.iter().all(|p| labels.contains(&(*p).into())),
         "{labels:?}"
     );
     let mut sources: Vec<String> = view("summary.json")["sources"]
@@ -905,7 +910,7 @@ fn practices_of_one_connection_keep_their_own_names() {
         .map(|s| s["source"].as_str().unwrap().to_string())
         .collect();
     sources.sort();
-    assert_eq!(sources, both);
+    assert_eq!(sources, all);
     let _ = std::fs::remove_dir_all(&e.root);
 }
 
@@ -2577,11 +2582,11 @@ fn a_claim_is_titled_priced_by_category_and_linked_to_its_visit_and_results() {
     );
 }
 
-/// The synthetic stream with its claim replaced by one whose payer replaced
-/// the billed visit code (tests/fixtures/fhir/replaced-line-eob.json).
-fn with_replaced_line() -> String {
+/// The synthetic stream with another claim in place of its own, whose totals
+/// leave a line out (tests/fixtures/fhir/left-out-line-eob.json).
+fn with_left_out_line() -> String {
     let eob: Value =
-        serde_json::from_str(include_str!("fixtures/fhir/replaced-line-eob.json")).unwrap();
+        serde_json::from_str(include_str!("fixtures/fhir/left-out-line-eob.json")).unwrap();
     medrec::testdata::STREAM
         .lines()
         .map(|l| {
@@ -2798,7 +2803,7 @@ fn two_sources_of_one_record_keep_what_either_says_of_its_providers() {
 fn a_claim_line_its_totals_leave_out_is_marked_and_kept_through_reindex() {
     let base = Env::new("claim-lines");
     setup(&base);
-    let e = provider_env(&base, &with_replaced_line());
+    let e = provider_env(&base, &with_left_out_line());
     e.ok(&[
         "import",
         "--from",
@@ -2830,21 +2835,21 @@ fn a_claim_line_its_totals_leave_out_is_marked_and_kept_through_reindex() {
         .iter()
         .map(|i| i["counted"] != false)
         .collect();
-    assert_eq!(counted, [true, false, true]);
-    assert_eq!(f["items"][0]["revenue"]["code"], "0450");
+    assert_eq!(counted, [true, true, false, true]);
+    assert_eq!(f["items"][0]["revenue"]["code"], "0420");
     assert_eq!(
         f["payer_notes"][0],
-        "Z9 -- Processed under the member's plan."
+        "P7 -- A sample note about the whole claim."
     );
 
     // Readers give the claim's totals.
     let claims = e.ok(&["timeline", "--kind", "claim"]);
     assert_eq!(
         claims["items"][0]["detail"],
-        "billed 1280.0 USD, plan paid 552.0 USD, you owe 200.0 USD"
+        "billed 390.0 USD, plan paid 186.0 USD, you owe 42.0 USD"
     );
     // A line's processing note is searchable.
-    let hits = e.ok(&["search", "coding policy"]);
+    let hits = e.ok(&["search", "session limit"]);
     assert_eq!(hits["items"][0]["kind"], "claim", "{hits}");
 
     // A claim filed by 0.8.1, without these fields, takes them on reindex.

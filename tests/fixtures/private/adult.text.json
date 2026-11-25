@@ -2,7 +2,7 @@
  "schema": "medrec-text/v1",
  "person": "p_privateadultaaaaaaaa",
  "texts": {
-  "d_counselletteraaaaaaa": "Example Counseling Center\nLetter\nNext session in four weeks.",
-  "d_physicalavsaaaaaaaaa": "Example Family Practice\nAfter Visit Summary\nBlood count recheck in three months."
+  "d_quitnoticeaaaaaaaaaa": "Sample Addiction Services\nLetter\nThe next class is in the cedar room.",
+  "d_headsummaryaaaaaaaaa": "Sample Headache Clinic\nAfter Visit Summary\nBring the diary in six weeks."
  }
 }

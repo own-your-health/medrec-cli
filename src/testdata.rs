@@ -11,8 +11,8 @@
 //! <DIR>/dicom/cd2/    the same study with a second series
 //! <DIR>/dicom/ct.zip  a CT study for the adult, zipped (needs bsdtar)
 //! <DIR>/provider/     a fake provider CLI (`fakeprov`) and its streams: the
-//!                     one it prints, and three patients' of one connection
-//!                     (`--patient family-1`, `foot-1`, `skin-1`)
+//!                     one it prints, and four patients' of one connection
+//!                     (`--patient eye-1`, `studio-1`, `hearing-1`, `sports-1`)
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -77,10 +77,10 @@ pub fn stream_with_summary(rendering: &str, finding: &str, version: &str) -> Str
     out
 }
 
-/// What one connection serves, as `(patient, person, stream)`: Robin at two
-/// practices, with a visit and a result at each on one day, and Alex at a
-/// third that holds no records.
-pub fn connection_streams() -> [(&'static str, &'static str, String); 3] {
+/// What one connection serves, as `(patient, person, stream)`: Alex at three
+/// practices, with a visit and a result at each on one day, and Robin at a
+/// fourth that holds no records.
+pub fn connection_streams() -> [(&'static str, &'static str, String); 4] {
     let stream = |patient: &str, practice: &str, robin: bool, visit: &str, hour: &str| {
         let (given, born, relationship) = match robin {
             true => ("Robin", "2020-02-02", "proxy"),
@@ -97,24 +97,26 @@ pub fn connection_streams() -> [(&'static str, &'static str, String); 3] {
             .replace("{{HOUR}}", hour)
             .replace("{{PULLED}}", &format!("2026-03-05T{hour}:00:00Z"))
     };
-    let family = stream(
-        "family-1",
-        "Example Family Practice",
-        true,
-        "Office visit",
-        "15",
+    let eye = stream("eye-1", "Example Eye Center", false, "Eye check", "14");
+    let studio = stream("studio-1", "Sample Skin Studio", false, "Skin check", "16");
+    let hearing = stream(
+        "hearing-1",
+        "Placeholder Hearing Clinic",
+        false,
+        "Hearing check",
+        "18",
     );
-    let foot = stream("foot-1", "Sample Foot Clinic", true, "Sample visit", "19");
-    let skin: String = stream("skin-1", "Placeholder Skin Clinic", false, "", "20")
+    let sports: String = stream("sports-1", "Example Sports Clinic", true, "", "20")
         .replace(r#","Encounter":1,"Observation":1"#, "")
         .lines()
-        .filter(|l| !l.contains(r#""skin-1-"#))
+        .filter(|l| !l.contains(r#""sports-1-"#))
         .map(|l| format!("{l}\n"))
         .collect();
     [
-        ("family-1", "Robin", family),
-        ("foot-1", "Robin", foot),
-        ("skin-1", "Alex", skin),
+        ("eye-1", "Alex", eye),
+        ("studio-1", "Alex", studio),
+        ("hearing-1", "Alex", hearing),
+        ("sports-1", "Robin", sports),
     ]
 }
 

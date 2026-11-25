@@ -325,9 +325,8 @@ pub fn counted(item: &Value) -> bool {
 /// alone is too little to go on: a payer's totals can give a figure that
 /// is not its lines' sum.
 ///
-/// A payer can list a line it then leaves out of the claim: UHC lists the
-/// billed code it replaced, at the member's cost, beside its replacement,
-/// and lines it wrote off. The same shapes also occur on lines the totals
+/// A payer can list a line it then leaves out of the claim: one it replaced
+/// with another, or wrote off. The same amounts also occur on lines the totals
 /// count, so only the totals tell them apart.
 pub fn left_out(items: &[Value], totals: &Map<String, Value>) -> Vec<usize> {
     let n = items.len();
@@ -777,56 +776,51 @@ mod tests {
             t.insert("you_owe".into(), usd(owed));
             t
         };
-        // A replaced billed code at the member's cost, beside its
-        // replacement and a counted line.
-        let replaced = [
-            line("1500.00", "650.00", "250.00"),
-            line("1800.00", "0", "1800.00"),
-            line("100.00", "40.00", "0"),
+        // One line of four.
+        let four = [
+            line("220.00", "130.00", "15.00"),
+            line("75.00", "60.00", "0"),
+            line("310.00", "200.00", "35.00"),
+            line("140.00", "0", "140.00"),
+        ];
+        let left = totals("605.00", "390.00", "50.00");
+        assert_eq!(left_out(&four, &left), [3]);
+        // Two, left out together.
+        let five = [
+            line("80.00", "64.00", "16.00"),
+            line("25.00", "0", "0"),
+            line("60.00", "48.00", "12.00"),
+            line("33.00", "0", "0"),
+            line("10.00", "8.00", "2.00"),
         ];
         assert_eq!(
-            left_out(&replaced, &totals("1600.00", "690.00", "250.00")),
-            [1]
-        );
-        // Two written-off lines, left out together.
-        let written_off = [
-            line("400.00", "0", "0"),
-            line("300.00", "200.00", "20.00"),
-            line("400.00", "0", "0"),
-        ];
-        assert_eq!(
-            left_out(&written_off, &totals("300.00", "200.00", "20.00")),
-            [0, 2]
+            left_out(&five, &totals("150.00", "120.00", "30.00")),
+            [1, 3]
         );
         // Sums that agree leave nothing out.
-        assert!(left_out(&replaced, &totals("3400.00", "690.00", "2050.00")).is_empty());
+        assert!(left_out(&four, &totals("745.00", "390.00", "190.00")).is_empty());
         // Two lines alike: either could be the one left out, so neither is.
         let alike = [
-            line("50", "0", "0"),
-            line("50", "0", "0"),
-            line("70", "60", "10"),
+            line("15", "0", "0"),
+            line("45", "40", "5"),
+            line("15", "0", "0"),
         ];
-        assert!(left_out(&alike, &totals("120", "60", "10")).is_empty());
-        // Totals that no set of lines explains (a billed total of one line
-        // while the plan paid every line) mark nothing.
-        let rental = [
-            line("90", "70", "0"),
-            line("90", "70", "0"),
-            line("90", "70", "0"),
-        ];
-        assert!(left_out(&rental, &totals("90", "210", "0")).is_empty());
+        assert!(left_out(&alike, &totals("60", "40", "5")).is_empty());
+        // Totals that no set of lines explains mark nothing.
+        let apart = [line("30", "20", "0"), line("30", "20", "0")];
+        assert!(left_out(&apart, &totals("30", "40", "0")).is_empty());
         // Never every line, nor one claim of one line.
-        assert!(left_out(&replaced[1..2], &totals("0", "0", "0")).is_empty());
+        assert!(left_out(&four[3..], &totals("0", "0", "0")).is_empty());
         // Another currency, or a name only the totals give, decides nothing
         // and is not compared.
-        let mut eur = totals("1600.00", "690.00", "250.00");
+        let mut eur = left.clone();
         eur.insert(
             "billed".into(),
-            json!({"amount": "1600.00", "currency": "EUR"}),
+            json!({"amount": "605.00", "currency": "EUR"}),
         );
-        assert!(left_out(&replaced, &eur).is_empty());
+        assert!(left_out(&four, &eur).is_empty());
         let mut owed_only = Map::new();
-        owed_only.insert("you_owe".into(), usd("250.00"));
+        owed_only.insert("you_owe".into(), usd("50.00"));
         let unpriced = [json!({"amounts": {"billed": usd("1")}}), json!({})];
         assert!(left_out(&unpriced, &owed_only).is_empty());
         // An amount too large to add decides nothing: 10^34 parses (10^38
@@ -842,17 +836,17 @@ mod tests {
         assert_eq!(add(&usd(&huge), &usd(&huge)), None);
         // One amount compared is too little to go on.
         let mut billed_only = Map::new();
-        billed_only.insert("billed".into(), usd("1600.00"));
-        assert!(left_out(&replaced, &billed_only).is_empty());
+        billed_only.insert("billed".into(), usd("605.00"));
+        assert!(left_out(&four, &billed_only).is_empty());
         // A line left out adds to no sum the totals do not give.
-        let mut items = replaced.to_vec();
-        items[1]["counted"] = json!(false);
+        let mut items = four.to_vec();
+        items[3]["counted"] = json!(false);
         for it in items.iter_mut() {
             it["amounts"]["copay"] = usd("5.00");
         }
-        let got = claim_amounts(totals("1600.00", "690.00", "250.00"), &items, None);
-        assert_eq!(got["copay"]["amount"], "10.00");
-        assert!(counted(&items[0]) && !counted(&items[1]));
+        let got = claim_amounts(left, &items, None);
+        assert_eq!(got["copay"]["amount"], "15.00");
+        assert!(counted(&items[0]) && !counted(&items[3]));
     }
 
     fn rec(id: &str, kind: &str, date: &str, fields: Value) -> Record {
