@@ -13,7 +13,7 @@
 use std::collections::BTreeSet;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use pk_cli_core::{private_file, CliError};
 use serde::{Deserialize, Serialize};
@@ -103,8 +103,10 @@ const COLUMNS: &[(usize, &str)] = &[
     ),
 ];
 
-/// How long the download may take, and the longest row.
-const TIMEOUT: Duration = Duration::from_secs(3 * 60 * 60);
+/// How long one read of the server may take, and the whole download.
+const READ: Duration = Duration::from_secs(60);
+const WHOLE: Duration = Duration::from_secs(2 * 60 * 60);
+/// The longest row.
 const MAX_ROW: usize = 64 * 1024;
 /// The most the zip's files may hold together.
 const MAX_INSIDE: u64 = 64 << 30;
@@ -223,8 +225,18 @@ impl Wanted {
         w
     }
 
+    /// What identifies these: one line each, of its kind and value, in
+    /// order.
     fn sha256(&self) -> String {
-        sha256_hex(format!("{self:?}").as_bytes())
+        let npis = self.npis.iter().map(|n| format!("npi {n}\n"));
+        let states = self.states.iter().map(|s| format!("state {s}\n"));
+        let people = self.people.iter().map(|(l, i)| format!("person {i} {l}\n"));
+        sha256_hex(
+            npis.chain(states)
+                .chain(people)
+                .collect::<String>()
+                .as_bytes(),
+        )
     }
 
     fn wants(&self, row: &Row) -> bool {
@@ -327,7 +339,7 @@ pub fn people(printed: &str) -> BTreeSet<(String, char)> {
 
 /// The monthly file the page lists, with the size the server gives it.
 pub fn offer(source: &Source) -> Result<Offer, CliError> {
-    let http = client(Duration::from_secs(60))?;
+    let http = client()?;
     let page = get(&http, &format!("{}{PAGE}", source.base))?
         .text()
         .map_err(upstream)?;
@@ -389,12 +401,12 @@ fn monthly(page: &str) -> Option<(String, String)> {
         .max()
 }
 
-fn client(timeout: Duration) -> Result<reqwest::blocking::Client, CliError> {
+/// `timeout` is of each read of a body, not of the whole.
+fn client() -> Result<reqwest::blocking::Client, CliError> {
     reqwest::blocking::Client::builder()
         .user_agent(concat!("medrec/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(Duration::from_secs(30))
-        .timeout(timeout)
-        .tcp_keepalive(Duration::from_secs(30))
+        .timeout(READ)
         .redirect(pk_cli_core::transport::same_host_redirects())
         .build()
         .map_err(upstream)
@@ -429,8 +441,9 @@ pub fn fetch(
     path: &Path,
     progress: &mut dyn FnMut(u64),
 ) -> Result<Fetched, CliError> {
-    let r = get(&client(TIMEOUT)?, &offer.url)?;
-    let (about, lines) = read_zip(r, offer.bytes, source.min_rows, wanted, progress)
+    let r = get(&client()?, &offer.url)?;
+    let until = Instant::now() + WHOLE;
+    let (about, lines) = read_zip(r, offer.bytes, source.min_rows, wanted, until, progress)
         .map_err(|e| CliError::Upstream(format!("CMS's NPPES file was not kept: {e}")))?;
     let about = Kept {
         schema: SCHEMA.into(),
@@ -469,29 +482,36 @@ impl Kept {
     }
 }
 
-/// Where the providers kept for the folder `folder_id` are.
+/// Where the kept providers are: in the cache and, unlike a code table,
+/// removed by `cache clear`, since the records chose them.
+pub fn dir() -> Option<PathBuf> {
+    Some(pk_cli_drive::cache::cache_base("medrec")?.join("directory"))
+}
+
+/// The providers kept for the folder `folder_id`.
 pub fn path(dir: &Path, folder_id: &str) -> PathBuf {
     dir.join(format!("{ID}-{folder_id}.jsonl"))
 }
 
-/// Every kept file in `dir`, by its first line: `None` for one that does not
-/// read.
-pub fn list(dir: &Path) -> Vec<Option<Kept>> {
-    let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)
+/// Every kept file in `dir`: the folder it is for, and its first line, or
+/// `None` when it does not read.
+pub fn list(dir: &Path) -> Vec<(String, Option<Kept>)> {
+    let mut found: Vec<(String, Option<Kept>)> = std::fs::read_dir(dir)
         .into_iter()
         .flatten()
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| {
-            p.file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(|n| n.starts_with(&format!("{ID}-")) && n.ends_with(".jsonl"))
+        .filter_map(|e| {
+            let path = e.ok()?.path();
+            let name = path.file_name()?.to_str()?;
+            let folder = name
+                .strip_prefix(ID)?
+                .strip_prefix('-')?
+                .strip_suffix(".jsonl")?
+                .to_string();
+            Some((folder, Directory::load(&path).map(|d| d.about)))
         })
         .collect();
-    paths.sort();
-    paths
-        .iter()
-        .map(|p| Directory::load(p).map(|d| d.about))
-        .collect()
+    found.sort_by(|a, b| a.0.cmp(&b.0));
+    found
 }
 
 impl Directory {
@@ -518,11 +538,18 @@ struct Tap<'a, R> {
     r: R,
     sha: Sha256,
     n: u64,
+    until: Instant,
     progress: &'a mut dyn FnMut(u64),
 }
 
 impl<R: Read> Read for Tap<'_, R> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if Instant::now() > self.until {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "the download took too long",
+            ));
+        }
         let n = self.r.read(buf)?;
         self.sha.update(&buf[..n]);
         self.n += n as u64;
@@ -573,6 +600,7 @@ fn read_zip(
     size: u64,
     min_rows: u64,
     wanted: &Wanted,
+    until: Instant,
     progress: &mut dyn FnMut(u64),
 ) -> Result<(Kept, Vec<u8>), String> {
     let mut r = BufReader::with_capacity(
@@ -581,6 +609,7 @@ fn read_zip(
             r: r.take(size + 1),
             sha: Sha256::new(),
             n: 0,
+            until,
             progress,
         },
     );
@@ -904,13 +933,17 @@ mod tests {
     }
 
     fn read(z: &[u8], min: u64, w: &Wanted) -> Result<(Kept, Vec<Provider>), String> {
-        let (about, lines) = read_zip(z, z.len() as u64, min, w, &mut |_| {})?;
+        let (about, lines) = read_zip(z, z.len() as u64, min, w, soon(), &mut |_| {})?;
         let providers = lines
             .split(|b| *b == b'\n')
             .filter(|l| !l.is_empty())
             .map(|l| serde_json::from_slice(l).unwrap())
             .collect();
         Ok((about, providers))
+    }
+
+    fn soon() -> Instant {
+        Instant::now() + Duration::from_secs(60)
     }
 
     fn kept(w: &Wanted) -> Vec<String> {
@@ -1020,8 +1053,14 @@ mod tests {
         }
         let mut longer = z.clone();
         longer.push(0);
-        assert!(read_zip(&longer[..], z.len() as u64, 1, &w, &mut |_| {}).is_err());
-        assert!(read_zip(&z[..], z.len() as u64 + 1, 1, &w, &mut |_| {}).is_err());
+        let size = z.len() as u64;
+        assert!(read_zip(&longer[..], size, 1, &w, soon(), &mut |_| {}).is_err());
+        assert!(read_zip(&z[..], size + 1, 1, &w, soon(), &mut |_| {}).is_err());
+
+        // A download past its time.
+        let past = Instant::now() - Duration::from_secs(1);
+        let e = read_zip(&z[..], size, 1, &w, past, &mut |_| {}).unwrap_err();
+        assert!(e.contains("too long"), "{e}");
 
         // A checksum that is not its file's.
         let at = z
@@ -1120,7 +1159,22 @@ mod tests {
         );
         assert!(w.people.contains(&("EXAMPLE".into(), 'C')));
         assert!(!w.people.contains(&("SAMPLE".into(), 'J')));
-        assert_ne!(w.sha256(), Wanted::default().sha256());
+    }
+
+    /// Compared from one run to the next to tell whether the records need
+    /// other rows, so it is the same in every build.
+    #[test]
+    fn what_is_wanted_has_one_hash() {
+        let w = Wanted {
+            npis: BTreeSet::from(["0000000006".into(), "0000000014".into()]),
+            states: BTreeSet::from(["FL".into()]),
+            people: BTreeSet::from([("SAMPLE".into(), 'J')]),
+        };
+        assert_eq!(
+            w.sha256(),
+            sha256_hex(b"npi 0000000006\nnpi 0000000014\nstate FL\nperson J SAMPLE\n")
+        );
+        assert_eq!(Wanted::default().sha256(), sha256_hex(b""));
     }
 
     /// CMS's server: the page, and the file's size and bytes.
@@ -1189,7 +1243,8 @@ mod tests {
         assert_eq!(d.about.sha256, sha256_hex(&file));
         assert!(d.about.is_current(&offer_, &w));
         assert!(!d.about.is_current(&offer_, &Wanted::default()));
-        assert_eq!(list(&dir), [Some(d.about.clone())]);
+        let folder = "f_aaaaaaaaaaaaaaaaaaaa".to_string();
+        assert_eq!(list(&dir), [(folder.clone(), Some(d.about.clone()))]);
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -1228,7 +1283,7 @@ mod tests {
         changed[last] ^= 1;
         std::fs::write(&path, changed).unwrap();
         assert!(Directory::load(&path).is_none());
-        assert_eq!(list(&dir), [None]);
+        assert_eq!(list(&dir), [(folder, None)]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1249,12 +1304,13 @@ mod tests {
         let p = std::env::var("MEDREC_NPPES").unwrap();
         let f = std::fs::File::open(&p).unwrap();
         let size = f.metadata().unwrap().len();
-        let started = std::time::Instant::now();
+        let started = Instant::now();
         let (about, _) = read_zip(
             f,
             size,
             CMS.min_rows,
             &wanted(&[], &["WY"], &[]),
+            soon(),
             &mut |_| {},
         )
         .unwrap();

@@ -544,6 +544,10 @@ fn the_code_tables_need_no_profile_and_start_absent() {
     assert_eq!(rows[0]["state"], "absent");
     assert_eq!(rows[1]["id"], "nppes");
     assert_eq!(rows[1]["state"], "absent");
+    for k in ["version", "date", "bytes", "rows", "sha256"] {
+        assert!(rows[1][k].is_null(), "{k}");
+    }
+    assert!(rows[1].get("folder").is_none());
     assert_eq!(rows[0]["sha256"].as_str().unwrap().len(), 64);
     for (args, why) in [
         (&["tables", "fetch", "nosuch"][..], "no table `nosuch`"),
@@ -555,6 +559,8 @@ fn the_code_tables_need_no_profile_and_start_absent() {
             &["tables", "fetch", "icd10cm", "--file", "/nonexistent.zip"][..],
             "nonexistent.zip",
         ),
+        (&["tables", "fetch", "icd10cm", "--force"][..], "--force"),
+        (&["tables", "fetch", "--force"][..], "required"),
     ] {
         let out = medrec().args(args).output().unwrap();
         assert_eq!(out.status.code(), Some(2), "{args:?}");
@@ -614,7 +620,8 @@ fn cache_clear_keeps_the_code_tables() {
     std::fs::create_dir_all(base.join("tables")).unwrap();
     std::fs::create_dir_all(base.join("copies")).unwrap();
     std::fs::write(base.join("tables/icd10cm-FY2027.zip"), b"x").unwrap();
-    std::fs::write(base.join("tables/nppes-f_x.jsonl"), b"x").unwrap();
+    std::fs::create_dir_all(base.join("directory")).unwrap();
+    std::fs::write(base.join("directory/nppes-f_x.jsonl"), b"x").unwrap();
     std::fs::write(base.join("copies/a.pdf"), b"x").unwrap();
     let run = |args: &[&str]| {
         medrec()
@@ -623,14 +630,19 @@ fn cache_clear_keeps_the_code_tables() {
             .output()
             .unwrap()
     };
+    // One that does not read is there for its folder, and never used.
+    let v = json_of(&run(&["--json", "tables", "list"]));
+    assert_eq!(v["items"][1]["state"], "changed");
+    assert_eq!(v["items"][1]["folder"], "f_x");
     let out = run(&["--json", "cache", "clear"]);
     assert!(out.status.success());
-    assert_eq!(json_of(&out)["files"], 1);
+    assert_eq!(json_of(&out)["files"], 2);
+    assert!(!base.join("directory").exists());
     assert!(base.join("tables/icd10cm-FY2027.zip").exists());
     assert!(!base.join("copies").exists());
     // A file that is not the recorded one is there and never read.
     let v = json_of(&run(&["--json", "tables", "list"]));
     assert_eq!(v["items"][0]["state"], "changed");
-    assert_eq!(v["items"][1]["state"], "changed");
+    assert_eq!(v["items"][1]["state"], "absent");
     let _ = std::fs::remove_dir_all(&dir);
 }

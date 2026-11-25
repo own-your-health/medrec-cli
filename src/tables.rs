@@ -72,14 +72,19 @@ pub struct Row {
     pub id: &'static str,
     pub title: &'static str,
     pub publisher: &'static str,
-    pub version: String,
-    pub date: String,
+    /// Null, as the four below are, for the provider directory when it was
+    /// never fetched or does not read: each month's file is another.
+    pub version: Option<String>,
+    pub date: Option<String>,
     pub state: State,
-    pub bytes: u64,
-    pub rows: u64,
-    pub sha256: String,
+    pub bytes: Option<u64>,
+    pub rows: Option<u64>,
+    pub sha256: Option<String>,
     pub url: String,
-    /// The rows kept for a records folder, of a table read for one.
+    /// The records folder the provider directory was read for, and how many
+    /// of its rows are kept.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kept: Option<u64>,
 }
@@ -140,44 +145,46 @@ pub fn list() -> Vec<Row> {
             id: t.id,
             title: t.title,
             publisher: t.publisher,
-            version: t.version.into(),
-            date: t.date.into(),
+            version: Some(t.version.into()),
+            date: Some(t.date.into()),
             state: dir.as_deref().map_or(State::Absent, |d| t.verified(d).0),
-            bytes: t.bytes,
-            rows: t.rows as u64,
-            sha256: t.sha256.into(),
+            bytes: Some(t.bytes),
+            rows: Some(t.rows as u64),
+            sha256: Some(t.sha256.into()),
             url: t.url.into(),
+            folder: None,
             kept: None,
         })
         .collect();
-    let mut kept = dir.as_deref().map(nppes::list).unwrap_or_default();
+    let kept = nppes::dir().map(|d| nppes::list(&d)).unwrap_or_default();
     if kept.is_empty() {
-        rows.push(directory_row(None, State::Absent));
+        rows.push(directory_row(None, None, State::Absent));
     }
-    for k in kept.drain(..) {
-        let state = if k.is_some() {
-            State::Ready
-        } else {
-            State::Changed
+    for (folder, k) in kept {
+        let state = match k {
+            Some(_) => State::Ready,
+            None => State::Changed,
         };
-        rows.push(directory_row(k, state));
+        rows.push(directory_row(Some(folder), k, state));
     }
     rows
 }
 
-fn directory_row(k: Option<nppes::Kept>, state: State) -> Row {
+fn directory_row(folder: Option<String>, k: Option<nppes::Kept>, state: State) -> Row {
+    let k = k.as_ref();
     Row {
         id: nppes::ID,
         title: nppes::TITLE,
         publisher: nppes::PUBLISHER,
-        version: k.as_ref().map(|k| k.month.clone()).unwrap_or_default(),
-        date: k.as_ref().map(|k| k.date.clone()).unwrap_or_default(),
+        version: k.map(|k| k.month.clone()),
+        date: k.map(|k| k.date.clone()),
         state,
-        bytes: k.as_ref().map_or(0, |k| k.bytes),
-        rows: k.as_ref().map_or(0, |k| k.rows),
-        sha256: k.as_ref().map(|k| k.sha256.clone()).unwrap_or_default(),
-        kept: k.as_ref().map(|k| k.kept),
-        url: k.map_or_else(|| nppes::CMS.base.into(), |k| k.url),
+        bytes: k.map(|k| k.bytes),
+        rows: k.map(|k| k.rows),
+        sha256: k.map(|k| k.sha256.clone()),
+        url: k.map_or_else(|| nppes::CMS.base.into(), |k| k.url.clone()),
+        folder,
+        kept: k.map(|k| k.kept),
     }
 }
 

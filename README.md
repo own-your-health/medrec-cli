@@ -636,11 +636,12 @@ medrec tables list                                  # what is kept, and of which
 
 - **Only when asked.** `tables fetch` with no name leaves it out, and nothing
   runs it on a schedule. The size is stated before the download starts. With
-  no terminal, or with `--json`, it needs `--force` (exit 6 without it).
+  no terminal, or with `--json`, every run needs `--force` (exit 6 without
+  it), one that finds the same file kept and downloads nothing included.
 - **Nothing about the records is sent.** medrec asks `download.cms.gov`, over
   https, for the page that lists the file, the file's size, and the whole
   file. No name or number is looked up over the network.
-- **What is kept**, in `~/.cache/medrec/tables` and never in the records
+- **What is kept**, in `~/.cache/medrec/directory` and never in the records
   folder: the providers whose NPI the records carry, the organizations of the
   states the records' own provider addresses are in, and the people of those
   states whose surname and first initial a record prints with no NPI. The zip
@@ -653,7 +654,12 @@ medrec tables list                                  # what is kept, and of which
 - Records need their providers' NPI and state: those filed before 0.9.6 get
   them from `medrec reindex`.
 - The kept rows are public ones, but which people are among them follows from
-  the records. Deleting `nppes-<folder id>.jsonl` removes them.
+  the records. `medrec cache clear` removes them.
+- `tables list --json` has one row for each records folder it was read for,
+  with `folder` (the folder's id) and `kept` (how many rows), and one row with
+  neither, and null `version`, `date`, `bytes`, `rows` and `sha256`, when there
+  is none. `changed` is a file that does not read as it was written; it is
+  not used.
 
 NPPES gives what providers reported to CMS. medrec is not affiliated with or
 endorsed by CMS.

@@ -310,8 +310,9 @@ enum TablesCmd {
         /// Keep this downloaded zip as the one code table named.
         #[arg(long, value_name = "ZIP", requires = "ids")]
         file: Option<std::path::PathBuf>,
-        /// Fetch `nppes` without asking.
-        #[arg(long)]
+        /// Fetch `nppes` without asking. Every run of it with no terminal,
+        /// or with --json, needs this.
+        #[arg(long, requires = "ids")]
         force: bool,
     },
 }
@@ -878,8 +879,9 @@ enum AuthCmd {
 #[derive(Subcommand, Debug)]
 enum CacheCmd {
     /// Remove every copy medrec keeps on this machine (the records folder
-    /// itself is untouched). The next command reads from Drive again. The
-    /// run locks, the refresh state and the code tables stay.
+    /// itself is untouched), the provider directory's rows included. The
+    /// next command reads from Drive again. The run locks, the refresh state
+    /// and the code tables stay.
     Clear,
     /// The background refresh a stale cached read starts.
     #[command(hide = true)]
@@ -974,9 +976,15 @@ fn tables_cmd(cli: &Cli, cmd: &TablesCmd, store: &ConfigStore) -> Result<(), Cli
                     "--file is one code table's zip: name that one table".into(),
                 ));
             }
-            let dir = tables::dir().ok_or_else(|| {
-                CliError::Other("cannot resolve a cache directory (is $HOME set?)".into())
-            })?;
+            if *force && !directory {
+                return Err(CliError::Usage(
+                    "--force is for nppes: name it, or leave --force out".into(),
+                ));
+            }
+            let no_cache =
+                || CliError::Other("cannot resolve a cache directory (is $HOME set?)".into());
+            let dir = tables::dir().ok_or_else(no_cache)?;
+            let kept_in = nppes::dir().ok_or_else(no_cache)?;
             // Refused before anything is fetched or a sign-in is read.
             let cfg = if directory {
                 let cfg = load(store, cli)?;
@@ -995,7 +1003,7 @@ fn tables_cmd(cli: &Cli, cmd: &TablesCmd, store: &ConfigStore) -> Result<(), Cli
                 rows.push(to_value(&tables::fetch(t, &dir, file.as_deref())?));
             }
             if let Some(cfg) = cfg {
-                rows.push(to_value(&fetch_directory(cli, &cfg, &dir, *force)?));
+                rows.push(to_value(&fetch_directory(cli, &cfg, &kept_in, *force)?));
             }
             output::emit(json, "table-fetch", items(&rows), |v| {
                 table(v, &["id", "version", "status", "bytes"])
@@ -1022,7 +1030,7 @@ fn fetch_directory(
         .collect::<Result<Vec<_>, _>>()?;
     let wanted = nppes::Wanted::of(&indexes);
     if wanted.npis.is_empty() && wanted.states.is_empty() {
-        return Err(CliError::Usage(
+        return Err(CliError::NotFound(
             "the records give no provider's NPI or state, so there is nothing to keep: import \
              again, or run `medrec reindex` once after an upgrade from before 0.9.6"
                 .into(),

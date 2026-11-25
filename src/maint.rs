@@ -748,7 +748,8 @@ pub fn clear_local_copies() -> Result<Cleared, CliError> {
     };
     // `refresh/` stays too: it holds this machine's refresher id, and a
     // new one would make this Mac another machine to its own folder. So
-    // does `tables/`: published files, no copy of any record.
+    // does `tables/`: published files, no copy of any record. `directory/`
+    // is published rows the records chose, so it goes.
     for e in entries {
         if ["locks", "refresh", "tables"]
             .iter()
