@@ -23,8 +23,9 @@ real record, document, study or provider response.
   `health-records/v1` provider that `medrec::testdata::write_provider` writes.
   It lists the `login-profiles` capability. `fakeprov-info-unprofiled.json` is
   the same from before login profiles, `fakeprov-info-no-login.json` one
-  that needs no login, and `fakeprov-info-files.json` one that also reads
-  downloaded files (`records-files`). `fakeprov-profiles.json` is its
+  that needs no login, `fakeprov-info-files.json` one that also reads
+  downloaded files (`records-files`), and `fakeprov-info-files-only.json` one
+  that reads files and signs in nowhere. `fakeprov-profiles.json` is its
   `profiles list --json` (`profile-list/v1`: `adult1`, `adult2`).
 - `stream/summary.xml` is a synthetic clinical summary, shaped like one a
   portal renders on each export: `{{RENDERING}}` (its timestamp and document

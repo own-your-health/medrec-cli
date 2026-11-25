@@ -2454,6 +2454,8 @@ nothing is private.
   the item, or of the one it is private with. Absent otherwise. A reader shows
   the area and no more of it. A row of `medrec private list` has it too (`yes`
   in its table's `given`).
+- **`heading`** (0.9.10 and later): `true` on a private record that is a heading
+  (Panels, above): it has no entry in `tests.json`. Absent otherwise.
 - **What a source takes back still tells** (0.9.9 and later). Nothing opens
   because a record or a paper is entered in error, the person's or one of a
   person their events read (X1, X2): each rule is judged with what is and with
@@ -2636,9 +2638,11 @@ readers ship with medrec:
       on it says how many of its own are, of those the answer may show, in its
       `detail` ("1 entered in error, not shown"), and has `in_error` and
       `not_applied` in its `fields` when those are in the answer, each absent
-      when nothing is left of it. So with an event asked for by its id in a call
-      that names no person (0.9.10 and later; 0.9.9 named them all). One that is
-      private itself, asked for by its id or named, has all of its own.
+      when nothing is left of it (0.9.10 and later; 0.9.9 could give an empty
+      list). So with an event asked for by its id in a call that names no person
+      (0.9.10 and later; 0.9.9 named them all). One that is private itself, asked
+      for by its id or named, has all of its own (one named, 0.9.10 and later;
+      0.9.9 left out what was held back).
     - any other item its sources differ on has `standing` `sources differ` and
       `says`, as `standing.json`'s words are said; the household's own file is
       `the household's own file`. It keeps its `status`.
@@ -2951,8 +2955,9 @@ characters and the invisible format characters that reorder or hide text
 
 `records_not_served` is of an export through a sign-in of all the source has: it is
 `null` with `--since`, where the export's header has `since`, with `--from-files`,
-where the source's folder has imports of another patient, and where a skip names
-neither a type nor a search. A record is not counted while any of its resources
+with neither `--from-profile` nor `--from-files` for a provider that reads files
+(`records-files`), where the source's folder has imports of another patient, and
+where a skip names neither a type nor a search. A record is not counted while any of its resources
 from this source is in the export, or may be among those it left out (its type was
 withheld or cut short, it is itself among the skips, or it is a `MedicationRequest`
 and a `MedicationDispense` is), nor when it is about another person. Nor is it

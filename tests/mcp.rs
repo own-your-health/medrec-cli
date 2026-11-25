@@ -2899,6 +2899,16 @@ fn a_heading_is_no_test_and_names_nothing_in_error() {
     let heads: BTreeSet<&str> = heads.map(|r| r["id"].as_str().unwrap()).collect();
     let want = [flagged_id.as_str(), &emptied_id, GROWN[11], MIXED];
     assert_eq!(heads, BTreeSet::from(want));
+    // So does private.json of those that are private.
+    let private = files["private"]["records"].as_object().unwrap();
+    let said: BTreeSet<&str> = (private.iter())
+        .filter(|(_, v)| v.get("heading").is_some_and(|h| *h == true))
+        .map(|(id, _)| id.as_str())
+        .collect();
+    assert!(!said.is_empty() && said.len() < private.len());
+    assert!(said.is_subset(&heads));
+    let unsaid = private.keys().filter(|id| !said.contains(id.as_str()));
+    assert!(unsaid.into_iter().all(|id| !heads.contains(id.as_str())));
     assert!(!shards
         .iter()
         .any(|r| r["fields"]["members"].to_string().contains(&wrong_id)));
