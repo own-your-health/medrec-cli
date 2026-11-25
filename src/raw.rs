@@ -732,6 +732,18 @@ mod tests {
         assert_eq!((f.records, f.unread, f.types[0].files), (2, 0, 1));
     }
 
+    /// A copy that is not there is none; one that cannot be read is an error.
+    #[test]
+    fn a_copy_that_cannot_be_read_is_an_error() {
+        let dir = crate::testutil::temp_dir("raw-copy");
+        std::fs::write(dir.join("SECRET"), "{}").unwrap();
+        assert_eq!(copy(&dir, "SECRET").unwrap().as_deref(), Some(&b"{}"[..]));
+        assert!(copy(&dir, "gone").unwrap().is_none());
+        let e = copy(&dir, "SECRET/one").unwrap_err();
+        assert!(!e.to_json().to_string().contains("SECRET"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// An error names no file, and is of the kind it was.
     #[test]
     fn an_error_of_a_count_names_no_file() {
