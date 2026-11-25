@@ -1152,15 +1152,20 @@ fn what_is_entered_in_error_is_counted_and_opened_by_its_id() {
     // A private one of an open event is not named where no person is, nor what
     // was decided of it; a private event is shown whole.
     e.ok(&["private", "mark", LETTER]);
+    let place = events["items"][1]["place"].as_str().unwrap().to_string();
     let of = |v: &Value| v["items"][0]["fields"].clone();
     let some = of(&ask(RECORDS, json!({"kind": "events", "id": visit})));
     assert_eq!(some["in_error"], json!([SKIN_BILL]));
     assert!(!some.to_string().contains(LETTER), "{some}");
-    assert!(!some.to_string().contains("o_together"), "{some}");
+    assert!(some.get("not_applied").is_none(), "{some}");
     e.ok(&["private", "mark", &visit]);
-    let whole = of(&ask(RECORDS, json!({"kind": "events", "id": visit})));
-    assert_eq!(whole["in_error"], json!([LETTER, SKIN_BILL]));
-    assert_eq!(whole["not_applied"][0]["id"], "o_togetheraaaaaaaaaaaa");
+    let named = json!({"kind": "events", "name": place, "response_format": "detailed"});
+    for args in [json!({"kind": "events", "id": visit}), named] {
+        let v = ask(RECORDS, args);
+        let whole = &item(&v, &visit)["fields"];
+        assert_eq!(whole["in_error"], json!([LETTER, SKIN_BILL]), "{v}");
+        assert_eq!(whole["not_applied"][0]["id"], "o_togetheraaaaaaaaaaaa");
+    }
     e.ok(&["private", "reset", &visit]);
     e.ok(&["private", "reset", LETTER]);
     let views: Value = {
