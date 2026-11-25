@@ -786,7 +786,7 @@ const DEGREES: &[&str] = &[
 ];
 
 /// Whether what `field` prints is a person's name.
-fn a_person(field: &str, text: &str) -> bool {
+pub(crate) fn a_person(field: &str, text: &str) -> bool {
     let degree = || {
         text.split(|c: char| c.is_whitespace() || c == ',')
             .any(|w| DEGREES.contains(&nppes::fold(w).as_str()))

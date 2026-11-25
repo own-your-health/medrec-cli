@@ -12,8 +12,10 @@ use crate::{events, given, labels, nppes, private};
 /// Who a paper says is of an area.
 struct Said {
     area: &'static str,
-    /// What it says at its head.
-    texts: Vec<String>,
+    /// What it says at its head: its organization, or its title.
+    text: String,
+    /// Whether that is the organization, and says the area itself.
+    organization: bool,
     /// The clinician whose bill it is (N5), as the claims print them.
     people: BTreeSet<(String, char)>,
     /// Only by what a source gave, that the paper does not show.
@@ -21,35 +23,69 @@ struct Said {
 }
 
 impl Said {
-    /// A paper's organization and its title, when either says an area. What
-    /// a paper says inside is not read: it names others too.
-    fn paper(d: &Document, gave: bool) -> Option<Said> {
-        let texts: Vec<String> = [&d.organization, &d.title]
-            .into_iter()
-            .filter_map(|t| t.clone())
-            .collect();
-        let area = texts.iter().find_map(|t| private::place_area(t))?;
-        Some(Said {
-            area,
-            texts,
-            people: BTreeSet::new(),
-            gave,
-        })
+    /// A paper's organization, where it says an area, and its title, where it
+    /// or the organization does. What a paper says inside is not read: it
+    /// names others too.
+    fn paper(d: &Document, gave: bool) -> Vec<Said> {
+        let area = |t: &Option<String>| private::place_area(t.as_deref()?);
+        let (of, titled) = (area(&d.organization), area(&d.title));
+        let said = |text: &Option<String>, area: Option<&'static str>, organization: bool| {
+            Some(Said {
+                area: area?,
+                text: text.clone()?,
+                organization,
+                people: BTreeSet::new(),
+                gave,
+            })
+        };
+        let each = [
+            said(&d.organization, of, true),
+            said(&d.title, of.or(titled), false),
+        ];
+        each.into_iter().flatten().collect()
     }
 
     /// The practice an event's bill says a clinician is of.
     fn alias(a: &Value) -> Option<Said> {
         Some(Said {
             area: private::place_area(a["organization"].as_str()?)?,
-            texts: Vec::new(),
+            text: String::new(),
+            organization: false,
             people: nppes::people(a["clinician"].as_str()?),
             gave: false,
         })
     }
 
-    /// Whether it names one of these people.
-    fn names(&self, people: &BTreeSet<(String, char)>) -> bool {
-        !self.people.is_disjoint(people) || self.texts.iter().any(|t| names(t, people))
+    /// Whether it names one of these people. A name that may be a place's is
+    /// looked for in an organization alone.
+    fn names(&self, printed: &Printed) -> bool {
+        let people = &printed.people;
+        if !printed.a_person && !self.organization {
+            return false;
+        }
+        !self.people.is_disjoint(people) || names(&self.text, people)
+    }
+}
+
+/// The people a claim's provider can be.
+struct Printed {
+    people: BTreeSet<(String, char)>,
+    /// Whether the text is a person's: by an initial, a degree, or a comma
+    /// after the surname. `Kim Placeholder` can be a place.
+    a_person: bool,
+}
+
+impl Printed {
+    fn of(r: &Record) -> Option<Printed> {
+        let text = r.fields.get("provider").and_then(Value::as_str)?;
+        let people = nppes::people(text);
+        if events::says_organization(text) || people.is_empty() {
+            return None;
+        }
+        let mut words = text.split(|c: char| !c.is_alphanumeric());
+        let initial = words.any(|w| w.chars().count() == 1);
+        let a_person = initial || text.contains(',') || labels::a_person("provider", text);
+        Some(Printed { people, a_person })
     }
 }
 
@@ -76,7 +112,7 @@ impl Clinicians {
         let mut each: Vec<Said> = Vec::new();
         for d in &idx.documents {
             each.extend(Said::paper(d, false));
-            each.extend(given::papers_as_given(d).filter_map(|x| Said::paper(&x, true)));
+            each.extend(given::papers_as_given(d).flat_map(|x| Said::paper(&x, true)));
         }
         let aliases = events.iter().filter_map(|e| e["aliases"].as_array());
         each.extend(aliases.flatten().filter_map(Said::alias));
@@ -90,23 +126,13 @@ impl Clinicians {
             return None;
         }
         let of = |r: &Record| {
-            let people = printed(r)?;
-            let papers = self.0.iter().filter(|s| gave || !s.gave);
-            papers
-                .into_iter()
-                .find(|s| s.names(&people))
-                .map(|s| s.area)
+            let printed = Printed::of(r)?;
+            let mut papers = self.0.iter().filter(|s| gave || !s.gave);
+            papers.find(|s| s.names(&printed)).map(|s| s.area)
         };
         let given = || given::as_given(r).find_map(|x| of(&x));
         of(r).or_else(|| gave.then(given).flatten())
     }
-}
-
-/// The people a claim's printed provider can be.
-fn printed(r: &Record) -> Option<BTreeSet<(String, char)>> {
-    let text = r.fields.get("provider").and_then(Value::as_str)?;
-    let people = nppes::people(text);
-    (!events::says_organization(text) && !people.is_empty()).then_some(people)
 }
 
 #[cfg(test)]
@@ -178,6 +204,28 @@ mod tests {
         );
         let use_of = Some("substance_use");
         assert_eq!(by("Kim Placeholder, CADC", "Bill", "PLACEHOLDER K"), use_of);
+        // A name with no initial, degree or comma can be a place's.
+        assert_eq!(by("Kim Placeholder, LCSW", "Bill", "Kim Placeholder"), mind);
+        assert_eq!(
+            by(practice, "Visit with Kim Placeholder", "Kim Placeholder"),
+            None
+        );
+        assert_eq!(
+            by(
+                "Example Pediatrics",
+                "Psychotherapy letter",
+                "Example Pediatrics"
+            ),
+            None
+        );
+        assert_eq!(
+            by(
+                "Kim Placeholder, MD",
+                "Psychotherapy letter",
+                "K PLACEHOLDER"
+            ),
+            None
+        );
         // Another surname, another initial, and no initial at all.
         for provider in ["K SAMPLE", "J PLACEHOLDER", "PLACEHOLDER", "K P"] {
             assert_eq!(
