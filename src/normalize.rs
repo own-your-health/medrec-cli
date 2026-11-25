@@ -21,8 +21,6 @@ pub const RXNORM: &str = "http://www.nlm.nih.gov/research/umls/rxnorm";
 pub const CVX: &str = "http://hl7.org/fhir/sid/cvx";
 /// The field of a result that holds its parts.
 pub const COMPONENTS: &str = "components";
-/// The codes of those that have no value.
-pub const ABSENT: &str = "components_absent";
 /// The two parts of a blood pressure, by their LOINC codes.
 const SYSTOLIC: &str = "8480-6";
 const DIASTOLIC: &str = "8462-4";
@@ -50,7 +48,6 @@ pub const FIELDS: &[(&str, &[&str])] = &[
             "when",
             "value",
             COMPONENTS,
-            ABSENT,
             "reference_range",
             "interpretation",
             "category",
@@ -234,6 +231,7 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
         .find_map(|p| path_str(r, p))
         .map(str::to_string);
     let mut fields = Map::new();
+    let mut absent = Vec::new();
     if let Some(w) = &when {
         fields.insert("when".into(), json!(w));
     }
@@ -261,7 +259,7 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
             put(&mut fields, "period", r.get("period").cloned());
         }
         "Observation" => {
-            let (parts, absent) = components(r);
+            let (parts, without_value) = components(r);
             let value = observation_value(r);
             let own = value.as_ref().is_some_and(|v| !value_text(v).is_empty());
             let value = if own || parts.is_empty() {
@@ -274,9 +272,7 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
                 let parts: Vec<Value> = parts.into_iter().map(Value::Object).collect();
                 fields.insert(COMPONENTS.into(), parts.into());
             }
-            if !absent.is_empty() {
-                fields.insert(ABSENT.into(), absent.into());
-            }
+            absent = without_value;
             put(
                 &mut fields,
                 "reference_range",
@@ -598,6 +594,7 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
         errors: Vec::new(),
         fields_from: None,
         given: Vec::new(),
+        absent,
         documents: Vec::new(),
         provenance: vec![provenance],
     })
@@ -945,13 +942,12 @@ fn measured(q: &Value) -> Option<Value> {
 
 /// The parts of a reading that have a value, each as a result has its own, and
 /// the codes of those that have none.
-fn components(r: &Value) -> (Vec<Map<String, Value>>, Vec<Value>) {
+fn components(r: &Value) -> (Vec<Map<String, Value>>, Vec<Code>) {
     let parts = r.get("component").and_then(Value::as_array);
     let (mut out, mut absent) = (Vec::new(), Vec::new());
     for c in parts.into_iter().flatten() {
         let code = c.get("code").and_then(|c| codeable(c, &[LOINC]));
-        let code = code.filter(|c| c.display.is_some() || c.code.is_some());
-        let Some(code) = code.and_then(|c| serde_json::to_value(c).ok()) else {
+        let Some(code) = code.filter(|c| c.display.is_some() || c.code.is_some()) else {
             continue;
         };
         let value = observation_value(c).filter(|v| !value_text(v).is_empty());
@@ -960,7 +956,7 @@ fn components(r: &Value) -> (Vec<Map<String, Value>>, Vec<Value>) {
             continue;
         };
         let mut part = Map::new();
-        part.insert("code".into(), code);
+        put(&mut part, "code", serde_json::to_value(code).ok());
         part.insert("value".into(), value);
         put(
             &mut part,
@@ -1882,9 +1878,8 @@ mod tests {
             let parts = r.fields.get(COMPONENTS).and_then(Value::as_array);
             let parts = parts.cloned().unwrap_or_default();
             assert_eq!(json!(parts.len()), case["parts"], "{of}");
-            let absent = r.fields.get(ABSENT).and_then(Value::as_array);
-            let absent = absent.into_iter().flatten();
-            let absent: Vec<&Value> = absent.map(|c| &c["display"]).collect();
+            let absent = r.absent.iter().map(|c| c.display.as_deref());
+            let absent: Vec<Option<&str>> = absent.collect();
             assert_eq!(json!(absent), case["absent"], "{of}");
             assert!(
                 parts.iter().all(|p| p["code"]["display"].is_string()),

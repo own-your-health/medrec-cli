@@ -1270,7 +1270,8 @@ mod tests {
         assert_eq!(why(parts(coded.clone(), 2.into())), Some(MENTAL_HEALTH));
         let seen = parts(named("Second piece"), "Chlamydia seen".into());
         assert_eq!(why(seen), Some(SEXUAL_HEALTH));
-        let absent = |code: Value| json!({"components_absent": [code], "value": 3});
+        // As `given` has one with no value.
+        let absent = |code: Value| json!({"components": [{ "code": code }], "value": 3});
         assert_eq!(why(absent(named("Second piece"))), None);
         assert_eq!(why(absent(named("Chlamydia DNA"))), Some(SEXUAL_HEALTH));
         assert_eq!(why(absent(coded)), Some(MENTAL_HEALTH));

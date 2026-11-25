@@ -225,7 +225,6 @@ The last column is the FHIR element the value comes from.
 | `result` | `when` | as written | `effectiveDateTime`, `effectivePeriod.start`, `effectiveInstant` or `issued` |
 | `result` | `value` | `{value, unit, system}` (a quantity; 0.9.10 and later with `comparator`, one of `<`, `<=`, `>=` and `>`, where the source gives one); or (0.9.10 and later) a blood pressure, `{value, unit}`, whose `value` is the text `"128/76"` and not a number (its numbers are in `components`); else text, a boolean, a whole number or a date | `valueQuantity`, `valueString`, `valueCodeableConcept`, `valueBoolean`, `valueInteger`, `valueDateTime`; 0.9.10 and later `valueTime`, `valueRange` and `valueRatio` as text, and what its parts say where it has none of its own |
 | `result` | `components` | a list of parts, below (0.9.10 and later) | each `component` with a code and a value |
-| `result` | `components_absent` | a list of codes, below (0.9.10 and later) | each `component` with a code and no value |
 | `result` | `reference_range` | text | first `referenceRange` (its `text`, else its low and high) |
 | `result` | `interpretation` | text | first `interpretation` |
 | `result` | `category` | text | first `category` |
@@ -328,8 +327,9 @@ records filed before.
 its parts as the source orders them, `{code, value, reference_range,
 interpretation}`, each as a result's own (`code` is `{system, code, display}`),
 the last two absent where the part has none. A part with neither a code nor a
-name is not in it. One with no value is not either: `components_absent` has its
-code, which the rules of what is private read and no list shows. Where the Observation has a value of its own, `value` is that.
+name is not in it. One with no value is not either: the record's `given` has its
+code (What a source gave, below), which the rules of what is private read and no
+reader shows. Where the Observation has a value of its own, `value` is that.
 Otherwise it is what its parts say:
 
 - the two of a blood pressure, told by their LOINC codes (8480-6 and 8462-4) and
@@ -340,11 +340,15 @@ Otherwise it is what its parts say:
 
 A part is not a record. A reading is judged by the names and codes of its parts
 too, with a value and without, and by the texts of their values (Private, below).
-`medrec reindex` gives results and reports filed before what 0.9.10 reads of them.
-An import by a medrec before 0.9.10 drops `components`, `components_absent` and
-`categories` again: a reading that is private by its parts alone is then open
-until the next `medrec reindex`, so run 0.9.10 or later on every machine that
-writes the folder.
+`medrec reindex` (0.9.10 and later) reads each result's and report's `status`,
+`display`, `code`, `date` and `fields` again from the raw file they are of: of
+several sources', the one `fields_from` names, else one that an import lets write
+them and whose values agree with the record's (a `comparator` aside), else none,
+and the record stays as it is. A file that says it is entered in error, or that
+gives another `key`, writes nothing.
+An import by a medrec before 0.9.10 drops `components` and `categories` again: a
+reading that is private by its parts alone is then open until the next
+`medrec reindex`, so run 0.9.10 or later on every machine that writes the folder.
 
 **Words.** A condition's, an allergy's and a medicine's `words` (0.9.9 and
 later) is what each of its sources says of it that can differ between them.
@@ -453,8 +457,8 @@ is a medication's, a result's, a report's, a procedure's or a claim's, and `code
 a condition's, a medication's, a result's, a report's or a procedure's; `fields`
 are a claim's `diagnoses`, its `payer_notes` and its `items` (of each line
 `service`, `revenue`, `payer_notes` and `counted`), a result's `about`, its
-`components` (of each part its `code`, and its `value` where that is a text that
-says an area) and `components_absent` (0.9.10 and later), and the fields that print a provider (Providers, below); `npis` has the NPI of the provider a field prints,
+`components` (0.9.10 and later: of each part its `code`, of those with no value
+too, and its `value` where that is a text that says an area), and the fields that print a provider (Providers, below); `npis` has the NPI of the provider a field prints,
 by that field; `cli` is that of a source that no longer has the record.
 `raw_path` is the raw file of the current version of what gave it, absent
 where that is not known. A document's is `{raw_path, organization, title,
@@ -598,7 +602,8 @@ of, and conditions, allergies and medicines whose `status` or `fields`
 changed), `given_updated` (0.9.9 and later: records whose `given` gained
 something), `results_split` (0.9.9 and later: results about somebody else that
 were filed as the person's own, or in one record with it), `results_updated` (0.9.10
-and later: results and reports whose `fields` changed), `papers_updated` (0.9.9 and later: papers whose `also_from`,
+and later: results and reports whose `fields`, `status`, `display`, `code` or
+`date` changed), `papers_updated` (0.9.9 and later: papers whose `also_from`,
 `words`, `errors` or `given` changed) and `papers_unread` (0.9.9 and later: raw files of
 papers that do not read). From 0.9.9 a run makes every person's views again, even
 when no record changes.

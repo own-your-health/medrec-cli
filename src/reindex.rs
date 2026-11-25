@@ -58,7 +58,8 @@ pub struct Reindexed {
     pub given_updated: usize,
     /// Results that were filed with one about somebody else.
     pub results_split: usize,
-    /// Results and reports whose fields changed.
+    /// Results and reports whose values changed: their fields, status, name,
+    /// code or date.
     pub results_updated: usize,
     /// Papers whose sources, or what one says or gave of them, changed.
     pub papers_updated: usize,
@@ -78,7 +79,8 @@ pub struct PersonReindexed {
     pub statuses_updated: usize,
     pub given_updated: usize,
     pub results_split: usize,
-    /// Results and reports whose fields changed.
+    /// Results and reports whose values changed: their fields, status, name,
+    /// code or date.
     pub results_updated: usize,
     pub papers_updated: usize,
     pub papers_unread: usize,
@@ -574,7 +576,7 @@ fn given(
                 new.providers = crate::providers::of(&v, &new.fields, &mut held)?.refs;
                 gave.push(Given {
                     raw_path: Some(rel.clone()),
-                    ..given::of(&new)
+                    ..given::gives(&new)
                 });
             }
         }

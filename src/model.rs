@@ -490,6 +490,10 @@ pub struct Record {
     /// read and it does not show (0.9.9 and later).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub given: Vec<crate::given::Given>,
+    /// The codes of a reading's parts that have no value, of one read from its
+    /// resource: kept in `given`, where a list or a search has none of it.
+    #[serde(skip)]
+    pub absent: Vec<Code>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub documents: Vec<String>,
     pub provenance: Vec<Provenance>,

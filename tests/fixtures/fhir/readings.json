@@ -776,13 +776,7 @@
     },
     {
      "code": {
-      "coding": [
-       {
-        "system": "http://loinc.org",
-        "code": "8478-0",
-        "display": "Mean blood pressure"
-       }
-      ]
+      "text": "Sample wristband reading"
      },
      "valueQuantity": {
       "unit": "mmHg",
@@ -796,7 +790,7 @@
   "says": "118/74 mmHg",
   "parts": 2,
   "absent": [
-   "Mean blood pressure"
+   "Sample wristband reading"
   ]
  },
  {

@@ -3094,20 +3094,67 @@ fn a_results_parts_and_categories_come_with_an_import_and_by_reindex() {
     for text in ["128/76", "<0.5", "1:40"] {
         assert!(shown.contains(text), "{text}: {shown}");
     }
-    assert_eq!(base.ok(&["reindex"])["results_updated"], 0);
+    // A part with no value is in what the source gave, and nowhere else.
+    const ABSENT: &str = "Sample wristband reading";
+    let lists = |of: &Value| -> Vec<Value> {
+        let all = of["records"].as_array().unwrap().iter();
+        let says = all.filter(|r| r.to_string().contains(ABSENT));
+        says.cloned().collect()
+    };
+    let has = lists(&whole);
+    assert_eq!(has.len(), 1);
+    let gave = has[0]["given"][0]["fields"]["components"].as_array();
+    assert_eq!(gave.unwrap().len(), 3, "{}", has[0]);
+    let mut of = has[0].clone();
+    of.as_object_mut().unwrap().remove("given");
+    assert!(!of.to_string().contains(ABSENT), "{of}");
+    for args in [
+        &["results", "--person", "Robin"] as &[&str],
+        &["timeline", "--person", "Robin"],
+        &["search", "wristband"],
+    ] {
+        let v = base.ok(args);
+        assert!(!v.to_string().contains(ABSENT), "{args:?}: {v}");
+    }
+    assert_eq!(
+        base.ok(&["search", "wristband"])["items"],
+        serde_json::json!([])
+    );
+    for f in std::fs::read_dir(base.records().join("views"))
+        .unwrap()
+        .flatten()
+    {
+        let files = std::fs::read_dir(f.path()).into_iter().flatten().flatten();
+        for file in files
+            .map(|f| f.path())
+            .chain([f.path()])
+            .filter(|p| p.is_file())
+        {
+            let text = String::from_utf8_lossy(&std::fs::read(&file).unwrap()).to_lowercase();
+            assert!(!text.contains("wristband"), "{}", file.display());
+        }
+    }
+    let r = base.ok(&["reindex"]);
+    assert_eq!(
+        (&r["results_updated"], &r["given_updated"]),
+        (&0.into(), &0.into())
+    );
 
     // An index without them, as an earlier medrec wrote it.
     let mut old = read();
     let mut lacking = 0;
+    let without = |v: &mut Value| {
+        let absent = v.to_string().contains(ABSENT);
+        absent && v.as_object_mut().unwrap().remove("given").is_some()
+    };
+    let less = old["records"].as_array_mut().unwrap().iter_mut();
+    let given = less.map(without).filter(|had| *had).count();
+    assert_eq!(given, 1);
     for r in old["records"].as_array_mut().unwrap() {
         let fields = r["fields"].as_object_mut().unwrap();
         let parts = fields.remove("components").is_some();
         let had = fields.len();
-        fields.retain(|k, v| {
-            k != "categories"
-                && k != "components_absent"
-                && !(k == "value" && parts && v.is_string())
-        });
+        fields.retain(|k, v| k != "categories" && !(k == "value" && parts && v.is_string()));
         lacking += usize::from(parts || fields.len() < had);
     }
     std::fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();

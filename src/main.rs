@@ -124,8 +124,8 @@ enum Command {
     Verify(VerifyArgs),
     /// Shape every claim again, and read every record's providers, every
     /// condition's, allergy's and medicine's fields and what each source says
-    /// of it, and every result's and report's fields (its parts, exact values
-    /// and categories too) again, from the filed raw resources, put each result about
+    /// of it, and every result's and report's status and fields (its parts, exact
+    /// values and categories too) again, from the filed raw resources, put each result about
     /// somebody else that was filed as the person's own in a record of its
     /// own, and read bills' and receipts' statements again, as this medrec's
     /// import does: once after an upgrade that changes them.
