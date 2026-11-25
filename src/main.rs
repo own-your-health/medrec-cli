@@ -1206,7 +1206,7 @@ fn run(cli: &Cli) -> Result<(), CliError> {
                     v,
                     &["date", "person_name", "kind", "title", "detail", "source"],
                 );
-                notes.iter().for_each(|n| println!("{n}"));
+                notes.iter().for_each(|n| note(cli, n));
             });
             Ok(())
         }
@@ -1226,7 +1226,7 @@ fn run(cli: &Cli) -> Result<(), CliError> {
                     v,
                     &["date", "person_name", "kind", "id", "title", "snippet"],
                 );
-                notes.iter().for_each(|n| println!("{n}"));
+                notes.iter().for_each(|n| note(cli, n));
             });
             Ok(())
         }
@@ -3059,7 +3059,7 @@ fn records_cmd(
                 "sources",
             ],
         );
-        notes.iter().for_each(|n| println!("{n}"));
+        notes.iter().for_each(|n| note(cli, n));
     });
     Ok(())
 }

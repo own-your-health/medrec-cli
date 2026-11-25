@@ -455,7 +455,7 @@ pub fn records(
             }
             notes.extend(list.notes.into_iter().map(|n| match selected.len() {
                 1 => n,
-                _ => format!("{}: {n}", p.name),
+                _ => format!("{}: {n}", crate::printable(&p.name)),
             }));
         }
     }
@@ -638,10 +638,15 @@ pub struct LeftOut {
 impl LeftOut {
     /// What a command's list says of those it left out.
     fn notes(&self) -> Vec<String> {
-        match self.held_at.len() {
+        match self.left_out(Why::Error) {
             0 => Vec::new(),
             n => vec![standing::in_error(n)],
         }
+    }
+
+    /// How many items were left out for `why`.
+    fn left_out(&self, why: Why) -> usize {
+        self.held_at.iter().filter(|(_, w)| *w == why).count()
     }
 
     /// Sorts `items` out by `held`, keeping their order: what is kept, and
@@ -1039,6 +1044,9 @@ mod tests {
         });
         assert_eq!(two.on_page(Why::Error, 0, 2, true), 1);
         assert_eq!(two.on_page(Why::Private, 0, 2, true), 1);
+        // A command's note is of those entered in error only.
+        assert_eq!(two.notes(), ["1 entered in error, not shown"]);
+        assert!(out.notes().is_empty());
     }
 
     #[test]

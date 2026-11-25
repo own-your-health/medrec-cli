@@ -210,15 +210,15 @@ pub struct Line {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SearchArgs {
-    /// Words that must all appear.
+    /// Words to find.
     pub query: String,
-    /// A name, alias or id.
+    /// Name, alias or id.
     #[serde(default)]
     pub person: Option<String>,
     /// YYYY-MM-DD.
     #[serde(default)]
     pub since: Option<String>,
-    /// YYYY-MM-DD.
+    /// YYYY-MM-DD, inclusive.
     #[serde(default)]
     pub until: Option<String>,
     #[serde(flatten)]
@@ -321,13 +321,13 @@ pub struct RecordsArgs {
     /// visits: encounters. tests: each test's latest result. bills: filed
     /// statements. timeline: all.
     pub kind: Kind,
-    /// A name, alias or id.
+    /// Name, alias or id.
     #[serde(default)]
     pub person: Option<String>,
     /// YYYY-MM-DD.
     #[serde(default)]
     pub since: Option<String>,
-    /// YYYY-MM-DD.
+    /// YYYY-MM-DD, inclusive.
     #[serde(default)]
     pub until: Option<String>,
     /// Current ones only.
@@ -405,7 +405,7 @@ pub struct Item {
     pub range: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub flag: Option<String>,
-    /// For `tests`: results of the test on file.
+    /// For `tests`: how many.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<i64>")]
     pub results: Option<usize>,
@@ -438,10 +438,10 @@ pub struct Item {
 pub struct DocumentArgs {
     /// The document's id.
     pub id: String,
-    /// Start at this page (from 1).
+    /// Start at this page.
     #[serde(default)]
     pub page: Option<u32>,
-    /// A previous answer's `next_offset`.
+    /// An earlier `next_offset`.
     #[serde(default)]
     pub offset: Option<u64>,
 }
@@ -544,8 +544,8 @@ impl Toolset for MedrecTools {
                 DOCUMENT,
                 "Read a document",
                 "A filed document's text, with its title, date, type and organization. Read a \
-                 letter or bill. Long text comes in parts: pass next_offset as offset, \
-                 or page.",
+                 visit summary, lab report, letter or bill. Long text comes in parts: pass \
+                 next_offset as offset, or page.",
             )
             .input::<DocumentArgs>()
             .output::<DocumentOut>(),

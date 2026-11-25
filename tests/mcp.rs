@@ -1314,20 +1314,45 @@ fn the_record_commands_list_what_is_current_by_every_sources_word() {
     let v = e.ok(&["results", "--person", "Alex"]);
     assert_eq!(v["items"], json!([]));
     assert_eq!(v["notes"], json!(["1 entered in error, not shown"]));
-    // At the terminal, each source's word.
+    // At the terminal, each source's word; the rows alone are the output,
+    // and what it leaves out is said beside them.
     let text = |args: &[&str]| {
         let mut cmd = e.command();
         let out = cmd.args(args).output().unwrap();
-        String::from_utf8(out.stdout).unwrap()
+        (
+            String::from_utf8(out.stdout).unwrap(),
+            String::from_utf8(out.stderr).unwrap(),
+        )
     };
-    let shown = text(&["conditions", "--person", "Alex", "--active"]);
-    for said in [
+    let (shown, said) = text(&["conditions", "--person", "Alex", "--active"]);
+    for words in [
         "current, sources differ",
         "Example Health: active (read 2024-05-02); Sample Clinic East: resolved (read 2024-05-03)",
-        "1 entered in error, not shown",
     ] {
-        assert!(shown.contains(said), "{said}: {shown}");
+        assert!(shown.contains(words), "{words}: {shown}");
     }
+    for (args, words) in [
+        (
+            &["conditions", "--person", "Alex", "--active"][..],
+            "1 entered in error, not shown",
+        ),
+        (
+            &["timeline", "--person", "Alex"],
+            "5 entered in error, not shown",
+        ),
+        (
+            &["search", "sample burn", "--person", "Alex"],
+            "1 entered in error, not shown",
+        ),
+    ] {
+        let (shown, said) = text(args);
+        assert!(said.contains(words), "{words}: {said}");
+        assert!(!shown.contains("not shown"), "{shown}");
+    }
+    assert!(said.contains("No problem list from"), "{said}");
+    // `--quiet` leaves the rows.
+    let (_, said) = text(&["conditions", "--person", "Alex", "--active", "--quiet"]);
+    assert_eq!(said, "");
     let v = e.ok(&["timeline", "--person", "Alex"]);
     let ids: Vec<&str> = v["items"]
         .as_array()

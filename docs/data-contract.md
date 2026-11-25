@@ -1566,8 +1566,9 @@ order. Notes are not in it; a reader adds them from `notes.md`.
 
 `medrec_summary`'s summary of the person without `person` and `as_of`:
 `counts`, `sources`, `medications`, `conditions`, `allergies`,
-`immunizations`, `latest_results`, `recent_visits` and `bills`. Each list
-is `{items, more}`, at most 25 items. It is computed as of no day, so no
+`immunizations`, `latest_results`, `recent_visits`, `bills` and `standing`
+(0.9.9 and later). Each list but `standing` is `{items, more}`, at most 25
+items; `standing` is uncut. It is computed as of no day, so no
 bill is `past_due`; a reader works `past_due` out for the day it answers.
 It is made without the household's payments: a reader leaves out the
 bills `bills.json` has `settled` as it answers (0.9.1 and later). Each
