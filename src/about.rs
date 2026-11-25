@@ -184,10 +184,15 @@ pub fn counted(p: &Person, idx: &PersonIndex) -> Counted {
     out
 }
 
+/// Whom a record is about, where that is somebody else.
+pub fn who(p: &Person, idx: &PersonIndex, r: &Record) -> Option<&'static str> {
+    let listing = || ids(p, idx).contains(&r.id).then_some(ANOTHER);
+    record(p, r).or_else(listing)
+}
+
 /// What is said of a record opened by its id, where it is about somebody else.
 pub fn of_record(p: &Person, idx: &PersonIndex, r: &Record) -> Option<String> {
-    let who = || ids(p, idx).contains(&r.id).then_some(ANOTHER);
-    record(p, r).or_else(who).map(|who| says(p, who))
+    who(p, idx, r).map(|who| says(p, who))
 }
 
 /// The same of a paper.
@@ -195,7 +200,7 @@ pub fn of_paper(p: &Person, idx: &PersonIndex, id: &str) -> Option<String> {
     ids(p, idx).contains(id).then(|| says(p, ANOTHER))
 }
 
-fn says(p: &Person, who: &str) -> String {
+pub fn says(p: &Person, who: &str) -> String {
     format!("about {who}, in {}'s chart", crate::printable(&p.name))
 }
 

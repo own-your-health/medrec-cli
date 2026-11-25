@@ -40,6 +40,7 @@ pub mod prompt;
 pub mod provider_labels;
 pub mod providers;
 pub mod questionnaires;
+pub mod raw;
 pub mod refresh;
 pub mod reindex;
 pub mod review;

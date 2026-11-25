@@ -1391,6 +1391,14 @@ fn a_test_its_source_says_is_of_another_person_is_in_no_list() {
         // It, and the report that lists it alone.
         let list = e.ok(&["records", "about-another"]);
         assert_eq!(list["items"].as_array().unwrap().len(), 2, "{list}");
+        // Its raw files are opened as it is, and in no count of many.
+        assert_eq!(e.ok(&["records", "raw", &id])["notes"], json!([note]));
+        for how in ["--fields", "--changes"] {
+            let notes = &e.ok(&["records", "raw", &id, how])["notes"];
+            assert_eq!(*notes, json!([format!("about {says}")]));
+        }
+        let many = e.ok(&["records", "fields", "--kind", "result"]);
+        assert_eq!((&many["records"], &many["types"]), (&json!(0), &json!([])));
         // Again; by another source with nothing of it; and by the first.
         let kept = e.index().records.len();
         e.import(&test_about("one", Some(focus), 1));
@@ -1996,6 +2004,12 @@ fn a_report_of_another_persons_results_is_about_them() {
     assert_eq!(about(&e), (1, false));
     e.import(&with(&["obs-0001", "obs-0002"], 2));
     assert_eq!(about(&e), (2, true));
+    let id = named(&e, "report", "Example panel").id;
+    let note = "about another person, in Robin Testperson's chart";
+    assert_eq!(e.ok(&["records", "show", &id])["notes"], json!([note]));
+    assert_eq!(e.ok(&["records", "raw", &id])["notes"], json!([note]));
+    let notes = &e.ok(&["records", "raw", &id, "--fields"])["notes"];
+    assert_eq!(*notes, json!(["about another person"]));
     let v = e.ok(&["reindex", "--dry-run"]);
     let want = json!({"said": 1, "by_age": 0, "listing": 1, "documents": 0});
     assert_eq!(v["people"][0]["views"]["about_another"], want);

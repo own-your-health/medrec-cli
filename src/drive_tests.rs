@@ -309,3 +309,56 @@ fn the_views_on_drive_follow_a_write_and_then_upload_only_what_changed() {
     assert_eq!(held, named);
     drop(f);
 }
+
+/// The elements of the records' raw files are counted from copies of them.
+#[test]
+fn the_elements_of_raw_files_on_drive_are_counted() {
+    use crate::model::{PersonIndex, Record};
+    let h = Harness::new(true);
+    h.sign_in();
+    let records = h.fake.add_folder(ROOT_ID, "Medical Records");
+    let loc = h.location(&records);
+    let mut cfg = Config::default();
+    maint::init(&mut cfg, &loc, false, BUDGET).unwrap();
+    let rel = |n: usize| format!("Robin Testperson/Records/one/Claim/c-{n}.json");
+    {
+        let f = Folder::open_at(&loc, Access::Write, BUDGET).unwrap();
+        let mut hh = f.household().unwrap();
+        hh.people.push(
+            serde_json::from_value(serde_json::json!({
+                "id": "p_drive", "name": "Robin Testperson", "folder": "Robin Testperson",
+                "created_at": "2026-01-01T00:00:00Z"
+            }))
+            .unwrap(),
+        );
+        f.save_household(&mut hh).unwrap();
+        let mut idx = PersonIndex::new("p_drive");
+        idx.records = (0..3)
+            .map(|n| -> Record {
+                serde_json::from_value(serde_json::json!({
+                    "id": format!("r_{n}"), "kind": "claim", "key": format!("k_{n}"),
+                    "display": "Office visit", "fields": {}, "provenance": [{
+                        "source": {"kind": "fhir", "cli": "fakeprov"}, "method": "fhir-api",
+                        "filed_at": "2026-01-02T10:00:00Z", "filed_by": "medrec",
+                        "raw_path": rel(n)}]
+                }))
+                .unwrap()
+            })
+            .collect();
+        f.save_index(&hh.people[0], &mut idx).unwrap();
+        // The last one's is not there.
+        for n in 0..2 {
+            let raw = format!(r#"{{"resourceType": "Claim", "id": "c-{n}", "item": [{{}}]}}"#);
+            f.store.write_text(&rel(n), &raw).unwrap();
+        }
+    }
+    let f = Folder::open_at(&loc, Access::Read, BUDGET).unwrap();
+    let hh = f.household().unwrap();
+    let count = crate::raw::fields(&f, &hh, None, &[]).unwrap();
+    assert_eq!((count.records, count.without_raw, count.unread), (3, 0, 1));
+    assert_eq!(count.types.len(), 1);
+    assert_eq!(
+        (count.types[0].cli.as_str(), count.types[0].files),
+        ("fakeprov", 2)
+    );
+}
