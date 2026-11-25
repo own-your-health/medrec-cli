@@ -134,22 +134,29 @@ impl Env {
             std::fs::write(&p, serde_json::to_vec_pretty(&v).unwrap()).unwrap();
         }
         let secs = medrec::refresh::time::parse(at).unwrap();
-        let cache = self.root.join("cache");
-        if !cache.is_dir() {
-            return;
-        }
-        walk(&cache, &mut |f| {
-            let in_refresh = f.parent().and_then(|d| d.file_name()) == Some("refresh".as_ref());
-            if !in_refresh || f.extension() != Some("json".as_ref()) {
-                return;
-            }
-            let mut local: Value = serde_json::from_slice(&std::fs::read(f).unwrap()).unwrap();
+        self.local(&mut |local| {
             if let Some(m) = local.get_mut("ran_at").and_then(Value::as_object_mut) {
                 for t in m.values_mut() {
                     *t = json!(secs);
                 }
-                std::fs::write(f, serde_json::to_vec(&local).unwrap()).unwrap();
             }
+        });
+    }
+
+    /// This machine's record of its passes, changed by `f`.
+    fn local(&self, f: &mut dyn FnMut(&mut Value)) {
+        let cache = self.root.join("cache");
+        if !cache.is_dir() {
+            return;
+        }
+        walk(&cache, &mut |p| {
+            let in_refresh = p.parent().and_then(|d| d.file_name()) == Some("refresh".as_ref());
+            if !in_refresh || p.extension() != Some("json".as_ref()) {
+                return;
+            }
+            let mut local: Value = serde_json::from_slice(&std::fs::read(p).unwrap()).unwrap();
+            f(&mut local);
+            std::fs::write(p, serde_json::to_vec(&local).unwrap()).unwrap();
         });
     }
 
@@ -1440,14 +1447,25 @@ fn event_request(e: &Env, id: &str, event: Value) {
 
 /// A household decision the app writes: `event` or `paid`.
 fn decision_request(e: &Env, id: &str, key: &str, body: Value) {
+    decision_request_at(e, id, key, body, "2026-11-24T12:00:00Z");
+}
+
+fn decision_request_at(e: &Env, id: &str, key: &str, body: Value, at: &str) {
+    decision_request_by(e, id, key, body, at, at);
+}
+
+/// One whose device's clock says `clock` when the store's says `at`.
+fn decision_request_by(e: &Env, id: &str, key: &str, body: Value, at: &str, clock: &str) {
     let dir = e.records().join("_requests");
     std::fs::create_dir_all(&dir).unwrap();
+    let stamp: String = clock.chars().filter(|c| *c != '-' && *c != ':').collect();
+    let path = dir.join(format!("{stamp}_{id}.json"));
     std::fs::write(
-        dir.join(format!("20261124T120000Z_{id}.json")),
+        &path,
         serde_json::to_vec(&json!({
             "schema": "medrec-request/v1",
             "id": id,
-            "requested_at": "2026-11-24T12:00:00Z",
+            "requested_at": clock,
             "requested_by": {"email": "alex@example.com", "name": "Alex Testperson"},
             key: body,
             "app": {"name": "own-your-health-app", "version": "0.1.0"},
@@ -1455,6 +1473,14 @@ fn decision_request(e: &Env, id: &str, key: &str, body: Value) {
         .unwrap(),
     )
     .unwrap();
+    let secs = medrec::refresh::time::parse(at).unwrap() as u64;
+    let modified = std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs);
+    std::fs::File::options()
+        .write(true)
+        .open(path)
+        .unwrap()
+        .set_modified(modified)
+        .unwrap();
 }
 
 /// A person's events view, by the name views.json gives it.
@@ -2012,6 +2038,509 @@ fn private_items_follow_the_rules_until_the_household_marks_them() {
     let (code, _) = e.code(&["private", "mark", ferrous]);
     assert_ne!(code, Some(0));
     assert_eq!(std::fs::read(&file).unwrap(), b"{not json");
+}
+
+/// A person's `providers.json`.
+fn provider_view(e: &Env, pid: &str) -> Value {
+    let views = e.json_at("views/views.json");
+    let md5 = views["people"][pid]["files"]["providers.json"]
+        .as_str()
+        .unwrap();
+    e.json_at(&format!("views/{pid}/providers.{}.json", &md5[..12]))
+}
+
+/// What the household says of providers, at a terminal and from the app.
+#[test]
+fn the_household_says_who_a_printed_name_is() {
+    let e = Env::new("labels");
+    setup(&e);
+    let alex = with_private_fixtures(&e);
+    let aid = alex["id"].as_str().unwrap();
+    e.ok(&["views", "write"]);
+    let (visit, summary) = ("r_physicalaaaaaaaaaaaa", "d_physicalavsaaaaaaaaa");
+    let practice = "Example Family Practice";
+    let file = e
+        .records()
+        .join(alex["folder"].as_str().unwrap())
+        .join("marks.json");
+    let index = std::fs::read(file.with_file_name("index.json")).unwrap();
+
+    // Mistakes change nothing, and repeat no name.
+    let set = ["labels", "set", "--person", "Alex", "--printed"];
+    let of =
+        |rest: &[&'static str]| -> Vec<&'static str> { set.iter().chain(rest).copied().collect() };
+    for (args, code) in [
+        (of(&[practice]), 2),
+        (of(&[practice, "--role", " "]), 2),
+        (of(&[practice, "--phone", "none"]), 2),
+        (of(&[practice, "--role", "clinic", "--item", "x"]), 2),
+        (of(&["Invented Name", "--role", "clinic"]), 4),
+        (
+            of(&[
+                practice,
+                "--role",
+                "clinic",
+                "--item",
+                "r_ferritinaaaaaaaaaaaa",
+            ]),
+            4,
+        ),
+        (
+            vec!["labels", "same", "--person", "Alex", "--printed", practice],
+            2,
+        ),
+        (
+            vec![
+                "labels",
+                "wrong",
+                "--person",
+                "No One",
+                "--printed",
+                practice,
+            ],
+            4,
+        ),
+        (vec!["labels", "undo", "r_physicalaaaaaaaaaaaa"], 2),
+        (vec!["labels", "undo", "o_nosuchidaaaaaaaaaaaa"], 4),
+    ] {
+        let (got, text) = e.code(&args);
+        assert_eq!(got, Some(code), "{args:?}: {text}");
+        assert!(!text.contains("Invented Name"), "{text}");
+    }
+    assert!(!file.exists(), "nothing was written");
+
+    let said = e.ok(&of(&[
+        practice,
+        "--name",
+        "Family doctors",
+        "--phone",
+        "555-010-0142",
+    ]));
+    assert_eq!(
+        (&said["status"], &said["kind"], &said["person"]),
+        (&json!("recorded"), &json!("set"), &json!(aid)),
+        "{said}"
+    );
+    let first = said["said"]["id"].as_str().unwrap().to_string();
+    let again = e.ok(&of(&[
+        practice,
+        "--name",
+        "Family doctors",
+        "--phone",
+        "555-010-0142",
+    ]));
+    assert_eq!(
+        (&again["status"], &again["said"]["id"]),
+        (&json!("unchanged"), &json!(first))
+    );
+    e.ok(&["views", "write"]);
+    let v = provider_view(&e, aid);
+    let id = v["by_name"][practice].as_str().unwrap().to_string();
+    let label = &v["labels"][&id];
+    assert_eq!(
+        (&label["name"], &label["phone"], &label["confidence"]),
+        (
+            &json!("Family doctors"),
+            &json!("555-010-0142"),
+            &json!("household")
+        ),
+        "{v}"
+    );
+    assert_eq!(v["overrides"][0]["id"], json!(first), "{v}");
+
+    // The app says the visit's is something else, and a name nothing prints.
+    decision_request(
+        &e,
+        "x_providersaaaaaaaaaaa",
+        "provider",
+        json!({"person": aid, "printed": [practice], "set": {"role": "Counselor"}, "item": visit}),
+    );
+    decision_request(
+        &e,
+        "x_providersbbbbbbbbbbb",
+        "provider",
+        json!({"person": aid, "printed": ["Invented Name"], "wrong": true}),
+    );
+    decision_request(
+        &e,
+        "x_providersccccccccccc",
+        "provider",
+        json!({"person": aid, "printed": ["Invented Name"], "maybe": true}),
+    );
+    e.ok(&["refresh", "--scheduled"]);
+    let at = |id: &str| format!("_requests/done/20261124T120000Z_{id}.json");
+    let done = e.json_at(&at("x_providersaaaaaaaaaaa"));
+    assert_eq!(done["handled"]["outcome"], "ok", "{done}");
+    assert_eq!(done["provider"], json!({"person": aid, "kind": "set"}));
+    for id in ["x_providersbbbbbbbbbbb", "x_providersccccccccccc"] {
+        let refused = e.json_at(&at(id));
+        assert_eq!(refused["handled"]["outcome"], "invalid", "{refused}");
+    }
+    for id in [
+        "x_providersaaaaaaaaaaa",
+        "x_providersbbbbbbbbbbb",
+        "x_providersccccccccccc",
+    ] {
+        let text = e.json_at(&at(id)).to_string();
+        for s in ["Invented Name", practice, "Counselor"] {
+            assert!(!text.contains(s), "{s}: {text}");
+        }
+    }
+    let marks: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    // Asked before the first was said at the terminal, it is listed before it.
+    let by_app = &marks["providers"][0];
+    assert_eq!(
+        (&by_app["at"], &marks["providers"][1]["id"]),
+        (&json!("2026-11-24T12:00:00Z"), &json!(first))
+    );
+    assert_eq!(
+        (
+            &by_app["set"],
+            &by_app["item"],
+            &by_app["by"],
+            &by_app["request"]
+        ),
+        (
+            &json!({"role": "Counselor"}),
+            &json!(visit),
+            &json!("Alex Testperson"),
+            &json!("x_providersaaaaaaaaaaa")
+        ),
+        "{marks}"
+    );
+    // A household label in a private area makes its item private, and the
+    // paper the visit links with it; the private part of the file has it.
+    let private = private_view(&e, aid);
+    assert!(private_rows(&private, "records").contains(&(
+        visit.into(),
+        "mental_health".into(),
+        "provider".into()
+    )));
+    assert!(private["documents"].get(summary).is_some(), "{private}");
+    let v = provider_view(&e, aid);
+    assert!(!json!([v["labels"], v["overrides"]])
+        .to_string()
+        .contains("Counselor"));
+    assert_eq!(v["private"]["overrides"][0]["item"], visit, "{v}");
+
+    // Listed newest first, with the person's own.
+    let listed = e.ok(&["labels", "list", "--person", "Alex"]);
+    let items = listed["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2, "{listed}");
+    assert!(items
+        .iter()
+        .all(|i| i["kind"] == "set" && i["person"] == aid));
+    let (_, table) = e.code(&["labels", "list"]);
+    assert!(
+        table.contains("Family doctors") && table.contains(practice),
+        "{table}"
+    );
+
+    // Undone, the rules are back; and no record was edited.
+    let undone = by_app["id"].as_str().unwrap();
+    assert_eq!(e.ok(&["labels", "undo", undone])["kind"], "undo");
+    assert_eq!(e.code(&["labels", "undo", undone]).0, Some(4));
+    e.ok(&["views", "write"]);
+    let private = private_view(&e, aid);
+    assert!(private["records"].get(visit).is_none());
+    assert!(private["documents"].get(summary).is_none());
+    assert_eq!(
+        std::fs::read(file.with_file_name("index.json")).unwrap(),
+        index
+    );
+
+    // Served again, or for both people who asked, an undo is done.
+    decision_request(
+        &e,
+        "x_providersddddddddddd",
+        "provider",
+        json!({"person": aid, "undo": undone}),
+    );
+    e.ok(&["refresh", "--scheduled"]);
+    let done = e.json_at(&at("x_providersddddddddddd"));
+    assert_eq!(done["handled"]["outcome"], "ok", "{done}");
+    assert_eq!(done["handled"]["message"], "there was nothing to undo");
+
+    // A marks.json that does not read is not written over, and a request
+    // that says something stays pending: its done/ file would not keep it.
+    let held = std::fs::read(&file).unwrap();
+    let mut odd: Value = serde_json::from_slice(&held).unwrap();
+    odd["providers"][0]["printed"] = json!(practice);
+    let odd = serde_json::to_vec(&odd).unwrap();
+    std::fs::write(&file, &odd).unwrap();
+    assert_ne!(e.code(&of(&[practice, "--role", "clinic"])).0, Some(0));
+    let now = medrec::model::now_rfc3339();
+    let stamp: String = now.chars().filter(|c| *c != '-' && *c != ':').collect();
+    let at = |id: &str| format!("_requests/done/{stamp}_{id}.json");
+    let wrong = json!({"person": aid, "printed": [practice], "wrong": true});
+    let id = "x_providerseeeeeeeeeee";
+    decision_request_at(&e, id, "provider", wrong.clone(), &now);
+    let pending = e.records().join(format!("_requests/{stamp}_{id}.json"));
+    for _ in 0..2 {
+        let pass = e.ok(&["refresh", "--scheduled"]);
+        assert_eq!(
+            pass["requests"],
+            json!([{"request": id, "outcome": "retrying",
+                "cause": "reading the person's marks.json: other"}])
+        );
+        assert!(pending.exists());
+        assert!(!e.records().join(at(id)).exists());
+    }
+    assert_eq!(std::fs::read(&file).unwrap(), odd);
+    // For a day, and then what it answers repeats nothing of the marks.
+    let mut first = 0;
+    e.local(&mut |l| {
+        let t = &mut l["failing"][id];
+        first = t.as_i64().unwrap();
+        *t = json!(first - 24 * 3600);
+    });
+    assert!(first > 0);
+    let pass = e.ok(&["refresh", "--scheduled"]);
+    assert_eq!(pass["requests"][0]["outcome"], "failed", "{pass}");
+    assert!(!pass.to_string().contains(practice), "{pass}");
+    assert!(!pending.exists());
+    let failed = e.json_at(&at(id));
+    assert_eq!(failed["handled"]["outcome"], "failed", "{failed}");
+    assert!(!failed.to_string().contains(practice), "{failed}");
+    e.local(&mut |l| assert!(l.get("failing").is_none(), "{l}"));
+
+    // Written once the marks read again.
+    let id = "x_providersfffffffffff";
+    decision_request_at(&e, id, "provider", wrong, &now);
+    e.ok(&["refresh", "--scheduled"]);
+    std::fs::write(&file, &held).unwrap();
+    e.ok(&["refresh", "--scheduled"]);
+    assert_eq!(e.json_at(&at(id))["handled"]["outcome"], "ok");
+    e.local(&mut |l| assert!(l.get("failing").is_none(), "{l}"));
+}
+
+/// A request can be served late, or again: it is what was said when it was
+/// asked, and undoes nothing said or taken back since.
+#[test]
+fn what_a_provider_request_says_is_as_of_when_it_was_asked() {
+    let e = Env::new("labels-late");
+    setup(&e);
+    let alex = with_private_fixtures(&e);
+    let aid = alex["id"].as_str().unwrap();
+    let robin = e.json_at("household.json")["people"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["name"] == "Robin Testperson")
+        .unwrap()["id"]
+        .clone();
+    let (practice, center) = ("Example Family Practice", "Example Counseling Center");
+    let file = e
+        .records()
+        .join(alex["folder"].as_str().unwrap())
+        .join("marks.json");
+    let hour = |h: u32| format!("2026-11-24T{h:02}:00:00Z");
+    let ask = |id: &str, h: u32, body: Value| {
+        decision_request_at(&e, id, "provider", body, &hour(h));
+    };
+    let outcome = |id: &str, h: u32| -> Value {
+        e.json_at(&format!("_requests/done/20261124T{h:02}0000Z_{id}.json"))["handled"]["outcome"]
+            .clone()
+    };
+    let rows = |pass: &Value| -> Vec<(String, String)> {
+        let text = |v: &Value| v.as_str().unwrap().to_string();
+        pass["requests"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| (text(&r["request"]), text(&r["outcome"])))
+            .collect()
+    };
+    let say = |name: &str, printed: &str| {
+        e.ok(&[
+            "labels",
+            "set",
+            "--person",
+            "Alex",
+            "--printed",
+            printed,
+            "--name",
+            name,
+        ])["said"]["id"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    let names = || -> Vec<Value> {
+        let marks: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        marks["providers"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|c| c["set"]["name"].clone())
+            .collect()
+    };
+    let row = |id: &str, o: &str| (id.to_string(), o.to_string());
+    // To the next second, the least two times are told apart by.
+    let wait = || {
+        let now = medrec::refresh::time::now();
+        while medrec::refresh::time::now() <= now {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    };
+
+    // One that cannot be written holds back the person's later ones, and
+    // nobody else's.
+    let (first, second, other) = (
+        "x_lateaaaaaaaaaaaaaaaa",
+        "x_latebbbbbbbbbbbbbbbb",
+        "x_latecccccccccccccccc",
+    );
+    ask(
+        first,
+        10,
+        json!({"person": aid, "printed": [practice], "set": {"name": "Asked first"}}),
+    );
+    ask(
+        second,
+        11,
+        json!({"person": aid, "printed": [center], "set": {"name": "Asked second"}}),
+    );
+    ask(
+        other,
+        12,
+        json!({"person": robin, "undo": "o_nothingaaaaaaaaaaaaa"}),
+    );
+    std::fs::write(&file, b"{not json").unwrap();
+    let pass = e.ok(&["refresh", "--scheduled"]);
+    assert_eq!(
+        rows(&pass),
+        [
+            row(first, "retrying"),
+            row(second, "waiting"),
+            row(other, "ok")
+        ]
+    );
+
+    // Said since at a terminal, that stands; the other is recorded.
+    std::fs::remove_file(&file).unwrap();
+    say("Said after", practice);
+    let pass = e.ok(&["refresh", "--scheduled"]);
+    assert_eq!(rows(&pass), [row(first, "skipped"), row(second, "ok")]);
+    assert_eq!(outcome(first, 10), "skipped");
+    assert_eq!(names(), [json!("Asked second"), json!("Said after")]);
+
+    // Of some of the same names, it is said of the others alone.
+    let both = "x_latedddddddddddddddd";
+    ask(
+        both,
+        13,
+        json!({"person": aid, "printed": [practice, center], "set": {"name": "Of both"}}),
+    );
+    e.ok(&["refresh", "--scheduled"]);
+    assert_eq!(outcome(both, 13), "ok");
+    assert_eq!(
+        names(),
+        [json!("Asked second"), json!("Of both"), json!("Said after")]
+    );
+    let v = provider_view(&e, aid);
+    let shown = |printed: &str| {
+        let part = if v["by_name"].get(printed).is_some() {
+            &v
+        } else {
+            &v["private"]
+        };
+        let id = part["by_name"][printed].as_str().unwrap().to_string();
+        part["labels"][&id]["name"].clone()
+    };
+    assert_eq!(shown(practice), "Said after", "{v}");
+    assert_eq!(shown(center), "Of both", "{v}");
+
+    // Served again after it was taken back (its answer was never written), it
+    // is not said again.
+    let last = "x_lateeeeeeeeeeeeeeeee";
+    let body = json!({"person": aid, "printed": [center], "set": {"name": "Asked last"}});
+    ask(last, 14, body.clone());
+    e.ok(&["refresh", "--scheduled"]);
+    assert_eq!(outcome(last, 14), "ok");
+    let marks: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    let id = marks["providers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["request"] == last)
+        .unwrap()["id"]
+        .as_str()
+        .unwrap();
+    e.ok(&["labels", "undo", id]);
+    std::fs::remove_file(
+        e.records()
+            .join(format!("_requests/done/20261124T140000Z_{last}.json")),
+    )
+    .unwrap();
+    ask(last, 14, body.clone());
+    let held = std::fs::read(&file).unwrap();
+    e.ok(&["refresh", "--scheduled"]);
+    assert_eq!(outcome(last, 14), "skipped");
+    assert_eq!(std::fs::read(&file).unwrap(), held);
+    // Asked again after that, it is.
+    wait();
+    let again = "x_lateffffffffffffffff";
+    let now = medrec::model::now_rfc3339();
+    decision_request_at(&e, again, "provider", body, &now);
+    let pass = e.ok(&["refresh", "--scheduled"]);
+    assert_eq!(rows(&pass), [row(again, "ok")]);
+    let marks: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    assert!(marks.get("providers_undone").is_none(), "{marks}");
+    assert_eq!(names().last().unwrap(), "Asked last");
+
+    // The order is the store's. A device whose clock is ahead has no last word
+    // when it is tried again, and one whose clock is behind is heard.
+    let (ahead, behind) = ("x_lategggggggggggggggg", "x_latehhhhhhhhhhhhhhhh");
+    let of = |name: &str| json!({"person": aid, "printed": [practice], "set": {"name": name}});
+    let held = std::fs::read(&file).unwrap();
+    let soon = "2099-01-01T00:00:00Z";
+    let now = medrec::model::now_rfc3339();
+    decision_request_by(&e, ahead, "provider", of("Clock ahead"), &now, soon);
+    std::fs::write(&file, b"{not json").unwrap();
+    let pass = e.ok(&["refresh", "--scheduled"]);
+    assert_eq!(rows(&pass), [row(ahead, "retrying")]);
+    std::fs::write(&file, &held).unwrap();
+    wait();
+    say("Said since", practice);
+    let pass = e.ok(&["refresh", "--scheduled"]);
+    assert_eq!(rows(&pass), [row(ahead, "skipped")]);
+    assert_eq!(names().last().unwrap(), "Said since");
+    let now = medrec::model::now_rfc3339();
+    decision_request_by(
+        &e,
+        behind,
+        "provider",
+        of("Clock behind"),
+        &now,
+        "2026-11-24T09:00:00Z",
+    );
+    let pass = e.ok(&["refresh", "--scheduled"]);
+    assert_eq!(rows(&pass), [row(behind, "ok")]);
+    assert_eq!(names().last().unwrap(), "Clock behind");
+
+    // Said again is said later: what was asked before that does not count.
+    let between = "x_lateiiiiiiiiiiiiiiii";
+    let first = say("Said twice", practice);
+    wait();
+    let now = medrec::model::now_rfc3339();
+    decision_request_at(&e, between, "provider", of("Asked between"), &now);
+    wait();
+    assert_eq!(say("Said twice", practice), first);
+    let pass = e.ok(&["refresh", "--scheduled"]);
+    assert_eq!(rows(&pass), [row(between, "skipped")]);
+    assert_eq!(names().last().unwrap(), "Said twice");
+
+    // What a later medrec took back is kept, and reads.
+    let mut marks: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    let later = json!([{"printed": [practice], "kind": "moved", "at": "2026-01-01T00:00:00Z",
+        "to": "Example"}]);
+    marks["providers_undone"] = later.clone();
+    std::fs::write(&file, serde_json::to_vec(&marks).unwrap()).unwrap();
+    say("Said last", practice);
+    let marks: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    assert_eq!(marks["providers_undone"], later);
+    assert_eq!(names().last().unwrap(), "Said last");
 }
 
 #[test]

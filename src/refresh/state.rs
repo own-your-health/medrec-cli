@@ -91,6 +91,10 @@ pub struct Local {
     /// not remove (another Google account's): passed over until they go.
     #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
     pub left: std::collections::BTreeSet<String>,
+    /// When each provider request still pending could first not be written
+    /// (Unix seconds), by its id.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub failing: std::collections::BTreeMap<String, i64>,
     /// When each source last ran its provider (Unix seconds), whatever
     /// asked: a person's request waits `policy::REQUEST_GUARD` from it.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]

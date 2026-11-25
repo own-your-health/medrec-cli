@@ -287,6 +287,7 @@ medrec timeline --person Robin --since 2026-01-01
 medrec events list --person Robin               # what happened: one line per visit, stay, test or fill
 medrec bills list --person Robin                # each bill: its claim, what is paid and left
 medrec private list --person Robin              # what stays off shared screens, and why
+medrec labels list --person Robin               # what the household said of a provider
 medrec search hemoglobin
 medrec results --code 718-7
 medrec meds --active
@@ -549,6 +550,39 @@ can read every record in it. Marks are kept in the person's `marks.json`
 with the payments, and each person's private items are a view,
 `views/<person id>/private.json`
 ([docs/data-contract.md](docs/data-contract.md), "Private").
+
+### Provider labels
+
+A claim may print a provider as `SAMPLE J` and nothing more. medrec puts a
+name, a practice, a role and a phone beside it where it has them, and says
+why: *sure* where the record carries the provider's NPI and the provider
+directory (below) has it, *likely* where the directory has one person it can
+be or a paper of the same visit prints the name. Where the household knows
+better, it says so, and that wins:
+
+```sh
+medrec labels set --person Robin --printed "SAMPLE J" --name "Dr. Jordan Sample" --role radiologist
+medrec labels set --person Robin --printed "SAMPLE J" --phone 555-010-0123 --item <record, document or event id>
+medrec labels same --person Robin --printed "SAMPLE J" --printed "Jordan Sample MD"       # one provider
+medrec labels different --person Robin --printed "SAMPLE J" --printed "SAMPLE A"          # two
+medrec labels wrong --person Robin --printed "SAMPLE J"      # the label is wrong: none
+medrec labels list
+medrec labels undo <id>
+```
+
+- `--printed` is the name exactly as the items print it. `--item` is for that
+  one item. Without it, what is said is of every item of the person's that
+  prints the name.
+- `set` replaces what was set before. A part left out is as a sure label has
+  it, and never a likely one's.
+- Nothing is edited: the record keeps its own text, beside the label. What the
+  household says is kept in the person's `marks.json`, with who said it in the
+  app and when, and is taken back with `undo`.
+- A label, sure or the household's, in an area that makes items private makes
+  the items that print the name private ("Private items", above).
+- The app writes the same through `_requests/`. Each person's labels are a
+  view, `views/<person id>/providers.json`
+  ([docs/data-contract.md](docs/data-contract.md), "Provider labels").
 
 ### Views
 

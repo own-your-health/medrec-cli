@@ -24,7 +24,7 @@ views/                        each person's records cut into small files, for re
   index.json                  the person's index (documents, records, studies, imports)
   text.json                   extracted text per document
   overrides.json              the household's decisions on events (0.9.0 and later)
-  marks.json                  the household's payments and private marks (0.9.1 and later)
+  marks.json                  the household's payments, private marks and provider corrections (0.9.1 and later)
   provider-state.json         what a provider directory gave (0.9.7 and later)
   provider-state~unread-<8 hex>.json   one that did not read, kept (0.9.7 and later)
   Documents/<YYYY>/<YYYY-MM-DD>_<type>_<org>_<details>_<original name>
@@ -615,9 +615,10 @@ which outrank the matching rules. It is absent until the first decision.
 ## marks.json (`medrec-marks/v1`, 0.9.1 and later)
 
 What the household marked on a person's records that the rules do not
-decide: the bills they marked paid (`bills.json`, below) and the items they
-marked private or not (`private.json`, below). It is a file of its own so
-that a medrec before 0.9.1, which rewrites `overrides.json` with only the
+decide: the bills they marked paid (`bills.json`, below), the items they
+marked private or not (`private.json`, below), and what they said of the
+providers the items print (`providers.json`, below). It is a file of its own
+so that a medrec before 0.9.1, which rewrites `overrides.json` with only the
 fields it knows, never drops a mark. It is absent until the first mark.
 
 ```json
@@ -629,6 +630,10 @@ fields it knows, never drops a mark. It is absent until the first mark.
  ],
  "private": [
    {"id": "o_…", "item": "r_…", "private": true,
+    "at": "2026-11-24T12:00:00Z", "by": "Alex Testperson", "request": "x_…"}
+ ],
+ "providers": [
+   {"id": "o_…", "printed": ["J SAMPLE"], "set": {"name": "Dr. Sample", "phone": "555-010-0123"},
     "at": "2026-11-24T12:00:00Z", "by": "Alex Testperson", "request": "x_…"}
  ]}
 ```
@@ -642,16 +647,36 @@ fields it knows, never drops a mark. It is absent until the first mark.
   (`false`), whatever the rules say. An item has at most one mark: another
   replaces it, the same again changes nothing, and `medrec private reset`
   drops it. `private` is absent until the first such mark.
-- A mark on an event also lists the event's own `members` (record and
-  document ids) when it was made. An event keeps its id only while its
-  anchor member stays (Events, below); when the id changes, the mark
-  follows its members to the event that holds any of them.
+- A provider correction (0.9.7 and later) is what the household said of
+  `printed`, names exactly as the person's items print them, and one of:
+  - `set`: what to call the one name, or each of several: `name`, `practice`,
+    `role` and `phone`, at least one;
+  - `same`: that two names or more are one provider (`true`) or are not
+    (`false`);
+  - `wrong`: `true`, that the label a name has is wrong.
+
+  `item` (a record, document or event id, with one name and `set` or
+  `wrong`) holds it to that item. A correction of the same names and item
+  replaces one of the same sort (`set` and `wrong` are one sort, `same` the
+  other), and the same again changes only `at`. `medrec labels undo` drops one.
+  `providers` is absent until the first. It is in the order things were said:
+  `at` is when, for a request the store's time for its file (the folder's clock,
+  not the asking device's) and never after medrec first tried it, and from a
+  terminal after all that is there.
+- `providers_undone` (`[{printed, item, kind, at}]`, absent when empty) is what
+  was taken back, until the same is said of again, and for 90 days at most. A
+  request asked before then and served after does not say it again. An entry of
+  a `kind` medrec does not know is kept as it is.
+- A mark on an event, or a correction held to one, also lists the event's own
+  `members` (record and document ids) when it was made. An event keeps its id
+  only while its anchor member stays (Events, below); when the id changes, the
+  mark follows its members to the event that holds any of them.
 - `by` and `request` are as in `overrides.json`: who asked and the request
   it came from, `null` from a terminal, neither trusted.
 - medrec writes it (`medrec bills paid|undo`, `medrec private
-  mark|unmark|reset`, and paid and private requests in `_requests/`,
-  below). Readers read it only to judge the freshness of the
-  views made from it (views, below).
+  mark|unmark|reset`, `medrec labels set|same|different|wrong|undo`, and paid,
+  private and provider requests in `_requests/`, below). Readers read it only
+  to judge the freshness of the views made from it (views, below).
 - A file that does not read as this person's `medrec-marks/v1` is left
   out: `bills.json` and `private.json` say `marks_unreadable`, `medrec
   bills list` and `medrec private list` say so,
@@ -919,8 +944,9 @@ with `event` in place of `scope`:
 
 - `event` holds `person` and exactly one of `apart` or `together`, each two
   different record (`r_…`) or document (`d_…`) ids. A request with more
-  than one of `scope`, `event`, `paid` and `private` (below), or with none, is
-  `invalid` (rule 1), as is one whose `person` is not in `household.json`.
+  than one of `scope`, `event`, `paid`, `private` and `provider` (below), or
+  with none, is `invalid` (rule 1), as is one whose `person` is not in
+  `household.json`.
 - The next pass writes the decision to the person's `overrides.json`, and
   the views follow before it releases the lock, once for all of a pass's
   decisions. It imports nothing, so no guard or interval applies. While
@@ -945,7 +971,7 @@ The app's "Mark paid" is a request with `paid` in place of `scope`:
 - `amount` is a decimal string in US dollars, above zero with at most two
   places, or `{"amount", "currency"}` with a three-letter currency code.
   `on` is a `YYYY-MM-DD` day. A request with more than one of `scope`,
-  `event`, `paid` and `private`, or whose `person` is not in
+  `event`, `paid`, `private` and `provider`, or whose `person` is not in
   `household.json`, is `invalid` (rule 1).
 - It is applied as an event request is: by the next pass, to the person's
   `marks.json` `payments`, pending while another writer holds the
@@ -967,12 +993,55 @@ place of `scope`:
 - `item` is one of the person's record, document or event ids (`r_…`,
   `d_…`, `e_…`). `private` is `true`, `false`, or `null` to drop the
   household's mark and leave the item to the rules. A request with more
-  than one of `scope`, `event`, `paid` and `private`, or whose `person` is
-  not in `household.json`, is `invalid` (rule 1).
+  than one of `scope`, `event`, `paid`, `private` and `provider`, or whose
+  `person` is not in `household.json`, is `invalid` (rule 1).
 - It is applied as an event request is: by the next pass, to the person's
   `marks.json` `private`, pending while another writer holds the folder.
   Its `done/` file keeps `private`. `handled.outcome` is `invalid` when the
   item is not one of that person's.
+
+### Provider requests (0.9.7 and later)
+
+What the household says of a provider in the app is a request with `provider`
+in place of `scope`:
+
+```json
+{"schema": "medrec-request/v1", "id": "x_…", "requested_at": "…",
+ "requested_by": {…}, "app": {…},
+ "provider": {"person": "p_…", "printed": ["J SAMPLE"],
+   "set": {"name": "Dr. Sample"}, "item": "r_…"}}
+```
+
+- `provider` is `{person, printed, …}` with exactly one of `set`, `same` (`true`
+  or `false`) and `wrong` (`true`), and `item` where it is about one item, as
+  in `marks.json` (above); or `{person, undo: "o_…"}`. A correction has at most
+  10 names of 200 characters, `same` at least 2, and one with an `item` exactly
+  1. A part of `set` has at most 120 characters, none of them a control
+  character; `phone` has 7 to 20 digits, and else only spaces, `()+-.` and `x`
+  or `ext`. Anything else, another key included, is `invalid` (rule 1).
+- It is applied as an event request is: by the next pass, to the person's
+  `marks.json` `providers`, pending while another writer holds the folder.
+  `handled.outcome` is `invalid` when the person's items do not print a name
+  it gives, or the item is not theirs or does not print it. The same said
+  again is `ok`, and so is an undo of what is not there: a request can be
+  served twice, and two people can ask for the same.
+- What it says is as of when its file reached the folder, by the store's time
+  for the file; `requested_at` counts only where the store gives none.
+  `handled.outcome` is `skipped` when
+  something said of the same names and item after that stands, or was taken
+  back after that; what it says of some of the same names only is recorded
+  before what was said later.
+- Everyone's outcomes show together, so its `done/` file keeps only
+  `provider: {person, kind}` (`set`, `same`, `different`, `wrong` or `undo`),
+  and `handled.message` repeats no name or text: "recorded it as o_…".
+- As that file does not say what was asked, a request that could not be written
+  (the folder does not answer, the person's marks do not read) stays pending,
+  and each pass tries it again for 24 hours from the first that could not; then
+  it is `failed`, and what it said is gone from the folder. The person's later
+  provider requests wait behind it. The app may show what it asked while it is
+  pending. The pass says which wait and why on its own machine (`medrec refresh`
+  `requests[]`: `retrying` with a `cause`, the step and the kind of error, or
+  `waiting`).
 
 ## views/ (`medrec-views/v2`, 0.8.0 and later)
 
@@ -1082,7 +1151,7 @@ with how sure medrec is and why. **A label changes nothing from a source.**
 It stands beside the source's own text, which every reader still has. It
 labels items a reader already shows: there is no list of providers, and no
 reader searches, sorts or filters by a label. A person with no labelled
-provider has no `providers.json`.
+provider, of whom the household said nothing, has no `providers.json`.
 
 ```json
 {"schema": "medrec-providers/v1", "person": "p_…",
@@ -1093,7 +1162,9 @@ provider has no `providers.json`.
    "evidence": [{"from": "only_match", "state": "FL"}, {"from": "paper", "document": "d_…"}]}},
  "by_name": {"J SAMPLE": "v_…"},
  "by_item": {"r_…": {"J SAMPLE": "v_…"}},
- "private": {"labels": {…}, "by_name": {…}, "by_item": {…}}}
+ "overrides": [{"id": "o_…", "kind": "set", "printed": ["R PLACEHOLDER"], "item": "r_…",
+   "by": "Alex Testperson", "at": "2026-11-24T12:00:00Z"}],
+ "private": {"labels": {…}, "by_name": {…}, "by_item": {…}, "overrides": […]}}
 ```
 
 - **Looking one up.** An item is a record, a document or an event, and a
@@ -1111,13 +1182,14 @@ provider has no `providers.json`.
 - **`by_name`** has a printed name only when every item that prints it has a
   label. **`by_item`** has the items whose label is not the one `by_name`
   gives, and always a claim's `provider`.
-- **`confidence`**: `sure`, or `likely`. A reader treats one it does not know
-  as likely. A likely label is marked as likely, with its evidence, and never
-  leads the source's words.
+- **`confidence`**: `household` (the household said so), `sure`, or `likely`. A
+  reader treats one it does not know as likely. A likely label is marked as
+  likely, with its evidence, and never leads the source's words.
 - **`evidence`**, why:
 
   | `from` | |
   |---|---|
+  | `household` | The household said so: `id` (a correction's, in `overrides`), `by` and `at`. |
   | `npi` | The record carries the provider's National Provider Identifier, and the directory has it. Every sure label is this one. |
   | `only_match` | The directory has one person of the printed surname and first initial, in the state the record's source gives (`state`; or, when it gives none, in any state the directory was read for), whose role gives the service, and no given name the text spells out is another. A person whose role medrec has no words for counts as one it can be, and is never the label. |
   | `paper` | A paper of the same event with a practice's own heading (a bill, receipt, visit or discharge summary, prescription or immunization record, and not a laboratory's, pharmacy's or imaging center's) prints the name, and every such paper that does is of one practice. `document` is the paper. |
@@ -1127,23 +1199,47 @@ provider has no `providers.json`.
   one. `role` is medrec's own plain words for the directory's code.
   `phone_from` says where the phone is from: `directory` (as of its `date`,
   which is an earlier one than the file's when a newer directory no longer has
-  the provider) or `paper` (the `document`, a bill or receipt that gives a
-  number to call). A phone is shown with where it came from, and never as
-  verified.
-- **The id** comes from the label's confidence, name, practice, role and
-  phone, with the folder's random `label_salt` (`views.json`), never from the
-  NPI. One provider's sure label has one id in every person's file. No NPI is
-  in the file.
+  the provider), `paper` (the `document`, a bill or receipt that gives a number
+  to call) or `household` (the `id` of what they said). A phone is shown with
+  where it came from, and never as verified.
+- **What the household says** (`marks.json` `providers`) wins over every match.
+  What is said of an item wins over what is said of a name, and the latest over
+  an earlier one.
+  - `set`: the label is the household's. A part they left out is the sure
+    label's, and never a likely one's: a guess is not made theirs. With only a
+    phone the label stays what it is, with that phone.
+  - `wrong`: there is no label, whatever one is found.
+  - `same`: the names share one label, the one the household set, else a sure
+    one, as the household's, with the phone they gave any of the names. With
+    only a likely one it stays likely.
+  - `different`: the names share no label. One label both would have, and the
+    household did not set, is neither's.
+  - One said of an item is outside what `same` and `different` say of its name.
+  - Two names that stand for one provider in a list or a count do so by a sure
+    label or the household's, never by a likely one.
+  - `overrides` lists what they said, for readers to show it and to undo it, in
+    the order they said it, `item` the event's id now when it followed the
+    event's members. It is in `private` unless items that are not private print
+    every name it gives, and when its `item` or what it sets is private.
+- **The id** comes from the label's confidence, name (the printed one when it
+  has none), practice, role and phone, with the folder's random `label_salt`
+  (`views.json`), never from the NPI. One provider's sure label has one id in
+  every person's file. No NPI is in the file.
 - **Private, per person.** `private` holds what only private items say
   (`private.json`): their labels, and the evidence and phone a private paper
   gives. A label whose name, practice or role is in a private area is only
-  there, whatever item prints it. A sure one makes the item that prints it
-  private (`provider`, Private, below), unless the household marked it not
-  private, and then the item has no label. A likely one makes nothing private,
-  and an item that is not private does without it. When the person's
-  `marks.json` does not read, everything is in `private`. A reader uses
-  `private` only for a private item it is showing, in an answer or on a page
-  about that person, and never in one about the whole household.
+  there, whatever item prints it. A sure one, or the household's, makes the
+  item that prints it private (`provider`, Private, below), unless the
+  household marked it not private, and then the item has no label. A sure one
+  the household said is wrong does not, nor one they set a role over when that
+  role, and the name and practice the label then has, are in no private area;
+  that they said two names are not one provider changes nothing about what is
+  private. Where names are one provider (`same`), a private area of one is of
+  all of them. A likely one makes nothing private, and an item that is not
+  private does without it. When the person's `marks.json` does not read,
+  everything is in `private`. A reader uses `private` only for a private item
+  it is showing, in an answer or on a page about that person, and never in one
+  about the whole household.
 - **Machines** (README, "Provider directory"). What a directory gave is kept
   in `provider-state.json` (below), so what is labelled and what is private do
   not depend on which machine wrote last. Every machine that writes the folder
@@ -1650,7 +1746,7 @@ nothing is private.
   |---|---|
   | `source` | came from a portal whose records are all of one area: a behavioral health or a fertility clinic's record system |
   | `code` | is a condition whose ICD-10 code is in an area, or a claim whose principal diagnosis (the lowest `sequence`) is: F10–F19 and Z71.4–Z71.5 substance use; the other F codes mental health; Z30–Z32, Z33.2, O00–O08, N46 and N96–N98 reproductive; A50–A64, B20, Z21, Z11.3–Z11.4, Z20.2, Z20.6 and Z72.5 sexual health |
-  | `provider` | was made by a practice or clinician whose name or credential says its area: a claim's provider or facility, a visit's place, location or clinician, a medicine's prescriber, a result's performer, a document's organization; or is a record that prints a provider with a sure label (Provider labels, above) whose name, practice or role does (0.9.7 and later) |
+  | `provider` | was made by a practice or clinician whose name or credential says its area: a claim's provider or facility, a visit's place, location or clinician, a medicine's prescriber, a result's performer, a document's organization; or is a record that prints a provider with a sure label (Provider labels, above) whose name, practice or role does, or a record, document or event that prints one the household calls so (0.9.7 and later) |
   | `medicine` | is a medicine of an area by its name or code: antidepressants, antipsychotics, anxiolytics, stimulants and lithium; fertility drugs and contraceptives; HIV medicines and those for erectile dysfunction; medicines for substance use and smoking |
   | `test` | is a result or report of a test of an area: sexually transmitted infections, pregnancy and fertility, drug screens |
   | `members` | is an event with a private claim or portal visit, or whose own members are all private |

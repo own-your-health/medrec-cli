@@ -8,6 +8,7 @@ pub mod bills;
 pub mod claims;
 pub mod code_names;
 pub mod config;
+pub mod corrections;
 pub mod dicom;
 pub mod documents;
 pub mod events;

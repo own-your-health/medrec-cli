@@ -49,7 +49,7 @@ pub struct Mark {
 
 /// An event's own members, by record or document id: those without
 /// `person` (another person's paper).
-fn own_members(e: &Value) -> Vec<String> {
+pub(crate) fn own_members(e: &Value) -> Vec<String> {
     e["members"]
         .as_array()
         .into_iter()
@@ -60,14 +60,24 @@ fn own_members(e: &Value) -> Vec<String> {
         .collect()
 }
 
-/// Whether a mark on an event applies to the event `eid` with these own
-/// members: it names it, or it names an event no longer there and shares
-/// a member with it.
+/// Whether what the household said of an event (`item`, with the own members
+/// it had then) is of the event `eid` with these: it names it, or it names an
+/// event no longer there and shares a member with it.
+pub(crate) fn is_of_event(
+    item: &str,
+    had: &[String],
+    eid: &str,
+    members: &[String],
+    events: &BTreeSet<&str>,
+) -> bool {
+    item == eid
+        || (item.starts_with("e_")
+            && !events.contains(item)
+            && had.iter().any(|x| members.contains(x)))
+}
+
 fn marks_event(m: &Mark, eid: &str, members: &[String], events: &BTreeSet<&str>) -> bool {
-    m.item == eid
-        || (m.item.starts_with("e_")
-            && !events.contains(m.item.as_str())
-            && m.members.iter().any(|x| members.contains(x)))
+    is_of_event(&m.item, &m.members, eid, members, events)
 }
 
 /// Why an item is private: its area, and what said so.
@@ -353,8 +363,8 @@ fn papers_tied(idx: &PersonIndex, bills: &Value) -> Vec<(String, String)> {
 
 /// The person's `private.json` as `medrec views write` writes it: from
 /// their index and its texts, their `events.json`, their marks, and the
-/// records a provider label makes private, with their area
-/// (`labels::State::areas`).
+/// items a provider label makes private, with their area
+/// (`labels::Said::areas`).
 pub fn build(
     p: &Person,
     idx: &PersonIndex,
@@ -363,21 +373,21 @@ pub fn build(
     marks: &[Mark],
     labelled: &BTreeMap<String, &'static str>,
 ) -> Value {
+    let by_label = |id: &str| {
+        labelled.get(id).map(|area| Why {
+            area,
+            from: "provider",
+        })
+    };
     let mut items: BTreeMap<String, Why> = BTreeMap::new();
     for r in &idx.records {
-        let why = record_why(r).or_else(|| {
-            labelled.get(&r.id).map(|area| Why {
-                area,
-                from: "provider",
-            })
-        });
-        if let Some(w) = why {
+        if let Some(w) = record_why(r).or_else(|| by_label(&r.id)) {
             items.insert(r.id.clone(), w);
         }
     }
     for d in &idx.documents {
         let text = texts.texts.get(&d.id).map(String::as_str);
-        if let Some(w) = document_why(d, text) {
+        if let Some(w) = document_why(d, text).or_else(|| by_label(&d.id)) {
             items.insert(d.id.clone(), w);
         }
     }
@@ -485,6 +495,11 @@ pub fn build(
                     },
                 );
             }
+            // Where it was, as the household calls a provider no member of
+            // it prints.
+            if let Some(w) = by_label(eid).filter(|_| !items.contains_key(eid)) {
+                items.insert(eid.to_string(), w);
+            }
             // The last mark that applies: its own, else one that followed
             // its members here.
             let mark = marks
@@ -588,6 +603,11 @@ pub fn with_events(
     // As the last pass left it: what is private is the same on a machine
     // with the directory and on one without it.
     let state = crate::viewfiles::provider_state(folder, p)?;
+    let corrections = marks
+        .as_ref()
+        .map(|m| m.providers.as_slice())
+        .unwrap_or_default();
+    let said = crate::labels::Said::of(idx, &events, &state, corrections);
     let mut v = build(
         p,
         idx,
@@ -597,7 +617,7 @@ pub fn with_events(
             .as_ref()
             .map(|m| m.private.as_slice())
             .unwrap_or_default(),
-        &state.areas(idx),
+        &said.areas(),
     );
     if state.lost() {
         v["labels_unreadable"] = Value::Bool(true);

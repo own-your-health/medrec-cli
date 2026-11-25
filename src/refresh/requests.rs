@@ -35,6 +35,11 @@ pub enum Scope {
         item: String,
         private: Option<bool>,
     },
+    /// Not an import: what the household says of a provider its items print.
+    Provider {
+        person: String,
+        ask: Box<crate::corrections::Ask>,
+    },
 }
 
 impl Scope {
@@ -43,7 +48,10 @@ impl Scope {
     pub fn is_decision(&self) -> bool {
         matches!(
             self,
-            Scope::Event { .. } | Scope::Paid { .. } | Scope::Private { .. }
+            Scope::Event { .. }
+                | Scope::Paid { .. }
+                | Scope::Private { .. }
+                | Scope::Provider { .. }
         )
     }
 }
@@ -188,13 +196,32 @@ pub fn parse(name: &str, body: &[u8], known: &dyn Known) -> Parsed {
         return bad("its requested_at is not an RFC 3339 time".into());
     };
     let is_member = |s: &str| crate::ids::is_valid("r", s) || crate::ids::is_valid("d", s);
-    let given = ["scope", "event", "paid", "private"]
+    let given = ["scope", "event", "paid", "private", "provider"]
         .into_iter()
         .filter(|k| v.get(*k).is_some())
         .count();
     if given > 1 {
-        return bad("it has more than one of a scope, an event, a paid and a private".into());
+        return bad(
+            "it has more than one of a scope, an event, a paid, a private and a provider".into(),
+        );
     }
+    let provider = match v.get("provider") {
+        Some(Value::Object(e)) => {
+            let person = e.get("person").and_then(Value::as_str).unwrap_or("");
+            if !(crate::ids::is_valid("p", person) && known.person(person)) {
+                return bad("its provider names no person in household.json".into());
+            }
+            match crate::corrections::Ask::parse(e) {
+                Ok(ask) => Some(Scope::Provider {
+                    person: person.into(),
+                    ask: Box::new(ask),
+                }),
+                Err(why) => return bad(format!("its provider is refused: {why}")),
+            }
+        }
+        Some(_) => return bad("its provider is not an object".into()),
+        None => None,
+    };
     let private = match v.get("private") {
         Some(Value::Object(e)) => {
             let person = e.get("person").and_then(Value::as_str).unwrap_or("");
@@ -266,7 +293,7 @@ pub fn parse(name: &str, body: &[u8], known: &dyn Known) -> Parsed {
         Some(_) => return bad("its paid is not an object".into()),
         None => None,
     };
-    let event = match (v.get("event"), paid.or(private)) {
+    let event = match (v.get("event"), paid.or(private).or(provider)) {
         (_, Some(decision)) => Some(decision),
         (Some(Value::Object(e)), None) => {
             let person = e.get("person").and_then(Value::as_str).unwrap_or("");
@@ -352,6 +379,8 @@ pub fn parse(name: &str, body: &[u8], known: &dyn Known) -> Parsed {
             item,
             private,
         } => json!({"person": person, "item": item, "private": private}),
+        // Everyone's outcomes show together: never the names or the text.
+        Scope::Provider { person, ask } => json!({"person": person, "kind": ask.word()}),
     };
     let mut kept = Map::new();
     kept.insert("schema".into(), REQUEST_SCHEMA.into());
@@ -361,6 +390,7 @@ pub fn parse(name: &str, body: &[u8], known: &dyn Known) -> Parsed {
         Scope::Event { .. } => "event",
         Scope::Paid { .. } => "paid",
         Scope::Private { .. } => "private",
+        Scope::Provider { .. } => "provider",
         _ => "scope",
     };
     kept.insert(key.into(), scope_json);
@@ -633,6 +663,123 @@ mod tests {
             let why = why(parse(NAME, &body(req.clone()), &K));
             assert!(why.contains(want), "{req}: {why}");
         }
+    }
+
+    #[test]
+    fn a_provider_request_says_one_thing_and_its_done_file_repeats_none_of_it() {
+        let body = |provider: &Value| {
+            serde_json::to_vec(&json!({
+                "schema": REQUEST_SCHEMA,
+                "id": "x_aaaaaaaaaaaaaaaaaaaa",
+                "requested_at": "2026-11-22T20:03:12Z",
+                "provider": provider,
+            }))
+            .unwrap()
+        };
+        let pid = "p_aaaaaaaaaaaaaaaaaaaa";
+        let o = "o_aaaaaaaaaaaaaaaaaaaa";
+        let r = "r_aaaaaaaaaaaaaaaaaaaa";
+        for (mut req, word) in [
+            (
+                json!({"printed": ["J SAMPLE"], "set": {"role": " Radiologist "}}),
+                "set",
+            ),
+            (
+                json!({"printed": ["J SAMPLE"], "set": {"phone": "555-010-0123 x4"}, "item": r}),
+                "set",
+            ),
+            (
+                json!({"printed": ["J SAMPLE", "Jordan Sample"], "same": true}),
+                "same",
+            ),
+            (
+                json!({"printed": ["J SAMPLE", "A SAMPLE"], "same": false}),
+                "different",
+            ),
+            (
+                json!({"printed": ["J SAMPLE"], "wrong": true, "item": r}),
+                "wrong",
+            ),
+            (json!({"undo": o}), "undo"),
+        ] {
+            req["person"] = pid.into();
+            match parse(NAME, &body(&req), &K) {
+                Parsed::Valid(v) => {
+                    assert!(v.scope.is_decision(), "{req}");
+                    assert_eq!(v.kept["provider"], json!({"person": pid, "kind": word}));
+                    let kept = Value::Object(v.kept).to_string();
+                    assert!(
+                        !kept.contains("SAMPLE") && !kept.contains("adiologist"),
+                        "{kept}"
+                    );
+                }
+                Parsed::Invalid(i) => panic!("{req}: {}", i.why),
+            }
+        }
+        let long = "x".repeat(201);
+        for (mut req, want) in [
+            (json!({"printed": ["J SAMPLE"]}), "not one of"),
+            (
+                json!({"printed": ["J SAMPLE"], "wrong": true, "same": false}),
+                "not one of",
+            ),
+            (
+                json!({"printed": ["J SAMPLE"], "wrong": false}),
+                "wrong is not true",
+            ),
+            (
+                json!({"printed": ["J SAMPLE"], "same": true}),
+                "fewer than two",
+            ),
+            (
+                json!({"printed": ["J SAMPLE", "J SAMPLE"], "same": true}),
+                "twice",
+            ),
+            (json!({"printed": [], "wrong": true}), "no printed name"),
+            (json!({"printed": [""], "wrong": true}), "empty or over"),
+            (json!({"printed": [long], "wrong": true}), "empty or over"),
+            (json!({"printed": "J SAMPLE", "wrong": true}), "not a list"),
+            (json!({"printed": ["J SAMPLE"], "set": {}}), "gives no name"),
+            (
+                json!({"printed": ["J SAMPLE"], "set": {"role": "  "}}),
+                "empty",
+            ),
+            (
+                json!({"printed": ["J SAMPLE"], "set": {"role": 4}}),
+                "not text",
+            ),
+            (
+                json!({"printed": ["J SAMPLE"], "set": {"npi": "0"}}),
+                "not name, practice",
+            ),
+            (
+                json!({"printed": ["J SAMPLE"], "set": {"phone": "ask at the desk"}}),
+                "not a phone",
+            ),
+            (
+                json!({"printed": ["J SAMPLE"], "set": {"role": "a\nb"}}),
+                "not plain",
+            ),
+            (
+                json!({"printed": ["J SAMPLE"], "wrong": true, "item": o}),
+                "not a record",
+            ),
+            (
+                json!({"printed": ["J SAMPLE", "A"], "same": true, "item": r}),
+                "goes with one printed name",
+            ),
+            (json!({"undo": "r_aaaaaaaaaaaaaaaaaaaa"}), "not an id"),
+            (json!({"undo": o, "printed": ["J SAMPLE"]}), "only the id"),
+            (json!({"undo": o, "why": "x"}), "does not know"),
+        ] {
+            req["person"] = pid.into();
+            let why = why(parse(NAME, &body(&req), &K));
+            assert!(why.contains(want), "{req}: {why}");
+            assert!(!why.contains("SAMPLE"), "{why}");
+        }
+        assert!(why(parse(NAME, &body(&json!(true)), &K)).contains("not an object"));
+        let nobody = json!({"person": "p_nosuchpersonaaaaaaaa", "undo": o});
+        assert!(why(parse(NAME, &body(&nobody), &K)).contains("no person"));
     }
 
     #[test]
