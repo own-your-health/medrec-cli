@@ -2316,18 +2316,28 @@ impl Asking<'_> {
         }
     }
 
-    /// What a request asked now is answered: its `handled`.
-    fn ask(&self, key: &str, mut body: Value) -> Value {
+    /// A request asked now: its id, and the file it is done in.
+    fn put(&self, key: &str, mut body: Value) -> (String, String) {
         body["person"] = self.aid.clone().into();
         let n = self.asked.get();
         self.asked.set(n + 1);
         let id = format!("x_{}", (n as char).to_string().repeat(20));
         let now = medrec::model::now_rfc3339();
         decision_request_at(self.e, &id, key, body, &now);
-        self.e.ok(&["refresh", "--scheduled"]);
         let stamp: String = now.chars().filter(|c| *c != '-' && *c != ':').collect();
         let done = format!("_requests/done/{stamp}_{id}.json");
-        self.e.json_at(&done)["handled"].clone()
+        (id, done)
+    }
+
+    fn handled(&self, done: &str) -> Value {
+        self.e.json_at(done)["handled"].clone()
+    }
+
+    /// What a request asked now is answered: its `handled`.
+    fn ask(&self, key: &str, body: Value) -> Value {
+        let (_, done) = self.put(key, body);
+        self.e.ok(&["refresh", "--scheduled"]);
+        self.handled(&done)
     }
 
     /// Asked and refused, with nothing written and no item named.
@@ -2436,18 +2446,41 @@ fn a_request_that_cannot_be_judged_fails() {
     let a = Asking::new(&e);
     let migraine = "r_migraineaaaaaaaaaaaa";
     let event = a.event_of(QUIT);
+    a.granted("provider", json!({"printed": [PLAIN_ROOM], "wrong": true}));
+    let said = a.marks()["providers"][0]["id"].clone();
     let state = a.file.with_file_name("provider-state.json");
     std::fs::write(&state, "{").unwrap();
-    let before = a.decided();
+    let mut before = a.decided();
     for (key, body) in [
         ("private", json!({"item": migraine, "private": false})),
         ("private", json!({"item": event, "private": false})),
         ("event", json!({"apart": [QUIT, LEVEL]})),
+        ("event", json!({"together": [QUIT, PLAIN]})),
     ] {
         let h = a.ask(key, body.clone());
         assert_eq!(h["outcome"], "failed", "{body}: {h}");
         assert!(h.get("reason").is_none(), "{body}: {h}");
         assert_eq!(a.decided(), before, "{body}");
+    }
+    // A provider request of any kind is tried again, and recorded once they
+    // read.
+    for body in [
+        json!({"printed": [HEADACHE], "set": {"name": "Head room"}}),
+        json!({"printed": [HEADACHE], "wrong": true}),
+        json!({"printed": [HEADACHE, PLAIN_ROOM], "same": true}),
+        json!({"undo": said}),
+    ] {
+        let (id, asked) = a.put("provider", body.clone());
+        let pass = e.ok(&["refresh", "--scheduled"]);
+        assert_eq!(pass["requests"][0]["outcome"], "retrying", "{body}: {pass}");
+        assert_eq!(a.decided(), before, "{body}");
+        std::fs::remove_file(&state).unwrap();
+        let pass = e.ok(&["refresh", "--scheduled"]);
+        assert_eq!(pass["requests"][0]["request"], id, "{pass}");
+        assert_eq!(a.handled(&asked)["outcome"], "ok", "{body}: {pass}");
+        assert_ne!(a.decided(), before, "{body}");
+        before = a.decided();
+        std::fs::write(&state, "{").unwrap();
     }
     // A mark that makes one private is judged by nothing.
     a.granted("private", json!({"item": migraine, "private": true}));
