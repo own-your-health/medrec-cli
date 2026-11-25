@@ -2633,7 +2633,10 @@ readers ship with medrec:
       the bills on it, and `events` counts those in `events_in_error`; an event
       on it says how many of its own are, of those the answer may show, in its
       `detail` ("1 entered in error, not shown"), and has `in_error` and
-      `not_applied` in its `fields` when those are in the answer.
+      `not_applied` in its `fields` when those are in the answer, each absent
+      when nothing is left of it. So with an event asked for by its id in a call
+      that names no person (0.9.10 and later; 0.9.9 named them all). One that is
+      private itself, asked for by its id or named, has all of its own.
     - any other item its sources differ on has `standing` `sources differ` and
       `says`, as `standing.json`'s words are said; the household's own file is
       `the household's own file`. It keeps its `status`.
