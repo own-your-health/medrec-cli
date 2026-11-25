@@ -2654,6 +2654,7 @@ fn the_raw_files_of_a_record_are_counted_by_the_names_of_their_elements() {
     };
     import(1, false);
     import(2, true);
+    import(3, true);
     let index = std::fs::read(base.records().join("Robin Testperson/index.json")).unwrap();
     let index: Value = serde_json::from_slice(&index).unwrap();
     let records = index["records"].as_array().unwrap().iter();
@@ -2664,14 +2665,15 @@ fn the_raw_files_of_a_record_are_counted_by_the_names_of_their_elements() {
     let raw = base.ok(&["records", "raw", &id]);
     assert_eq!(raw["schema"], "record-raw/v1");
     let files = raw["files"].as_array().unwrap();
-    assert_eq!(files.len(), 2, "{raw}");
+    assert_eq!(files.len(), 3, "{raw}");
     let versions: Vec<&Value> = files
         .iter()
         .map(|f| &f["resource"]["meta"]["versionId"])
         .collect();
-    assert_eq!(versions, ["1", "2"]);
-    assert_eq!(files[1]["version"], "current");
-    assert_ne!(files[0]["version"], "current");
+    assert_eq!(versions, ["1", "2", "3"]);
+    assert_eq!(files[2]["version"], "current");
+    assert!(files[..2].iter().all(|f| f["version"] != "current"));
+    assert!(raw.get("notes").is_none());
 
     // What the later one changed, and no value of either.
     let no_value = |text: &str| {
@@ -2692,10 +2694,18 @@ fn the_raw_files_of_a_record_are_counted_by_the_names_of_their_elements() {
     let of = &changes["files"][0];
     assert_eq!(
         (&of["cli"], &of["versions"]),
-        (&"fakeprov".into(), &2.into()),
+        (&"fakeprov".into(), &3.into()),
         "{changes}"
     );
-    let changed = of["steps"][0]["changed"].as_array().unwrap();
+    assert_eq!((&of["ordered"], &of["unread"]), (&true.into(), &0.into()));
+    let steps = of["steps"].as_array().unwrap();
+    let ends: Vec<(&Value, &Value)> = steps.iter().map(|s| (&s["from"], &s["to"])).collect();
+    let named = |i: usize| &files[i]["version"];
+    assert_eq!(ends, [(named(0), named(1)), (named(1), named(2))]);
+    let last = steps[1]["changed"].as_array().unwrap().iter();
+    let last: Vec<&Value> = last.map(|c| &c["path"]).collect();
+    assert_eq!(last, ["meta.lastUpdated", "meta.versionId"]);
+    let changed = steps[0]["changed"].as_array().unwrap();
     let row = |path: &str| {
         changed
             .iter()
@@ -2732,9 +2742,42 @@ fn the_raw_files_of_a_record_are_counted_by_the_names_of_their_elements() {
     assert_eq!(all["types"].as_array().unwrap().len(), 1, "{all}");
     assert_eq!(all["types"][0]["resource_type"], "ExplanationOfBenefit");
     assert_eq!(word(&all, "not-counted"), 1, "{all}");
+    // Of each the current version alone.
+    assert_eq!(all["types"][0]["files"], claims.len() as u64);
+    let submitted = word(&fields, "submitted");
+    assert!(submitted.as_u64() > Some(0), "{fields}");
+    assert_eq!(word(&all, "submitted"), submitted);
     no_value(&all.to_string());
+    let alex = base.ok(&["records", "fields", "--person", "Alex"]);
+    assert_eq!(
+        (&alex["records"], &alex["types"]),
+        (&0.into(), &serde_json::json!([]))
+    );
+    let two = ["records", "fields", "--kind", "claim", "--kind", "result"];
+    assert_eq!(base.ok(&two)["types"].as_array().unwrap().len(), 2);
+    let unknown = base.run(&["records", "fields", "--kind", "claims"]);
+    assert_eq!(unknown.status.code(), Some(2));
     let every = base.ok(&["records", "fields"]);
     assert!(every["types"].as_array().unwrap().len() > 4, "{every}");
+    no_value(&every.to_string());
+    // Nor any text, date or id of the records.
+    let mut said: Vec<String> = Vec::new();
+    for r in index["records"].as_array().unwrap() {
+        for k in ["display", "date"] {
+            said.extend(r[k].as_str().map(str::to_string));
+        }
+        let of = &r["provenance"][0]["source_resource"]["id"];
+        said.extend(of.as_str().map(str::to_string));
+        let texts = r["fields"].as_object().unwrap().values();
+        said.extend(texts.filter_map(|v| Some(v.as_str()?.to_string())));
+    }
+    said.retain(|w| w.len() > 5);
+    assert!(said.len() > 20, "{said:?}");
+    let text = every.to_string();
+    for w in &said {
+        let quoted = format!("\"{w}\"");
+        assert!(!text.contains(&quoted), "{w}: {text}");
+    }
     for args in [
         &["records", "fields", "--kind", "claim"][..],
         &["records", "raw", &id, "--fields"],
@@ -2746,12 +2789,49 @@ fn the_raw_files_of_a_record_are_counted_by_the_names_of_their_elements() {
         no_value(&text);
     }
 
-    // One file that does not read is counted, and named when it is asked for.
-    let path = base.records().join(files[1]["path"].as_str().unwrap());
-    std::fs::write(&path, "{").unwrap();
-    let all = base.ok(&["records", "fields", "--kind", "claim"]);
-    assert_eq!(all["unread"], 1, "{all}");
-    assert!(!base.run(&["records", "raw", &id]).status.success());
+    // One file that does not read, or is not there, is counted, and named when
+    // it is asked for.
+    let rel = files[2]["path"].as_str().unwrap();
+    let path = base.records().join(rel);
+    for left in [Some("{"), None] {
+        match left {
+            Some(text) => std::fs::write(&path, text).unwrap(),
+            None => std::fs::remove_file(&path).unwrap(),
+        }
+        let all = base.ok(&["records", "fields", "--kind", "claim"]);
+        assert_eq!(all["unread"], 1, "{all}");
+        let of = base.ok(&["records", "raw", &id, "--fields"]);
+        assert_eq!(of["unread"], 1, "{of}");
+        let of = base.ok(&["records", "raw", &id, "--changes"]);
+        let of = &of["files"][0];
+        assert_eq!(
+            (&of["versions"], &of["unread"]),
+            (&2.into(), &1.into()),
+            "{of}"
+        );
+        assert_eq!(
+            (&of["ordered"], &of["steps"]),
+            (&false.into(), &serde_json::json!([]))
+        );
+        let out = base.run(&["records", "raw", &id]);
+        assert_eq!(out.status.code(), Some(1));
+        let says = String::from_utf8(out.stderr).unwrap();
+        assert!(
+            says.contains(rel) && says.contains("does not read"),
+            "{says}"
+        );
+    }
+    // The answers with no value name no file in an error either.
+    let dir = path.parent().unwrap();
+    let aside = dir.with_extension("aside");
+    std::fs::rename(dir, &aside).unwrap();
+    std::fs::write(dir, "not a folder").unwrap();
+    for how in ["--changes", "--fields"] {
+        let out = base.run(&["records", "raw", &id, how]);
+        for text in [out.stdout, out.stderr] {
+            no_value(&String::from_utf8(text).unwrap());
+        }
+    }
     let none = base.run(&["records", "raw", "r_aaaaaaaaaaaaaaaaaaaa"]);
     assert_eq!(none.status.code(), Some(4));
 }

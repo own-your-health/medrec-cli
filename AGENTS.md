@@ -65,6 +65,7 @@ quick-xml, lopdf), and so are local tools (poppler, tesseract, bsdtar).
 | `src/intake/` | Document intake: file types, text and OCR, detection with scores and evidence, duplicates |
 | `src/review.rs` | Filing what intake held back |
 | `src/import.rs`, `src/stream.rs`, `src/normalize.rs` | Provider import: the bounded subprocess, the `records-stream/v1` reader (medical-common's `pk-med-records`), FHIR to index records |
+| `src/raw.rs` | `medrec records raw` and `records fields`: the raw files of records, the names of their elements with counts (no values but the codes of what a claim's amounts are), and what changed between the versions kept of each |
 | `src/changes.rs` | What a dry run of the reindex counts that the views would say otherwise, for each person (docs/data-contract.md, "A dry run") |
 | `src/claims.rs`, `src/reindex.rs` | Claim shaping (line and claim categories, amounts, titles, visit and result links) and `medrec reindex`, which shapes filed claims again, reads every record's providers and every condition's, allergy's and medicine's status and words again from their raw files, puts results about somebody else that were filed as the person's own in records of their own, and reads bills' and receipts' statements again |
 | `src/providers.rs` | Who a record's provider fields name, as its source identifies them: the NPI and the address (state and city) behind each reference (docs/data-contract.md, "Providers") |

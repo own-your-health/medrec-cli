@@ -300,7 +300,7 @@ medrec records about-another --person Robin    # what is in a chart about somebo
 medrec records show <record id>                # one record, whatever it is about
 medrec records raw <record id>                 # its raw files, as its sources sent them
 medrec records raw <record id> --changes       # what a later version changed, by the names of its elements alone
-medrec records fields --kind claim             # the elements in many raw files, counted, with no value
+medrec records fields --kind claim             # the elements in many raw files, counted; no values but a claim's amount category codes
 medrec search hemoglobin
 medrec results --code 718-7
 medrec meds --active
