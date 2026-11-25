@@ -2602,6 +2602,9 @@ fn a_claim_is_titled_priced_by_category_and_linked_to_its_visit_and_results() {
     let records = old["records"].as_array_mut().unwrap();
     let claim = records.iter_mut().find(|r| r["kind"] == "claim").unwrap();
     claim["display"] = serde_json::json!("Professional");
+    // With a line it has no more, that says none.
+    let lines = claim["fields"]["items"].as_array_mut().unwrap();
+    lines.push(serde_json::json!({"service": "Example service"}));
     std::fs::write(&path, serde_json::to_string(&old).unwrap()).unwrap();
     let r = e.ok(&["reindex"]);
     assert_eq!(
