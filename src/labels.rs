@@ -2122,7 +2122,7 @@ mod tests {
             let mut r = self.index.records[0].clone();
             r.id = id.into();
             r.key = format!("claim|{id}");
-            r.date = Some("2026-02-03".into());
+            r.date = Some("2026-02-10".into());
             r.fields["provider"] = json!(provider);
             r.providers[0].npi = Some(npi.into());
             self.index.records.push(r);
@@ -2194,8 +2194,8 @@ mod tests {
 
     /// Every kind of label, where each is kept, and what is not labelled:
     /// two providers it can be (`D SPECIMEN`), papers of two practices
-    /// (`P DUMMY`), a private paper for an open item (`L FILLER`) and for a
-    /// private one (`B SPECIMEN`), a service two fit (`r_therapy…`), and an
+    /// (`P DUMMY`), private papers of a day that make its clinician's items
+    /// private (`L FILLER`, `B SPECIMEN`), a service two fit (`r_therapy…`), and an
     /// item the household marked not private whose label is in a private area
     /// (`r_marked…`). `Drew Specimen, MD` spells out the first name of one of
     /// the two.
@@ -3187,12 +3187,18 @@ mod tests {
         );
         assert_eq!(l("R PLACEHOLDER")["phone"], "555-010-0150");
         // A private paper's is in the private part alone.
-        let id = v["private"]["by_name"]["B SPECIMEN"].as_str().unwrap();
-        assert_eq!(
-            v["private"]["labels"],
-            json!({id: {"practice": "Example Counseling Center", "confidence": "likely",
-                "evidence": [{"from": "paper", "document": "d_counselingtwoaaaaaaa"}]}})
-        );
+        let private = |name: &str, paper: &str| {
+            let id = v["private"]["by_name"][name].as_str().unwrap();
+            let label = json!({"practice": "Example Counseling Center", "confidence": "likely",
+                "evidence": [{"from": "paper", "document": paper}]});
+            (id.to_string(), label)
+        };
+        let both = [
+            private("B SPECIMEN", "d_counselingtwoaaaaaaa"),
+            private("L FILLER", "d_counselingaaaaaaaaaa"),
+        ];
+        let both: serde_json::Map<String, Value> = both.into_iter().collect();
+        assert_eq!(v["private"]["labels"], Value::Object(both));
 
         // A person none of whose items has a label has no file.
         c.index.documents.clear();

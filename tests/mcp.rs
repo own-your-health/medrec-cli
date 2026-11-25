@@ -3280,9 +3280,13 @@ fn a_practice_a_bill_told_of_holds_claims_whatever_becomes_of_it() {
     let path = dir.join("index.json");
     let was = std::fs::read(&path).unwrap();
     let later = "r_lateraaaaaaaaaaaaaaa";
-    // With the bill and its claim as `change` has them.
-    let after = |change: &dyn Fn(&mut Value, &mut Value)| -> Value {
+    // With the bill and its claim as `change` has them, and the claims `more`.
+    let after_with = |change: &dyn Fn(&mut Value, &mut Value), more: &[Value]| -> Value {
         let mut v: Value = serde_json::from_slice(&was).unwrap();
+        v["records"]
+            .as_array_mut()
+            .unwrap()
+            .extend(more.iter().cloned());
         let (mut bill, mut claim) = (Value::Null, Value::Null);
         for (list, id, out) in [
             ("documents", "d_billaaaaaaaaaaaaaaaa", &mut bill),
@@ -3302,6 +3306,7 @@ fn a_practice_a_bill_told_of_holds_claims_whatever_becomes_of_it() {
         }
         views_of(&e, &alex).0["private"]["records"][later].clone()
     };
+    let after = |change: &dyn Fn(&mut Value, &mut Value)| after_with(change, &[]);
     let why = |given: bool| {
         let mut why = json!({"area": "mental_health", "from": "clinician"});
         if given {
@@ -3337,6 +3342,25 @@ fn a_practice_a_bill_told_of_holds_claims_whatever_becomes_of_it() {
         claim_is(claim);
     };
     assert_eq!(after(&both), why(true));
+    // The bill now names the claim's practice, as a source has both now.
+    let walk_in = |bill: &mut Value, claim: &mut Value| {
+        both(bill, claim);
+        bill["organization"] = "Example Walk-in".into();
+    };
+    assert_eq!(after(&walk_in), why(true));
+    // Another clinician's visit of the same day: both are held back.
+    let v: Value = serde_json::from_slice(&was).unwrap();
+    let list = v["records"].as_array().unwrap();
+    let mut second = list
+        .iter()
+        .find(|x| x["id"] == "r_billedaaaaaaaaaaaaaa")
+        .unwrap()
+        .clone();
+    second["id"] = "r_secondaaaaaaaaaaaaaa".into();
+    second["key"] = "claim|second|2024-10-01".into();
+    second["fields"]["provider"] = "J SAMPLE".into();
+    second["display"] = "Sample visit \u{b7} J SAMPLE".into();
+    assert_eq!(after_with(&|_, _| {}, &[second]), why(false));
     let _ = std::fs::remove_dir_all(&e.root);
 }
 

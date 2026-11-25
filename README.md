@@ -591,10 +591,11 @@ ICD-10 code by what it is called, a report by its conclusion and a result by a
 value that is a text, a document by its title, the name its file came with or
 any private record that links it, a bill or receipt by its own words, with its
 copies and the statements and payments before and after it, and a study by its
-report. A claim that prints no more of a clinician than a surname and an initial
-is private where one of the person's papers, or a practice whose bill is of that
-clinician's visit, ties that name to what they treat. That is a likely match, and
-`medrec private unmark <id>` opens one that is another's. A study with no report is left out of answers
+report. A claim is private too where its provider's surname and first initial
+are those of a clinician whom one of the person's papers, or a paper from a
+practice of the day of their visit, ties to what they treat, even when the claim
+spells out more of the name. That is a likely match, and `medrec private unmark
+<id>` opens one that is another's. A study with no report is left out of answers
 about the whole household too. An item stays private by what any of its sources
 gave of it, then or now, whatever it shows: the list says `given` of one that is
 private only by that. The household has the last word.
