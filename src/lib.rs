@@ -45,6 +45,7 @@ pub mod refresh;
 pub mod reindex;
 pub mod review;
 pub mod roles;
+pub mod served;
 pub mod services;
 pub mod sources;
 pub mod standing;
