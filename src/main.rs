@@ -1655,8 +1655,7 @@ fn bills_cmd(cli: &Cli, cmd: &BillsCmd, store: &ConfigStore) -> Result<(), CliEr
                 }
             }
             let p = found.ok_or_else(|| CliError::NotFound(format!("no payment {id}")))?;
-            let pm = medrec::bills::undo(&f, p, id)?
-                .ok_or_else(|| CliError::NotFound(format!("no payment {id}")))?;
+            let pm = medrec::bills::undo(&f, p, id)?;
             output::emit(json, "bill-payment-undone", to_value(&pm), |_| {
                 println!("undone {}", pm.id)
             });

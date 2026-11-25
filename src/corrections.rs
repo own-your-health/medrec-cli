@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::folder::Folder;
+use crate::marks::{READ, RECORDS, WRITE};
 use crate::model::{Household, Person};
 use crate::private;
 use crate::refresh::time;
@@ -449,9 +450,6 @@ pub fn decide(
     request: Option<&Request>,
 ) -> Result<Done, Failed> {
     let failed = |doing: &'static str| move |error: CliError| Failed::Folder { doing, error };
-    const READ: &str = "reading the person's marks.json";
-    const RECORDS: &str = "reading the person's records";
-    const WRITE: &str = "writing the person's marks.json";
 
     let mut m = folder.marks(p).map_err(failed(READ))?;
     let now = time::now();

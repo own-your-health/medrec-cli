@@ -60,27 +60,37 @@ impl Marks {
 /// answered late.
 pub const UNDONE_KEEP_SECS: i64 = 90 * 86_400;
 
+/// What was being done when the folder failed.
+pub const READ: &str = "reading the person's marks.json";
+pub const WRITE: &str = "writing the person's marks.json";
+pub const READ_DECISIONS: &str = "reading the person's overrides.json";
+pub const WRITE_DECISIONS: &str = "writing the person's overrides.json";
+pub const RECORDS: &str = "reading the person's records";
+
 /// Why a decision of the household's was not written to a person's
 /// `marks.json` or `overrides.json`.
 #[derive(Debug)]
 pub enum Failed {
     /// It names what is not the person's, or says what cannot be.
     Refused(CliError),
-    /// The folder could not be read or written, whatever the error's kind:
-    /// a Drive file that is gone is a "not found" too.
-    Folder(CliError),
+    /// The folder did not give or take a file, whatever the error's kind: a
+    /// Drive file that is gone is a "not found" too. The error's message can
+    /// quote the file.
+    Folder {
+        doing: &'static str,
+        error: CliError,
+    },
 }
 
-impl From<CliError> for Failed {
-    fn from(e: CliError) -> Failed {
-        Failed::Folder(e)
-    }
+/// The folder failed at `doing`.
+pub fn failed(doing: &'static str) -> impl Fn(CliError) -> Failed {
+    move |error| Failed::Folder { doing, error }
 }
 
 impl From<Failed> for CliError {
     fn from(f: Failed) -> CliError {
         match f {
-            Failed::Refused(e) | Failed::Folder(e) => e,
+            Failed::Refused(error) | Failed::Folder { error, .. } => error,
         }
     }
 }

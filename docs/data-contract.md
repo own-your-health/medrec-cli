@@ -961,10 +961,10 @@ with `event` in place of `scope`:
   `sources` is empty.
 - A `failed` decision (an event, paid, unpaid or private request) is answered
   once and not tried again: its `done/` file says `failed`, and the person
-  asks again. Its `handled.message` is in medrec's own words and repeats
-  nothing from the folder (0.9.7 and later). The step and the kind of error
-  are only in the refreshing machine's own output (`medrec refresh`
-  `requests[]` `cause`).
+  asks again. Its `handled.message` names the step that failed in medrec's own
+  words ("it failed at reading the person's marks.json") and repeats nothing
+  from the folder (0.9.7 and later). The kind of error is only in the
+  refreshing machine's own output (`medrec refresh` `requests[]` `cause`).
 
 ### Paid requests (0.9.1 and later)
 

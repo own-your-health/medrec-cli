@@ -12,7 +12,7 @@ use serde_json::{json, Map, Value};
 
 use crate::claims::{decimal, units};
 use crate::events::same_org;
-use crate::marks::Failed;
+use crate::marks::{failed, Failed, READ, RECORDS, WRITE};
 use crate::model::{Amount, Document, Person, PersonIndex, PersonText};
 
 pub const SCHEMA: &str = "medrec-bills/v1";
@@ -639,7 +639,7 @@ pub fn mark_paid(
             crate::printable(&amount.amount)
         ))));
     }
-    let idx = folder.index(p)?;
+    let idx = folder.index(p).map_err(failed(RECORDS))?;
     let Some(d) = idx.documents.iter().find(|d| d.id == document) else {
         return Err(Failed::Refused(CliError::NotFound(format!(
             "{} has no document {}",
@@ -657,7 +657,7 @@ pub fn mark_paid(
         amount: decimal(units(&amount.amount).unwrap_or(0)),
         currency: amount.currency.clone(),
     };
-    let mut o = folder.marks(p)?;
+    let mut o = folder.marks(p).map_err(failed(READ))?;
     if let Some(pm) = o
         .payments
         .iter()
@@ -678,21 +678,19 @@ pub fn mark_paid(
         request: request.map(str::to_string),
     };
     o.payments.push(pm.clone());
-    folder.save_marks(p, &o)?;
+    folder.save_marks(p, &o).map_err(failed(WRITE))?;
     Ok(Marked::Recorded(pm))
 }
 
-/// Drop a marked payment by its id; `None` when the person has no such
-/// payment.
-pub fn undo(
-    folder: &crate::folder::Folder,
-    p: &Person,
-    id: &str,
-) -> Result<Option<Payment>, pk_cli_core::CliError> {
+/// Drop a marked payment by its id; refused when the person has none of it.
+pub fn undo(folder: &crate::folder::Folder, p: &Person, id: &str) -> Result<Payment, Failed> {
     use crate::refresh::time;
-    let mut o = folder.marks(p)?;
+    let mut o = folder.marks(p).map_err(failed(READ))?;
     let Some(i) = o.payments.iter().position(|pm| pm.id == id) else {
-        return Ok(None);
+        return Err(Failed::Refused(pk_cli_core::CliError::NotFound(format!(
+            "no payment {}",
+            crate::printable(id)
+        ))));
     };
     let pm = o.payments.remove(i);
     let now = time::now();
@@ -705,8 +703,8 @@ pub fn undo(
             other: serde_json::Map::new(),
         });
     }
-    folder.save_marks(p, &o)?;
-    Ok(Some(pm))
+    folder.save_marks(p, &o).map_err(failed(WRITE))?;
+    Ok(pm)
 }
 
 #[cfg(test)]

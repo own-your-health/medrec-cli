@@ -521,12 +521,12 @@ impl Decided {
         }
     }
 
-    /// Failed at `doing`. Everyone's outcomes show together, so the message
-    /// is the caller's own words.
-    fn failed(message: &str, doing: &str, error: &CliError) -> Decided {
+    /// Failed at `doing`. Everyone's outcomes show together, and an error's
+    /// message can quote a file, so the message is the step in medrec's words.
+    fn failed(doing: &str, error: &CliError) -> Decided {
         Decided {
             cause: Some(format!("{doing}: {}", error.code())),
-            ..Decided::new("failed", message)
+            ..Decided::new("failed", format!("it failed at {doing}"))
         }
     }
 }
@@ -554,11 +554,7 @@ fn provider_request(
         Ok(Done::NothingToUndo) => Decided::new("ok", "there was nothing to undo"),
         Ok(Done::SaidLater) => Decided::new("skipped", "something said later stands"),
         Err(Failed::Refused(r)) => Decided::new("invalid", r.words()),
-        Err(Failed::Folder { doing, error }) => Decided::failed(
-            "the person's marks could not be read or written",
-            doing,
-            &error,
-        ),
+        Err(Failed::Folder { doing, error }) => Decided::failed(doing, &error),
     }
 }
 
@@ -586,13 +582,6 @@ fn decision_request(
             format!("its {what} names no person in household.json"),
         )
     };
-    let marks = |e: CliError| {
-        Decided::failed(
-            "the person's marks could not be read or written",
-            "reading or writing the person's marks.json",
-            &e,
-        )
-    };
     match &v.scope {
         Scope::Provider { person: p, ask } => match person(p) {
             Some(p) => provider_request(folder, h, v, p, ask, at),
@@ -616,7 +605,7 @@ fn decision_request(
                 Err(Failed::Refused(_)) => {
                     Decided::new("invalid", "the item it names is not one of the person's")
                 }
-                Err(Failed::Folder(e)) => marks(e),
+                Err(Failed::Folder { doing, error }) => Decided::failed(doing, &error),
             }
         }
         Scope::Paid {
@@ -651,7 +640,7 @@ fn decision_request(
                     "invalid",
                     "the document it names is not one of the person's",
                 ),
-                Err(Failed::Folder(e)) => marks(e),
+                Err(Failed::Folder { doing, error }) => Decided::failed(doing, &error),
             }
         }
         Scope::Unpaid { person: p, payment } => {
@@ -659,10 +648,10 @@ fn decision_request(
                 return no_person("unpaid");
             };
             match crate::bills::undo(folder, p, payment) {
-                Ok(Some(pm)) => Decided::new("ok", format!("undone {}", pm.id)),
+                Ok(pm) => Decided::new("ok", format!("undone {}", pm.id)),
                 // Served again, or asked by two people, it is undone.
-                Ok(None) => Decided::new("ok", "there was nothing to undo"),
-                Err(e) => marks(e),
+                Err(Failed::Refused(_)) => Decided::new("ok", "there was nothing to undo"),
+                Err(Failed::Folder { doing, error }) => Decided::failed(doing, &error),
             }
         }
         Scope::Event {
@@ -682,11 +671,7 @@ fn decision_request(
                     "invalid",
                     "a member it names is not one of the person's records or documents",
                 ),
-                Err(Failed::Folder(e)) => Decided::failed(
-                    "the person's event decisions could not be read or written",
-                    "reading or writing the person's overrides.json",
-                    &e,
-                ),
+                Err(Failed::Folder { doing, error }) => Decided::failed(doing, &error),
             }
         }
         Scope::All | Scope::Person(_) | Scope::Source(_) => {
@@ -1310,11 +1295,7 @@ pub fn pass(cfg: &Config, mode: Mode, pick: Option<&Pick>) -> Result<PassReport,
                         let at = asked.map_or(tried, |t| t.min(tried));
                         decision_request(f, &h, v, at)
                     }
-                    (_, Some(Err(e))) => Decided::failed(
-                        "the folder could not be opened to write",
-                        "opening the folder to write",
-                        e,
-                    ),
+                    (_, Some(Err(e))) => Decided::failed("opening the folder to write", e),
                     (_, None) => Decided::new("failed", "the folder was not opened to write"),
                 };
                 // Its `done/` file would keep nothing of what it says, so one

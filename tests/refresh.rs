@@ -1847,10 +1847,28 @@ fn a_bill_marked_paid_from_the_app_or_a_terminal_is_settled_in_the_bills_view() 
             .unwrap_or_else(|| panic!("{id}: {pass}"));
         assert_eq!(
             row["cause"],
-            format!("reading or writing the person's {file}: other"),
+            format!("reading the person's {file}: other"),
             "{pass}"
         );
+        assert_eq!(
+            done["handled"]["message"],
+            format!("it failed at reading the person's {file}")
+        );
     }
+    // Nor is a file that reads blamed for one that does not.
+    std::fs::write(&file, serde_json::to_vec(&m).unwrap()).unwrap();
+    std::fs::write(&o, &held).unwrap();
+    std::fs::write(dir.join("index.json"), b"{not json").unwrap();
+    let id = "x_unpaidgggggggggggggg";
+    let paid = json!({"person": aid, "document": bill, "on": "2026-04-01", "amount": "2.00"});
+    decision_request(&e, id, "paid", paid);
+    let pass = e.ok(&["refresh", "--scheduled"]);
+    assert_eq!(
+        pass["requests"],
+        json!([{"request": id, "outcome": "failed",
+            "cause": "reading the person's records: other"}]),
+        "{pass}"
+    );
     let _ = std::fs::remove_dir_all(&e.root);
 }
 
