@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::events::Built;
+use crate::given;
 use crate::marks::{failed, Failed, READ, RECORDS, WRITE};
 use crate::model::{Document, Household, Person, PersonIndex, PersonText, Record};
 use crate::standing;
@@ -88,11 +89,25 @@ fn marks_event(m: &Mark, eid: &str, members: &[String], events: &BTreeSet<&str>)
 struct Why {
     area: &'static str,
     from: &'static str,
+    /// Only by what a source gave and no item shows ([`given`]).
+    given: bool,
 }
 
 impl Why {
+    fn of(area: &'static str, from: &'static str) -> Why {
+        Why {
+            area,
+            from,
+            given: false,
+        }
+    }
+
     fn json(self) -> Value {
-        json!({"area": self.area, "from": self.from})
+        let mut v = json!({"area": self.area, "from": self.from});
+        if self.given {
+            v["given"] = Value::Bool(true);
+        }
+        v
     }
 }
 
@@ -273,19 +288,13 @@ fn principal_diagnosis(r: &Record) -> Option<(Option<&str>, &str)> {
 /// Why a record is private by the rules, if it is.
 fn record_why(r: &Record) -> Option<Why> {
     if let Some(area) = source_area(r) {
-        return Some(Why {
-            area,
-            from: "source",
-        });
+        return Some(Why::of(area, "source"));
     }
     let by_names = |keys: &[&str]| {
         keys.iter()
             .filter_map(|k| field(r, k))
             .find_map(|n| first_area(&PLACES, n))
-            .map(|area| Why {
-                area,
-                from: "provider",
-            })
+            .map(|area| Why::of(area, "provider"))
     };
     match r.kind.as_str() {
         "condition" => r
@@ -294,11 +303,11 @@ fn record_why(r: &Record) -> Option<Why> {
             .filter(|c| is_icd10(c.system.as_deref()))
             .and_then(|c| c.code.as_deref())
             .and_then(icd10_area)
-            .map(|area| Why { area, from: "code" }),
+            .map(|area| Why::of(area, "code")),
         "claim" => principal_diagnosis(r)
             .filter(|(system, _)| is_icd10(*system))
             .and_then(|(_, code)| icd10_area(code))
-            .map(|area| Why { area, from: "code" })
+            .map(|area| Why::of(area, "code"))
             .or_else(|| by_names(&["provider", "facility"])),
         "encounter" => by_names(&["service_provider", "location", "practitioner"]),
         "medication" => {
@@ -307,14 +316,11 @@ fn record_why(r: &Record) -> Option<Why> {
             named
                 .filter_map(|n| first_area(&MEDICINES, n))
                 .next()
-                .map(|area| Why {
-                    area,
-                    from: "medicine",
-                })
+                .map(|area| Why::of(area, "medicine"))
                 .or_else(|| by_names(&["prescriber"]))
         }
         "result" | "report" => first_area(&TESTS, &r.display)
-            .map(|area| Why { area, from: "test" })
+            .map(|area| Why::of(area, "test"))
             .or_else(|| by_names(&["performer"])),
         _ => None,
     }
@@ -327,10 +333,7 @@ fn document_why(d: &Document, text: Option<&str>) -> Option<Why> {
         .organization
         .as_deref()
         .and_then(|o| first_area(&PLACES, o))
-        .map(|area| Why {
-            area,
-            from: "provider",
-        });
+        .map(|area| Why::of(area, "provider"));
     let words = || {
         let title = d.title.as_deref().and_then(|t| first_area(&PAPERS, t));
         let page = || {
@@ -339,10 +342,7 @@ fn document_why(d: &Document, text: Option<&str>) -> Option<Why> {
                 .iter()
                 .find_map(|list| first_area(list, &page))
         };
-        title.or_else(page).map(|area| Why {
-            area,
-            from: "words",
-        })
+        title.or_else(page).map(|area| Why::of(area, "words"))
     };
     place.or_else(words)
 }
@@ -367,7 +367,7 @@ fn papers_tied(idx: &PersonIndex) -> Vec<(String, String)> {
 /// The person's `private.json` as `medrec views write` writes it: from
 /// their index and its texts, their events (`events::Built`), their marks,
 /// and the items a provider label makes private, with their area
-/// (`labels::Said::areas` of [`Built::for_private`]). What a source takes
+/// (`labels::areas`). What a source takes
 /// back still tells what it did, so nothing it made private opens.
 pub fn build(
     p: &Person,
@@ -375,38 +375,117 @@ pub fn build(
     texts: &PersonText,
     built: &Built,
     marks: &[Mark],
-    labelled: &BTreeMap<String, &'static str>,
+    labelled: &BTreeMap<String, (&'static str, bool)>,
 ) -> Value {
     let now_index = standing::index(idx);
     let events = &*built.for_private();
-    let by_label = |id: &str| {
-        labelled.get(id).map(|area| Why {
-            area,
-            from: "provider",
-        })
-    };
-    let mut items: BTreeMap<String, Why> = BTreeMap::new();
-    for r in &idx.records {
-        if let Some(w) = record_why(r).or_else(|| by_label(&r.id)) {
-            items.insert(r.id.clone(), w);
+    // A study is private when its report is. One with no report, or a report
+    // the person does not have, cannot be judged, with what is entered in
+    // error or without it.
+    let mut unreported = Vec::new();
+    let mut reports: Vec<(&str, [Option<String>; 2])> = Vec::new();
+    for (s, now) in idx.studies.iter().zip(&now_index.studies) {
+        let report = |of: &PersonIndex, report: &Option<String>| -> Option<String> {
+            let has = |r: &&String| {
+                of.documents.iter().any(|d| d.id == **r) || of.records.iter().any(|x| x.id == **r)
+            };
+            report.as_ref().filter(has).cloned()
+        };
+        let of = [report(idx, &s.report), report(&now_index, &now.report)];
+        if of.contains(&None) {
+            unreported.push(s.id.clone());
         }
+        reports.push((&s.id, of));
     }
-    for d in &idx.documents {
-        let text = texts.texts.get(&d.id).map(String::as_str);
-        if let Some(w) = document_why(d, text).or_else(|| by_label(&d.id)) {
-            items.insert(d.id.clone(), w);
+    // A document tied to a private one is private.
+    let mut ties = papers_tied(idx);
+    ties.extend(crate::bills::ties(&crate::bills::build(
+        p,
+        idx,
+        texts,
+        &built.events,
+        &[],
+    )));
+    if let Some(whole) = &built.whole {
+        ties.extend(crate::bills::whole_ties(p, idx, texts, whole));
+    }
+    let judge = |given: bool| {
+        let mut items: BTreeMap<String, Why> = BTreeMap::new();
+        let label = |id: &str| {
+            let (area, only) = labelled.get(id)?;
+            (given || !only).then(|| Why::of(area, "provider"))
+        };
+        for r in &idx.records {
+            let gave = || given::as_given(r).find_map(|x| record_why(&x));
+            let w = record_why(r).or_else(|| gave().filter(|_| given));
+            let w = w.or_else(|| label(&r.id));
+            items.extend(w.map(|w| (r.id.clone(), w)));
+        }
+        for d in &idx.documents {
+            let text = texts.texts.get(&d.id).map(String::as_str);
+            let gave = || given::papers_as_given(d).find_map(|x| document_why(&x, None));
+            let w = document_why(d, text).or_else(|| gave().filter(|_| given));
+            let w = w.or_else(|| label(&d.id));
+            items.extend(w.map(|w| (d.id.clone(), w)));
+        }
+        follow(&mut items, idx, events, &ties, marks, label);
+        for (study, of) in &reports {
+            let mut why = of.iter().flatten();
+            if let Some(w) = why.find_map(|r| items.get(r).copied()) {
+                items.insert(study.to_string(), Why::of(w.area, "report"));
+            }
+        }
+        items
+    };
+    let mut items = judge(true);
+    let gave = idx.records.iter().any(|r| !r.given.is_empty())
+        || idx.documents.iter().any(|d| !d.given.is_empty())
+        || labelled.values().any(|(_, only)| *only);
+    if gave {
+        // As they are by what is shown; else only by what a source gave.
+        let shown = judge(false);
+        for (id, w) in &mut items {
+            *w = match shown.get(id) {
+                Some(w) => *w,
+                None => Why { given: true, ..*w },
+            };
         }
     }
 
+    let mut out = json!({"schema": SCHEMA, "person": p.id,
+        "records": {}, "documents": {}, "events": {}, "studies": {}});
+    for (id, w) in items {
+        let kind = match id.get(..2) {
+            Some("r_") => "records",
+            Some("d_") => "documents",
+            Some("e_") => "events",
+            Some("m_") => "studies",
+            _ => continue,
+        };
+        out[kind][id] = w.json();
+    }
+    if !unreported.is_empty() {
+        out["unreported_studies"] = unreported.into();
+    }
+    out
+}
+
+/// What is private with what is: by the household's marks, the records and
+/// papers tied to it, and events.
+fn follow(
+    items: &mut BTreeMap<String, Why>,
+    idx: &PersonIndex,
+    events: &Value,
+    ties: &[(String, String)],
+    marks: &[Mark],
+    by_label: impl Fn(&str) -> Option<Why>,
+) {
     // The household's marks on records, then the documents a private record
     // links, then the marks on documents: an event follows what its members
     // are.
     let mark_of: BTreeMap<&str, bool> =
         marks.iter().map(|m| (m.item.as_str(), m.private)).collect();
-    let household = Why {
-        area: HOUSEHOLD,
-        from: "household",
-    };
+    let household = Why::of(HOUSEHOLD, "household");
     let apply = |items: &mut BTreeMap<String, Why>, id: &str, mark: Option<bool>| match mark {
         Some(true) => {
             let area = items.get(id).map_or(HOUSEHOLD, |w| w.area);
@@ -436,24 +515,10 @@ pub fn build(
             .filter(|(d, _)| mark_of.get(d.as_str()) != Some(&false))
             .collect();
         for (d, w) in linked {
-            items.entry(d).or_insert(Why {
-                area: w.area,
-                from: "record",
-            });
+            items.entry(d).or_insert(Why::of(w.area, "record"));
         }
     };
     // So is one tied to a private one.
-    let mut ties = papers_tied(idx);
-    ties.extend(crate::bills::ties(&crate::bills::build(
-        p,
-        idx,
-        texts,
-        &built.events,
-        &[],
-    )));
-    if let Some(whole) = &built.whole {
-        ties.extend(crate::bills::whole_ties(p, idx, texts, whole));
-    }
     let tie = |items: &mut BTreeMap<String, Why>| loop {
         let tied: Vec<(String, Why)> = ties
             .iter()
@@ -466,19 +531,16 @@ pub fn build(
             return;
         }
         for (d, w) in tied {
-            items.entry(d).or_insert(Why {
-                area: w.area,
-                from: "paper",
-            });
+            items.entry(d).or_insert(Why::of(w.area, "paper"));
         }
     };
     // A mark naming an item the person no longer has is skipped.
     for r in &idx.records {
-        apply(&mut items, &r.id, mark_of.get(r.id.as_str()).copied());
+        apply(items, &r.id, mark_of.get(r.id.as_str()).copied());
     }
-    link(&mut items);
+    link(items);
     for d in &idx.documents {
-        apply(&mut items, &d.id, mark_of.get(d.id.as_str()).copied());
+        apply(items, &d.id, mark_of.get(d.id.as_str()).copied());
     }
 
     // An event is private when a claim or portal visit in it is, or every
@@ -503,13 +565,7 @@ pub fn build(
             let all = (!ids.is_empty() && ids.iter().all(|id| items.contains_key(id)))
                 .then(|| items[&ids[0]]);
             if let Some(w) = lead.or(all) {
-                items.insert(
-                    eid.to_string(),
-                    Why {
-                        area: w.area,
-                        from: "members",
-                    },
-                );
+                items.insert(eid.to_string(), Why::of(w.area, "members"));
             }
             // Where it was, as the household calls a provider no member of
             // it prints.
@@ -529,7 +585,7 @@ pub fn build(
                         .find(|m| marks_event(m, eid, &ids, &event_ids))
                 })
                 .map(|m| m.private);
-            apply(&mut items, eid, mark);
+            apply(items, eid, mark);
             by_event.push((eid.to_string(), ids));
         }
         for (eid, ids) in &by_event {
@@ -538,66 +594,16 @@ pub fn build(
             };
             for id in ids {
                 if !items.contains_key(id) && mark_of.get(id.as_str()) != Some(&false) {
-                    items.insert(
-                        id.clone(),
-                        Why {
-                            area: w.area,
-                            from: "event",
-                        },
-                    );
+                    items.insert(id.clone(), Why::of(w.area, "event"));
                 }
             }
         }
-        link(&mut items);
-        tie(&mut items);
+        link(items);
+        tie(items);
         if items.len() == before {
             break;
         }
     }
-
-    // A study is private when its report is. One with no report, or a
-    // report the person does not have, cannot be judged, with what is entered
-    // in error or without it.
-    let mut unreported = Vec::new();
-    for (s, now) in idx.studies.iter().zip(&now_index.studies) {
-        let report = |of: &PersonIndex, report: &Option<String>| -> Option<String> {
-            let has = |r: &&String| {
-                of.documents.iter().any(|d| d.id == **r) || of.records.iter().any(|x| x.id == **r)
-            };
-            report.as_ref().filter(has).cloned()
-        };
-        let (was, is) = (report(idx, &s.report), report(&now_index, &now.report));
-        if was.is_none() || is.is_none() {
-            unreported.push(s.id.clone());
-        }
-        let mut why = [was, is].into_iter().flatten();
-        if let Some(w) = why.find_map(|r| items.get(&r).copied()) {
-            items.insert(
-                s.id.clone(),
-                Why {
-                    area: w.area,
-                    from: "report",
-                },
-            );
-        }
-    }
-
-    let mut out = json!({"schema": SCHEMA, "person": p.id,
-        "records": {}, "documents": {}, "events": {}, "studies": {}});
-    for (id, w) in items {
-        let kind = match id.get(..2) {
-            Some("r_") => "records",
-            Some("d_") => "documents",
-            Some("e_") => "events",
-            Some("m_") => "studies",
-            _ => continue,
-        };
-        out[kind][id] = w.json();
-    }
-    if !unreported.is_empty() {
-        out["unreported_studies"] = unreported.into();
-    }
-    out
 }
 
 /// The person's `private.json` as `medrec views write` would write it now.
@@ -626,8 +632,7 @@ pub fn with_events(
         .as_ref()
         .map(|m| m.providers.as_slice())
         .unwrap_or_default();
-    let whole = events.for_private();
-    let said = crate::labels::Said::of(idx, &whole, &state, corrections);
+    let labelled = crate::labels::areas(idx, &events, &state, corrections);
     let mut v = build(
         p,
         idx,
@@ -637,7 +642,7 @@ pub fn with_events(
             .as_ref()
             .map(|m| m.private.as_slice())
             .unwrap_or_default(),
-        &said.areas(),
+        &labelled,
     );
     if state.lost() {
         v["labels_unreadable"] = Value::Bool(true);
@@ -645,7 +650,6 @@ pub fn with_events(
     if marks.is_none() || state.lost() {
         v["marks_unreadable"] = Value::Bool(true);
     }
-    drop(whole);
     Ok((v, events))
 }
 
@@ -969,7 +973,7 @@ mod tests {
     ) -> Value {
         let built = Built {
             events: events.clone(),
-            whole: None,
+            ..Built::default()
         };
         build(p, idx, texts, &built, marks, &BTreeMap::new())
     }
@@ -1357,6 +1361,7 @@ mod tests {
             let both = Built {
                 events: none(),
                 whole: Some(none()),
+                ..Built::default()
             };
             let v = build(&person(), &idx, &texts, &both, &[], &BTreeMap::new());
             let after = areas(&v, "documents");
@@ -1398,6 +1403,7 @@ mod tests {
         let both = Built {
             events: events(&[member(visit, "encounter")]),
             whole: Some(whole),
+            ..Built::default()
         };
         let v = build(&person(), &idx, &no_text(), &both, &[], &BTreeMap::new());
         for kind in ["records", "documents", "events", "studies"] {
@@ -1408,7 +1414,7 @@ mod tests {
         // Once its claim is gone from the events as from the index, no more.
         let gone = Built {
             events: both.events.clone(),
-            whole: None,
+            ..Built::default()
         };
         idx.records.remove(0);
         let v = build(&person(), &idx, &no_text(), &gone, &[], &BTreeMap::new());

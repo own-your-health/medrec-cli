@@ -1141,6 +1141,7 @@ pub fn document_for(
         also_from: Vec::new(),
         words: Vec::new(),
         errors: Vec::new(),
+        given: Vec::new(),
         origin,
     }
 }

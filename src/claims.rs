@@ -861,6 +861,7 @@ mod tests {
             words: Vec::new(),
             errors: Vec::new(),
             fields_from: None,
+            given: Vec::new(),
             documents: Vec::new(),
             provenance: Vec::new(),
         }

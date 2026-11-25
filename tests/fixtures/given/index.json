@@ -1,0 +1,246 @@
+{
+ "schema": "medrec-index/v1",
+ "person": "p_robinaaaaaaaaaaaaaaa",
+ "rev": 1,
+ "studies": [],
+ "imports": [],
+ "records": [
+  {
+   "id": "r_hearvisitaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|hearvisit|2024-05-07",
+   "date": "2024-05-07",
+   "display": "Office visit · Example Hearing Room",
+   "fields": {
+    "provider": "Example Hearing Room",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2024-05-07",
+     "end": "2024-05-07"
+    },
+    "type": "professional",
+    "amounts": {
+     "billed": {
+      "amount": "90.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "35.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "sequence": 1,
+      "category": "visit",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "99212",
+       "display": "Office visit"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "90.00",
+        "currency": "USD"
+       },
+       "you_owe": {
+        "amount": "35.00",
+        "currency": "USD"
+       }
+      }
+     }
+    ],
+    "category": "visit"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-07-02T10:00:00Z",
+     "filed_at": "2024-07-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/Binary/hearvisit.json"
+    },
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "east",
+      "fhir_base": "https://east.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-07-03T10:00:00Z",
+     "filed_at": "2024-07-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/east/Binary/hearvisit.json"
+    }
+   ],
+   "words": [
+    {
+     "raw_path": "Robin Example/Records/north/Binary/hearvisit.json",
+     "status": "active",
+     "read": "2024-07-02T10:00:00Z"
+    },
+    {
+     "raw_path": "Robin Example/Records/east/Binary/hearvisit.json",
+     "status": "entered-in-error",
+     "read": "2024-07-03T10:00:00Z"
+    }
+   ],
+   "fields_from": "Robin Example/Records/north/Binary/hearvisit.json",
+   "status": "active",
+   "given": [
+    {
+     "raw_path": "Robin Example/Records/east/Binary/hearvisit.json",
+     "fields": {
+      "provider": "Sample Counseling Room"
+     }
+    }
+   ]
+  },
+  {
+   "id": "r_footvisitaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|footvisit|2024-05-14",
+   "date": "2024-05-14",
+   "display": "Office visit · Example Foot Room",
+   "fields": {
+    "provider": "Example Foot Room",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2024-05-14",
+     "end": "2024-05-14"
+    },
+    "type": "professional",
+    "amounts": {
+     "billed": {
+      "amount": "90.00",
+      "currency": "USD"
+     },
+     "you_owe": {
+      "amount": "20.00",
+      "currency": "USD"
+     }
+    },
+    "items": [
+     {
+      "sequence": 1,
+      "category": "visit",
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "99212",
+       "display": "Office visit"
+      },
+      "amounts": {
+       "billed": {
+        "amount": "90.00",
+        "currency": "USD"
+       },
+       "you_owe": {
+        "amount": "20.00",
+        "currency": "USD"
+       }
+      }
+     }
+    ],
+    "category": "visit"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-07-02T10:00:00Z",
+     "filed_at": "2024-07-04T10:00:00Z",
+     "filed_by": "medrec 0.9.9",
+     "raw_path": "Robin Example/Records/north/Binary/footvisit.json"
+    }
+   ]
+  }
+ ],
+ "documents": [
+  {
+   "id": "d_hearbillaaaaaaaaaaaa",
+   "path": "Robin Example/Claims/2024/hearbill.pdf",
+   "sha256": "hearbill",
+   "md5": "hearbill",
+   "size": 10,
+   "media_type": "application/pdf",
+   "doc_type": "bill",
+   "date": "2024-06-04",
+   "organization": "Example Hearing Room",
+   "title": "Hearing statement",
+   "filed_at": "2024-07-04T10:00:00Z",
+   "origin": {
+    "kind": "fhir",
+    "action": "imported"
+   },
+   "provenance": {
+    "source": {
+     "kind": "fhir",
+     "cli": "fakeprov",
+     "organization_id": "north",
+     "fhir_base": "https://north.example.test/fhir"
+    },
+    "method": "fhir-api",
+    "fetched_at": "2024-07-02T10:00:00Z",
+    "filed_at": "2024-07-04T10:00:00Z",
+    "filed_by": "medrec 0.9.9",
+    "raw_path": "Robin Example/Records/north/Binary/hearbill.json"
+   },
+   "statement": {
+    "statement_date": "2024-06-04",
+    "amount_due": {
+     "amount": "35.00",
+     "currency": "USD"
+    }
+   }
+  },
+  {
+   "id": "d_footbillaaaaaaaaaaaa",
+   "path": "Robin Example/Claims/2024/footbill.pdf",
+   "sha256": "footbill",
+   "md5": "footbill",
+   "size": 10,
+   "media_type": "application/pdf",
+   "doc_type": "bill",
+   "date": "2024-06-11",
+   "organization": "Example Foot Room",
+   "title": "Foot statement",
+   "filed_at": "2024-07-04T10:00:00Z",
+   "origin": {
+    "kind": "fhir",
+    "action": "imported"
+   },
+   "provenance": {
+    "source": {
+     "kind": "fhir",
+     "cli": "fakeprov",
+     "organization_id": "north",
+     "fhir_base": "https://north.example.test/fhir"
+    },
+    "method": "fhir-api",
+    "fetched_at": "2024-07-02T10:00:00Z",
+    "filed_at": "2024-07-04T10:00:00Z",
+    "filed_by": "medrec 0.9.9",
+    "raw_path": "Robin Example/Records/north/Binary/footbill.json"
+   },
+   "statement": {
+    "statement_date": "2024-06-11",
+    "amount_due": {
+     "amount": "20.00",
+     "currency": "USD"
+    }
+   }
+  }
+ ]
+}

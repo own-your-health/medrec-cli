@@ -28,6 +28,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
+use crate::given;
 use crate::marks::{failed, Failed, READ_DECISIONS, RECORDS, WRITE_DECISIONS};
 use crate::model::{Document, Person, PersonIndex, PersonText, Record};
 use crate::sources::Sources;
@@ -546,6 +547,8 @@ struct Ev {
     differences: Vec<Value>,
     /// The place a link gave it (X1).
     linked_place: Option<String>,
+    /// The places it would have, by what else the sources gave of it.
+    linked_given: Vec<String>,
 }
 
 impl Ev {
@@ -559,6 +562,7 @@ impl Ev {
             links: Vec::new(),
             differences: Vec::new(),
             linked_place: None,
+            linked_given: Vec::new(),
         }
     }
 
@@ -2816,12 +2820,19 @@ fn grouped(inp: &Input, idx: &PersonIndex, linked: &[Linked]) -> (Base, usize) {
                 if !(s <= born && born <= e) {
                     continue;
                 }
-                let hospital = other.evs[i]
-                    .claims()
-                    .find(|m| m.role == "facility")
-                    .and_then(|m| orecs.get(m.id.as_str()))
-                    .and_then(|r| str_field(r, "provider").or_else(|| str_field(r, "facility")))
-                    .map(str::to_string);
+                let facility = |r: &Record| -> Option<String> {
+                    let name = str_field(r, "provider").or_else(|| str_field(r, "facility"))?;
+                    Some(name.to_string())
+                };
+                let claim = other.evs[i].claims().find(|m| m.role == "facility");
+                let claim = claim.and_then(|m| orecs.get(m.id.as_str()));
+                let hospital = claim.and_then(|r| facility(r));
+                let gave: Vec<String> = claim
+                    .into_iter()
+                    .flat_map(|r| given::as_given(r))
+                    .filter_map(|r| facility(&r))
+                    .filter(|name| Some(name) != hospital.as_ref())
+                    .collect();
                 let stay_id = event_id(&l.person.id, &other.evs[i].anchor);
                 for ev in b.evs.iter_mut() {
                     if ev.span().is_some_and(|(a, z)| a <= e && s <= z) {
@@ -2829,6 +2840,7 @@ fn grouped(inp: &Input, idx: &PersonIndex, linked: &[Linked]) -> (Base, usize) {
                         if ev.linked_place.is_none() {
                             ev.linked_place = hospital.clone();
                         }
+                        ev.linked_given.extend(gave.iter().cloned());
                     }
                 }
             }
@@ -2924,9 +2936,13 @@ fn records_of(idx: &PersonIndex) -> BTreeMap<&str, &Record> {
 /// person's is entered in error, the events as they are with it, each with the
 /// id of the event that has the rest of it: what tells that an item is private
 /// does not change when a source takes one back.
+#[derive(Default)]
 pub struct Built {
     pub events: Value,
     pub whole: Option<Value>,
+    /// Where an event would be by what a linked person's sources gave and do
+    /// not show ([`crate::given`]): `{id, place}`.
+    pub given: Vec<Value>,
 }
 
 impl Built {
@@ -2942,6 +2958,17 @@ impl Built {
             }
         }
     }
+
+    /// The same with what is given and not shown: what tells a label.
+    pub fn for_given(&self) -> Cow<'_, Value> {
+        let mut all = self.for_private();
+        if !self.given.is_empty() {
+            let mut list = all["events"].as_array().cloned().unwrap_or_default();
+            list.extend(self.given.iter().cloned());
+            all = Cow::Owned(json!({ "events": list }));
+        }
+        all
+    }
 }
 
 /// An event with what is entered in error: the one that has the rest of it
@@ -2950,6 +2977,22 @@ struct With {
     at: Option<String>,
     items: Vec<String>,
     event: (Day, Day, String, Value),
+    /// Where else it would be ([`Built::given`]).
+    given: Vec<String>,
+}
+
+/// Where else an event would be, by what a linked person's sources gave.
+fn places_given(ev: &Ev, render: impl Fn(&Ev) -> Option<(Day, Day, String, Value)>) -> Vec<String> {
+    let mut out = ev.linked_given.clone();
+    out.retain(|name| {
+        let linked_place = Some(name.clone());
+        let at = Ev {
+            linked_place,
+            ..ev.clone()
+        };
+        render(&at).is_some_and(|(.., e)| e["place"] == **name)
+    });
+    out
 }
 
 /// Where each item entered in error would be, and what the household decided
@@ -3046,9 +3089,9 @@ pub fn build_both(inp: &Input) -> Built {
                 .map(|e| event_id(pid, &e.anchor))
                 .find(|id| shown.contains(id))
         };
+        let rendered = |ev: &Ev| render(pid, ev, &all, &named, &differ, &b_all.aliases, from);
         let each = b_all.evs.iter().filter_map(|ev| {
-            let rendered = render(pid, ev, &all, &named, &differ, &b_all.aliases, from);
-            let (start, end, id, event) = rendered?;
+            let (start, end, id, event) = rendered(ev)?;
             let own = ev.members.iter().filter(|m| m.person.is_none());
             let items = own.flat_map(|m| {
                 let copies = m.extra.get("copies").and_then(Value::as_array);
@@ -3059,10 +3102,24 @@ pub fn build_both(inp: &Input) -> Built {
                 at: now(ev),
                 items: items.map(str::to_string).collect(),
                 event: (start, end, id, event),
+                given: places_given(ev, rendered),
             })
         });
         each.collect()
     };
+    let mut given: Vec<Value> = Vec::new();
+    let mut place = |id: &str, places: Vec<String>| {
+        for p in places {
+            let e = json!({"id": id, "place": p});
+            if !given.contains(&e) {
+                given.push(e);
+            }
+        }
+    };
+    for ev in &b.evs {
+        let rendered = |ev: &Ev| render(pid, ev, &recs, &labels, &differ, &b.aliases, from);
+        place(&event_id(pid, &ev.anchor), places_given(ev, rendered));
+    }
     let mine = match gone.is_empty() {
         true => Vec::new(),
         false => with(&linked),
@@ -3085,7 +3142,9 @@ pub fn build_both(inp: &Input) -> Built {
     let whole = whole.map(|with| {
         let events = with.into_iter().map(|w| {
             let (.., id, mut e) = w.event;
-            e["id"] = json!(w.at.unwrap_or(id));
+            let id = w.at.unwrap_or(id);
+            place(&id, w.given);
+            e["id"] = json!(id);
             e
         });
         json!({ "events": events.collect::<Vec<_>>() })
@@ -3164,6 +3223,7 @@ pub fn build_both(inp: &Input) -> Built {
     Built {
         events: Value::Object(doc),
         whole,
+        given,
     }
 }
 

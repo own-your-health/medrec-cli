@@ -13,6 +13,7 @@ pub mod dicom;
 pub mod documents;
 pub mod events;
 pub mod folder;
+pub mod given;
 pub mod hash;
 pub mod ids;
 pub mod imaging;

@@ -144,7 +144,8 @@ same text, and those of a copy folded in by `documents merge`, once; served
 again byte for byte, it is a duplicate),
 `classification` (what was detected, with scores and evidence),
 `statement` and `same_statement_as` (a bill's, below), `provenance`, and
-`also_from`, `words` and `errors` (Entered in error, below). An imported document's `provenance.raw_path` names its
+`also_from`, `words` and `errors` (Entered in error, below), and `given` (What a
+source gave, below). An imported document's `provenance.raw_path` names its
 Binary's raw file, which holds the latest rendering the source served;
 earlier ones stay beside it as `<id>~<md5>.json`, as for every raw
 resource, and the document's own bytes are the filed file. `also_from` (0.9.9
@@ -378,7 +379,7 @@ there.
   writes nothing while another does not say so. Its `providers` are read again
   from all that do not say so, and nothing of them is kept from before.
 - A version that says so stays on the record it was of, whatever else it
-  leaves out.
+  leaves out, and what it leaves out stays on the record.
 - It comes back by itself when a later version of the same source's no longer
   says so. `errors` keeps each time it did: `{raw_path, from, until}`, when
   medrec first read the version that says so (a paper's, its word) and the
@@ -408,6 +409,41 @@ there.
   it saves. `medrec reindex` gives back what raw files tell: the sources in
   `also_from`, `words`, and `errors` for what a source says now. A time that
   ended is lost, and a file of the household's is until it is taken in again.
+
+**What a source gave** (0.9.9 and later). A record's `given` is what its
+sources gave of it, then or now, that the rules of what is private read and
+that the record does not show: a list of `{raw_path, cli, display, code,
+fields, npis}`, each with the parts that are other than those shown. `display`
+is a medication's, a result's or a report's, and `code` a condition's or a
+medication's; `fields` are a claim's `diagnoses` and the fields that print a
+provider (Providers, below); `npis` has the NPI of the provider a field prints,
+by that field; `cli` is that of a source that no longer has the record.
+`raw_path` is the raw file of the current version of what gave it, absent
+where that is not known. A document's is `{raw_path, organization, title}`.
+
+- It decides what is private and nothing else: each rule and provider label
+  reads it beside what the item shows (Private items, below). What an item
+  shows, in every view and answer, is still of a source that stands. No view or
+  answer has `given`, and a reader of `index.json` shows none of it.
+- It is never dropped. So nothing that a source gave opens because a later
+  version gives something else, a source says the item is entered in error,
+  another source's values take its place, or the source takes its resource to
+  another record, which then has it too. The household's own mark opens it
+  (`medrec private unmark`).
+- It is of the item itself. One that is private only with another (its event,
+  its report, a record or a paper tied to it) follows that as it is. A newborn's
+  event that takes its place from a parent's claim (X1) is judged by the places
+  that claim was given too.
+- An import keeps what a version gives, an older one served late included, and
+  what the record showed before another version or another source's values.
+  `medrec reindex` keeps what every version of a record's raw files gives that
+  is there, and what describes a paper, earlier versions included; and, for a
+  record with a raw file that is not there or does not read, what the record
+  showed. `documents merge` keeps what the copy it folds in was called.
+- A medrec before 0.9.9 drops it from an index it saves. `medrec reindex` gives
+  back what the raw files tell: not a name a source had before of a paper
+  another filed, nor what a record showed whose raw file is gone. Run 0.9.9 or
+  later on every machine that writes the folder.
 
 **Providers.** A record's `providers` (0.9.6 and later) is what its sources
 say of the people and places its fields print, beyond their names: a list
@@ -463,8 +499,9 @@ gained fields), `providers_updated` (0.9.6 and later: records whose
 `providers` changed), `statuses_updated` (0.9.9 and later: records whose
 `words` or `errors` changed, or whose values another source's took the place
 of, and conditions, allergies and medicines whose `status` or `fields`
-changed), `papers_updated` (0.9.9 and later: papers whose `also_from`,
-`words` or `errors` changed) and `papers_unread` (0.9.9 and later: raw files of
+changed), `given_updated` (0.9.9 and later: records whose `given` gained
+something), `papers_updated` (0.9.9 and later: papers whose `also_from`,
+`words`, `errors` or `given` changed) and `papers_unread` (0.9.9 and later: raw files of
 papers that do not read).
 
 A `claim` (an ExplanationOfBenefit) is shaped for costs (0.5.0 and later).
@@ -1676,7 +1713,8 @@ Immunizations, results, visits and bills leave out what is entered in error.
 
 ### documents.json and text-<n>.bin
 
-`documents.json` is `index.json`'s `documents`, each with these fields added:
+`documents.json` is `index.json`'s `documents` without `given`, each with these
+fields added:
 
 - `text_at`: where its text is, `[pack, byte offset, byte length,
   characters]`. Absent when the document has no text.
@@ -2166,6 +2204,10 @@ nothing is private.
   | `paper` | is a document tied to a private one, either way: its copy (`same_statement_as`, `near_duplicates`), the bill that supersedes it or one it supersedes (`superseded_by` in `bills.json`), or the receipt that pays it or the bill it pays (0.9.6 and later) |
   | `household` | was marked private by the household; its `area` is the one the rules give it, else `household` |
 
+- **`given`** (0.9.9 and later): `true` where the item is private only by what a
+  source gave, then or now, that no item shows (What a source gave, above): of
+  the item, or of the one it is private with. Absent otherwise. A reader shows
+  the area and no more of it.
 - **What a source takes back still tells** (0.9.9 and later). Nothing opens
   because a record or a paper is entered in error, the person's or one of a
   person their events read (X1, X2): each rule is judged with what is and with

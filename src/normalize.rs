@@ -553,6 +553,7 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
         words: words.into_iter().collect(),
         errors: Vec::new(),
         fields_from: None,
+        given: Vec::new(),
         documents: Vec::new(),
         provenance: vec![provenance],
     })

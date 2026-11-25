@@ -2486,3 +2486,146 @@ fn a_drive_folders_keychain_dialog_nobody_answers_ends_the_call_with_auth() {
     assert_eq!(reads, 1, "one read, which every call waited on");
     let _ = std::fs::remove_dir_all(&e.root);
 }
+
+const HEAR_VISIT: &str = "r_hearvisitaaaaaaaaaaa";
+const HEAR_BILL: &str = "d_hearbillaaaaaaaaaaaa";
+
+/// What a source gave holds an item private wherever it is: in the index's
+/// views, its event, its bill, the search, each total of the household and
+/// every answer, as the household's own mark does. Only that opens it.
+#[test]
+fn what_a_source_gave_is_private_everywhere() {
+    let e = Env::new("given");
+    let dir = fixture_household(&e, "given", &["index.json"]);
+    let held: Value =
+        serde_json::from_slice(&std::fs::read(dir.join("index.json")).unwrap()).unwrap();
+    let mut open = held.clone();
+    open["records"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("given")
+        .unwrap();
+    let t = e.tools();
+    let alex = h_id(&e, "Alex Testperson");
+    let kinds = [
+        "timeline",
+        "events",
+        "claims",
+        "bills",
+        "documents",
+        "conditions",
+        "results",
+    ];
+    // Everything the household can be shown of it, each answer fitting.
+    let answers = || -> BTreeMap<String, Value> {
+        let mut out = BTreeMap::new();
+        let mut ask = |name: String, tool: &str, args: Value| {
+            let r = call(&t, tool, args);
+            assert!(!r.is_error(), "{tool}: {}", r.text());
+            out.insert(name, assert_fits(&t, tool, &r).clone());
+        };
+        for kind in kinds {
+            ask(kind.into(), RECORDS, json!({ "kind": kind }));
+            let detailed = json!({"kind": kind, "response_format": "detailed"});
+            ask(format!("{kind}, detailed"), RECORDS, detailed);
+        }
+        ask("search".into(), SEARCH, json!({"query": "professional"}));
+        ask("bills, search".into(), SEARCH, json!({"query": "bill"}));
+        ask("summary".into(), SUMMARY, json!({}));
+        out
+    };
+    // The views a reader makes its pages and totals of, and what is private.
+    let views = || -> (BTreeMap<String, Value>, Vec<String>, String) {
+        e.ok(&["views", "write"]);
+        let mut out = BTreeMap::new();
+        for f in std::fs::read_dir(e.records().join("views").join(&alex)).unwrap() {
+            let path = f.unwrap().path();
+            let name = path.file_name().unwrap().to_str().unwrap().to_string();
+            let (stem, ext) = (
+                name.split('.').next().unwrap(),
+                name.rsplit('.').next().unwrap(),
+            );
+            if ext == "json" {
+                let v: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+                out.insert(stem.to_string(), v);
+            }
+        }
+        let private = out.remove("private").unwrap();
+        let of = ["records", "documents", "events"].iter();
+        let ids = of.flat_map(|k| private[*k].as_object().into_iter().flatten());
+        let ids = ids.map(|(id, _)| id.clone()).collect();
+        (out, ids, private["records"][HEAR_VISIT].to_string())
+    };
+    let put = |v: &Value| std::fs::write(dir.join("index.json"), v.to_string()).unwrap();
+
+    // With nothing given, it is the household's to see.
+    put(&open);
+    let (seen, (files, none, _)) = (answers(), views());
+    assert!(none.is_empty(), "{none:?}");
+    for kind in ["claims", "timeline", "search"] {
+        assert!(seen[kind].to_string().contains(HEAR_VISIT), "{kind}");
+    }
+    for kind in ["bills", "documents", "timeline", "bills, search"] {
+        assert!(seen[kind].to_string().contains(HEAR_BILL), "{kind}");
+    }
+    for name in [
+        "bills",
+        "documents",
+        "events",
+        "records-claim-0",
+        "summary",
+        "timeline-0",
+    ] {
+        assert!(files.contains_key(name), "{name}");
+    }
+
+    // The household's own mark: what private is, everywhere.
+    e.ok(&["private", "mark", HEAR_VISIT]);
+    let (marked, (marked_files, marked_ids, _)) = (answers(), views());
+    e.ok(&["private", "reset", HEAR_VISIT]);
+    assert_eq!(marked_ids.len(), 3, "{marked_ids:?}");
+    assert_eq!((answers(), views().0), (seen.clone(), files.clone()));
+
+    // What a source gave is the same, and no answer or view has it.
+    put(&held);
+    let (kept, (kept_files, kept_ids, why)) = (answers(), views());
+    assert_eq!(kept, marked);
+    assert_eq!(
+        (kept_files.clone(), kept_ids.clone()),
+        (marked_files, marked_ids)
+    );
+    assert_eq!(
+        why,
+        json!({"area": "mental_health", "from": "provider", "given": true}).to_string()
+    );
+    for (name, v) in kept.iter().chain(&kept_files) {
+        assert!(!v.to_string().contains("Counseling"), "{name}");
+    }
+    for (name, v) in &kept {
+        for id in &kept_ids {
+            assert!(!v.to_string().contains(id.as_str()), "{name}: {id}");
+        }
+    }
+    // Of the person, it is there, marked, with the values that stand.
+    for (kind, id) in [("claims", HEAR_VISIT), ("bills", HEAR_BILL)] {
+        let r = call(&t, RECORDS, json!({"kind": kind, "person": "Alex"}));
+        let v = assert_fits(&t, RECORDS, &r).clone();
+        let mut items = v["items"].as_array().unwrap().iter();
+        let i = items.find(|i| i["id"] == id).unwrap();
+        assert_eq!(i["private"], "mental_health", "{kind}");
+        assert!(!v.to_string().contains("Counseling"), "{v}");
+    }
+    let list = e.ok(&["private", "list"]);
+    let mut rows = list["items"].as_array().unwrap().iter();
+    let row = rows.find(|i| i["id"] == HEAR_VISIT).unwrap();
+    assert_eq!(
+        (&row["from"], &row["given"]),
+        (&json!("provider"), &json!(true))
+    );
+
+    // Only the household opens it.
+    e.ok(&["private", "unmark", HEAR_VISIT]);
+    let (opened, (opened_files, opened_ids, _)) = (answers(), views());
+    assert!(opened_ids.is_empty(), "{opened_ids:?}");
+    assert_eq!((opened, opened_files), (seen, files));
+}

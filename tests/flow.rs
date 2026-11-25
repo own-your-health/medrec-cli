@@ -2172,6 +2172,7 @@ fn a_document_filed_twice_merges_into_the_one_it_renders_again() {
     std::fs::write(e.records().join(&copy_path), &bytes).unwrap();
     let mut copy = summary.clone();
     copy["id"] = "d_copy0001".into();
+    copy["title"] = "Psychotherapy summary".into();
     copy["path"] = copy_path.clone().into();
     copy["sha256"] = medrec::hash::sha256_hex(&bytes).into();
     copy["md5"] = medrec::hash::md5_hex(&bytes).into();
@@ -2249,6 +2250,12 @@ fn a_document_filed_twice_merges_into_the_one_it_renders_again() {
     );
     assert_eq!(index["records"][0]["documents"], serde_json::json!([kept]));
     assert_eq!(index["studies"][0]["report"], kept.as_str());
+    // What the copy was called holds it private.
+    assert_eq!(kept_doc["title"], summary["title"]);
+    assert_eq!(kept_doc["given"][0]["title"], "Psychotherapy summary");
+    let private = e.ok(&["private", "list"]);
+    let mut rows = private["items"].as_array().unwrap().iter();
+    assert!(rows.any(|r| r["id"] == kept.as_str() && r["given"] == true));
     assert!(read("text.json")["texts"].get("d_copy0001").is_none());
     let notes = e.ok(&["note", "list"]);
     assert_eq!(notes["items"][0]["about"], serde_json::json!([kept]));

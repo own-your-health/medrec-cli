@@ -494,10 +494,9 @@ pub(crate) fn sync_with(
             .map(|m| m.providers.as_slice())
             .unwrap_or_default();
         let mut private = {
-            let whole = events.for_private();
-            let said = crate::labels::Said::of(&me.idx, &whole, &state, corrections);
             let (idx, texts) = (&me.idx, &me.texts);
-            crate::private::build(p, idx, texts, &events, private_marks, &said.areas())
+            let labelled = crate::labels::areas(idx, &events, &state, corrections);
+            crate::private::build(p, idx, texts, &events, private_marks, &labelled)
         };
         if state.lost() {
             private["labels_unreadable"] = Value::Bool(true);
@@ -1297,6 +1296,8 @@ pub(crate) fn person(
         .map(|d| {
             let mut v = serde_json::to_value(d).unwrap_or(Value::Null);
             if let Value::Object(m) = &mut v {
+                // Read for what is private, and shown nowhere.
+                m.remove("given");
                 if let Some(at) = text_at.get(d.id.as_str()) {
                     m.insert("text_at".into(), serde_json::json!(at));
                 }

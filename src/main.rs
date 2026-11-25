@@ -1800,11 +1800,15 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
                             _ => event_of(id),
                         }
                         .unwrap_or_default();
-                        items.push(serde_json::json!({
+                        let mut row = serde_json::json!({
                             "id": id, "kind": singular, "area": why["area"],
                             "from": why["from"], "date": date, "title": title,
                             "person": p.id, "person_name": p.name,
-                        }));
+                        });
+                        if why["given"] == true {
+                            row["given"] = true.into();
+                        }
+                        items.push(row);
                     }
                 }
             }
@@ -1852,8 +1856,15 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
                 doc["labels_unreadable"] = labels.into();
             }
             output::emit(json, "private-list", doc, |v| {
+                let mut v = v.clone();
+                for i in v["items"].as_array_mut().into_iter().flatten() {
+                    if i["given"] == true {
+                        let from = i["from"].as_str().unwrap_or_default();
+                        i["from"] = format!("{from}, not shown").into();
+                    }
+                }
                 table(
-                    v,
+                    &v,
                     &["date", "person_name", "kind", "area", "from", "title", "id"],
                 )
             });

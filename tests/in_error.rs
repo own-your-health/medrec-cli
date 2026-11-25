@@ -1,6 +1,8 @@
-//! What a source says is entered in error (docs/data-contract.md, "Entered in
-//! error"), through the binary, on synthetic data only.
+//! What a source says is entered in error, and what one gave and takes back
+//! (docs/data-contract.md, "Entered in error" and "What a source gave"),
+//! through the binary, on synthetic data only.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use assert_cmd::Command;
@@ -115,6 +117,14 @@ impl Env {
         let mut v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         change(&mut v);
         std::fs::write(path, v.to_string()).unwrap();
+    }
+
+    /// What is private, by id.
+    fn private(&self) -> BTreeMap<String, Value> {
+        let v = self.ok(&["private", "list"]);
+        let items = v["items"].as_array().unwrap().iter();
+        let by_id = |i: &Value| (i["id"].as_str().unwrap().to_string(), i.clone());
+        items.map(by_id).collect()
     }
 
     fn visit(&self) -> Record {
@@ -869,4 +879,219 @@ fn a_source_in_error_says_nothing_of_the_providers() {
     e.import(&says("one", None, "finished", 1));
     e.import(&says("two", Some(two), "entered-in-error", 1));
     is(&e, None, "class one");
+}
+
+// ------------------------------------------------- what a source gave
+
+/// A place whose name says its area, and one whose name says none.
+const PRIVATE: &str = "Example Counseling Group";
+const OPEN: &str = "Example Walk-in Clinic";
+
+/// The visit as a source gives it, at a place, or with no more than what it
+/// is of.
+fn visit_at(org: &str, place: Option<&str>, status: &str, version: u32) -> String {
+    stream(org, |id, v| {
+        if id == "enc-0001" {
+            say(v, status, version);
+            let o = v.as_object_mut().unwrap();
+            o.remove("serviceProvider");
+            match place {
+                Some(p) => o.insert("serviceProvider".into(), json!({ "display": p })),
+                None => o.remove("type").and(o.remove("period")),
+            };
+        }
+        id != "obs-0001"
+    })
+}
+
+/// Whether the visit is private, and by a place it does not show.
+fn held(e: &Env) -> Option<bool> {
+    let why = e.private().remove(&e.visit().id)?;
+    assert_eq!(
+        (&why["area"], &why["from"]),
+        (&json!("mental_health"), &json!("provider"))
+    );
+    Some(why["given"] == true)
+}
+
+fn shows_place(e: &Env) -> String {
+    e.visit().fields["service_provider"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+/// What one source gave holds an item private beside another that gives
+/// something else, and when it takes it back, says otherwise or is gone.
+#[test]
+fn what_one_source_gave_stays_private_whatever_is_said_later() {
+    let e = Env::new("gave");
+    e.import(&visit_at("two", Some(OPEN), "finished", 1));
+    assert_eq!(held(&e), None);
+    e.import(&visit_at("one", Some(PRIVATE), "finished", 1));
+    assert_eq!((shows_place(&e).as_str(), held(&e)), (OPEN, Some(true)));
+    for (status, place, version) in [
+        ("entered-in-error", PRIVATE, 2),
+        ("finished", PRIVATE, 3),
+        ("finished", OPEN, 4),
+        ("entered-in-error", OPEN, 5),
+    ] {
+        e.import(&visit_at("one", Some(place), status, version));
+        assert_eq!(held(&e), Some(shows_place(&e) == OPEN), "{version}");
+        e.reindex();
+        assert_eq!(held(&e), Some(shows_place(&e) == OPEN), "{version}");
+    }
+    assert_eq!(shows_place(&e), OPEN);
+    // Neither does the one it shows say it: only the household opens it.
+    e.import(&visit_at("two", Some(OPEN), "finished", 2));
+    assert_eq!(held(&e), Some(true));
+    let id = e.visit().id;
+    e.ok(&["private", "unmark", &id]);
+    assert_eq!(held(&e), None);
+    e.ok(&["private", "reset", &id]);
+    assert_eq!(held(&e), Some(true));
+}
+
+/// The same of a source's own earlier version, and of one entered in error
+/// that comes with nothing of what it was of.
+#[test]
+fn what_an_earlier_version_gave_stays_private() {
+    let e = Env::new("gave-before");
+    e.import(&visit_at("one", Some(PRIVATE), "finished", 1));
+    assert_eq!(held(&e), Some(false));
+    e.import(&visit_at("one", Some(OPEN), "finished", 2));
+    assert_eq!((shows_place(&e).as_str(), held(&e)), (OPEN, Some(true)));
+    assert_eq!(e.index().records.iter().flat_map(|r| &r.given).count(), 1);
+
+    let e = Env::new("gave-bare");
+    e.import(&visit_at("one", Some(PRIVATE), "finished", 1));
+    let was = e.visit();
+    for _ in 0..2 {
+        e.import(&visit_at("one", None, "entered-in-error", 2));
+        e.reindex();
+        let v = e.visit();
+        assert!(record_in_error(&v));
+        assert_eq!(
+            (v.id, v.date, v.fields),
+            (was.id.clone(), was.date.clone(), was.fields.clone())
+        );
+    }
+    e.import(&visit_at("one", Some(OPEN), "finished", 3));
+    assert_eq!((shows_place(&e).as_str(), held(&e)), (OPEN, Some(true)));
+}
+
+/// What was given before medrec kept it is read from the raw files, every
+/// version of them.
+#[test]
+fn reindex_reads_what_was_given_from_every_raw_version() {
+    let forget = |e: &Env| {
+        e.edit(|v| {
+            for r in v["records"].as_array_mut().unwrap() {
+                r.as_object_mut().unwrap().remove("given");
+            }
+        })
+    };
+    let e = Env::new("gave-raw");
+    e.import(&visit_at("one", Some(PRIVATE), "finished", 1));
+    e.import(&visit_at("one", Some(OPEN), "finished", 2));
+    forget(&e);
+    assert_eq!(held(&e), None);
+    let dry = e.ok(&["reindex", "--dry-run"]);
+    assert_eq!((dry["given_updated"].as_u64(), held(&e)), (Some(1), None));
+    assert_eq!(e.ok(&["reindex"])["given_updated"], 1);
+    assert_eq!(held(&e), Some(true));
+    assert_eq!(e.ok(&["reindex"])["given_updated"], 0);
+
+    let e = Env::new("gave-raw-two");
+    e.import(&visit_at("two", Some(OPEN), "finished", 1));
+    e.import(&visit_at("one", Some(PRIVATE), "finished", 1));
+    forget(&e);
+    assert_eq!(held(&e), None);
+    assert_eq!(e.ok(&["reindex"])["given_updated"], 1);
+    assert_eq!((shows_place(&e).as_str(), held(&e)), (OPEN, Some(true)));
+}
+
+/// What a resource gave goes with it to the record it is of, and the record
+/// it left keeps it too.
+#[test]
+fn what_a_resource_gave_goes_with_it() {
+    let on = |org: &str, place: &str, day: &str, version: u32| {
+        stream(org, |id, v| {
+            if id == "enc-0001" {
+                say(v, "finished", version);
+                v["serviceProvider"]["display"] = place.into();
+                v["period"] = json!({"start": format!("2026-{day}T09:30:00Z")});
+            }
+            id != "obs-0001"
+        })
+    };
+    let e = Env::new("gave-moved");
+    e.import(&on("two", OPEN, "03-04", 1));
+    e.import(&on("one", PRIVATE, "03-04", 1));
+    e.import(&on("one", OPEN, "03-11", 2));
+    let visits: Vec<Record> = e
+        .index()
+        .records
+        .into_iter()
+        .filter(|r| r.kind == "encounter")
+        .collect();
+    assert_eq!(visits.len(), 2);
+    let private = e.private();
+    for v in visits {
+        assert_eq!(v.fields["service_provider"], OPEN);
+        assert_eq!(private[&v.id]["given"], true, "{}", v.date.unwrap());
+    }
+}
+
+/// A paper's title and its source's name are its first source's, and what
+/// another gives holds it private.
+#[test]
+fn what_another_source_calls_a_paper_holds_it_private() {
+    let called = |org: &str, title: &str, name: &str, version: u32| {
+        let s = stream(org, |id, v| {
+            if id == "doc-0001" {
+                say(v, "current", version);
+                v["description"] = title.into();
+            }
+            true
+        });
+        s.replacen(
+            r#""name":"Example Health""#,
+            &format!(r#""name":"{name}""#),
+            1,
+        )
+    };
+    for (title, name) in [("Psychotherapy summary", OPEN), ("Visit summary", PRIVATE)] {
+        let e = Env::new(&format!("gave-paper-{}", title.len()));
+        e.import(&called("two", "Visit summary", OPEN, 1));
+        let id = e.paper().id;
+        assert!(!e.private().contains_key(&id));
+        e.import(&called("one", title, name, 1));
+        assert_eq!(e.private()[&id]["given"], true, "{title}");
+        assert_eq!(e.paper().organization.as_deref(), Some(OPEN));
+        // It shows nothing of it, and keeps it when it is said no more.
+        let shown = e.ok(&["documents", "open", &id]).to_string();
+        assert!(
+            !shown.contains("Psycho") && !shown.contains(PRIVATE),
+            "{shown}"
+        );
+        e.import(&called("one", "Visit summary", OPEN, 2));
+        assert_eq!(e.private()[&id]["given"], true, "{title}");
+        // Nor is it lost where medrec did not keep it.
+        e.edit(|v| {
+            for d in v["documents"].as_array_mut().unwrap() {
+                d.as_object_mut().unwrap().remove("given");
+            }
+        });
+        assert!(!e.private().contains_key(&id));
+        e.reindex();
+        assert_eq!(e.private().contains_key(&id), name == OPEN, "{title}");
+    }
+    // Its own source's later title.
+    let e = Env::new("gave-title");
+    e.import(&called("two", "Visit summary", OPEN, 1));
+    let id = e.paper().id;
+    e.import(&called("two", "Psychotherapy summary", OPEN, 2));
+    e.import(&called("two", "Visit summary", OPEN, 3));
+    assert_eq!(e.private()[&id]["given"], true);
 }
