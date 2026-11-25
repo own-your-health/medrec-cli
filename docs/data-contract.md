@@ -98,7 +98,18 @@ views/                        each person's records cut into small files, for re
    medrec that finds a larger number stops and says to update.
 5. **Rename or move files through medrec**, so the index stays right.
    `medrec verify` reports any file that is missing, changed (by MD5, or by
-   SHA-256 with `--deep`) or not in an index.
+   SHA-256 with `--deep`) or not in an index. With `--events` (0.9.11 and later)
+   it also reads the raw files of the records that events are made of, as they
+   are, and says for each person (`events[]`), with ids alone:
+   `place_not_given`, the events whose place is in no raw file of their records
+   and is no name of a source of theirs (`places_of_others` is how many have a
+   place by a linked person's or a paper's word, which is not compared);
+   `places_differ`, the records whose raw files give different places, as two
+   visits in one; `name_not_given` and `day_not_given`, the records whose name
+   or day no raw file of theirs has (a claim's name is medrec's);
+   `source_not_its_own`, those with a raw file in the folder of another source
+   than they say they came from, or of another resource; and `unread`, those
+   with a raw file that is not there or does not read. Any of them is exit 1.
 
 ## household.json (`medrec-household/v1`)
 

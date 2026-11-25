@@ -8,6 +8,7 @@ use std::time::Duration;
 use pk_cli_core::CliError;
 use serde::Serialize;
 
+use crate::against::Against;
 use crate::config::Config;
 use crate::folder::{self, Access, Folder};
 use crate::hash;
@@ -508,11 +509,15 @@ pub struct Verify {
     pub changed: Vec<String>,
     /// Files under Documents, Claims or Imaging that no index entry names.
     pub unindexed: Vec<String>,
+    /// With `--events`, each person's against their raw files.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub events: Option<Vec<Against>>,
 }
 
 impl Verify {
     pub fn clean(&self) -> bool {
-        self.missing.is_empty() && self.changed.is_empty()
+        let events = self.events.iter().flatten().all(Against::clean);
+        self.missing.is_empty() && self.changed.is_empty() && events
     }
 }
 

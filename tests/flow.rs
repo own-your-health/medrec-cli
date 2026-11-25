@@ -300,6 +300,118 @@ fn imaging_discs_add_only_new_images() {
     let _ = std::fs::remove_dir_all(&e.root);
 }
 
+/// `verify --events` finds an event and a record that say what none of their own
+/// raw files does.
+#[test]
+fn verify_compares_events_with_their_raw_files() {
+    let base = Env::new("verify-events");
+    setup(&base);
+    let e = provider_env(&base, medrec::testdata::STREAM);
+    let import = ["import", "--from", "fakeprov", "--from-profile", "adult1"];
+    e.ok(&[&import[..], &["--patient", "pat-0001", "--person", "Robin"]].concat());
+    let path = e.records().join("Robin Testperson/index.json");
+    let filed: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let visit = filed["records"].as_array().unwrap().iter();
+    let at = visit.enumerate().find(|(_, r)| r["kind"] == "encounter");
+    let (at, visit) = at.unwrap();
+    let id = visit["id"].as_str().unwrap();
+    let compared = || -> (Option<i32>, Value) {
+        let out = e.run(&["--json", "verify", "--events"]);
+        let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+        let people = v["events"].as_array().unwrap().iter();
+        let some: Vec<&Value> = people.filter(|p| p["events"] != 0).collect();
+        assert_eq!(some.len(), 1, "{v}");
+        (out.status.code(), some[0].clone())
+    };
+    let (code, v) = compared();
+    assert_eq!(code, Some(0), "{v}");
+    assert!(v["records"].as_u64() > Some(1), "{v}");
+    assert!(e.ok(&["verify"]).get("events").is_none());
+    let event = e.ok(&["events", "list", "--person", "Robin"]);
+    let event = event["items"][0]["id"].as_str().unwrap().to_string();
+    const LISTS: [&str; 6] = [
+        "place_not_given",
+        "places_differ",
+        "name_not_given",
+        "day_not_given",
+        "source_not_its_own",
+        "unread",
+    ];
+    let raw = e
+        .records()
+        .join(visit["provenance"][0]["raw_path"].as_str().unwrap());
+    let its = std::fs::read_to_string(&raw).unwrap();
+    let other = its.replace("enc-0001", "enc-other");
+    let other = other.replace("Example Health Clinic", "Elsewhere Clinic");
+    let other = other.replace("Example Health", "Elsewhere Clinic");
+    assert_ne!(other, its);
+    std::fs::write(raw.with_file_name("enc-other.json"), &other).unwrap();
+    type Change = fn(&mut Value);
+    let cases: [(Change, &str); 6] = [
+        (
+            |r| r["fields"]["service_provider"] = "Elsewhere Clinic".into(),
+            "place_not_given",
+        ),
+        (
+            |r| {
+                let mut p = r["provenance"][0].clone();
+                let path = p["raw_path"].as_str().unwrap();
+                let path = path.replace("enc-0001", "enc-other");
+                p["raw_path"] = path.into();
+                p["source_resource"]["id"] = "enc-other".into();
+                r["provenance"].as_array_mut().unwrap().push(p);
+            },
+            "places_differ",
+        ),
+        (
+            |r| r["display"] = "Elsewhere visit".into(),
+            "name_not_given",
+        ),
+        (|r| r["date"] = "2001-01-01".into(), "day_not_given"),
+        (
+            |r| r["provenance"][0]["source"]["organization_id"] = "elsewhere".into(),
+            "source_not_its_own",
+        ),
+        (
+            |r| r["provenance"][0]["source_resource"]["id"] = "elsewhere".into(),
+            "source_not_its_own",
+        ),
+    ];
+    for (change, list) in cases {
+        let mut index = filed.clone();
+        change(&mut index["records"][at]);
+        std::fs::write(&path, serde_json::to_string(&index).unwrap()).unwrap();
+        let (code, v) = compared();
+        assert_eq!(code, Some(1), "{list}: {v}");
+        for l in LISTS {
+            let of = if l == "place_not_given" {
+                event.as_str()
+            } else {
+                id
+            };
+            let want = if l == list { vec![of] } else { vec![] };
+            assert_eq!(v[l], serde_json::json!(want), "{list}: {v}");
+        }
+    }
+    std::fs::write(&path, serde_json::to_string(&filed).unwrap()).unwrap();
+    std::fs::write(&raw, "{").unwrap();
+    let (code, v) = compared();
+    assert_eq!(
+        (code, &v["unread"]),
+        (Some(1), &serde_json::json!([id])),
+        "{v}"
+    );
+    std::fs::write(&raw, &its).unwrap();
+    assert_eq!(compared().0, Some(0));
+    let out = e.run(&["verify", "--events"]);
+    let text = String::from_utf8_lossy(&out.stdout).to_string();
+    assert!(
+        text.contains("events of") && !text.contains("Clinic"),
+        "{text}"
+    );
+    let _ = std::fs::remove_dir_all(&base.root);
+}
+
 fn provider_env(e: &Env, stream: &str) -> Env {
     let dir = medrec::testdata::write_provider(&e.root.join("provider"), stream);
     Env {

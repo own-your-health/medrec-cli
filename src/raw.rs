@@ -229,7 +229,6 @@ pub fn fields(
     person: Option<&str>,
     kinds: &[String],
 ) -> Result<Fields, CliError> {
-    let tmp = pk_cli_drive::private_temp_dir("medrec-fields")?;
     let mut count = Count::default();
     // One that matches no one person names the people it can be.
     let of = people::selected(h, person).map_err(|e| {
@@ -244,15 +243,32 @@ pub fn fields(
         let idx = folder.index(p).map_err(unnamed)?;
         let of = |r: &&Record| kinds.is_empty() || kinds.contains(&r.kind);
         let chosen: Vec<&Record> = idx.records.iter().filter(of).collect();
-        if folder.store.is_local() {
-            for r in chosen {
-                count.record(r, &mut |rel| bytes(folder, rel).map_err(unnamed))?;
-            }
-            continue;
+        let files = Files::of(folder, chosen.iter().copied())?;
+        for r in chosen {
+            count.record(r, &mut |rel| files.bytes(rel))?;
         }
-        // One copy per folder of raw files, not one call per file.
-        let paths = chosen.iter().flat_map(|r| currents(r));
-        let dirs: BTreeSet<String> = paths
+    }
+    Ok(count.done())
+}
+
+/// The current raw files of records, read in place, or of a Drive folder from a
+/// copy: one per folder of them, not one call per file. No error names a file.
+pub(crate) enum Files<'a> {
+    There(&'a Folder),
+    Copied(pk_cli_drive::TempDir),
+}
+
+impl<'a> Files<'a> {
+    pub fn of<'r>(
+        folder: &'a Folder,
+        records: impl Iterator<Item = &'r Record>,
+    ) -> Result<Files<'a>, CliError> {
+        if folder.store.is_local() {
+            return Ok(Files::There(folder));
+        }
+        let tmp = pk_cli_drive::private_temp_dir("medrec-raw")?;
+        let dirs: BTreeSet<String> = records
+            .flat_map(currents)
             .filter_map(|(rel, _)| rel.rsplit_once('/').map(|(d, _)| d.to_string()))
             .collect();
         for d in &dirs {
@@ -261,11 +277,21 @@ pub fn fields(
                 folder.store.fetch_tree(d, &to).map_err(unnamed)?;
             }
         }
-        for r in chosen {
-            count.record(r, &mut |rel| copy(tmp.path(), rel))?;
+        Ok(Files::Copied(tmp))
+    }
+
+    fn bytes(&self, rel: &str) -> Read {
+        match self {
+            Files::There(folder) => bytes(folder, rel).map_err(unnamed),
+            Files::Copied(tmp) => copy(tmp.path(), rel),
         }
     }
-    Ok(count.done())
+
+    /// A file's resource; `None` where it is not there or does not read.
+    pub fn read(&self, rel: &str) -> Result<Option<Value>, CliError> {
+        let of = |b: Vec<u8>| serde_json::from_slice(&b).ok().filter(Value::is_object);
+        Ok(self.bytes(rel)?.and_then(of))
+    }
 }
 
 /// The kinds of record.
