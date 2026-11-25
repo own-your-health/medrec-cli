@@ -2,8 +2,8 @@
 //! for it, as this medrec's import shapes it, so claims no source serves any
 //! more take the current shape too; what the sources' raw files say of the
 //! providers each record prints ([`crate::providers`]); the fields of every
-//! condition, allergy and medicine; what each source says of every record and
-//! paper that keeps it; the results that are about somebody else; the other
+//! condition, allergy, medicine, result and report; what each source says of
+//! every record and paper that keeps it; the results that are about somebody else; the other
 //! sources that served a paper's bytes; and every bill's and receipt's
 //! statement read again from its stored text for the fields it lacks. It reads
 //! only the folder.
@@ -674,28 +674,45 @@ fn statuses(idx: &mut PersonIndex, tmp: &Path) -> Result<usize, CliError> {
     Ok(changed)
 }
 
-/// The fields of each result and report again, from the raw file they are of:
+/// The values of each result and report again, from the raw file they are of:
 /// one that does not say it is entered in error, and would not give the record
-/// another `key`. Records changed, counted.
+/// another `key`. Of several sources' it is the one the record names, else one
+/// its values agree with, else none. Records changed, counted.
 fn results(idx: &mut PersonIndex, tmp: &Path) -> usize {
     let mut changed = 0;
     let each = idx.records.iter_mut();
     for r in each.filter(|r| matches!(r.kind.as_str(), "result" | "report")) {
-        let Some(path) = import::wrote(r) else {
-            continue;
-        };
-        let of = |p: &&Provenance| p.raw_path.as_deref() == Some(path);
-        let shape = r.provenance.iter().find(of).and_then(|p| {
-            let new = normalize::record(&read(tmp, path)?, p.clone())?;
+        let shape = |p: &Provenance| {
+            let new = normalize::record(&read(tmp, p.raw_path.as_ref()?)?, p.clone())?;
             let in_error = new.words.iter().any(|w| w.in_error());
             (new.key == r.key && new.kind == r.kind && !in_error).then_some(new)
-        });
-        let Some(mut new) = shape else { continue };
+        };
+        let shape = match (r.provenance.as_slice(), import::writer(r)) {
+            ([only], _) => shape(only),
+            (all, Some(path)) => {
+                let of = |p: &&Provenance| p.raw_path.as_deref() == Some(path);
+                all.iter().find(of).and_then(shape)
+            }
+            (all, None) => {
+                let may = all
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| import::can_write(r, *i));
+                may.filter_map(|(_, p)| shape(p)).find(|n| agrees(n, r))
+            }
+        };
+        let Some(new) = shape else { continue };
+        let mut now = r.clone();
+        now.display = new.display;
+        now.status = new.status;
+        now.code = new.code;
+        now.date = new.date;
+        now.fields = new.fields;
         if let Some(who) = r.fields.get(about::FIELD) {
-            new.fields.entry(about::FIELD).or_insert(who.clone());
+            now.fields.entry(about::FIELD).or_insert(who.clone());
         }
-        if new.fields != r.fields {
-            r.fields = new.fields;
+        if now != *r {
+            *r = now;
             changed += 1;
         }
     }
@@ -703,12 +720,22 @@ fn results(idx: &mut PersonIndex, tmp: &Path) -> usize {
 }
 
 /// Whether a record's status and fields are of this shape of one of its raw
-/// files: it has each, but the prescriber import finds elsewhere.
+/// files: it has each, but the prescriber import finds elsewhere, and what says
+/// that a result's value is a bound, which medrec before 0.9.10 did not read.
 fn agrees(shape: &Record, r: &Record) -> bool {
     if r.kind == "claim" {
         return content(shape) == content(r);
     }
-    let said = |(k, v): (&String, &Value)| k == "prescriber" || shape.fields.get(k) == Some(v);
+    let read = |k: &str| {
+        let mut v = shape.fields.get(k)?.clone();
+        if let Some(of) = v.as_object_mut().filter(|_| k == "value") {
+            of.remove("comparator");
+        }
+        Some(v)
+    };
+    let said = |(k, v): (&String, &Value)| {
+        k == "prescriber" || shape.fields.get(k) == Some(v) || read(k).as_ref() == Some(v)
+    };
     shape.status == r.status && r.fields.iter().all(said)
 }
 
@@ -837,6 +864,85 @@ mod tests {
         let mut idx = PersonIndex::new("p_test");
         idx.records.push(r);
         (idx, tmp)
+    }
+
+    /// A result two sources state, with the values of the second, as an index
+    /// from before 0.9.10 has it, and one of their raw files as it is now.
+    fn earlier_result(tag: &str, second: Value) -> (PersonIndex, std::path::PathBuf) {
+        let tmp = std::env::temp_dir().join(format!("medrec-results-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let of = |org: &str, value: Value| {
+            let mut v = json!({"resourceType": "Observation", "id": "a", "status": "final",
+                "code": {"text": "Example level"}, "effectiveDateTime": "2024-01-01T08:00:00Z"});
+            v["valueQuantity"] = value;
+            v["status"] = if org == "one" { "final" } else { "corrected" }.into();
+            let rel = format!("{org}/Observation/a.json");
+            let path = tmp.join(&rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, v.to_string()).unwrap();
+            let p: Provenance = serde_json::from_value(json!({
+                "source": {"kind": "fhir", "cli": "fakeprov", "organization_id": org},
+                "source_resource": {"type": "Observation", "id": "a"},
+                "method": "fhir-api", "filed_at": "2024-01-02T10:00:00Z",
+                "filed_by": "medrec 0.9.8", "raw_path": rel}))
+            .unwrap();
+            normalize::record(&v, p).unwrap()
+        };
+        let one = of("one", json!({"value": 5, "unit": "mg/dL"}));
+        let mut r = of("two", second);
+        assert_eq!(one.key, r.key);
+        r.provenance.insert(0, one.provenance[0].clone());
+        r.words.clear();
+        r.fields_from = None;
+        if let Some(v) = r.fields["value"].as_object_mut() {
+            v.remove("comparator");
+        }
+        let mut idx = PersonIndex::new("p_test");
+        idx.records.push(r);
+        (idx, tmp)
+    }
+
+    /// The values of a result stay those of the source they are of.
+    #[test]
+    fn a_results_values_come_of_no_other_source() {
+        let bound = json!({"value": 5, "unit": "mg/dL", "comparator": "<"});
+        let (mut idx, tmp) = earlier_result("bound", bound);
+        statuses(&mut idx, &tmp).unwrap();
+        assert_eq!(results(&mut idx, &tmp), 1);
+        let r = &idx.records[0];
+        assert_eq!(r.fields["value"]["comparator"], "<");
+        assert_eq!(r.status.as_deref(), Some("corrected"));
+        assert_eq!(results(&mut idx, &tmp), 0);
+        // Its raw file is not there, or does not read: nothing of the other's.
+        let other = json!({"value": 7, "unit": "mg/dL"});
+        for (n, left) in [None, Some("{")].into_iter().enumerate() {
+            let (mut idx, tmp) = earlier_result(&format!("lost-{n}"), other.clone());
+            let file = tmp.join("two/Observation/a.json");
+            match left {
+                Some(text) => std::fs::write(&file, text).unwrap(),
+                None => std::fs::remove_file(&file).unwrap(),
+            }
+            statuses(&mut idx, &tmp).unwrap();
+            assert_eq!(results(&mut idx, &tmp), 0);
+            assert_eq!(idx.records[0].fields["value"]["value"], 7);
+        }
+    }
+
+    /// A version an import filed and did not read in gives the record its
+    /// status with its values.
+    #[test]
+    fn a_results_status_comes_with_its_values() {
+        let (mut idx, tmp) = earlier_result("status", json!({"value": 7, "unit": "mg/dL"}));
+        idx.records[0].provenance.remove(0);
+        let file = tmp.join("two/Observation/a.json");
+        let mut v: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        v["status"] = "amended".into();
+        v["valueQuantity"]["value"] = 8.into();
+        std::fs::write(&file, v.to_string()).unwrap();
+        assert_eq!(results(&mut idx, &tmp), 1);
+        let r = &idx.records[0];
+        assert_eq!(r.status.as_deref(), Some("amended"));
+        assert_eq!(r.fields["value"]["value"], 8);
     }
 
     /// The one it names can write by import: a source's first on the record.

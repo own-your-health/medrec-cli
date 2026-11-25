@@ -223,8 +223,9 @@ The last column is the FHIR element the value comes from.
 | `encounter` | `service_provider` | text | `serviceProvider.display` |
 | `encounter` | `period` | `{start, end}` | `period` |
 | `result` | `when` | as written | `effectiveDateTime`, `effectivePeriod.start`, `effectiveInstant` or `issued` |
-| `result` | `value` | `{value, unit, system}` (a quantity; 0.9.10 and later with `comparator`, one of `<`, `<=`, `>=` and `>`, where the source gives one), else text, a boolean, a whole number or a date | `valueQuantity`, `valueString`, `valueCodeableConcept`, `valueBoolean`, `valueInteger`, `valueDateTime`; 0.9.10 and later `valueTime`, `valueRange` and `valueRatio` as text, and what its parts say where it has none of its own |
+| `result` | `value` | `{value, unit, system}` (a quantity; 0.9.10 and later with `comparator`, one of `<`, `<=`, `>=` and `>`, where the source gives one); or (0.9.10 and later) a blood pressure, `{value, unit}`, whose `value` is the text `"128/76"` and not a number (its numbers are in `components`); else text, a boolean, a whole number or a date | `valueQuantity`, `valueString`, `valueCodeableConcept`, `valueBoolean`, `valueInteger`, `valueDateTime`; 0.9.10 and later `valueTime`, `valueRange` and `valueRatio` as text, and what its parts say where it has none of its own |
 | `result` | `components` | a list of parts, below (0.9.10 and later) | each `component` with a code and a value |
+| `result` | `components_absent` | a list of codes, below (0.9.10 and later) | each `component` with a code and no value |
 | `result` | `reference_range` | text | first `referenceRange` (its `text`, else its low and high) |
 | `result` | `interpretation` | text | first `interpretation` |
 | `result` | `category` | text | first `category` |
@@ -326,8 +327,9 @@ records filed before.
 **A reading of several parts** (0.9.10 and later) is one result. `components` is
 its parts as the source orders them, `{code, value, reference_range,
 interpretation}`, each as a result's own (`code` is `{system, code, display}`),
-the last two absent where the part has none. A part with no code or no value is
-not in it. Where the Observation has a value of its own, `value` is that.
+the last two absent where the part has none. A part with neither a code nor a
+name is not in it. One with no value is not either: `components_absent` has its
+code, which the rules of what is private read and no list shows. Where the Observation has a value of its own, `value` is that.
 Otherwise it is what its parts say:
 
 - the two of a blood pressure, told by their LOINC codes (8480-6 and 8462-4) and
@@ -337,8 +339,12 @@ Otherwise it is what its parts say:
   others beside a blood pressure, `value` is a text that begins with it.
 
 A part is not a record. A reading is judged by the names and codes of its parts
-too (Private, below). `medrec reindex` gives results and reports filed before
-what 0.9.10 reads of them.
+too, with a value and without, and by the texts of their values (Private, below).
+`medrec reindex` gives results and reports filed before what 0.9.10 reads of them.
+An import by a medrec before 0.9.10 drops `components`, `components_absent` and
+`categories` again: a reading that is private by its parts alone is then open
+until the next `medrec reindex`, so run 0.9.10 or later on every machine that
+writes the folder.
 
 **Words.** A condition's, an allergy's and a medicine's `words` (0.9.9 and
 later) is what each of its sources says of it that can differ between them.
@@ -446,8 +452,9 @@ fields, npis}`, each with the parts that are other than those shown. `display`
 is a medication's, a result's, a report's, a procedure's or a claim's, and `code`
 a condition's, a medication's, a result's, a report's or a procedure's; `fields`
 are a claim's `diagnoses`, its `payer_notes` and its `items` (of each line
-`service`, `revenue`, `payer_notes` and `counted`), a result's `about` and the
-fields that print a provider (Providers, below); `npis` has the NPI of the provider a field prints,
+`service`, `revenue`, `payer_notes` and `counted`), a result's `about`, its
+`components` (of each part its `code`, and its `value` where that is a text that
+says an area) and `components_absent` (0.9.10 and later), and the fields that print a provider (Providers, below); `npis` has the NPI of the provider a field prints,
 by that field; `cli` is that of a source that no longer has the record.
 `raw_path` is the raw file of the current version of what gave it, absent
 where that is not known. A document's is `{raw_path, organization, title,
@@ -2373,7 +2380,7 @@ nothing is private.
   | `code` | is a condition whose ICD-10 code is in an area, or a claim whose principal diagnosis (the lowest `sequence`) is: F10–F19 and Z71.4–Z71.5 substance use, and (0.9.9 and later) Z71.6, Z72.0, Z77.22, Z87.891 and O99.33; the other F codes mental health; Z30–Z32, Z33.2, O00–O08, N46 and N96–N98 reproductive; A50–A64, B20, Z21, Z11.3–Z11.4, Z20.2, Z20.6 and Z72.5 sexual health |
   | `provider` | was made by a practice or clinician whose name or credential says its area: a claim's provider or facility, a visit's place, location or clinician, a medicine's prescriber, a result's performer, a document's organization; or is a record that prints a provider with a sure label (Provider labels, above) whose name, practice or role does, or a record, document or event that prints one the household calls so (0.9.7 and later) |
   | `medicine` | is a medicine of an area by its name or code, or (0.9.9 and later) a pharmacy claim its `display` names as one: antidepressants, antipsychotics, anxiolytics, stimulants and lithium; fertility drugs and contraceptives; HIV medicines and those for erectile dysfunction; medicines for substance use and smoking |
-  | `test` | is a result or report of a test of an area: sexually transmitted infections, pregnancy and fertility, drug screens; or (0.9.9 and later) of a questionnaire of one, or of tobacco use (Questionnaires, below); by its own name and code or those of any of its parts (0.9.10 and later) |
+  | `test` | is a result or report of a test of an area: sexually transmitted infections, pregnancy and fertility, drug screens; or (0.9.9 and later) of a questionnaire of one, or of tobacco use (Questionnaires, below); by its own name and code or those of any of its parts, or by a text that is the value of a part (0.9.10 and later) |
   | `members` | is an event with a private claim or portal visit, or whose own members are all private |
   | `event` | is a member of a private event |
   | `words` | is a bill or receipt whose first page that has any text says an area, by a service, a medicine or a test, or any document whose title does (0.9.6 and later), or whose title is a questionnaire's, or with an `original_name` that says either (0.9.9 and later; `_`, `.` and `-` read as spaces) |
@@ -2396,7 +2403,8 @@ nothing is private.
   report is, which is in `studies` too when that report was private.
 - **Questionnaires** (0.9.9 and later). A result or a report is a
   questionnaire's by the LOINC code it has, else by the words of its name or of
-  its code's, and a document by those of its title. So is a question of one, and
+  its code's, and (0.9.10 and later) a result by the same of any of its parts, for
+  what is private and for what is about another person, and a document by those of its title. So is a question of one, and
   its score.
 
   | Questionnaire | Area | Who answers it of themselves |

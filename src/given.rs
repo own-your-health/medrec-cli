@@ -10,7 +10,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
 use crate::model::{Code, Document, PersonIndex, ProviderRef, Record};
-use crate::normalize::COMPONENTS;
+use crate::normalize::{ABSENT, COMPONENTS};
+use crate::private;
 use crate::providers::FIELDS;
 use crate::services;
 
@@ -73,8 +74,19 @@ pub fn of(r: &Record) -> Given {
     }
     let parts = r.fields.get(COMPONENTS).and_then(Value::as_array);
     if let Some(parts) = parts.filter(|_| r.kind == "result") {
-        let codes = parts.iter().map(|p| json!({"code": p["code"]}));
-        fields.insert(COMPONENTS.into(), codes.collect());
+        let read = |p: &Value| {
+            let mut part = json!({"code": p["code"]});
+            // A text that says an area, and no other value.
+            let text = p["value"].as_str();
+            if let Some(t) = text.filter(|t| private::words(t).is_some()) {
+                part["value"] = t.into();
+            }
+            part
+        };
+        fields.insert(COMPONENTS.into(), parts.iter().map(read).collect());
+    }
+    if let Some(codes) = r.fields.get(ABSENT).filter(|_| r.kind == "result") {
+        fields.insert(ABSENT.into(), codes.clone());
     }
     let npi = |p: &ProviderRef| Some((p.field.clone(), p.npi.clone()?));
     Given {
@@ -265,22 +277,32 @@ mod tests {
         assert_eq!(as_given(&r).count(), 2);
     }
 
-    /// The names and codes of a reading's parts are kept, and no value.
+    /// The names and codes of a reading's parts are kept, and of their values
+    /// the texts that say an area alone.
     #[test]
     fn what_a_readings_parts_were_is_kept() {
-        let part = |name: &str| json!({"code": {"display": name}, "value": 3});
-        let parts = |names: [&str; 2]| json!({"components": names.map(part), "value": "two"});
-        let mut r = record("result", parts(["One", "Two"]));
-        let other = of(&record("result", parts(["One", "Three"])));
+        let part = |name: &str, value: Value| json!({"code": {"display": name}, "value": value});
+        let parts = |of: [Value; 2], absent: &str| json!({"components": of, "components_absent": [{"display": absent}], "value": "two"});
+        let one = part("One", 3.into());
+        let mut r = record(
+            "result",
+            parts([one.clone(), part("Two", "Seen".into())], "Four"),
+        );
+        let says = part("Three", "Chlamydia seen".into());
+        let other = of(&record("result", parts([one, says], "Five")));
         assert!(keep(&mut r, other.clone()));
         assert!(!keep(&mut r, other));
-        let want = json!([{"fields": {"components":
-            [{"code": {"display": "One"}}, {"code": {"display": "Three"}}]}}]);
+        let want = json!([{"fields": {
+            "components": [{"code": {"display": "One"}},
+                {"code": {"display": "Three"}, "value": "Chlamydia seen"}],
+            "components_absent": [{"display": "Five"}]}}]);
         assert_eq!(serde_json::to_value(&r.given).unwrap(), want);
         let as_was = as_given(&r).next().unwrap();
         let named = crate::questionnaires::told_by(&as_was);
         let named: Vec<&str> = named.iter().map(|(n, _)| n.as_str()).collect();
-        assert_eq!(named, ["Example one", "One", "Three"]);
+        assert_eq!(named, ["Example one", "One", "Three", "Five"]);
+        let own = serde_json::to_string(&of(&r)).unwrap();
+        assert!(!own.contains("Seen") && !own.contains("two"), "{own}");
     }
 
     /// An NPI is of the name it came with.

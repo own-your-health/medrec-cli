@@ -22,6 +22,7 @@ use crate::events::Built;
 use crate::given;
 use crate::marks::{failed, Failed, Marks, LABELS, READ, READ_DECISIONS, RECORDS, WRITE};
 use crate::model::{Document, Household, Person, PersonIndex, PersonText, Record};
+use crate::normalize::COMPONENTS;
 use crate::parts::{self, Parts};
 use crate::questionnaires;
 use crate::services;
@@ -249,6 +250,13 @@ static PAPERS: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
     .collect()
 });
 
+/// The texts that are the values of a reading's parts.
+fn parts_say(r: &Record) -> impl Iterator<Item = &str> {
+    let parts = r.fields.get(COMPONENTS).and_then(Value::as_array);
+    let values = parts.into_iter().flatten();
+    values.filter_map(|p| p.get("value")?.as_str())
+}
+
 /// The area any words of a text say: of a service, a medicine, a test or a
 /// questionnaire.
 pub(crate) fn words(text: &str) -> Option<&'static str> {
@@ -365,6 +373,7 @@ fn record_why(r: &Record) -> Option<Why> {
                 first_area(&TESTS, name)
                     .or_else(|| questionnaires::of(name, code.as_ref()).map(|q| q.area))
             })
+            .or_else(|| parts_say(r).find_map(words))
             .map(|area| Why::of(area, "test"))
             .or_else(|| by_names(&["performer"])),
         _ => None,
@@ -1236,6 +1245,35 @@ mod tests {
         ] {
             assert_eq!(icd10_area(code), area, "{code}");
         }
+    }
+
+    /// A reading is private by the name or the code of any of its parts, with a
+    /// value or without, and by a text that is the value of one.
+    #[test]
+    fn a_reading_is_private_by_any_of_its_parts() {
+        let why = |fields: Value| {
+            let r = record("r_readingaaaaaaaaaaaaa", "result", "Example panel", fields);
+            record_why(&serde_json::from_value(r).unwrap()).map(|w| w.area)
+        };
+        let parts = |code: Value, value: Value| {
+            let first = json!({"code": {"display": "First piece"}, "value": 1});
+            json!({"components": [first, {"code": code, "value": value}]})
+        };
+        let named = |name: &str| json!({"display": name});
+        let coded = json!({"system": "http://loinc.org", "code": "44250-9", "display": "Item"});
+        assert_eq!(why(parts(named("Second piece"), 2.into())), None);
+        assert_eq!(why(parts(named("Second piece"), "Not seen".into())), None);
+        assert_eq!(
+            why(parts(named("Chlamydia DNA"), 2.into())),
+            Some(SEXUAL_HEALTH)
+        );
+        assert_eq!(why(parts(coded.clone(), 2.into())), Some(MENTAL_HEALTH));
+        let seen = parts(named("Second piece"), "Chlamydia seen".into());
+        assert_eq!(why(seen), Some(SEXUAL_HEALTH));
+        let absent = |code: Value| json!({"components_absent": [code], "value": 3});
+        assert_eq!(why(absent(named("Second piece"))), None);
+        assert_eq!(why(absent(named("Chlamydia DNA"))), Some(SEXUAL_HEALTH));
+        assert_eq!(why(absent(coded)), Some(MENTAL_HEALTH));
     }
 
     /// The view with no provider labels.

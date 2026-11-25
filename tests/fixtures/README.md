@@ -37,6 +37,9 @@ real record, document, study or provider response.
   unassigned labeler `00000`. `fhir/medication-dispense-contained.json` is
   the same fill with its prescription contained, naming an `Example
   Prescriber`.
+- `fhir/readings.json` is invented Observations at no one's, one for each shape
+  of a result's value and of its parts, each with the value, unit, text, count
+  of parts, codes of the parts with no value and categories expected of it.
 - `fhir/left-out-line-eob.json` is a claim (an ExplanationOfBenefit at
   "Sample Rehab Center") of four lines, whose totals leave one out. Its two
   processing notes, one a line points at and one no line does, and its NUBC

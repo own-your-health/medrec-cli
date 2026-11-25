@@ -21,6 +21,8 @@ pub const RXNORM: &str = "http://www.nlm.nih.gov/research/umls/rxnorm";
 pub const CVX: &str = "http://hl7.org/fhir/sid/cvx";
 /// The field of a result that holds its parts.
 pub const COMPONENTS: &str = "components";
+/// The codes of those that have no value.
+pub const ABSENT: &str = "components_absent";
 /// The two parts of a blood pressure, by their LOINC codes.
 const SYSTOLIC: &str = "8480-6";
 const DIASTOLIC: &str = "8462-4";
@@ -48,6 +50,7 @@ pub const FIELDS: &[(&str, &[&str])] = &[
             "when",
             "value",
             COMPONENTS,
+            ABSENT,
             "reference_range",
             "interpretation",
             "category",
@@ -258,7 +261,7 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
             put(&mut fields, "period", r.get("period").cloned());
         }
         "Observation" => {
-            let parts = components(r);
+            let (parts, absent) = components(r);
             let value = observation_value(r);
             let own = value.as_ref().is_some_and(|v| !value_text(v).is_empty());
             let value = if own || parts.is_empty() {
@@ -270,6 +273,9 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
             if !parts.is_empty() {
                 let parts: Vec<Value> = parts.into_iter().map(Value::Object).collect();
                 fields.insert(COMPONENTS.into(), parts.into());
+            }
+            if !absent.is_empty() {
+                fields.insert(ABSENT.into(), absent.into());
             }
             put(
                 &mut fields,
@@ -900,15 +906,8 @@ fn coding_text(c: &Value) -> Value {
 
 fn observation_value(r: &Value) -> Option<Value> {
     if let Some(q) = r.get("valueQuantity") {
-        let mut v = json!({
-            "value": q.get("value"),
-            "unit": q.get("unit").or_else(|| q.get("code")),
-            "system": q.get("system"),
-        });
-        // Below or above what could be measured is not the number itself.
-        if let Some(c) = path_str(q, "comparator") {
-            v["comparator"] = c.into();
-        }
+        let mut v = measured(q)?;
+        v["system"] = q.get("system").cloned().unwrap_or_default();
         return Some(v);
     }
     if let Some(of) = r.get("valueRange") {
@@ -916,7 +915,7 @@ fn observation_value(r: &Value) -> Option<Value> {
     }
     if let Some(of) = r.get("valueRatio") {
         let side = |k: &str| {
-            let text = of.get(k).and_then(|q| quantity(Some(q)));
+            let text = of.get(k).and_then(measured);
             text.map(|q| value_text(&q)).filter(|t| !t.is_empty())
         };
         let (n, d) = (side("numerator")?, side("denominator")?);
@@ -933,18 +932,35 @@ fn observation_value(r: &Value) -> Option<Value> {
         .find_map(|k| r.get(*k).cloned())
 }
 
-/// The parts of a reading that have a value, each as a result has its own.
-fn components(r: &Value) -> Vec<Map<String, Value>> {
+/// A number with its unit, and what says it is a bound: below or above what
+/// could be measured is not the number itself.
+fn measured(q: &Value) -> Option<Value> {
+    let mut v = quantity(Some(q)).filter(|v| !v["value"].is_null())?;
+    let than = path_str(q, "comparator");
+    if let Some(c) = than.filter(|c| ["<", "<=", ">=", ">"].contains(c)) {
+        v["comparator"] = c.into();
+    }
+    Some(v)
+}
+
+/// The parts of a reading that have a value, each as a result has its own, and
+/// the codes of those that have none.
+fn components(r: &Value) -> (Vec<Map<String, Value>>, Vec<Value>) {
     let parts = r.get("component").and_then(Value::as_array);
-    let mut out = Vec::new();
+    let (mut out, mut absent) = (Vec::new(), Vec::new());
     for c in parts.into_iter().flatten() {
-        let Some(code) = c.get("code").and_then(|c| codeable(c, &[LOINC])) else {
+        let code = c.get("code").and_then(|c| codeable(c, &[LOINC]));
+        let code = code.filter(|c| c.display.is_some() || c.code.is_some());
+        let Some(code) = code.and_then(|c| serde_json::to_value(c).ok()) else {
             continue;
         };
         let value = observation_value(c).filter(|v| !value_text(v).is_empty());
-        let Some(value) = value else { continue };
+        let Some(value) = value else {
+            absent.push(code);
+            continue;
+        };
         let mut part = Map::new();
-        put(&mut part, "code", serde_json::to_value(code).ok());
+        part.insert("code".into(), code);
         part.insert("value".into(), value);
         put(
             &mut part,
@@ -958,7 +974,7 @@ fn components(r: &Value) -> Vec<Map<String, Value>> {
         );
         out.push(part);
     }
-    out
+    (out, absent)
 }
 
 /// What a reading of parts says as one: the two of a blood pressure, told by
@@ -1008,11 +1024,9 @@ fn range_text(rr: &Value) -> Value {
         return t.clone();
     }
     let side = |k: &str| {
-        rr.get(k).map(|q| {
-            let v = q.get("value").map(|v| v.to_string()).unwrap_or_default();
-            let u = q.get("unit").and_then(Value::as_str).unwrap_or("");
-            format!("{v} {u}").trim().to_string()
-        })
+        let q = rr.get(k)?;
+        let u = q.get("unit").and_then(Value::as_str).unwrap_or("");
+        Some(format!("{} {u}", q.get("value")?).trim().to_string())
     };
     match (side("low"), side("high")) {
         (Some(l), Some(h)) => json!(format!("{l} – {h}")),
@@ -1868,6 +1882,10 @@ mod tests {
             let parts = r.fields.get(COMPONENTS).and_then(Value::as_array);
             let parts = parts.cloned().unwrap_or_default();
             assert_eq!(json!(parts.len()), case["parts"], "{of}");
+            let absent = r.fields.get(ABSENT).and_then(Value::as_array);
+            let absent = absent.into_iter().flatten();
+            let absent: Vec<&Value> = absent.map(|c| &c["display"]).collect();
+            assert_eq!(json!(absent), case["absent"], "{of}");
             assert!(
                 parts.iter().all(|p| p["code"]["display"].is_string()),
                 "{of}"

@@ -3039,7 +3039,7 @@ fn a_results_parts_and_categories_come_with_an_import_and_by_reindex() {
     }
     resources.push(serde_json::json!({
         "resourceType": "DiagnosticReport", "id": "report-1", "status": "final",
-        "code": {"text": "Example panel"}, "effectiveDateTime": "2024-04-20T09:30:00Z",
+        "code": {"text": "Example panel"}, "effectiveDateTime": "2024-04-30T09:30:00Z",
         "category": [{"coding": [
             {"system": "http://terminology.hl7.org/CodeSystem/v2-0074", "code": "LAB"}]}],
     }));
@@ -3087,7 +3087,7 @@ fn a_results_parts_and_categories_come_with_an_import_and_by_reindex() {
     assert_eq!(first["components"].as_array().unwrap().len(), 2, "{first}");
     assert_eq!(first["categories"], serde_json::json!(["vital-signs"]));
     assert_eq!(
-        of_day(&whole, "2024-04-20")["categories"],
+        of_day(&whole, "2024-04-30")["categories"],
         serde_json::json!(["LAB"])
     );
     let shown = base.ok(&["results", "--person", "Robin"]).to_string();
@@ -3103,7 +3103,11 @@ fn a_results_parts_and_categories_come_with_an_import_and_by_reindex() {
         let fields = r["fields"].as_object_mut().unwrap();
         let parts = fields.remove("components").is_some();
         let had = fields.len();
-        fields.retain(|k, v| k != "categories" && !(k == "value" && parts && v.is_string()));
+        fields.retain(|k, v| {
+            k != "categories"
+                && k != "components_absent"
+                && !(k == "value" && parts && v.is_string())
+        });
         lacking += usize::from(parts || fields.len() < had);
     }
     std::fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
