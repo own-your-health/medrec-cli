@@ -339,12 +339,12 @@ fn verify_compares_events_with_their_raw_files() {
     let filed: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     let visit = filed["records"].as_array().unwrap().iter();
     let at = visit.enumerate().find(|(_, r)| r["kind"] == "encounter");
-    let (at, visit) = at.unwrap();
+    let (at_index, visit) = at.unwrap();
     let id = visit["id"].as_str().unwrap();
     let compared = || -> (Option<i32>, Value) {
         let out = e.run(&["--json", "verify", "--events"]);
         let v: Value = serde_json::from_slice(&out.stdout).unwrap();
-        let people = v["events"].as_array().unwrap().iter();
+        let people = v["people"].as_array().unwrap().iter();
         let some: Vec<&Value> = people.filter(|p| p["events"] != 0).collect();
         assert_eq!(some.len(), 1, "{v}");
         (out.status.code(), some[0].clone())
@@ -352,15 +352,16 @@ fn verify_compares_events_with_their_raw_files() {
     let (code, v) = compared();
     assert_eq!(code, Some(0), "{v}");
     assert!(v["records"].as_u64() > Some(1), "{v}");
-    assert!(e.ok(&["verify"]).get("events").is_none());
+    assert!(e.ok(&["verify"]).get("people").is_none());
     let event = e.ok(&["events", "list", "--person", "Robin"]);
     let event = event["items"][0]["id"].as_str().unwrap().to_string();
-    const LISTS: [&str; 6] = [
+    const LISTS: [&str; 7] = [
         "place_not_given",
         "places_differ",
         "name_not_given",
         "day_not_given",
         "source_not_its_own",
+        "resource_not_its_own",
         "unread",
     ];
     let raw = e
@@ -373,7 +374,7 @@ fn verify_compares_events_with_their_raw_files() {
     assert_ne!(other, its);
     std::fs::write(raw.with_file_name("enc-other.json"), &other).unwrap();
     type Change = fn(&mut Value);
-    let cases: [(Change, &str); 6] = [
+    let cases: [(Change, &str); 8] = [
         (
             |r| r["fields"]["service_provider"] = "Elsewhere Clinic".into(),
             "place_not_given",
@@ -400,15 +401,41 @@ fn verify_compares_events_with_their_raw_files() {
         ),
         (
             |r| r["provenance"][0]["source_resource"]["id"] = "elsewhere".into(),
-            "source_not_its_own",
+            "resource_not_its_own",
+        ),
+        // One of two files is not there: what only it may say is not
+        // compared, the name, the day and the place.
+        (
+            |r| {
+                let mut p = r["provenance"][0].clone();
+                let path = p["raw_path"]
+                    .as_str()
+                    .unwrap()
+                    .replace("enc-0001", "enc-gone");
+                p["raw_path"] = path.into();
+                r["provenance"].as_array_mut().unwrap().push(p);
+                r["display"] = "Elsewhere visit".into();
+                r["date"] = "2001-01-01".into();
+                r["fields"]["service_provider"] = "Elsewhere Clinic".into();
+            },
+            "unread",
+        ),
+        // A path an edited index makes absolute is a file that is not there.
+        (
+            |r| {
+                let path = r["provenance"][0]["raw_path"].as_str().unwrap();
+                r["provenance"][0]["raw_path"] = format!("/{path}").into();
+            },
+            "unread",
         ),
     ];
     for (change, list) in cases {
         let mut index = filed.clone();
-        change(&mut index["records"][at]);
+        change(&mut index["records"][at_index]);
         std::fs::write(&path, serde_json::to_string(&index).unwrap()).unwrap();
         let (code, v) = compared();
         assert_eq!(code, Some(1), "{list}: {v}");
+        assert!(v.get("not_compared").is_none(), "{v}");
         for l in LISTS {
             let of = if l == "place_not_given" {
                 event.as_str()
@@ -428,6 +455,56 @@ fn verify_compares_events_with_their_raw_files() {
         "{v}"
     );
     std::fs::write(&raw, &its).unwrap();
+    assert_eq!(compared().0, Some(0));
+    // A place no file gives but the source's name, and files whose place is a
+    // records connection's or a room number: none of it is a difference.
+    let resource: Value = serde_json::from_str(&its).unwrap();
+    assert_eq!(resource["serviceProvider"]["display"], "Example Health");
+    let at = |name: &str, place: Option<&str>| {
+        let mut r = resource.clone();
+        match place {
+            Some(p) => r["serviceProvider"]["display"] = p.into(),
+            None => drop(r.as_object_mut().unwrap().remove("serviceProvider")),
+        }
+        let text = serde_json::to_string(&r).unwrap();
+        assert!(!text.contains("\"Example Health\""), "{name}");
+        std::fs::write(raw.with_file_name(format!("{name}.json")), text).unwrap();
+        let mut p = visit["provenance"][0].clone();
+        let path = p["raw_path"].as_str().unwrap().replace("enc-0001", name);
+        p["raw_path"] = path.into();
+        p
+    };
+    let no_place = at("enc-noplace", None);
+    let connection = at("enc-connection", Some("Example Health (all practices)"));
+    let room = at("enc-room", Some("214"));
+    let mut index = filed.clone();
+    index["records"][at_index]["provenance"] = serde_json::json!([no_place]);
+    std::fs::write(&path, serde_json::to_string(&index).unwrap()).unwrap();
+    let (code, v) = compared();
+    assert_eq!(code, Some(0), "by the source's name: {v}");
+    let mut index = filed.clone();
+    index["records"][at_index]["provenance"] = serde_json::json!([room, connection]);
+    std::fs::write(&path, serde_json::to_string(&index).unwrap()).unwrap();
+    let (code, v) = compared();
+    assert_eq!(code, Some(0), "a connection and a room: {v}");
+    // A person whose files do not read is not compared; the others are.
+    std::fs::write(&path, serde_json::to_string(&filed).unwrap()).unwrap();
+    let text = e.records().join("Robin Testperson/text.json");
+    let kept = std::fs::read(&text).ok();
+    std::fs::write(&text, "{").unwrap();
+    let out = e.run(&["--json", "verify", "--events"]);
+    let v: Value = serde_json::from_slice(&out.stdout).expect("one JSON document");
+    assert_eq!(out.status.code(), Some(1), "{v}");
+    let robin = v["people"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["not_compared"] == true);
+    assert!(robin.is_some_and(|p| p["events"] == 0), "{v}");
+    match kept {
+        Some(t) => std::fs::write(&text, t).unwrap(),
+        None => std::fs::remove_file(&text).unwrap(),
+    }
     assert_eq!(compared().0, Some(0));
     let out = e.run(&["verify", "--events"]);
     let text = String::from_utf8_lossy(&out.stdout).to_string();

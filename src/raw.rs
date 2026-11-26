@@ -15,6 +15,7 @@ use crate::import;
 use crate::model::{Household, Person, Record};
 use crate::normalize;
 use crate::people;
+use crate::store;
 
 /// The elements whose codes are words of the format and not a finding: what an
 /// amount of a claim is.
@@ -261,7 +262,8 @@ pub fn fields(
 /// copy: one per folder of them, not one call per file. No error names a file.
 pub(crate) enum Files<'a> {
     There(&'a Folder),
-    Copied(pk_cli_drive::TempDir),
+    /// The copies, and the folders that could not be copied.
+    Copied(pk_cli_drive::TempDir, BTreeSet<String>),
 }
 
 impl<'a> Files<'a> {
@@ -277,19 +279,42 @@ impl<'a> Files<'a> {
             .flat_map(currents)
             .filter_map(|(rel, _)| rel.rsplit_once('/').map(|(d, _)| d.to_string()))
             .collect();
+        let mut failed = BTreeSet::new();
         for d in &dirs {
-            if folder.store.exists(d).map_err(unnamed)? {
-                let to = tmp.path().join(d);
-                folder.store.fetch_tree(d, &to).map_err(unnamed)?;
+            // A path no index can lead out of the copy by: its files are not there.
+            let Some(to) = store::within(tmp.path(), d) else {
+                continue;
+            };
+            let copied = match folder.store.exists(d) {
+                Ok(true) => folder.store.fetch_tree(d, &to),
+                Ok(false) => Ok(()),
+                Err(e) => Err(e),
+            };
+            if copied.is_err() {
+                failed.insert(d.clone());
             }
         }
-        Ok(Files::Copied(tmp))
+        Ok(Files::Copied(tmp, failed))
     }
 
-    fn bytes(&self, rel: &str) -> Read {
+    /// A file's bytes; `None` where it is not there, and an error where its
+    /// folder could not be copied.
+    pub fn bytes(&self, rel: &str) -> Read {
+        if !store::plain_rel(rel) {
+            return Ok(None);
+        }
         match self {
             Files::There(folder) => bytes(folder, rel).map_err(unnamed),
-            Files::Copied(tmp) => copy(tmp.path(), rel),
+            Files::Copied(_, failed)
+                if rel
+                    .rsplit_once('/')
+                    .is_some_and(|(d, _)| failed.contains(d)) =>
+            {
+                Err(CliError::Other(
+                    "a folder of raw files could not be copied".into(),
+                ))
+            }
+            Files::Copied(tmp, _) => copy(tmp.path(), rel),
         }
     }
 
@@ -315,7 +340,10 @@ fn bytes(folder: &Folder, rel: &str) -> Read {
 
 /// The same of the copies in `tmp`.
 fn copy(tmp: &Path, rel: &str) -> Read {
-    match std::fs::read(tmp.join(rel)) {
+    let Some(at) = store::within(tmp, rel) else {
+        return Ok(None);
+    };
+    match std::fs::read(at) {
         Ok(b) => Ok(Some(b)),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(unnamed(CliError::Other(e.to_string()))),

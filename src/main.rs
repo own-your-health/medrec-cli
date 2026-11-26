@@ -1401,7 +1401,7 @@ fn run(cli: &Cli) -> Result<(), CliError> {
             let f = Folder::open(&cfg, Access::Fresh)?;
             let mut r = maint::verify(&f, a.deep)?;
             if a.events {
-                r.events = Some(medrec::against::events(&f, &f.household()?)?);
+                r.people = Some(medrec::against::events(&f, &f.household()?));
             }
             let clean = r.clean();
             output::emit(json, "verify", to_value(&r), |v| {
@@ -1418,7 +1418,11 @@ fn run(cli: &Cli) -> Result<(), CliError> {
                         println!("{label}: {}", p.as_str().unwrap_or(""));
                     }
                 }
-                for of in r.events.iter().flatten() {
+                for of in r.people.iter().flatten() {
+                    if of.not_compared {
+                        println!("{}: not compared: its files could not be read", of.person);
+                        continue;
+                    }
                     println!(
                         "{}: compared {} events of {} records with their raw files; {} places are \
                          a linked person's or a paper's word",

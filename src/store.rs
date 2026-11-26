@@ -250,6 +250,43 @@ fn cache_dir(spec: &DriveSpec) -> Option<PathBuf> {
     cache::cache_dir_for(BIN, &spec.to_string())
 }
 
+/// Whether `rel` is a relative path of plain names, with no root, `.` or `..`.
+/// A path an index gives is one: anyone who can write the folder can edit an
+/// index, so no such path may lead outside the place it is read in.
+pub fn plain_rel(rel: &str) -> bool {
+    !rel.is_empty()
+        && !rel.contains('\\')
+        && Path::new(rel)
+            .components()
+            .all(|c| matches!(c, std::path::Component::Normal(_)))
+}
+
+/// `rel` under `root`, where it is a [`plain_rel`]; `None` where it is not.
+pub fn within(root: &Path, rel: &str) -> Option<PathBuf> {
+    plain_rel(rel).then(|| root.join(rel))
+}
+
+#[cfg(test)]
+mod rel_tests {
+    use super::*;
+
+    #[test]
+    fn only_a_relative_path_of_plain_names_is_within() {
+        let root = Path::new("/tmp/copy");
+        for ok in ["a/b.json", "Robin Testperson/Records/x/Claim", "a//b"] {
+            assert!(plain_rel(ok), "{ok}");
+            assert!(
+                within(root, ok).is_some_and(|p| p.starts_with(root)),
+                "{ok}"
+            );
+        }
+        for not in ["", "/a/b.json", "../a", "a/../b", "./a", "a\\b", "/"] {
+            assert!(!plain_rel(not), "{not}");
+            assert!(within(root, not).is_none(), "{not}");
+        }
+    }
+}
+
 pub fn expand_home(s: &str) -> PathBuf {
     if let Some(rest) = s.strip_prefix("~/") {
         if let Some(home) = std::env::var_os("HOME") {

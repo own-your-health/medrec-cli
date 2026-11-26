@@ -522,14 +522,14 @@ pub struct Verify {
     pub changed: Vec<String>,
     /// Files under Documents, Claims or Imaging that no index entry names.
     pub unindexed: Vec<String>,
-    /// With `--events`, each person's against their raw files.
+    /// With `--events`, each person's events against their raw files.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub events: Option<Vec<Against>>,
+    pub people: Option<Vec<Against>>,
 }
 
 impl Verify {
     pub fn clean(&self) -> bool {
-        let events = self.events.iter().flatten().all(Against::clean);
+        let events = self.people.iter().flatten().all(Against::clean);
         self.missing.is_empty() && self.changed.is_empty() && events
     }
 }

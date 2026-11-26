@@ -100,16 +100,28 @@ views/                        each person's records cut into small files, for re
    `medrec verify` reports any file that is missing, changed (by MD5, or by
    SHA-256 with `--deep`) or not in an index. With `--events` (0.9.11 and later)
    it also reads the raw files of the records that events are made of, as they
-   are, and says for each person (`events[]`), with ids alone:
-   `place_not_given`, the events whose place is in no raw file of their records
-   and is no name of a source of theirs (`places_of_others` is how many have a
-   place by a linked person's or a paper's word, which is not compared);
-   `places_differ`, the records whose raw files give different places, as two
-   visits in one; `name_not_given` and `day_not_given`, the records whose name
-   or day no raw file of theirs has (a claim's name is medrec's);
-   `source_not_its_own`, those with a raw file in the folder of another source
-   than they say they came from, or of another resource; and `unread`, those
-   with a raw file that is not there or does not read. Any of them is exit 1.
+   are, and `people` has one entry for each person, with counts and ids alone:
+
+   | Field | What |
+   |---|---|
+   | `person` | the person's id |
+   | `not_compared` | `true` where their index or events could not be read, so nothing of theirs is compared and every list is empty; absent otherwise |
+   | `events`, `records` | how many events were compared, and how many of the person's own records are in them |
+   | `places_of_others` | how many events have a place by a linked person's or a paper's word, which is not compared |
+   | `place_not_given` | ids of events whose place is in no raw file of their records and is no name of a source of theirs |
+   | `places_differ` | ids of records two of whose raw files give places of which none is the other's |
+   | `name_not_given`, `day_not_given` | ids of records whose name, or day, no raw file of theirs has |
+   | `source_not_its_own` | ids of records with a raw file in the folder of another source than they say they came from |
+   | `resource_not_its_own` | ids of records with a raw file of another resource type or id than they say |
+   | `unread` | ids of records with a raw file that is not there, does not read, is in a folder that could not be copied, or has a path that is not relative |
+
+   What is not compared: the name of a claim, which is medrec's, and a name
+   that is medrec's default for the kind (such as "Visit"); the name and day of
+   a record with a raw file in `unread`, since that file may be the one that
+   says them; the place of an event with such a record; and as a place, a
+   records connection's name or one with no word but legal ones and numbers.
+   An empty list is of what was compared. Any id, or `not_compared`, is
+   exit 1, after the whole report is printed.
 
 ## household.json (`medrec-household/v1`)
 
