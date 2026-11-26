@@ -241,7 +241,7 @@ impl Folder {
     }
 
     /// Write a person's index, its claims' links recomputed first
-    /// (`claims::link`).
+    /// (`claims::link`) and its panels' (`panels::link`).
     pub fn save_index(&self, p: &Person, idx: &mut PersonIndex) -> Result<(), CliError> {
         if !idx.about_another.is_empty() {
             return Err(CliError::Other(
@@ -249,6 +249,7 @@ impl Folder {
             ));
         }
         crate::claims::link(&mut idx.records);
+        crate::panels::link(&mut idx.records);
         let rel = index_rel(p);
         let current: Option<PersonIndex> = self.read_json(&rel)?;
         if current.map(|c| c.rev).unwrap_or(0) != idx.rev {

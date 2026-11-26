@@ -320,7 +320,7 @@ fn contained<'a>(root: &'a Value, id: &str) -> Option<&'a Value> {
 
 /// `(type, id)` of a reference to the server at `base`: relative, or
 /// absolute under it, with or without `/_history/<v>`.
-fn local<'a>(reference: &'a str, base: Option<&str>) -> Option<(&'a str, &'a str)> {
+pub(crate) fn local<'a>(reference: &'a str, base: Option<&str>) -> Option<(&'a str, &'a str)> {
     let rest = if reference.contains(':') {
         reference
             .strip_prefix(base?.trim_end_matches('/'))?

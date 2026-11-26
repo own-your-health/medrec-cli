@@ -20,7 +20,7 @@ impl Env {
         let root = std::env::temp_dir().join(format!("medrec-flow-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
-        let path = std::env::var("PATH").unwrap_or_default();
+        let path = medrec::testdata::no_viewer_path(&std::env::var("PATH").unwrap_or_default());
         let e = Env { root, path };
         e.ok(&["profiles", "add", "home"]);
         e
@@ -39,6 +39,7 @@ impl Env {
             .env("PATH", &self.path)
             .env("MEDREC_PROFILE", "home")
             .env("MEDREC_KEYCHAIN_SERVICE", "piekstra.medrec.hermetic-tests")
+            .env("MEDREC_VIEWER", "none")
             .env_remove("NO_COLOR");
         for (k, v) in env {
             c.env(k, v);
@@ -63,6 +64,30 @@ impl Env {
 
     fn records(&self) -> PathBuf {
         self.root.join("records")
+    }
+}
+
+/// A test's `open` of a paper or a study launches nothing on the machine:
+/// `MEDREC_VIEWER=none` holds it (`launched: false`), and the first `open` and
+/// `xdg-open` on its `PATH` are the tests' own, which only say what they were
+/// given. That file is a check at best: a viewer is started and not waited
+/// for, so one could write after the read.
+fn launches_nothing(e: &Env, args: &[&str]) {
+    let launched = medrec::testdata::no_viewer_dir().join("launched");
+    let before = std::fs::read_to_string(&launched).unwrap_or_default();
+    let open = e.ok(args);
+    assert_eq!(open["launched"], false, "{args:?}: {open}");
+    let after = std::fs::read_to_string(&launched).unwrap_or_default();
+    assert_eq!(before, after, "{args:?} ran a viewer");
+    for name in ["open", "xdg-open"] {
+        let found = Command::new("sh")
+            .args(["-c", &format!("command -v {name}")])
+            .env("PATH", &e.path)
+            .output()
+            .unwrap();
+        let found = String::from_utf8_lossy(&found.stdout).trim().to_string();
+        let ours = medrec::testdata::no_viewer_dir().join(name);
+        assert_eq!(PathBuf::from(found), ours, "{name}");
     }
 }
 
@@ -283,6 +308,7 @@ fn imaging_discs_add_only_new_images() {
     assert_eq!(list["items"][0]["instances"], 6);
     let open = e.ok(&["images", "open", &study, "--no-launch"]);
     assert_eq!(open["launched"], false);
+    launches_nothing(&e, &["images", "open", &study]);
     let opened = PathBuf::from(open["path"].as_str().unwrap());
     assert!(opened.join("S002/00003.dcm").exists());
     let out = e.root.join("export");
@@ -703,6 +729,7 @@ fn an_import_files_records_and_documents_and_is_idempotent() {
     let eobs = e.ok(&["documents", "list", "--type", "eob"]);
     assert_eq!(eobs["items"].as_array().unwrap().len(), 1);
     let doc = eobs["items"][0]["id"].as_str().unwrap().to_string();
+    launches_nothing(&e, &["documents", "open", &doc]);
     let open = e.ok(&["documents", "open", &doc, "--no-launch"]);
     let copy = PathBuf::from(open["path"].as_str().unwrap());
     use std::os::unix::fs::PermissionsExt;
@@ -841,6 +868,40 @@ fn a_local_folder_is_owner_only_and_lists_take_a_limit() {
     assert_eq!(folder_mode(&e), "ok");
     std::fs::set_permissions(e.records(), std::fs::Permissions::from_mode(0o755)).unwrap();
     assert_eq!(folder_mode(&e), "warn");
+    let _ = std::fs::remove_dir_all(Path::new(&e.root));
+}
+
+/// `doctor` names the `open` commands a `none` viewer holds, and where the
+/// viewer is from. It starts no viewer.
+#[test]
+fn doctor_says_which_open_a_none_viewer_holds() {
+    let e = Env::new("doctor-viewer");
+    setup(&e);
+    let viewer = |env: &[(&str, &str)]| -> String {
+        let out = e.run_env(&["--json", "doctor"], env);
+        let v: Value = serde_json::from_slice(&out.stdout).expect("one JSON document");
+        let checks = v["checks"].as_array().unwrap();
+        let c = checks.iter().find(|c| c["check"] == "viewer");
+        c.expect("a viewer check")["detail"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    // The harness's MEDREC_VIEWER=none holds both, and says so.
+    let both = viewer(&[]);
+    assert!(
+        both.contains("`images open` and `documents open`"),
+        "{both}"
+    );
+    assert!(both.contains("MEDREC_VIEWER"), "{both}");
+    // `config viewer none` holds studies alone.
+    e.ok(&["config", "set", "viewer", "none"]);
+    let studies = viewer(&[("MEDREC_VIEWER", "")]);
+    assert!(
+        studies.contains("papers still open in the system's viewer"),
+        "{studies}"
+    );
+    assert!(!studies.contains("MEDREC_VIEWER"), "{studies}");
     let _ = std::fs::remove_dir_all(Path::new(&e.root));
 }
 
@@ -1344,6 +1405,7 @@ fn held_import(e: &Env, hold: &Path) -> std::process::Child {
         .env("PATH", &e.path)
         .env("MEDREC_PROFILE", "home")
         .env("MEDREC_KEYCHAIN_SERVICE", "piekstra.medrec.hermetic-tests")
+        .env("MEDREC_VIEWER", "none")
         .env("FAKEPROV_HOLD", hold)
         .args([
             "--json",
@@ -2707,6 +2769,23 @@ fn a_claim_is_titled_priced_by_category_and_linked_to_its_visit_and_results() {
         0,
         "a second run changes nothing"
     );
+    // One that is shaped again with the links it had has none made otherwise.
+    assert_eq!(r["links_updated"], 1, "{r}");
+    assert!(claim_of(&want)["fields"]["visit"].is_string());
+    let mut old = now.clone();
+    let records = old["records"].as_array_mut().unwrap();
+    let claim = records.iter_mut().find(|r| r["kind"] == "claim").unwrap();
+    claim["display"] = serde_json::json!("Professional");
+    // With a line it has no more, that says none.
+    let lines = claim["fields"]["items"].as_array_mut().unwrap();
+    lines.push(serde_json::json!({"service": "Example service"}));
+    std::fs::write(&path, serde_json::to_string(&old).unwrap()).unwrap();
+    let r = e.ok(&["reindex"]);
+    assert_eq!(
+        (r["reshaped"].as_u64(), r["links_updated"].as_u64()),
+        (Some(1), Some(0)),
+        "{r}"
+    );
 }
 
 /// The synthetic stream with another claim in place of its own, whose totals
@@ -3449,8 +3528,9 @@ fn a_record_keeps_what_each_source_says_of_its_status() {
     assert_eq!(read()["records"], full["records"]);
 }
 
-/// A result is imported with its parts, its exact value and its categories,
-/// and `reindex` gives them to results and reports that lack them.
+/// A result is imported with its parts, its exact value, its categories and
+/// the results it lists, and `reindex` gives them to results and reports that
+/// lack them.
 #[test]
 fn a_results_parts_and_categories_come_with_an_import_and_by_reindex() {
     const READINGS: &str = include_str!("fixtures/fhir/readings.json");
@@ -3462,9 +3542,18 @@ fn a_results_parts_and_categories_come_with_an_import_and_by_reindex() {
     for (i, r) in resources.iter_mut().enumerate() {
         r["effectiveDateTime"] = format!("2024-04-{:02}T09:30:00Z", i + 1).into();
     }
+    let refs = |ids: [&str; 2]| {
+        ids.map(|id| serde_json::json!({"reference": format!("Observation/{id}")}))
+    };
+    resources.push(serde_json::json!({
+        "resourceType": "Observation", "id": "panel-1", "status": "final",
+        "code": {"text": "Example heading"}, "effectiveDateTime": "2024-04-21T09:30:00Z",
+        "hasMember": refs(["lt-1", "range-1"]),
+    }));
     resources.push(serde_json::json!({
         "resourceType": "DiagnosticReport", "id": "report-1", "status": "final",
         "code": {"text": "Example panel"}, "effectiveDateTime": "2024-04-30T09:30:00Z",
+        "result": refs(["sum-1", "not-filed"]),
         "category": [{"coding": [
             {"system": "http://terminology.hl7.org/CodeSystem/v2-0074", "code": "LAB"}]}],
     }));
@@ -3519,6 +3608,21 @@ fn a_results_parts_and_categories_come_with_an_import_and_by_reindex() {
     for text in ["128/76", "<0.5", "1:40"] {
         assert!(shown.contains(text), "{text}: {shown}");
     }
+    let id_of = |id: &str| -> Value {
+        let mut all = whole["records"].as_array().unwrap().iter();
+        let its = |r: &&Value| r["provenance"][0]["source_resource"]["id"] == id;
+        all.find(its).unwrap()["id"].clone()
+    };
+    let heading = of_day(&whole, "2024-04-21");
+    let want = serde_json::json!([id_of("lt-1"), id_of("range-1")]);
+    assert_eq!(heading["members"], want);
+    let report = of_day(&whole, "2024-04-30");
+    assert_eq!(report["members"], serde_json::json!([id_of("sum-1")]));
+    assert_eq!(report["results"], 2);
+    let rows = base.ok(&["results", "--person", "Robin"]);
+    let mut rows = rows["items"].as_array().unwrap().iter();
+    let row = rows.find(|r| r["display"] == "Example heading").unwrap();
+    assert_eq!(row["detail"], "panel", "{row}");
     // A part with no value is in what the source gave, and nowhere else.
     const ABSENT: &str = "Sample wristband reading";
     let lists = |of: &Value| -> Vec<Value> {
@@ -3576,11 +3680,13 @@ fn a_results_parts_and_categories_come_with_an_import_and_by_reindex() {
     let given = less.map(without).filter(|had| *had).count();
     assert_eq!(given, 1);
     for r in old["records"].as_array_mut().unwrap() {
+        let listing = r.as_object_mut().unwrap().remove("lists").is_some();
         let fields = r["fields"].as_object_mut().unwrap();
+        fields.remove("members");
         let parts = fields.remove("components").is_some();
         let had = fields.len();
         fields.retain(|k, v| k != "categories" && !(k == "value" && parts && v.is_string()));
-        lacking += usize::from(parts || fields.len() < had);
+        lacking += usize::from(listing || parts || fields.len() < had);
     }
     std::fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
     let r = base.ok(&["reindex", "--dry-run"]);
@@ -3597,6 +3703,156 @@ fn a_results_parts_and_categories_come_with_an_import_and_by_reindex() {
     std::fs::write(raw.join("bp-1.json"), "{").unwrap();
     assert_eq!(base.ok(&["reindex"])["results_updated"], 0);
     assert_eq!(of_day(&read(), "2024-04-01"), first);
+    let _ = std::fs::remove_dir_all(&base.root);
+}
+
+/// An import says how many of the records its source gave before it does not
+/// have, and the names of what changed in those it updated.
+#[test]
+fn an_import_counts_what_is_not_served_and_names_what_changed() {
+    let base = Env::new("not-served");
+    setup(&base);
+    let import = |stream: &[Value], more: &[&str]| -> Value {
+        let stream: String = stream.iter().map(|v| format!("{v}\n")).collect();
+        let args = ["import", "--from", "fakeprov", "--from-profile", "adult1"];
+        let who = ["--patient", "pat-0001", "--person", "Robin"];
+        let args: Vec<&str> = args.iter().chain(&who).chain(more).copied().collect();
+        provider_env(&base, &stream).ok(&args)
+    };
+    let all: Vec<Value> = medrec::testdata::STREAM
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    let first = import(&all, &[]);
+    assert_eq!(first["records_not_served"], 0, "{first}");
+    assert_eq!(first["not_served"], serde_json::json!({}));
+    assert_eq!(first["updated"], serde_json::json!([]));
+
+    // Without its claim, and with a later word of its condition.
+    let is = |v: &Value, t: &str| v["resourceType"] == t;
+    let mut less: Vec<Value> = all.clone();
+    less.retain(|v| !is(v, "ExplanationOfBenefit"));
+    for v in &mut less {
+        if is(v, "Condition") {
+            v["clinicalStatus"] = serde_json::json!({"coding": [{"code": "resolved"}]});
+            v["meta"]["lastUpdated"] = "2026-03-06T00:00:00Z".into();
+        }
+        if let Some(n) = v.get_mut("counts") {
+            n.as_object_mut().unwrap().remove("ExplanationOfBenefit");
+        }
+    }
+    let second = import(&less, &[]);
+    assert_eq!(second["records_not_served"], 1, "{second}");
+    assert_eq!(second["not_served"], serde_json::json!({"claim": 1}));
+    let updated = second["updated"].as_array().unwrap();
+    assert_eq!(updated.len(), 1, "{second}");
+    assert_eq!(updated[0]["kind"], "condition");
+    let changed: Vec<&str> = updated[0]["changed"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert_eq!(changed, ["status", "words"]);
+    // It is kept, and counted by each import from then on.
+    let path = base.records().join("Robin Testperson/index.json");
+    let index: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let kept = index["records"].as_array().unwrap();
+    assert!(kept.iter().any(|r| r["kind"] == "claim"));
+    let runs = index["imports"].as_array().unwrap();
+    assert_eq!(runs.last().unwrap()["records_not_served"], 1);
+    let third = import(&less, &[]);
+    assert_eq!(third["records_not_served"], 1);
+    assert_eq!(third["updated"], serde_json::json!([]));
+
+    // Where a type was withheld none of it is counted, and an export of what
+    // changed since a day tells nothing.
+    let mut withheld = less.clone();
+    withheld.last_mut().unwrap()["skipped"] = serde_json::json!([
+        {"resource_type": "ExplanationOfBenefit", "reason": "withheld", "code": "forbidden"}]);
+    assert_eq!(import(&withheld, &[])["records_not_served"], 0);
+    let since = import(&less, &["--since", "2024-01-01"]);
+    assert!(since["records_not_served"].is_null(), "{since}");
+    assert!(since["not_served"].is_null());
+    let mut partial = less.clone();
+    partial[0]["since"] = "2024-01-01".into();
+    let since = import(&partial, &[]);
+    assert!(since["records_not_served"].is_null(), "{since}");
+    assert!(since["not_served"].is_null());
+    assert_eq!(import(&all, &[])["records_not_served"], 0);
+
+    // Nor do downloaded files, which are what is in a directory; and what only
+    // they gave is none that a sign-in stopped giving.
+    let statements = base.root.join("statements");
+    std::fs::create_dir_all(&statements).unwrap();
+    let dir = statements.to_str().unwrap();
+    let at = |stream: &[Value], minute: u32| -> Vec<Value> {
+        let mut stream = stream.to_vec();
+        stream[0]["pulled_at"] = format!("2026-03-07T09:{minute:02}:00Z").into();
+        stream
+    };
+    let files = |stream: &[Value]| -> Value {
+        let stream: String = stream.iter().map(|v| format!("{v}\n")).collect();
+        let args = ["--json", "import", "--from", "fakeprov"];
+        let args = [&args[..], &["--from-files", dir, "--patient", "pat-0001"]].concat();
+        let e = provider_env(&base, &stream);
+        let out = e.run_env(&args, &[("FAKEPROV_INFO", "files")]);
+        assert!(out.status.success(), "{:?}", said(&out));
+        serde_json::from_slice(&out.stdout).unwrap()
+    };
+    let r = files(&at(&less, 1));
+    assert!(r["records_not_served"].is_null(), "{r}");
+    assert!(r["not_served"].is_null());
+    let index: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let runs = index["imports"].as_array().unwrap();
+    assert_eq!(runs.last().unwrap()["from_files"], true);
+    assert_eq!(runs[0]["from_files"], false);
+    assert_eq!(import(&at(&less, 2), &[])["records_not_served"], 1);
+    let more = |version: u32| -> Vec<Value> {
+        let mut stream = all.clone();
+        let another = stream.iter().find(|v| is(v, "AllergyIntolerance"));
+        let mut another = another.unwrap().clone();
+        another["id"] = "another".into();
+        another["code"] = serde_json::json!({"text": "Example pollen"});
+        another["meta"]["lastUpdated"] = format!("2026-03-0{version}T00:00:00Z").into();
+        stream.insert(1, another);
+        let counts = stream.last_mut().unwrap()["counts"].as_object_mut();
+        let n = &mut counts.unwrap()["AllergyIntolerance"];
+        *n = (n.as_u64().unwrap() + 1).into();
+        stream
+    };
+    assert_eq!(files(&at(&more(1), 3))["records_added"], 1);
+    assert_eq!(import(&at(&all, 4), &[])["records_not_served"], 0);
+    import(&at(&more(2), 5), &[]);
+    let r = import(&at(&all, 6), &[]);
+    assert_eq!(r["not_served"], serde_json::json!({"allergy": 1}), "{r}");
+    // A sign-in through a provider that also reads files is one.
+    let stream: String = at(&less, 7).iter().map(|v| format!("{v}\n")).collect();
+    let args = ["--json", "import", "--from", "fakeprov"];
+    let args = [
+        &args[..],
+        &["--from-profile", "adult1", "--patient", "pat-0001"],
+    ]
+    .concat();
+    let out = provider_env(&base, &stream).run_env(&args, &[("FAKEPROV_INFO", "files")]);
+    assert!(out.status.success(), "{:?}", said(&out));
+    let r: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(r["records_not_served"].is_u64(), "{r}");
+    let index: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let last = index["imports"].as_array().unwrap().last().unwrap().clone();
+    assert_eq!(last["from_files"], false);
+    // One that signs in nowhere reads the files its environment names.
+    let stream: String = at(&less, 8).iter().map(|v| format!("{v}\n")).collect();
+    let args = ["--json", "import", "--from", "fakeprov"];
+    let args = [&args[..], &["--patient", "pat-0001"]].concat();
+    let env = [("FAKEPROV_INFO", "files-only"), ("FAKEPROV_FILES", dir)];
+    let out = provider_env(&base, &stream).run_env(&args, &env);
+    assert!(out.status.success(), "{:?}", said(&out));
+    let r: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(r["records_not_served"].is_null(), "{r}");
+    let index: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let last = index["imports"].as_array().unwrap().last().unwrap().clone();
+    assert_eq!(last["from_files"], true);
     let _ = std::fs::remove_dir_all(&base.root);
 }
 
@@ -3955,6 +4211,22 @@ fn the_views_follow_every_write_and_only_files_that_change_are_written() {
         (w["people_rebuilt"].as_u64(), w["files_written"].as_u64()),
         (Some(0), Some(0)),
         "{w}"
+    );
+    // Views another build of this version wrote are made again: a rule can
+    // change between them.
+    let mut other: Value = serde_json::from_slice(&current).unwrap();
+    other["build"] = "0123456789abcdef0123456789abcdef01234567".into();
+    std::fs::write(records.join("views/views.json"), other.to_string()).unwrap();
+    let again = e.ok(&["views", "write"]);
+    let rebuilt = again["people_rebuilt"].as_u64();
+    assert_eq!(rebuilt, Some(people.len() as u64), "{again}");
+    let now: Value =
+        serde_json::from_slice(&std::fs::read(records.join("views/views.json")).unwrap()).unwrap();
+    assert_eq!(
+        now.get("build"),
+        serde_json::from_slice::<Value>(&current)
+            .unwrap()
+            .get("build")
     );
 
     // Made again from the same files, every view keeps its name. A file of

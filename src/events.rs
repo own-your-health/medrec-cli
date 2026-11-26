@@ -1848,6 +1848,12 @@ const CLINICAL: &[&str] = &[
     "prescription",
     "immunization_record",
 ];
+/// Whether a paper of this type can be of the only visit of its day (D3).
+pub(crate) fn of_the_days_visit(ty: &str) -> bool {
+    BILLING.contains(&ty)
+        || (CLINICAL.contains(&ty) && !matches!(ty, "prescription" | "immunization_record"))
+}
+
 static PORTAL_NOTE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)progress note|encounter summary|^note$|after visit|discharge|visit summary")
         .unwrap()
@@ -2115,9 +2121,7 @@ fn papers_into_events(
             // D3: a bill, receipt or report from a practice no claim names
             // joins the only visit that day: likely, or sure when the
             // amount due is the event's you_owe. N5 learns the alias.
-            let d3_types = BILLING.contains(&ty)
-                || (CLINICAL.contains(&ty)
-                    && !matches!(ty, "prescription" | "immunization_record"));
+            let d3_types = of_the_days_visit(ty);
             let pharmacy = org_tokens(org).iter().any(|t| t == "pharmacy")
                 || evs.iter().any(|ev| {
                     ev.kind == "fill" && event_names(ev, &p.idx).iter().any(|n| same_org(org, n))

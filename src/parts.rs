@@ -1,6 +1,6 @@
 //! What is left out of an open item where private items are left out, when
 //! something in it is private (docs/data-contract.md, "Private parts"): a
-//! claim's private lines, the lines of a bill's text that say an area, and
+//! claim's private lines, the lines of a paper's text that say an area, and
 //! what an event says by them. `private.json` has it, so that every reader
 //! shows the same words.
 

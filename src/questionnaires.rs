@@ -164,13 +164,15 @@ pub fn told_by(r: &Record) -> Vec<(String, Option<Code>)> {
         .collect()
 }
 
-/// The questionnaires that a result or a report is of.
+/// The questionnaires that a result or a report is of: by what it is told by,
+/// and those that list it.
 pub fn asked_by(r: &Record) -> Vec<Questionnaire> {
     let told = told_by(r);
-    let each = told
+    let told = told
         .iter()
-        .filter_map(|(name, code)| of(name, code.as_ref()));
-    each.collect()
+        .map(|(name, code)| (name.as_str(), code.as_ref()));
+    let all = told.chain(crate::panels::asked_in(r));
+    all.filter_map(|(name, code)| of(name, code)).collect()
 }
 
 #[cfg(test)]

@@ -786,7 +786,7 @@ const DEGREES: &[&str] = &[
 ];
 
 /// Whether what `field` prints is a person's name.
-fn a_person(field: &str, text: &str) -> bool {
+pub(crate) fn a_person(field: &str, text: &str) -> bool {
     let degree = || {
         text.split(|c: char| c.is_whitespace() || c == ',')
             .any(|w| DEGREES.contains(&nppes::fold(w).as_str()))
@@ -1115,6 +1115,16 @@ fn heading(d: &Document) -> Option<&str> {
 /// the first initial, or before one when a comma follows it. Both are
 /// written as names are.
 fn prints_name(body: &str, readings: &BTreeSet<(String, char)>) -> bool {
+    let same = |printed: &str, surname: &str| surname.len() >= SURNAME && printed == surname;
+    prints(body, readings, &same)
+}
+
+/// The same, where `same` says whether a surname printed is one of them.
+pub(crate) fn prints(
+    body: &str,
+    readings: &BTreeSet<(String, char)>,
+    same: &dyn Fn(&str, &str) -> bool,
+) -> bool {
     let words: Vec<(&str, String)> = body
         .split_whitespace()
         .map(|w| (w, nppes::fold(w)))
@@ -1129,28 +1139,25 @@ fn prints_name(body: &str, readings: &BTreeSet<(String, char)>) -> bool {
     };
     let given = |i: usize, initial: char| proper(i) && words[i].1.starts_with(initial);
     readings.iter().any(|(surname, initial)| {
-        surname.len() >= SURNAME
-            && (0..words.len()).any(|i| {
-                let Some(n) = (1..=3).find(|n| {
-                    words.get(i..i + n).is_some_and(|w| {
-                        w.iter().map(|x| x.1.as_str()).collect::<String>() == *surname
-                    })
-                }) else {
-                    return false;
-                };
-                if !proper(i) {
-                    return false;
-                }
-                let before = i.checked_sub(1).is_some_and(|b| {
-                    given(b, *initial)
-                        || (words[b].1.len() == 1
-                            && b.checked_sub(1).is_some_and(|b| given(b, *initial)))
-                });
-                let after = words[i + n - 1].0.ends_with(',')
-                    && i + n < words.len()
-                    && given(i + n, *initial);
-                before || after
+        let of = |i: usize, n: usize| {
+            words.get(i..i + n).is_some_and(|w| {
+                let printed: String = w.iter().map(|x| x.1.as_str()).collect();
+                same(&printed, surname)
             })
+        };
+        let before = |i: usize| {
+            i.checked_sub(1).is_some_and(|b| {
+                given(b, *initial)
+                    || (words[b].1.len() == 1
+                        && b.checked_sub(1).is_some_and(|b| given(b, *initial)))
+            })
+        };
+        let after = |i: usize, n: usize| {
+            words[i + n - 1].0.ends_with(',') && i + n < words.len() && given(i + n, *initial)
+        };
+        (0..words.len())
+            .filter(|i| proper(*i))
+            .any(|i| (1..=3).any(|n| of(i, n) && (before(i) || after(i, n))))
     })
 }
 
@@ -2115,7 +2122,7 @@ mod tests {
             let mut r = self.index.records[0].clone();
             r.id = id.into();
             r.key = format!("claim|{id}");
-            r.date = Some("2026-02-03".into());
+            r.date = Some("2026-02-10".into());
             r.fields["provider"] = json!(provider);
             r.providers[0].npi = Some(npi.into());
             self.index.records.push(r);
@@ -2187,8 +2194,8 @@ mod tests {
 
     /// Every kind of label, where each is kept, and what is not labelled:
     /// two providers it can be (`D SPECIMEN`), papers of two practices
-    /// (`P DUMMY`), a private paper for an open item (`L FILLER`) and for a
-    /// private one (`B SPECIMEN`), a service two fit (`r_therapy…`), and an
+    /// (`P DUMMY`), private papers of a day that make its clinician's items
+    /// private (`L FILLER`, `B SPECIMEN`), a service two fit (`r_therapy…`), and an
     /// item the household marked not private whose label is in a private area
     /// (`r_marked…`). `Drew Specimen, MD` spells out the first name of one of
     /// the two.
@@ -3180,12 +3187,18 @@ mod tests {
         );
         assert_eq!(l("R PLACEHOLDER")["phone"], "555-010-0150");
         // A private paper's is in the private part alone.
-        let id = v["private"]["by_name"]["B SPECIMEN"].as_str().unwrap();
-        assert_eq!(
-            v["private"]["labels"],
-            json!({id: {"practice": "Example Counseling Center", "confidence": "likely",
-                "evidence": [{"from": "paper", "document": "d_counselingtwoaaaaaaa"}]}})
-        );
+        let private = |name: &str, paper: &str| {
+            let id = v["private"]["by_name"][name].as_str().unwrap();
+            let label = json!({"practice": "Example Counseling Center", "confidence": "likely",
+                "evidence": [{"from": "paper", "document": paper}]});
+            (id.to_string(), label)
+        };
+        let both = [
+            private("B SPECIMEN", "d_counselingtwoaaaaaaa"),
+            private("L FILLER", "d_counselingaaaaaaaaaa"),
+        ];
+        let both: serde_json::Map<String, Value> = both.into_iter().collect();
+        assert_eq!(v["private"]["labels"], Value::Object(both));
 
         // A person none of whose items has a label has no file.
         c.index.documents.clear();

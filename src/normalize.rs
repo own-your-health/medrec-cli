@@ -53,6 +53,7 @@ pub const FIELDS: &[(&str, &[&str])] = &[
             "category",
             "categories",
             "issued",
+            crate::panels::MEMBERS,
             crate::about::FIELD,
         ],
     ),
@@ -65,6 +66,7 @@ pub const FIELDS: &[(&str, &[&str])] = &[
             "categories",
             "results",
             "issued",
+            crate::panels::MEMBERS,
         ],
     ),
     (
@@ -580,6 +582,7 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
         fields.keys().collect::<Vec<_>>()
     );
     let words = word(r, rt, status.as_deref(), &fields, &provenance);
+    let lists = crate::panels::lists(r, &provenance);
     Some(Record {
         id: crate::ids::new("r"),
         kind: kind.into(),
@@ -595,6 +598,8 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
         fields_from: None,
         given: Vec::new(),
         absent,
+        lists,
+        listed_by: Vec::new(),
         documents: Vec::new(),
         provenance: vec![provenance],
     })

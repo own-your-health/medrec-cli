@@ -111,6 +111,12 @@ pub struct Private {
     pub gone: Counts,
     /// Private by what a source gave alone, by kind.
     pub given: Counts,
+    /// Of those added, the ones private by their clinician, by kind.
+    pub clinician: Counts,
+    /// Of those, held by the day of a practice's paper alone, and through a
+    /// clinician linked to one.
+    pub clinician_day: usize,
+    pub clinician_linked: usize,
     /// Open with a private part, by kind.
     pub parts: Counts,
 }
@@ -285,9 +291,17 @@ fn private(
             if then[list].get(id).is_some() {
                 continue;
             }
-            one(&mut out.added, kind);
+            one(&mut out.added, kind.clone());
             let from = why["from"].as_str().unwrap_or("household");
             one(&mut out.added_by, from.to_string());
+            if from == "clinician" {
+                one(&mut out.clinician, kind.clone());
+                match why["learned"].as_str() {
+                    Some("day") => out.clinician_day += 1,
+                    Some("linked") => out.clinician_linked += 1,
+                    _ => {}
+                }
+            }
             if let Some(q) = kinds.questionnaire(list, id) {
                 one(&mut out.questionnaires, q.to_string());
             }
@@ -418,12 +432,22 @@ impl Changes {
         let of_about = [
             some(about.said, "by what their source says"),
             some(about.by_age, "by the person's age"),
+            some(about.listing, "panels and reports that list no other"),
             some(about.documents, "papers"),
         ];
         let of_about: Vec<String> = of_about.into_iter().flatten().collect();
         let mut out = vec![
             ("private, more", counts(&p.added)),
             ("their rules", counts(&p.added_by)),
+            ("by their clinician", counts(&p.clinician)),
+            (
+                "of them by the day of a practice's paper alone",
+                some(p.clinician_day, "items"),
+            ),
+            (
+                "of them through a clinician linked to a practice",
+                some(p.clinician_linked, "items"),
+            ),
             ("their questionnaires", asked),
             ("private before, open now", counts(&p.opened)),
             ("private before, not there now", counts(&p.gone)),

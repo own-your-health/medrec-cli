@@ -42,7 +42,7 @@ impl Env {
     }
 
     fn run(&self, args: &[&str]) -> std::process::Output {
-        let path = std::env::var("PATH").unwrap_or_default();
+        let path = medrec::testdata::no_viewer_path(&std::env::var("PATH").unwrap_or_default());
         Command::cargo_bin("medrec")
             .unwrap()
             .env("XDG_CONFIG_HOME", self.root.join("config"))
@@ -55,6 +55,7 @@ impl Env {
             )
             .env("MEDREC_PROFILE", "home")
             .env("MEDREC_KEYCHAIN_SERVICE", "piekstra.medrec.hermetic-tests")
+            .env("MEDREC_VIEWER", "none")
             .arg("--json")
             .args(args)
             .output()
@@ -1309,7 +1310,7 @@ fn what_another_source_calls_a_paper_holds_it_private() {
         assert_eq!(e.private()[&id]["given"], true, "{title}");
         assert_eq!(e.paper().organization.as_deref(), Some(OPEN));
         // It shows nothing of it, and keeps it when it is said no more.
-        let shown = e.ok(&["documents", "open", &id]).to_string();
+        let shown = e.ok(&["documents", "open", &id, "--no-launch"]).to_string();
         assert!(
             !shown.contains("Psycho") && !shown.contains(PRIVATE),
             "{shown}"
@@ -1388,8 +1389,9 @@ fn a_test_its_source_says_is_of_another_person_is_in_no_list() {
         let note = format!("about {says}, in Robin Testperson's chart");
         let of = |e: &Env| e.ok(&["records", "show", &id])["notes"].clone();
         assert_eq!(of(&e), json!([note]));
+        // It, and the report that lists it alone.
         let list = e.ok(&["records", "about-another"]);
-        assert_eq!(list["items"].as_array().unwrap().len(), 1, "{list}");
+        assert_eq!(list["items"].as_array().unwrap().len(), 2, "{list}");
         // Its raw files are opened as it is, and in no count of many.
         assert_eq!(e.ok(&["records", "raw", &id])["notes"], json!([note]));
         for how in ["--fields", "--changes"] {
@@ -1508,6 +1510,7 @@ fn a_test_an_unfinished_import_says_is_of_another_is_none_of_the_persons() {
             let listed = e.ok(&["results", "--person", "Robin"]).to_string();
             assert!(listed.contains(&own[0].id), "{own_first}, {how}");
             assert!(!listed.contains(&theirs[0].id), "{own_first}, {how}");
+            // The report of it is the person's other test's too.
             let list = e.ok(&["records", "about-another"]);
             assert_eq!(list["items"].as_array().unwrap().len(), 1, "{how}");
             e.ok(&["reindex"]);
@@ -1591,7 +1594,8 @@ fn a_test_two_sources_say_is_of_another_person_stays_so() {
         for org in ["one", "two"] {
             e.import(&test_about(org, Some(parent.clone()), 1));
         }
-        assert_eq!(count(&e), 1);
+        // It, and the report that lists it alone.
+        assert_eq!(count(&e), 2);
         for org in [first, second] {
             e.import(&test_about(org, None, 2));
             assert!(!seen(&e), "{first} {org}");
@@ -1733,7 +1737,7 @@ fn a_parents_test_never_hides_the_persons_own() {
         let dry = e.ok(&["reindex", "--dry-run"]);
         assert_eq!(dry["results_split"], 1);
         let about = &dry["people"][0]["views"]["about_another"];
-        let want = serde_json::json!({"said": 1, "by_age": 0, "documents": 0});
+        let want = serde_json::json!({"said": 1, "by_age": 0, "listing": 0, "documents": 0});
         assert_eq!(*about, want, "{dry}");
         assert_eq!(e.ok(&["reindex"])["results_split"], 1);
         check("read again");
@@ -1770,4 +1774,250 @@ fn values_left_by_a_parents_test_are_never_the_persons() {
     assert_eq!(list["items"].as_array().unwrap().len(), 1, "{list}");
     let list = e.ok(&["records", "about-another"]);
     assert_eq!(list["items"].as_array().unwrap().len(), 2, "{list}");
+}
+
+/// A stream with a second test beside the first.
+fn beside(org: &str, change: impl Fn(&str, &mut Value) -> bool) -> String {
+    let lines = medrec::testdata::STREAM.lines();
+    let mut out: Vec<String> = Vec::new();
+    for l in lines {
+        out.push(l.to_string());
+        let mut v: Value = serde_json::from_str(l).unwrap();
+        if v["id"] == "obs-0001" {
+            v["id"] = "obs-0002".into();
+            v["code"] = json!({"text": "Example level"});
+            out.push(v.to_string());
+        }
+    }
+    stream_of(&out.join("\n"), org, change)
+}
+
+fn refs(of: &[&str]) -> Value {
+    let refs = of.iter().map(|id| format!("Observation/{id}"));
+    refs.map(|r| json!({ "reference": r })).collect()
+}
+
+/// The one record of a kind with this name.
+fn named(e: &Env, kind: &str, name: &str) -> Record {
+    let records = e.index().records;
+    let mut of = records.into_iter();
+    of.find(|r| r.kind == kind && r.display.contains(name))
+        .unwrap()
+}
+
+/// What an earlier medrec's save of an index drops.
+fn forget_lists(e: &Env) {
+    e.edit(|v| {
+        for r in v["records"].as_array_mut().unwrap() {
+            for k in ["given", "lists", "listed_by"] {
+                r.as_object_mut().unwrap().remove(k);
+            }
+        }
+    });
+}
+
+/// A report that is private by all it listed stays so when its source lists
+/// nothing of it, or something open, in a later version; and one with no id.
+#[test]
+fn a_report_private_by_what_it_listed_stays_so() {
+    for (tag, idless, later) in [
+        ("none", false, &[][..]),
+        ("more", false, &["obs-0001", "obs-0002"]),
+        ("idless", true, &["obs-0002"]),
+    ] {
+        let e = Env::new(&format!("panel-{tag}"));
+        let with = |of: &[&str], version: u32| {
+            beside("one", |id, v| {
+                match id {
+                    "obs-0001" => v["code"] = json!({"text": "Chlamydia trachomatis"}),
+                    "rep-0001" => {
+                        say(v, "final", version);
+                        v["code"] = json!({"text": "Example panel"});
+                        v["result"] = refs(of);
+                        if idless {
+                            v.as_object_mut().unwrap().remove("id");
+                        }
+                    }
+                    _ => {}
+                }
+                true
+            })
+        };
+        let why = |e: &Env| {
+            let id = named(e, "report", "Example panel").id;
+            let v = e.private().remove(&id)?;
+            Some((v["area"].clone(), v["from"].clone(), v["given"] == true))
+        };
+        let by = |given| Some((json!("sexual_health"), json!("members"), given));
+        e.import(&with(&["obs-0001"], 1));
+        assert_eq!(why(&e), by(false), "{tag}");
+        e.import(&with(later, 2));
+        assert_eq!(why(&e), by(true), "{tag}");
+        let r = named(&e, "report", "Example panel");
+        let listed: Vec<&String> = r.lists.keys().collect();
+        let files: Vec<&String> = r.provenance[0].raw_path.iter().collect();
+        let want = if later.is_empty() { vec![] } else { files };
+        assert_eq!(listed, want, "{tag}");
+        let members: Vec<String> = later
+            .iter()
+            .map(|id| match *id {
+                "obs-0001" => named(&e, "result", "Chlamydia").id,
+                _ => named(&e, "result", "Example level").id,
+            })
+            .collect();
+        match members.is_empty() {
+            true => assert!(r.fields.get("members").is_none(), "{tag}"),
+            false => assert_eq!(r.fields["members"], json!(members), "{tag}"),
+        }
+        assert_eq!(e.ok(&["reindex"])["links_updated"], 0, "{tag}");
+        if !idless {
+            // By the raw files, every version of them.
+            forget_lists(&e);
+            assert_eq!(why(&e), None, "{tag}");
+            e.ok(&["reindex"]);
+            assert_eq!(why(&e), by(true), "{tag}");
+        }
+        // Only the household opens it.
+        e.ok(&["private", "unmark", &r.id]);
+        assert_eq!(why(&e), None, "{tag}");
+        let _ = std::fs::remove_dir_all(&e.root);
+    }
+}
+
+/// An answer is of the questionnaire that lists it or did, filed before that
+/// stops listing it or after, by an import and by `reindex`.
+#[test]
+fn an_answer_a_questionnaire_listed_before_is_of_it() {
+    let with = |of: &[&str], answer: bool, version: u32| {
+        beside("one", |id, v| {
+            match id {
+                "obs-0001" => v["code"] = json!({"text": "First answer"}),
+                "obs-0002" => {
+                    say(v, "final", version);
+                    v["code"] = json!({"text": "Children's Depression Inventory"});
+                    v["hasMember"] = refs(of);
+                }
+                _ => {}
+            }
+            answer || id != "obs-0001"
+        })
+    };
+    let area = |e: &Env| {
+        let id = named(e, "result", "First answer").id;
+        e.private().remove(&id).map(|v| v["area"].clone())
+    };
+    let mental = Some(json!("mental_health"));
+    for (tag, versions) in [
+        ("before", vec![(&["obs-0001"][..], true), (&[], true)]),
+        ("after", vec![(&["obs-0001"], false), (&[], true)]),
+        (
+            "late",
+            vec![(&["obs-0001"], false), (&[], false), (&[], true)],
+        ),
+    ] {
+        let e = Env::new(&format!("answer-{tag}"));
+        for (n, (of, answer)) in versions.iter().enumerate() {
+            e.import(&with(of, *answer, n as u32 + 1));
+        }
+        assert_eq!(area(&e), mental, "{tag}");
+        forget_lists(&e);
+        assert_eq!(area(&e), None, "{tag}");
+        e.ok(&["reindex"]);
+        assert_eq!(area(&e), mental, "{tag}");
+        let _ = std::fs::remove_dir_all(&e.root);
+    }
+    // An older version served late says so too.
+    let e = Env::new("answer-older");
+    e.import(&with(&[], true, 2));
+    assert_eq!(area(&e), None);
+    e.import(&with(&["obs-0001"], true, 1));
+    assert_eq!(area(&e), mental);
+    assert!(named(&e, "result", "Children's").lists.is_empty());
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
+/// What the rules make of an index that nothing else changes is made again,
+/// and a dry run says so.
+#[test]
+fn reindex_links_again_what_nothing_else_changes() {
+    let e = Env::new("links");
+    e.import(&beside("one", |id, v| {
+        match id {
+            "obs-0001" => v["code"] = json!({"text": "First answer"}),
+            "obs-0002" => {
+                v["code"] = json!({"text": "Children's Depression Inventory"});
+                v["hasMember"] = refs(&["obs-0001"]);
+            }
+            _ => {}
+        }
+        true
+    }));
+    let id = named(&e, "result", "First answer").id;
+    assert!(e.private().contains_key(&id));
+    assert_eq!(e.ok(&["reindex"])["links_updated"], 0);
+    e.edit(|v| {
+        for r in v["records"].as_array_mut().unwrap() {
+            r.as_object_mut().unwrap().remove("listed_by");
+        }
+    });
+    let path = e.folder().join("index.json");
+    let before = std::fs::read(&path).unwrap();
+    assert_eq!(e.ok(&["reindex", "--dry-run"])["links_updated"], 1);
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    let r = e.ok(&["reindex"]);
+    assert_eq!(
+        (&r["links_updated"], &r["results_updated"]),
+        (&json!(1), &json!(0))
+    );
+    assert!(e.private().contains_key(&id));
+    assert_eq!(named(&e, "result", "First answer").listed_by.len(), 1);
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
+/// A report whose results are about another person but those entered in error
+/// is about that person, and stays so whatever it lists later.
+#[test]
+fn a_report_of_another_persons_results_is_about_them() {
+    let parent = json!({"reference": "RelatedPerson/rp-0001", "display": "Mother"});
+    let with = |of: &[&str], version: u32| {
+        beside("one", |id, v| {
+            match id {
+                "obs-0001" => v["focus"] = json!([parent]),
+                "obs-0002" => v["status"] = "entered-in-error".into(),
+                "rep-0001" => {
+                    say(v, "final", version);
+                    v["code"] = json!({"text": "Example panel"});
+                    v["result"] = refs(of);
+                }
+                _ => {}
+            }
+            true
+        })
+    };
+    let e = Env::new("panel-about");
+    let about = |e: &Env| {
+        let v = e.ok(&["records", "about-another"]);
+        let id = named(e, "report", "Example panel").id;
+        let items = v["items"].as_array().unwrap().iter();
+        (items.len(), items.clone().any(|i| i["id"] == id.as_str()))
+    };
+    e.import(&with(&["obs-0002"], 1));
+    assert_eq!(about(&e), (1, false));
+    e.import(&with(&["obs-0001", "obs-0002"], 2));
+    assert_eq!(about(&e), (2, true));
+    let id = named(&e, "report", "Example panel").id;
+    let note = "about another person, in Robin Testperson's chart";
+    assert_eq!(e.ok(&["records", "show", &id])["notes"], json!([note]));
+    assert_eq!(e.ok(&["records", "raw", &id])["notes"], json!([note]));
+    let notes = &e.ok(&["records", "raw", &id, "--fields"])["notes"];
+    assert_eq!(*notes, json!(["about another person"]));
+    let v = e.ok(&["reindex", "--dry-run"]);
+    let want = json!({"said": 1, "by_age": 0, "listing": 1, "documents": 0});
+    assert_eq!(v["people"][0]["views"]["about_another"], want);
+    e.import(&with(&[], 3));
+    assert_eq!(about(&e), (2, true));
+    forget_lists(&e);
+    e.ok(&["reindex"]);
+    assert_eq!(about(&e), (2, true));
+    let _ = std::fs::remove_dir_all(&e.root);
 }

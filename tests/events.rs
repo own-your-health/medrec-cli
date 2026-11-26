@@ -832,7 +832,8 @@ fn child_judged(w: &World, name: &str) -> Value {
     let state = State::last(Last::None, &w.child.person);
     let areas = labels::areas(&w.child, &both, &state, &said);
     let person = &w.h.people[1];
-    private::build(person, &w.child, &w.child_text, &both, &[], &areas)
+    let marks = medrec::marks::Marks::new(&person.id);
+    private::build(person, &w.child, &w.child_text, &both, &marks, &areas)
 }
 
 /// What a linked person's record named an event for still tells what is

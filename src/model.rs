@@ -494,9 +494,25 @@ pub struct Record {
     /// resource: kept in `given`, where a list or a search has none of it.
     #[serde(skip)]
     pub absent: Vec<Code>,
+    /// The results a panel or a report lists, as raw files under their source,
+    /// by the raw file that lists them (0.9.10 and later).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub lists: BTreeMap<String, Vec<String>>,
+    /// The questionnaires that list this result, then or now (0.9.10 and
+    /// later).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub listed_by: Vec<Listed>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub documents: Vec<String>,
     pub provenance: Vec<Provenance>,
+}
+
+/// A panel or a report that lists a result.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Listed {
+    pub display: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<Code>,
 }
 
 impl Record {
@@ -672,6 +688,10 @@ pub struct ImportRun {
     pub organization: String,
     pub patient_id: String,
     pub pulled_at: String,
+    /// Whether it was of downloaded files, not through a sign-in (0.9.10 and
+    /// later; absent in a run filed before).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_files: Option<bool>,
     pub imported_at: String,
     pub counts: BTreeMap<String, u64>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -683,6 +703,10 @@ pub struct ImportRun {
     /// 0 in a run filed before).
     #[serde(default)]
     pub records_older: usize,
+    /// Records the source gave before and did not now (0.9.10 and later),
+    /// where that can be told.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub records_not_served: Option<usize>,
     pub resources_written: usize,
     pub resources_unchanged: usize,
     pub documents_added: usize,

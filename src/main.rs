@@ -127,10 +127,11 @@ enum Command {
     /// Shape every claim again, and read every record's providers, every
     /// condition's, allergy's and medicine's fields and what each source says
     /// of it, and every result's and report's status and fields (its parts, exact
-    /// values and categories too) again, from the filed raw resources, put each result about
-    /// somebody else that was filed as the person's own in a record of its
-    /// own, and read bills' and receipts' statements again, as this medrec's
-    /// import does: once after an upgrade that changes them.
+    /// values and categories too) and what each lists again, from the filed raw
+    /// resources, put each result about somebody else that was filed as the
+    /// person's own in a record of its own, link the records again, and read
+    /// bills' and receipts' statements again, as this medrec's import does: once
+    /// after an upgrade that changes them.
     Reindex(ReindexArgs),
     /// The views: each person's records cut into small files under views/,
     /// for readers that cannot parse a whole index at once. medrec brings
@@ -720,9 +721,20 @@ enum PrivateCmd {
     Mark { id: String },
     /// Mark a record, document or event not private, whatever the rules say: of
     /// a claim or a paper with a private part, all of it.
-    Unmark { id: String },
+    Unmark {
+        id: String,
+        /// The clinician the record prints, in place of the record: no item of
+        /// the person's is private because of whom that clinician is tied to.
+        #[arg(long)]
+        clinician: bool,
+    },
     /// Drop the household's mark on an item: the rules decide again.
-    Reset { id: String },
+    Reset {
+        id: String,
+        /// Of the clinician the record prints.
+        #[arg(long)]
+        clinician: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -848,7 +860,8 @@ enum DocumentsCmd {
     /// Open a document from a private local copy.
     Open {
         id: String,
-        /// Make the copy and print its path; open nothing.
+        /// Make the copy and print its path; open nothing (env MEDREC_VIEWER=none
+        /// does the same).
         #[arg(long)]
         no_launch: bool,
     },
@@ -923,7 +936,8 @@ enum ImagesCmd {
     /// Open a study in the viewer from a private local copy.
     Open {
         study: String,
-        /// Make the copy and print its path; open nothing.
+        /// Make the copy and print its path; open nothing (env MEDREC_VIEWER
+        /// overrides the viewer).
         #[arg(long)]
         no_launch: bool,
     },
@@ -1334,8 +1348,8 @@ fn run(cli: &Cli) -> Result<(), CliError> {
                     println!("nothing was written; a run would do this:");
                 }
                 println!(
-                    "{} claims: {} shaped again, {} unchanged, {} with no raw file; {} bills and receipts read again; {} records gained or changed what is said of their providers; {} records and {} papers what their sources say of them; {} results and reports their fields; {} records keep more of what their sources gave; {} results about somebody else put in records of their own",
-                    r.claims, r.reshaped, r.unchanged, r.without_raw, r.statements, r.providers_updated, r.statuses_updated, r.papers_updated, r.results_updated, r.given_updated, r.results_split
+                    "{} claims: {} shaped again, {} unchanged, {} with no raw file; {} bills and receipts read again; {} records gained or changed what is said of their providers; {} records and {} papers what their sources say of them; {} results and reports their fields or what they list; {} records their links to others; {} records keep more of what their sources gave; {} results about somebody else put in records of their own",
+                    r.claims, r.reshaped, r.unchanged, r.without_raw, r.statements, r.providers_updated, r.statuses_updated, r.papers_updated, r.results_updated, r.links_updated, r.given_updated, r.results_split
                 );
                 if let Some(n) = papers_unread(r.papers_unread) {
                     println!("{n}");
@@ -1836,11 +1850,30 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
             let mut parts = Vec::new();
             let mut unreadable: Vec<String> = Vec::new();
             let mut labels: Vec<String> = Vec::new();
+            let mut opened: Vec<serde_json::Value> = Vec::new();
             let mut in_error = 0;
             for p in medrec::people::selected(&h, person.as_deref())? {
                 let idx = f.index(p)?;
                 let gone: BTreeSet<&str> = medrec::standing::errors(&idx).collect();
                 let (v, events) = medrec::private::with_events(&f, &h, p, &idx)?;
+                // The clinicians the household opened, as it said them.
+                // A name is shown only while the record shows it: one that has
+                // left it since, or a record entered in error, is as given.
+                for o in f.marks(p).map(|m| m.clinicians).unwrap_or_default() {
+                    let record = idx.records.iter().find(|r| r.id == o.item);
+                    let record = record.filter(|r| !gone.contains(r.id.as_str()));
+                    let shows =
+                        |t: &&String| record.is_some_and(|r| medrec::clinicians::shows(r, t));
+                    let now = o.printed.as_ref().filter(shows);
+                    let mut row = serde_json::json!({
+                        "id": o.id, "clinician": now,
+                        "item": o.item, "at": o.at, "person": p.id, "person_name": p.name,
+                    });
+                    if now.is_none() {
+                        row["given"] = true.into();
+                    }
+                    opened.push(row);
+                }
                 if v.get("labels_unreadable").is_some() {
                     labels.push(p.id.clone());
                 } else if v.get("marks_unreadable").is_some() {
@@ -1929,6 +1962,9 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
                         if why["given"] == true {
                             row["given"] = true.into();
                         }
+                        if let Some(learned) = why.get("learned") {
+                            row["learned"] = learned.clone();
+                        }
                         items.push(row);
                     }
                 }
@@ -1949,6 +1985,9 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
             }
             let shown = list.take(&items);
             let mut doc = serde_json::json!({ "items": shown, "parts": list.take(&parts) });
+            if !opened.is_empty() {
+                doc["clinicians_opened"] = opened.into();
+            }
             if in_error > 0 {
                 let n = medrec::standing::in_error(in_error);
                 note(cli, &n);
@@ -1984,6 +2023,9 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
                     if i["given"] == true {
                         i["given"] = "yes".into();
                     }
+                    if let Some(learned) = i["learned"].as_str() {
+                        i["from"] = format!("clinician, {learned}").into();
+                    }
                 }
                 table(
                     &v,
@@ -2005,12 +2047,35 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
                         &["date", "person_name", "kind", "not_shown", "title", "id"],
                     );
                 }
+                let opened = v
+                    .get_mut("clinicians_opened")
+                    .and_then(|o| o.as_array_mut());
+                for o in opened.into_iter().flatten() {
+                    if o["given"] == true {
+                        o["given"] = "yes".into();
+                    }
+                }
+                if v.get("clinicians_opened").is_some() {
+                    println!();
+                    table(
+                        &serde_json::json!({"items": v["clinicians_opened"]}),
+                        &["at", "person_name", "clinician", "given", "item", "id"],
+                    );
+                }
             });
             return Ok(());
         }
         PrivateCmd::Mark { id } => (id, Some(true)),
-        PrivateCmd::Unmark { id } => (id, Some(false)),
-        PrivateCmd::Reset { id } => (id, None),
+        PrivateCmd::Unmark {
+            id,
+            clinician: true,
+        } => return clinician_cmd(cli, store, id, true),
+        PrivateCmd::Reset {
+            id,
+            clinician: true,
+        } => return clinician_cmd(cli, store, id, false),
+        PrivateCmd::Unmark { id, .. } => (id, Some(false)),
+        PrivateCmd::Reset { id, .. } => (id, None),
     };
     if !["r", "d", "e"].iter().any(|k| medrec::ids::is_valid(k, id)) {
         return Err(CliError::Usage(format!(
@@ -2036,6 +2101,44 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
             None => "back to the rules",
         };
         println!("{} {id} {what}", v["status"].as_str().unwrap_or(""))
+    });
+    Ok(())
+}
+
+/// `medrec private unmark|reset <ID> --clinician`.
+fn clinician_cmd(cli: &Cli, store: &ConfigStore, id: &str, open: bool) -> Result<(), CliError> {
+    if !medrec::ids::is_valid("r", id) {
+        return Err(CliError::Usage(format!(
+            "`{}` is not a record id (r_…)",
+            medrec::printable(id)
+        )));
+    }
+    let cfg = load(store, cli)?;
+    let f = Folder::open(&cfg, Access::Write)?;
+    let h = f.household()?;
+    let p = medrec::private::holder(&f, &h, id)?
+        .ok_or_else(|| CliError::NotFound(format!("no record {id}")))?;
+    let did = medrec::private::clinician(&f, &h, p, id, open)?;
+    let status = if did.marks.is_empty() {
+        "unchanged"
+    } else {
+        "recorded"
+    };
+    let v = serde_json::json!({
+        "item": id, "person": p.id, "clinician": true, "private": if open { Some(false) } else { None },
+        "marks": did.marks, "opened": did.opened, "held": did.held, "status": status,
+    });
+    output::emit(cli.common.json, "private-clinician", v, |v| {
+        let what = match open {
+            true => "its clinician is of no private area",
+            false => "its clinician is back to the rules",
+        };
+        println!(
+            "{} {id}: {what}; {} items open, {} private again",
+            v["status"].as_str().unwrap_or(""),
+            v["opened"],
+            v["held"]
+        )
     });
     Ok(())
 }
@@ -2758,6 +2861,9 @@ fn refresh_cmd(cli: &Cli, a: &RefreshArgs, store: &ConfigStore) -> Result<(), Cl
                 if let (Some(a), Some(u)) = (x.records_added, x.records_updated) {
                     line.push_str(&format!(" records +{a} ~{u}"));
                 }
+                if let Some(n) = x.records_not_served.filter(|n| *n > 0) {
+                    line.push_str(&format!(" ({n} not served any more)"));
+                }
                 if let Some(d) = x.documents_added {
                     line.push_str(&format!(" documents +{d}"));
                 }
@@ -3100,6 +3206,7 @@ fn import_cmd(cli: &Cli, a: &ImportArgs, store: &ConfigStore) -> Result<(), CliE
             from: a.from.clone(),
             from_profile: from_profile.clone(),
             files: from_files.clone(),
+            reads_files: provider.records_files,
             patient: patient.clone(),
             person: a.person.get(i).cloned(),
             since: a.since.clone(),
@@ -3183,6 +3290,17 @@ fn papers_unread(n: usize) -> Option<String> {
     })
 }
 
+/// The names of what changed in records an import updated, with how many each
+/// did in.
+fn changed_names(updated: &[medrec::served::Updated]) -> Option<String> {
+    let mut each: BTreeMap<&str, usize> = BTreeMap::new();
+    for name in updated.iter().flat_map(|u| &u.changed) {
+        *each.entry(name.as_str()).or_default() += 1;
+    }
+    let names: Vec<String> = each.iter().map(|(k, n)| format!("{k} ({n})")).collect();
+    (!names.is_empty()).then(|| names.join(", "))
+}
+
 /// One import's lines for a person reading the terminal.
 fn print_import(r: &import::Report) {
     let organization = medrec::printable(&r.organization);
@@ -3205,6 +3323,19 @@ fn print_import(r: &import::Report) {
         }
         if let Some(n) = papers_unread(r.papers_unread) {
             println!("{n}");
+        }
+        if let Some(n) = r.records_not_served.filter(|n| *n > 0) {
+            let kinds = r.not_served.iter().flatten();
+            let kinds: Vec<String> = kinds.map(|(k, n)| format!("{n} {k}")).collect();
+            let kinds = kinds.join(", ");
+            if n == 1 {
+                println!("1 record {organization} gave before is not in this export ({kinds}); it was kept");
+            } else {
+                println!("{n} records {organization} gave before are not in this export ({kinds}); they were kept");
+            }
+        }
+        if let Some(names) = changed_names(&r.updated) {
+            println!("changed in the updated records: {names}");
         }
         if r.records_older > 0 {
             println!(
@@ -3304,12 +3435,12 @@ fn one_record_cmd(cli: &Cli, cmd: &RecordsCmd, store: &ConfigStore) -> Result<()
             fields,
             changes,
         } => {
-            let (p, r) = raw::record(&f, &h, id)?;
+            let (p, r, who) = raw::record(&f, &h, id)?;
             // The counts have no name.
-            let about = match *fields || *changes {
-                true => medrec::about::record(&p, &r).map(|who| format!("about {who}")),
-                false => medrec::about::of_record(&p, &r),
-            };
+            let about = who.map(|who| match *fields || *changes {
+                true => format!("about {who}"),
+                false => medrec::about::says(&p, who),
+            });
             let said: Vec<String> = about.into_iter().collect();
             said.iter().for_each(|n| note(cli, n));
             let of = |v: Value| {
@@ -3459,7 +3590,8 @@ fn documents_cmd(cli: &Cli, cmd: &DocumentsCmd, store: &ConfigStore) -> Result<(
             let said: Vec<String> = error.into_iter().chain(about).collect();
             said.iter().for_each(|n| note(cli, n));
             let path = private_copy(&f, &d.path, &d.id)?;
-            let launched = !*no_launch && launch(&view::Viewer::for_documents(None), &path)?;
+            let viewer = view::Viewer::for_documents();
+            let launched = !*no_launch && launch(&viewer, &path, view::Source::Paper)?;
             output::emit(
                 json,
                 "document-open",
@@ -3504,9 +3636,13 @@ fn documents_cmd(cli: &Cli, cmd: &DocumentsCmd, store: &ConfigStore) -> Result<(
     Ok(())
 }
 
-fn launch(viewer: &view::Viewer, path: &std::path::Path) -> Result<bool, CliError> {
+fn launch(
+    viewer: &view::Viewer,
+    path: &std::path::Path,
+    from: view::Source,
+) -> Result<bool, CliError> {
     match viewer.command(path) {
-        Some(cmd) => view::launch(&cmd).map(|_| true),
+        Some(cmd) => view::launch(&cmd, from).map(|_| true),
         None => Ok(false),
     }
 }
@@ -3661,8 +3797,12 @@ fn images_cmd(cli: &Cli, cmd: &ImagesCmd, store: &ConfigStore) -> Result<(), Cli
             let (_, s) = imaging::find(&f, &h, study)?;
             let dir = view::new_open_dir(&s.id)?;
             f.store.fetch_tree(&s.path, &dir)?;
-            let launched =
-                !*no_launch && launch(&view::Viewer::for_images(cfg.viewer.as_deref()), &dir)?;
+            let launched = !*no_launch
+                && launch(
+                    &view::Viewer::for_images(cfg.viewer.as_deref()),
+                    &dir,
+                    view::Source::of_a_study(),
+                )?;
             output::emit(
                 json,
                 "study-open",

@@ -23,8 +23,9 @@ real record, document, study or provider response.
   `health-records/v1` provider that `medrec::testdata::write_provider` writes.
   It lists the `login-profiles` capability. `fakeprov-info-unprofiled.json` is
   the same from before login profiles, `fakeprov-info-no-login.json` one
-  that needs no login, and `fakeprov-info-files.json` one that also reads
-  downloaded files (`records-files`). `fakeprov-profiles.json` is its
+  that needs no login, `fakeprov-info-files.json` one that also reads
+  downloaded files (`records-files`), and `fakeprov-info-files-only.json` one
+  that reads files and signs in nowhere. `fakeprov-profiles.json` is its
   `profiles list --json` (`profile-list/v1`: `adult1`, `adult2`).
 - `stream/summary.xml` is a synthetic clinical summary, shaped like one a
   portal renders on each export: `{{RENDERING}}` (its timestamp and document
@@ -78,11 +79,20 @@ real record, document, study or provider response.
   report and its paper, a paper named as one, a visit and claims of some of
   those days, and two pharmacy claims. `make.py` writes `index.json`; its
   sources are those of `standing/household.json`.
+- `clinicians/` is an invented person's claims that print a surname and an initial,
+  papers that name two of those clinicians, by an organization or a title, bills of a
+  practice's of a day with one clinician's claim and of one with two, and a visit, a
+  prescription and a procedure that print a clinician.
+  `make.py` writes `index.json`. Its sources are those of
+  `standing/household.json`.
 - `parts/` is an invented person's claims, procedures, bills and papers, one for
   each way the contract's "Private" reads a service and each kind of private
   part. `make.py` writes `index.json` and `text.json`; `parts.json` is what
   `private.json` says of the parts, an event's under a claim in it. Its sources
   are those of `standing/household.json`.
+- `words/` is an invented person's records, one for each rule of the contract's
+  "Private" by a record's own words and codes. `make.py` writes `index.json`. Its
+  sources are those of `standing/household.json`.
 - `bills/` holds invented text in the shapes `pdftotext -layout` gives a
   provider's patient statement and a payment receipt:
   `statement-columns.txt` puts the statement's fields in a header row over a
