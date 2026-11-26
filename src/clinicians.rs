@@ -486,6 +486,11 @@ impl Clinicians {
     }
 }
 
+/// Whether an item shows this text as its clinician now.
+pub fn shows(r: &Record, text: &str) -> bool {
+    Printed::of(r).is_some_and(|p| p.text == text)
+}
+
 /// Every clinician an item can print, as shown or as a source gave it.
 pub(crate) fn printed(r: &Record) -> BTreeSet<Person> {
     let each = versions(r, true).filter_map(|x| Printed::of(&x));

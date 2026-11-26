@@ -3323,6 +3323,35 @@ fn a_clinician_a_paper_names_makes_claims_private_everywhere() {
             .cloned()
     };
     assert_eq!(row(HELD[4].0).unwrap()["learned"], "day");
+    // A record that shows its clinician no more, or is entered in error, shows
+    // the mark's name no more.
+    let path = dir.join("index.json");
+    let was = std::fs::read(&path).unwrap();
+    for change in ["provider", "error"] {
+        let mut v: Value = serde_json::from_slice(&was).unwrap();
+        let list = v["records"].as_array_mut().unwrap();
+        let r = list.iter_mut().find(|x| x["id"] == later).unwrap();
+        if change == "provider" {
+            r["fields"]["provider"] = "Example Walk-in".into();
+            r["display"] = "Sample visit \u{b7} Example Walk-in".into();
+        } else {
+            let of = r["provenance"][0]["raw_path"].clone();
+            r["words"] = json!([{"raw_path": of, "status": "entered-in-error"}]);
+        }
+        std::fs::write(&path, serde_json::to_vec(&v).unwrap()).unwrap();
+        let list = e.ok(&["private", "list"]);
+        let row = &list["clinicians_opened"][0];
+        assert_eq!(
+            (&row["clinician"], &row["given"]),
+            (&Value::Null, &json!(true)),
+            "{change}"
+        );
+        assert!(
+            !list["clinicians_opened"].to_string().contains("SAMPLETON"),
+            "{change}"
+        );
+    }
+    std::fs::write(&path, &was).unwrap();
     let again = e.ok(&["private", "unmark", later, "--clinician"]);
     assert_eq!(again["status"], "unchanged");
     let back = e.ok(&["private", "reset", billed, "--clinician"]);
@@ -3442,11 +3471,21 @@ fn a_practice_a_bill_told_of_holds_claims_whatever_becomes_of_it() {
         (&Value::Null, &json!(true))
     );
     assert!(!list["clinicians_opened"].to_string().contains("SAMPLETON"));
-    let out = e.run(&["private", "list"]);
-    assert!(!String::from_utf8_lossy(&out.stdout).contains("E SAMPLETON"));
+    let text = || {
+        let out = e.run(&["private", "list"]);
+        assert!(out.status.success(), "{out:?}");
+        String::from_utf8_lossy(&out.stdout).to_string()
+    };
+    let listed = text();
+    assert!(!listed.contains("E SAMPLETON"), "{listed}");
+    assert!(listed.contains("CLINICIAN"), "{listed}");
+    let line = listed.lines().find(|l| l.contains("o_")).unwrap();
+    assert!(line.contains("yes"), "{line}");
     e.ok(&["private", "reset", billed, "--clinician"]);
     let marks = std::fs::read_to_string(dir.join("marks.json")).unwrap();
     assert!(!marks.contains("SAMPLETON"), "{marks}");
+    // With no clinician marks, the list has no table of them.
+    assert!(!text().contains("CLINICIAN"));
     let both = |bill: &mut Value, claim: &mut Value| {
         bill_is(bill);
         claim_is(claim);

@@ -516,7 +516,10 @@ and later): a name that said an area while there was no ICD-10 code still says i
   shows, in every view and answer, is still of a source that stands. No view or
   answer has any of it, and a reader of `index.json` shows none of it: of it
   there is only `given: true` on an item of `private.json` and on its row of
-  `medrec private list`.
+  `medrec private list`, and, of a clinician the household opened whom only a
+  source gave (0.9.10 and later), `given: true` on the mark and on its
+  `clinicians_opened` row, with the mark's `people` (surnames and first
+  initials) in `marks.json`.
 - It is never dropped. So nothing that a source gave opens because a later
   version gives something else, a source says the item is entered in error,
   another source's values take its place, or the source takes its resource to
@@ -2492,8 +2495,9 @@ nothing is private.
   row of `medrec private list` has it, and its table says it in `from`. The
   list's `clinicians_opened` (absent when there are none) has the household's
   clinician marks: `id`, `clinician` (the mark's `printed`: the clinician as the
-  record shows them, `null` where only a source gave them), `given` (`true`
-  where only a source did; absent otherwise), `item`, `at`, `person` and
+  record shows them, `null` where only a source gave them, or where the record
+  shows them no more or is entered in error), `given` (`true` where `clinician`
+  is `null`; absent otherwise), `item`, `at`, `person` and
   `person_name`.
 - **`heading`** (0.9.10 and later): `true` on a private record that is a heading
   (Panels, above): it has no entry in `tests.json`. Absent otherwise.

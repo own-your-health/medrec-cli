@@ -1835,12 +1835,19 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
                 let gone: BTreeSet<&str> = medrec::standing::errors(&idx).collect();
                 let (v, events) = medrec::private::with_events(&f, &h, p, &idx)?;
                 // The clinicians the household opened, as it said them.
+                // A name is shown only while the record shows it: one that has
+                // left it since, or a record entered in error, is as given.
                 for o in f.marks(p).map(|m| m.clinicians).unwrap_or_default() {
+                    let record = idx.records.iter().find(|r| r.id == o.item);
+                    let record = record.filter(|r| !gone.contains(r.id.as_str()));
+                    let shows =
+                        |t: &&String| record.is_some_and(|r| medrec::clinicians::shows(r, t));
+                    let now = o.printed.as_ref().filter(shows);
                     let mut row = serde_json::json!({
-                        "id": o.id, "clinician": o.printed,
+                        "id": o.id, "clinician": now,
                         "item": o.item, "at": o.at, "person": p.id, "person_name": p.name,
                     });
-                    if o.given {
+                    if now.is_none() {
                         row["given"] = true.into();
                     }
                     opened.push(row);
@@ -2018,7 +2025,10 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
                         &["date", "person_name", "kind", "not_shown", "title", "id"],
                     );
                 }
-                for o in v["clinicians_opened"].as_array_mut().into_iter().flatten() {
+                let opened = v
+                    .get_mut("clinicians_opened")
+                    .and_then(|o| o.as_array_mut());
+                for o in opened.into_iter().flatten() {
                     if o["given"] == true {
                         o["given"] = "yes".into();
                     }
