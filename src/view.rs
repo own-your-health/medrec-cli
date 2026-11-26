@@ -112,17 +112,35 @@ pub enum Viewer {
     None,
 }
 
+/// The viewer for this run, over `config viewer` and the defaults
+/// (`MEDREC_VIEWER`, as `config viewer` takes it). The tests set `none`, so
+/// that no test opens anything on the machine that runs it.
+pub const VIEWER_ENV: &str = "MEDREC_VIEWER";
+
+fn for_this_run() -> Option<Viewer> {
+    let v = std::env::var(VIEWER_ENV).ok()?;
+    let v = v.trim();
+    (!v.is_empty()).then(|| Viewer::parse(v))
+}
+
 impl Viewer {
     /// From `config viewer`: unset means Weasis; `none`, `system`, a
-    /// `.app`, or an executable.
+    /// `.app`, or an executable. `MEDREC_VIEWER` is over it.
     pub fn for_images(configured: Option<&str>) -> Viewer {
+        if let Some(v) = for_this_run() {
+            return v;
+        }
         match configured.map(str::trim) {
             None | Some("") => Viewer::Weasis,
             Some(v) => Viewer::parse(v),
         }
     }
 
+    /// The system's viewer for the file, or `MEDREC_VIEWER`'s.
     pub fn for_documents(configured: Option<&str>) -> Viewer {
+        if let Some(v) = for_this_run() {
+            return v;
+        }
         match configured.map(str::trim) {
             None | Some("") => Viewer::System,
             Some(v) => Viewer::parse(v),

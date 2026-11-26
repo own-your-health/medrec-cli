@@ -20,7 +20,7 @@ impl Env {
         let root = std::env::temp_dir().join(format!("medrec-flow-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
-        let path = std::env::var("PATH").unwrap_or_default();
+        let path = medrec::testdata::no_viewer_path(&std::env::var("PATH").unwrap_or_default());
         let e = Env { root, path };
         e.ok(&["profiles", "add", "home"]);
         e
@@ -39,6 +39,7 @@ impl Env {
             .env("PATH", &self.path)
             .env("MEDREC_PROFILE", "home")
             .env("MEDREC_KEYCHAIN_SERVICE", "piekstra.medrec.hermetic-tests")
+            .env("MEDREC_VIEWER", "none")
             .env_remove("NO_COLOR");
         for (k, v) in env {
             c.env(k, v);
@@ -63,6 +64,28 @@ impl Env {
 
     fn records(&self) -> PathBuf {
         self.root.join("records")
+    }
+}
+
+/// A test's `open` of a paper or a study launches nothing on the machine:
+/// `MEDREC_VIEWER=none` holds it, and the first `open` and `xdg-open` on its
+/// `PATH` are the tests' own, which only say what they were given.
+fn launches_nothing(e: &Env, args: &[&str]) {
+    let launched = medrec::testdata::no_viewer_dir().join("launched");
+    let before = std::fs::read_to_string(&launched).unwrap_or_default();
+    let open = e.ok(args);
+    assert_eq!(open["launched"], false, "{args:?}: {open}");
+    let after = std::fs::read_to_string(&launched).unwrap_or_default();
+    assert_eq!(before, after, "{args:?} ran a viewer");
+    for name in ["open", "xdg-open"] {
+        let found = Command::new("sh")
+            .args(["-c", &format!("command -v {name}")])
+            .env("PATH", &e.path)
+            .output()
+            .unwrap();
+        let found = String::from_utf8_lossy(&found.stdout).trim().to_string();
+        let ours = medrec::testdata::no_viewer_dir().join(name);
+        assert_eq!(PathBuf::from(found), ours, "{name}");
     }
 }
 
@@ -283,6 +306,7 @@ fn imaging_discs_add_only_new_images() {
     assert_eq!(list["items"][0]["instances"], 6);
     let open = e.ok(&["images", "open", &study, "--no-launch"]);
     assert_eq!(open["launched"], false);
+    launches_nothing(&e, &["images", "open", &study]);
     let opened = PathBuf::from(open["path"].as_str().unwrap());
     assert!(opened.join("S002/00003.dcm").exists());
     let out = e.root.join("export");
@@ -591,6 +615,7 @@ fn an_import_files_records_and_documents_and_is_idempotent() {
     let eobs = e.ok(&["documents", "list", "--type", "eob"]);
     assert_eq!(eobs["items"].as_array().unwrap().len(), 1);
     let doc = eobs["items"][0]["id"].as_str().unwrap().to_string();
+    launches_nothing(&e, &["documents", "open", &doc]);
     let open = e.ok(&["documents", "open", &doc, "--no-launch"]);
     let copy = PathBuf::from(open["path"].as_str().unwrap());
     use std::os::unix::fs::PermissionsExt;

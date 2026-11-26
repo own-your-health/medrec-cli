@@ -62,7 +62,9 @@ brew install poppler tesseract        # text extraction and OCR
 
 Weasis (https://weasis.org) is the default DICOM viewer. Another viewer is
 set with `medrec config set viewer <app or executable>`, or `none` to only
-copy a study.
+copy a study. `MEDREC_VIEWER` sets it for one run, for papers too, which open in
+the system's viewer otherwise: `MEDREC_VIEWER=none` opens nothing and prints the
+copy's path.
 
 ## Quick start
 
