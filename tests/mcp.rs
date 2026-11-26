@@ -3427,6 +3427,26 @@ fn a_practice_a_bill_told_of_holds_claims_whatever_becomes_of_it() {
     };
     assert_eq!(after(&|bill, _| bill_is(bill)), why(true));
     assert_eq!(after(&|_, claim| claim_is(claim)), why(true));
+    // A clinician only a source gave is opened by no name the list shows.
+    let billed = "r_billedaaaaaaaaaaaaaa";
+    e.ok(&["private", "unmark", billed, "--clinician"]);
+    let marks = std::fs::read_to_string(dir.join("marks.json")).unwrap();
+    let marks: Value = serde_json::from_str(&marks).unwrap();
+    let mark = &marks["clinicians"][0];
+    assert!(mark.get("printed").is_none(), "{mark}");
+    assert_eq!(mark["given"], true, "{mark}");
+    let list = e.ok(&["private", "list"]);
+    let row = &list["clinicians_opened"][0];
+    assert_eq!(
+        (&row["clinician"], &row["given"]),
+        (&Value::Null, &json!(true))
+    );
+    assert!(!list["clinicians_opened"].to_string().contains("SAMPLETON"));
+    let out = e.run(&["private", "list"]);
+    assert!(!String::from_utf8_lossy(&out.stdout).contains("E SAMPLETON"));
+    e.ok(&["private", "reset", billed, "--clinician"]);
+    let marks = std::fs::read_to_string(dir.join("marks.json")).unwrap();
+    assert!(!marks.contains("SAMPLETON"), "{marks}");
     let both = |bill: &mut Value, claim: &mut Value| {
         bill_is(bill);
         claim_is(claim);

@@ -305,8 +305,13 @@ fn versions(r: &Record, gave: bool) -> impl Iterator<Item = Record> + '_ {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Opened {
     pub id: String,
-    /// The clinician as the record printed them.
-    pub printed: String,
+    /// The clinician as the record shows them, where it does; absent where
+    /// only a source gave them (`given`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub printed: Option<String>,
+    /// Only a source gave the record this clinician: no item shows them.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub given: bool,
     /// The surnames and first initials that name them: those that tie the
     /// record, or the first that the name reads as.
     pub people: Vec<Reading>,
@@ -448,9 +453,11 @@ impl Clinicians {
     /// The clinicians an item prints, as shown or as a source gave it, that
     /// hold it back, each as printed with the readings that do: whom opening
     /// it opens. A day holds a claim by any reading, and the first is kept.
-    pub(crate) fn tied(&self, r: &Record) -> BTreeMap<String, BTreeSet<Person>> {
-        let mut out: BTreeMap<String, BTreeSet<Person>> = BTreeMap::new();
+    /// Keyed by the text as printed, with whether the record shows it.
+    pub(crate) fn tied(&self, r: &Record) -> BTreeMap<String, (bool, BTreeSet<Person>)> {
+        let mut out: BTreeMap<String, (bool, BTreeSet<Person>)> = BTreeMap::new();
         let by_day = self.of_day(r, true).is_some();
+        let shown = Printed::of(r).map(|p| p.text);
         for x in versions(r, true) {
             let Some(printed) = Printed::of(&x).and_then(|p| p.but(&self.opened)) else {
                 continue;
@@ -469,7 +476,10 @@ impl Clinicians {
                 tie.insert(first);
             }
             if !tie.is_empty() {
-                out.entry(printed.text.clone()).or_default().extend(tie);
+                let is_shown = shown.as_ref() == Some(&printed.text);
+                let entry = out.entry(printed.text.clone()).or_default();
+                entry.0 |= is_shown;
+                entry.1.extend(tie);
             }
         }
         out
@@ -731,7 +741,8 @@ mod tests {
         };
         Opened {
             id: "o_openedaaaaaaaaaaaaaa".into(),
-            printed: printed.into(),
+            printed: Some(printed.into()),
+            given: false,
             people: people.iter().map(reading).collect(),
             item: item.into(),
             at: "2024-12-01T00:00:00Z".into(),
@@ -752,7 +763,10 @@ mod tests {
         (idx.records, idx.documents) = (alone.clone(), papers);
         let k = || BTreeSet::from([("PLACEHOLDER".to_string(), 'K')]);
         let tied = named(&idx).tied(&alone[0]);
-        assert_eq!(tied, BTreeMap::from([("K PLACEHOLDER".to_string(), k())]));
+        assert_eq!(
+            tied,
+            BTreeMap::from([("K PLACEHOLDER".to_string(), (true, k()))])
+        );
         // A payer's cut of the surname is held as the whole one is.
         let cut = claim("K PLACEHOL");
         assert!(named(&idx).named(&cut, true).is_some());
@@ -785,7 +799,10 @@ mod tests {
         (idx.records, idx.documents) = (two.clone(), dated(&[(COUNSELING, "bill", d1)]));
         let first = BTreeSet::from([("SAMPLE".to_string(), 'J')]);
         let tied = named(&idx).tied(&two[1]);
-        assert_eq!(tied, BTreeMap::from([("Jo Sample MD".to_string(), first)]));
+        assert_eq!(
+            tied,
+            BTreeMap::from([("Jo Sample MD".to_string(), (true, first))])
+        );
         let opened = mark("Jo Sample MD", &[("SAMPLE", "J")], &two[1].id);
         let open = Clinicians::of(&idx, &[opened]);
         assert_eq!(open.named(&two[1], true), None);
@@ -824,6 +841,19 @@ mod tests {
         };
         // A place now, another clinician before.
         assert_eq!(with("Example Walk-in", "J SAMPLE"), (linked, linked));
+        // A clinician only a source gave is tied as not shown.
+        let mut gone = claim("Example Walk-in");
+        let mut fields = Map::new();
+        fields.insert("provider".into(), "PLACEHOLDER, KIM".into());
+        gone.given = vec![given::Given {
+            fields,
+            ..Default::default()
+        }];
+        let mut idx = PersonIndex::new("p_test");
+        idx.documents = vec![paper(Some("Kim Placeholder, LCSW"), "Bill")];
+        let k = BTreeSet::from([("PLACEHOLDER".to_string(), 'K')]);
+        let tied = BTreeMap::from([("PLACEHOLDER, KIM".to_string(), (false, k))]);
+        assert_eq!(named(&idx).tied(&gone), tied);
         // Another clinician now, a place before.
         assert_eq!(with("J SAMPLE", "Example Walk-in"), (None, linked));
     }

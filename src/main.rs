@@ -1836,10 +1836,14 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
                 let (v, events) = medrec::private::with_events(&f, &h, p, &idx)?;
                 // The clinicians the household opened, as it said them.
                 for o in f.marks(p).map(|m| m.clinicians).unwrap_or_default() {
-                    opened.push(serde_json::json!({
+                    let mut row = serde_json::json!({
                         "id": o.id, "clinician": o.printed,
                         "item": o.item, "at": o.at, "person": p.id, "person_name": p.name,
-                    }));
+                    });
+                    if o.given {
+                        row["given"] = true.into();
+                    }
+                    opened.push(row);
                 }
                 if v.get("labels_unreadable").is_some() {
                     labels.push(p.id.clone());
@@ -2014,11 +2018,16 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
                         &["date", "person_name", "kind", "not_shown", "title", "id"],
                     );
                 }
+                for o in v["clinicians_opened"].as_array_mut().into_iter().flatten() {
+                    if o["given"] == true {
+                        o["given"] = "yes".into();
+                    }
+                }
                 if v.get("clinicians_opened").is_some() {
                     println!();
                     table(
                         &serde_json::json!({"items": v["clinicians_opened"]}),
-                        &["at", "person_name", "clinician", "item", "id"],
+                        &["at", "person_name", "clinician", "given", "item", "id"],
                     );
                 }
             });

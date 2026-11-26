@@ -1070,8 +1070,10 @@ fields it knows, never drops a mark. It is absent until the first mark.
 - A clinician mark (0.9.10 and later) is the household saying that a
   clinician is of no private area: no item of this person's is private by the
   `clinician` rule for them (`private.json`, below), whatever ties them.
-  `printed` is the clinician as the record (`item`) printed them, and `people`
-  the surnames (upper case) and first initials that name them: those that tie
+  `printed` is the clinician as the record (`item`) shows them. Where only a
+  source gave the record that clinician, `printed` is absent and `given` is
+  `true`, so that no name a source gave is shown. `people` is the surnames
+  (upper case) and first initials that name them: those that tie
   the record by a paper or a link, and where a day holds it, the first way the
   name reads (the last word the surname, or the words before a comma). A name
   is matched to them as the rule matches it, a surname cut short included. It
@@ -2489,8 +2491,10 @@ nothing is private.
   such a practice). Absent where a paper names them, and on every other item. A
   row of `medrec private list` has it, and its table says it in `from`. The
   list's `clinicians_opened` (absent when there are none) has the household's
-  clinician marks: `id`, `clinician` (initial and surname), `item`, `at`,
-  `person` and `person_name`.
+  clinician marks: `id`, `clinician` (the mark's `printed`: the clinician as the
+  record shows them, `null` where only a source gave them), `given` (`true`
+  where only a source did; absent otherwise), `item`, `at`, `person` and
+  `person_name`.
 - **`heading`** (0.9.10 and later): `true` on a private record that is a heading
   (Panels, above): it has no entry in `tests.json`. Absent otherwise.
 - **What a source takes back still tells** (0.9.9 and later). Nothing opens

@@ -1307,14 +1307,15 @@ pub fn clinician(
             return Err(Failed::Refused(CliError::Usage(not)));
         }
         let at = crate::refresh::time::fmt(crate::refresh::time::now());
-        for (printed, people) in tied {
+        for (text, (shown, people)) in tied {
             let reading = |(surname, initial): (String, char)| clinicians::Reading {
                 surname,
                 initial: initial.to_string(),
             };
             let o = clinicians::Opened {
                 id: crate::ids::new("o"),
-                printed,
+                printed: shown.then_some(text),
+                given: !shown,
                 people: people.into_iter().map(reading).collect(),
                 item: item.to_string(),
                 at: at.clone(),
