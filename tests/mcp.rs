@@ -24,7 +24,7 @@ impl Env {
         let root = std::env::temp_dir().join(format!("medrec-mcp-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
-        let path = std::env::var("PATH").unwrap_or_default();
+        let path = medrec::testdata::no_viewer_path(&std::env::var("PATH").unwrap_or_default());
         let e = Env { root, path };
         e.ok(&["profiles", "add", "home"]);
         e
@@ -39,6 +39,7 @@ impl Env {
             .env("PATH", &self.path)
             .env("MEDREC_PROFILE", "home")
             .env("MEDREC_KEYCHAIN_SERVICE", "piekstra.medrec.hermetic-tests")
+            .env("MEDREC_VIEWER", "none")
             .env_remove("MEDREC_DRIVE_PROFILE")
             .env_remove("NO_COLOR");
         c
@@ -2384,6 +2385,7 @@ fn the_binary_serves_over_stdio_and_writes_nothing() {
         .env("PATH", &e.path)
         .env("MEDREC_PROFILE", "home")
         .env("MEDREC_KEYCHAIN_SERVICE", "piekstra.medrec.hermetic-tests")
+        .env("MEDREC_VIEWER", "none")
         .env_remove("MEDREC_DRIVE_PROFILE")
         .arg("mcp")
         .stdin(Stdio::piped())
@@ -2464,6 +2466,7 @@ fn call_summary(e: &Env, env: &[(&str, &str)], calls: usize) -> Vec<(Value, std:
         .env("PATH", &e.path)
         .env("MEDREC_PROFILE", "home")
         .env("MEDREC_KEYCHAIN_SERVICE", "piekstra.medrec.hermetic-tests")
+        .env("MEDREC_VIEWER", "none")
         .env_remove("MEDREC_DRIVE_PROFILE");
     for (k, v) in env {
         cmd.env(k, v);
