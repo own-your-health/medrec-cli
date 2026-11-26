@@ -200,8 +200,38 @@ pub fn weasis_url(dir: &Path) -> String {
     out
 }
 
+/// Where the viewer being started is from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Source {
+    /// A paper's: the system's.
+    Paper,
+    /// A study's, by `config viewer` or the default.
+    Configured,
+    /// A study's, by `MEDREC_VIEWER`.
+    Run,
+}
+
+impl Source {
+    /// Of a study's viewer, now.
+    pub fn of_a_study() -> Source {
+        match for_this_run() {
+            Some(_) => Source::Run,
+            None => Source::Configured,
+        }
+    }
+}
+
+/// What to do when the viewer does not start.
+fn hint(from: Source) -> String {
+    match from {
+        Source::Paper => "a paper opens in the system's viewer: install its opener (`open`, or `xdg-open`), or open the copy with `--no-launch`".into(),
+        Source::Configured => "set another with `medrec config set viewer <app or command>`, or use `--no-launch`".into(),
+        Source::Run => format!("change or unset {VIEWER_ENV}, which this run's viewer is from, or use `--no-launch`"),
+    }
+}
+
 /// Start the viewer detached: no stdin, output discarded, not waited for.
-pub fn launch(cmd: &[OsString]) -> Result<(), CliError> {
+pub fn launch(cmd: &[OsString], from: Source) -> Result<(), CliError> {
     let (prog, args) = cmd
         .split_first()
         .ok_or_else(|| CliError::Other("no viewer command".into()))?;
@@ -213,13 +243,10 @@ pub fn launch(cmd: &[OsString]) -> Result<(), CliError> {
         .spawn()
         .map(|_| ())
         .map_err(|e| {
-            let another = match for_this_run() {
-                Some(_) => format!("change or unset {VIEWER_ENV}, which this run's viewer is from"),
-                None => "set another with `medrec config set viewer <app or command>`".into(),
-            };
             CliError::Other(format!(
-                "could not start the viewer `{}`: {e}; {another}",
-                prog.to_string_lossy()
+                "could not start the viewer `{}`: {e}; {}",
+                prog.to_string_lossy(),
+                hint(from)
             ))
         })
 }
@@ -261,6 +288,18 @@ mod tests {
             assert_eq!(for_a_paper(run), chosen, "{run:?}");
         }
         assert!(Viewer::None.command(Path::new("/x")).is_none());
+        // What a viewer that does not start asks for, by where it is from.
+        for (from, says) in [
+            (Source::Paper, "the system's viewer"),
+            (Source::Configured, "medrec config set viewer"),
+            (Source::Run, "MEDREC_VIEWER"),
+        ] {
+            let hint = hint(from);
+            assert!(hint.contains(says), "{from:?}: {hint}");
+            assert!(hint.contains("--no-launch"), "{from:?}: {hint}");
+        }
+        assert!(!hint(Source::Paper).contains("config set viewer"));
+        assert!(!hint(Source::Paper).contains("MEDREC_VIEWER"));
         assert_eq!(
             weasis_url(Path::new("/tmp/a b")),
             "weasis://%24dicom%3Aget%20-l%20%22/tmp/a%20b%22"

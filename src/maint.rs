@@ -402,7 +402,12 @@ fn viewer_check_of(cfg: &Config) -> Check {
         view::Viewer::None => check(
             "viewer",
             "skip",
-            "viewer is `none`: `images open` and `documents open` print the copy's path",
+            match view::Viewer::for_documents() {
+                view::Viewer::None => {
+                    "viewer is `none`: `images open` and `documents open` print the copy's path"
+                }
+                _ => "viewer is `none`: `images open` prints the copy's path; papers still open in the system's viewer",
+            },
         ),
         view::Viewer::System => check("viewer", "ok", "the system's default application"),
         view::Viewer::Weasis => {
