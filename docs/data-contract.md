@@ -24,7 +24,7 @@ views/                        each person's records cut into small files, for re
   index.json                  the person's index (documents, records, studies, imports)
   text.json                   extracted text per document
   overrides.json              the household's decisions on events (0.9.0 and later)
-  marks.json                  the household's payments, private marks and provider corrections (0.9.1 and later)
+  marks.json                  the household's payments, private marks, provider corrections and clinician marks (0.9.1 and later)
   provider-state.json         what a provider directory gave (0.9.7 and later)
   provider-state~unread-<8 hex>.json   one that did not read, kept (0.9.7 and later)
   Documents/<YYYY>/<YYYY-MM-DD>_<type>_<org>_<details>_<original name>
@@ -516,7 +516,10 @@ and later): a name that said an area while there was no ICD-10 code still says i
   shows, in every view and answer, is still of a source that stands. No view or
   answer has any of it, and a reader of `index.json` shows none of it: of it
   there is only `given: true` on an item of `private.json` and on its row of
-  `medrec private list`.
+  `medrec private list`, and, of a clinician the household opened whom only a
+  source gave (0.9.10 and later), `given: true` on the mark and on its
+  `clinicians_opened` row, with the mark's `people` (surnames and first
+  initials) in `marks.json`.
 - It is never dropped. So nothing that a source gave opens because a later
   version gives something else, a source says the item is entered in error,
   another source's values take its place, or the source takes its resource to
@@ -525,7 +528,10 @@ and later): a name that said an area while there was no ICD-10 code still says i
   it (`medrec private unmark`).
 - It is of the item itself. One that is private only with another (its event,
   its report, a record or a paper tied to it) follows that as it is, but a panel or
-  a report is judged by what it listed before too (0.9.10 and later). A newborn's
+  a report is judged by what it listed before too, and an item that prints a
+  clinician by what the papers that name them, and the papers and claims of a
+  day that tell of their practice, were given too (0.9.10 and later;
+  `clinician`, below). A newborn's
   event that takes its place from a parent's claim (X1) is judged by the places
   that claim was given too.
 - An import keeps what a version gives, an older one served late included, and
@@ -684,7 +690,7 @@ or id of an item, and names no kind of questionnaire that there is one of.
 
   | Field | Counts |
   |---|---|
-  | `private.added` | by kind, items that are private and were open, or were not there; `added_by`, by the rules that make them so (`from`); `questionnaires`, the questionnaires of them, by kind, where there are several of one; `questionnaires_one_of_a_kind`, how many kinds there is one of |
+  | `private.added` | by kind, items that are private and were open, or were not there; `added_by`, by the rules that make them so (`from`); `questionnaires`, the questionnaires of them, by kind, where there are several of one; `questionnaires_one_of_a_kind`, how many kinds there is one of; `clinician` (0.9.10 and later), by kind, those private by their clinician (`from: clinician`), and of them `clinician_day`, held by the day of a practice's paper alone, and `clinician_linked`, held through a clinician linked to a practice |
   | `private.opened` | by kind, items that were private and are open |
   | `private.gone` | by kind, items that were private and are not there: what is about somebody else, and an event that is another now |
   | `private.given` | by kind, items that are private only by what a source gave |
@@ -995,8 +1001,9 @@ which outrank the matching rules. It is absent until the first decision.
 
 What the household marked on a person's records that the rules do not
 decide: the bills they marked paid (`bills.json`, below), the items they
-marked private or not (`private.json`, below), and what they said of the
-providers the items print (`providers.json`, below). It is a file of its own
+marked private or not (`private.json`, below), what they said of the
+providers the items print (`providers.json`, below), and the clinicians they
+said are of no private area (`private.json`, below). It is a file of its own
 so that a medrec before 0.9.1, which rewrites `overrides.json` with only the
 fields it knows, never drops a mark. It is absent until the first mark.
 
@@ -1014,6 +1021,10 @@ fields it knows, never drops a mark. It is absent until the first mark.
  "providers": [
    {"id": "o_…", "printed": ["J SAMPLE"], "set": {"name": "Dr. Sample", "phone": "555-010-0123"},
     "at": "2026-11-24T12:00:00Z", "by": "Alex Testperson", "request": "x_…"}
+ ],
+ "clinicians": [
+   {"id": "o_…", "printed": "J SAMPLE", "people": [{"surname": "SAMPLE", "initial": "J"}],
+    "item": "r_…", "at": "2026-11-24T12:00:00Z"}
  ]}
 ```
 
@@ -1056,9 +1067,25 @@ fields it knows, never drops a mark. It is absent until the first mark.
 - `by` and `request` are as in `overrides.json`: who asked and the request
   it came from, `null` from a terminal, neither trusted.
 - medrec writes it (`medrec bills paid|undo`, `medrec private
-  mark|unmark|reset`, `medrec labels set|same|different|wrong|undo`, and paid,
+  mark|unmark|reset` (with `--clinician` too), `medrec labels set|same|different|wrong|undo`, and paid,
   unpaid, private and provider requests in `_requests/`, below). Readers read it only
   to judge the freshness of the views made from it (views, below).
+- A clinician mark (0.9.10 and later) is the household saying that a
+  clinician is of no private area: no item of this person's is private by the
+  `clinician` rule for them (`private.json`, below), whatever ties them.
+  `printed` is the clinician as the record (`item`) shows them. Where only a
+  source gave the record that clinician, `printed` is absent and `given` is
+  `true`, so that no name a source gave is shown. `people` is the surnames
+  (upper case) and first initials that name them: those that tie
+  the record by a paper or a link, and where a day holds it, the first way the
+  name reads (the last word the surname, or the words before a comma). A name
+  is matched to them as the rule matches it, a surname cut short included. It
+  is said at the Mac alone, of a record that the rule holds for a clinician it
+  prints (`medrec private unmark <id> --clinician`, one mark for each such
+  clinician), and `medrec private reset <id> --clinician` drops the marks of
+  every clinician the record prints. No request says it. `clinicians`
+  is absent until the first. Other rules still hold such an item, and a private
+  mark on it is kept.
 - A file that does not read as this person's `medrec-marks/v1` is left
   out: `bills.json` and `private.json` say `marks_unreadable`, `medrec
   bills list` and `medrec private list` say so,
@@ -2443,10 +2470,11 @@ nothing is private.
   |---|---|
   | `source` | came from a portal whose records are all of one area: a behavioral health or a fertility clinic's record system |
   | `service` | is a claim each line of which that its totals count is of a service in an area (the first line's), or one with no such line whose own name says it; or a procedure that is one (0.9.9 and later; Services, below) |
-  | `code` | is a condition whose ICD-10 code is in an area, or a claim whose principal diagnosis (the lowest `sequence`) is: F10–F19 and Z71.4–Z71.5 substance use, and (0.9.9 and later) Z71.6, Z72.0, Z77.22, Z87.891 and O99.33, and (0.9.10 and later) Z81.1–Z81.4; the other F codes mental health, and (0.9.10 and later) Z13.3, R45.851, T14.91, Z91.5, Z86.5 and the rest of Z81; Z30–Z32, Z33.2, O00–O08, N46 and N96–N98 reproductive; A50–A64, B20, Z21, Z11.3–Z11.4, Z20.2, Z20.6 and Z72.5 sexual health |
+  | `code` | is a condition whose ICD-10 code is in an area, or a claim whose principal diagnosis (the lowest `sequence`) is: F10–F19 and Z71.4–Z71.5 substance use, and (0.9.9 and later) Z71.6, Z72.0, Z77.22, Z87.891 and O99.33, and (0.9.10 and later) Z81.1–Z81.4, O99.31 and O99.32; the other F codes mental health, and (0.9.10 and later) Z13.3, R45.851, T14.91, Z91.5, Z86.5, the rest of Z81, and O99.34; Z30–Z32, Z33.2, O00–O08, N46 and N96–N98 reproductive, and (0.9.10 and later) Z79.3 and Z97.5; A50–A64, B20, Z21, Z11.3–Z11.4, Z20.2, Z20.6 and Z72.5 sexual health, and (0.9.10 and later) Z29.81. Each with the codes under it. Pregnancy itself is none |
   | `provider` | was made by a practice or clinician whose name or credential says its area: a claim's provider or facility, a visit's place, location or clinician, a medicine's prescriber, a result's performer, a document's organization; or is a record that prints a provider with a sure label (Provider labels, above) whose name, practice or role does, or a record, document or event that prints one the household calls so (0.9.7 and later) |
+  | `clinician` | is an item (0.9.10 and later) that prints a clinician, by surname and first initial: a claim's `provider`, a visit's `practitioner`, a medicine's `prescriber`, or a procedure's, result's or report's `performer`. It is private where a paper of the person names that clinician: in its `organization`, where that says an area as `provider` has it, or in its `title`, where that or the organization does. A claim is private too where it prints a clinician and is of the day of a `bill`, `receipt`, `discharge_summary`, `visit_summary`, `imaging_report` or `lab_report` from a practice whose organization says an area, and is not a pharmacy's (with "pharmacy" in its name) nor a records connection's name (`learned: day`): every such claim of that day, however the events are grouped. A claim of that day that prints a place is not. And an item is private where it prints a clinician linked to such a practice (`learned: linked`): by two days or more of such papers of one area on each of which the clinician has a claim, or by one such day on which they are the only clinician with a claim: a claim of the day prints them as shown or as a source gave it, and no claim of it, each version of which prints a clinician, is of another. A day alone holds no claim of another day. A surname cut to 8 letters or more is the one it begins. A name with no initial, no degree and no comma can be a place's: a claim's provider or a performer that is one is looked for in an organization alone, and is linked by no day. An immunization is judged by no clinician. The papers and the items are each read as shown and as a source gave them, then or now, those entered in error too, and the links are made again on each run, so a later claim of another clinician on a day can end a link by that day but not one by two days. An item private only by what a source gave of any of them, and none shows, has `given`; what is entered in error does not by itself make it so. Only the person's own papers and items are read, never another person's. A likely match: it holds the item back, and names, joins, sets a status and settles nothing. The household opens one item at the Mac (`medrec private unmark <id>`), or every item that a clinician makes private (`medrec private unmark <id> --clinician`, marks.json's `clinicians`, above) |
   | `medicine` | is a medicine of an area by its name, its brand (0.9.10 and later; Brands, below) or code, or (0.9.9 and later) a pharmacy claim its `display` names as one: antidepressants, antipsychotics, anxiolytics, stimulants and lithium; fertility drugs and contraceptives; HIV medicines and those for erectile dysfunction; medicines for substance use and smoking |
-  | `test` | is a result or report of a test of an area: sexually transmitted infections, pregnancy and fertility, drug screens; or (0.9.9 and later) of a questionnaire of one, or of tobacco use (Questionnaires, below); by its own name and code or those of any of its parts, or (0.9.10 and later) by a text that is its value or the value of a part, or a report's `conclusion`, as a line of a paper's text is (Private parts, below): by the words of a service, a medicine, a test or a questionnaire |
+  | `test` | is a result or report of a test of an area: sexually transmitted infections, pregnancy and fertility, drug screens; or (0.9.9 and later) of a questionnaire of one, or of tobacco use (Questionnaires, below); by its own name and code or those of any of its parts, or (0.9.10 and later) by a text that is its value or the value of a part, or a report's `conclusion`, as a line of a paper's text is (Private parts, below): by the words of a service, a medicine, a test or a questionnaire; or (0.9.10 and later) by its own name or a part's, as a visit's (`words`). A name that is "Gender identity" and no more is none |
   | `members` | is an event with a private claim or portal visit, or whose own members are all private, or (0.9.10 and later) a panel or a report all of what one source lists of which (Panels, above), now or before, is private, with what is entered in error or without it |
   | `event` | is a member of a private event |
   | `words` | is a bill or receipt whose first page that has any text says an area, by a service, a medicine or a test, or any document whose title does (0.9.6 and later), or whose title is a questionnaire's, or with an `original_name` that says either (0.9.9 and later; `_`, `.` and `-` read as spaces); or (0.9.10 and later) a condition with no ICD-10 code whose name, or its code's, is of a condition of an area, or a visit whose name or `reason` is, or says one as a paper's title does |
@@ -2460,6 +2488,17 @@ nothing is private.
   the item, or of the one it is private with. Absent otherwise. A reader shows
   the area and no more of it. A row of `medrec private list` has it too (`yes`
   in its table's `given`).
+- **`learned`** (0.9.10 and later): of an item private by its clinician, what
+  ties them to the area where no paper names them: `day` (the item is of the day
+  of a practice's paper, and no more) or `linked` (the clinician is linked to
+  such a practice). Absent where a paper names them, and on every other item. A
+  row of `medrec private list` has it, and its table says it in `from`. The
+  list's `clinicians_opened` (absent when there are none) has the household's
+  clinician marks: `id`, `clinician` (the mark's `printed`: the clinician as the
+  record shows them, `null` where only a source gave them, or where the record
+  shows them no more or is entered in error), `given` (`true` where `clinician`
+  is `null`; absent otherwise), `item`, `at`, `person` and
+  `person_name`.
 - **`heading`** (0.9.10 and later): `true` on a private record that is a heading
   (Panels, above): it has no entry in `tests.json`. Absent otherwise.
 - **What a source takes back still tells** (0.9.9 and later). Nothing opens

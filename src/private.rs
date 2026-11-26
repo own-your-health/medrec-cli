@@ -18,6 +18,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use crate::clinicians;
 use crate::events::Built;
 use crate::given;
 use crate::marks::{failed, Failed, Marks, LABELS, READ, READ_DECISIONS, RECORDS, WRITE};
@@ -96,6 +97,8 @@ struct Why {
     from: &'static str,
     /// Only by what a source gave and no item shows ([`given`]).
     given: bool,
+    /// By its clinician: what ties them to the area.
+    learned: Option<clinicians::Learned>,
 }
 
 impl Why {
@@ -104,6 +107,7 @@ impl Why {
             area,
             from,
             given: false,
+            learned: None,
         }
     }
 
@@ -111,6 +115,9 @@ impl Why {
         let mut v = json!({"area": self.area, "from": self.from});
         if self.given {
             v["given"] = Value::Bool(true);
+        }
+        if let Some(word) = self.learned.and_then(clinicians::Learned::word) {
+            v["learned"] = word.into();
         }
         v
     }
@@ -133,7 +140,11 @@ pub(crate) fn icd10_area(code: &str) -> Option<&'static str> {
         b'A' if (50..=64).contains(&n) => Some(SEXUAL_HEALTH),
         b'B' if n == 20 => Some(SEXUAL_HEALTH),
         b'O' if n <= 8 => Some(REPRODUCTIVE),
-        b'O' if n == 99 && c.get(3..5) == Some("33") => Some(SUBSTANCE_USE),
+        b'O' if n == 99 && c.get(3..4) == Some("3") => match c.get(4..5) {
+            Some("1" | "2" | "3") => Some(SUBSTANCE_USE),
+            Some("4") => Some(MENTAL_HEALTH),
+            _ => None,
+        },
         b'N' if n == 46 || (96..=98).contains(&n) => Some(REPRODUCTIVE),
         b'R' if n == 45 && c.get(3..6) == Some("851") => Some(MENTAL_HEALTH),
         b'T' if n == 14 && c.get(3..5) == Some("91") => Some(MENTAL_HEALTH),
@@ -143,7 +154,9 @@ pub(crate) fn icd10_area(code: &str) -> Option<&'static str> {
             (81, _) => Some(MENTAL_HEALTH),
             (21, _) => Some(SEXUAL_HEALTH),
             (11, Some("3" | "4")) | (20, Some("2" | "6")) | (72, Some("5")) => Some(SEXUAL_HEALTH),
+            (29, Some("8")) if c.get(4..5) == Some("1") => Some(SEXUAL_HEALTH),
             (30..=32, _) | (33, Some("2")) => Some(REPRODUCTIVE),
+            (79, Some("3")) | (97, Some("5")) => Some(REPRODUCTIVE),
             (71, Some("4" | "5" | "6")) | (72, Some("0")) => Some(SUBSTANCE_USE),
             (77, Some("2")) if c.get(4..5) == Some("2") => Some(SUBSTANCE_USE),
             (87, Some("8")) if c.get(4..6) == Some("91") => Some(SUBSTANCE_USE),
@@ -262,7 +275,7 @@ static CONDITIONS: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
         r"syphilis|syphilitic|gonorrh\w*|gonococc\w*|chlamydia\w*|trichomon\w*|mycoplasma genitalium|chancroid|lymphogranuloma|granuloma inguinale|donovanosis|condyloma\w*",
         r"(?:ano)?genital (?:\w+ )?(?:herpes\w*|hsv|warts?)|herpes\w* (?:\w+ ){0,3}(?:ano)?genital\w*|hsv-?2|herpes simplex (?:virus )?(?:type )?2",
         r"hiv|human immunodeficiency|acquired immun(?:e|o)?[- ]?deficien\w*|(?-i:AIDS)",
-        r"sexually transmi\w*|sexual (?:mode of )?transmission|st[di]s?|venereal|high[- ]risk sexual|un(?:safe|protected) (?:sex|sexual|intercourse)",
+        r"sexually transmi\w*|sexual (?:mode of )?transmission|st[di]s?|venereal|high[- ]risk (?:hetero|homo|bi)?sexual|un(?:safe|protected) (?:sex|sexual|intercourse)",
         r"erectile|impotence|premature ejaculation|sexual (?:dysfunction|desire|aversion|arousal)",
     ]
     .join("|");
@@ -301,11 +314,11 @@ static CONDITIONS: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
 });
 
 /// What has the words of one and is none: what is lower than it was, a liver's
-/// that drink does not explain, and what one hears with.
+/// that drink does not explain, what one hears with, and what anyone is asked.
 static OTHERWISE: LazyLock<Regex> = LazyLock::new(|| {
     let lower = "st|segment|respiratory|marrow|myocardial|cardiac|cns|nervous system";
     Regex::new(&format!(
-        r"(?i)\b(?:(?:{lower}) depression|non[- ]alcoholic|hearing[- ]aids?)\b"
+        r"(?i)\b(?:(?:{lower}) depression|non[- ]alcoholic|hearing[- ]aids?)\b|^gender identity$"
     ))
     .unwrap()
 });
@@ -318,6 +331,11 @@ fn condition_name(text: &str) -> Option<&'static str> {
 /// The area of a paper by its title.
 fn title(text: &str) -> Option<&'static str> {
     first_area(&PAPERS, text).or_else(|| questionnaires::of(text, None).map(|q| q.area))
+}
+
+/// The area of what a visit, a result or a report is called.
+fn named(text: &str) -> Option<&'static str> {
+    title(text).or_else(|| condition_name(text))
 }
 
 /// Tests that are about the areas themselves.
@@ -382,7 +400,6 @@ pub(crate) fn said(r: &Record) -> Vec<(&'static str, &'static str)> {
     let of = |part: &'static str, text: Option<&str>, area: fn(&str) -> Option<&'static str>| {
         Some((part, area(text?)?))
     };
-    let visit: fn(&str) -> Option<&'static str> = |t| title(t).or_else(|| condition_name(t));
     let name = Some(r.display.as_str());
     let each = match r.kind.as_str() {
         "condition" => [
@@ -394,8 +411,8 @@ pub(crate) fn said(r: &Record) -> Vec<(&'static str, &'static str)> {
             None,
         ],
         "encounter" => [
-            of("display", name, visit),
-            of("reason", field(r, "reason"), visit),
+            of("display", name, named),
+            of("reason", field(r, "reason"), named),
         ],
         "report" => [of("conclusion", field(r, "conclusion"), words), None],
         "result" => [of("value", field(r, "value"), words), None],
@@ -527,7 +544,7 @@ fn record_why(r: &Record) -> Option<Why> {
         // A reading is, by any of its parts.
         "result" | "report" => questionnaires::told_by(r)
             .iter()
-            .find_map(|(name, _)| first_area(&TESTS, name))
+            .find_map(|(name, _)| first_area(&TESTS, name).or_else(|| named(name)))
             .or_else(|| questionnaires::asked_by(r).first().map(|q| q.area))
             .or_else(|| parts_say(r).find_map(words))
             .or_else(said_area)
@@ -586,9 +603,10 @@ pub fn build(
     idx: &PersonIndex,
     texts: &PersonText,
     built: &Built,
-    marks: &[Mark],
+    all_marks: &Marks,
     labelled: &BTreeMap<String, (&'static str, bool)>,
 ) -> Value {
+    let marks = all_marks.private.as_slice();
     let now_index = standing::index(idx);
     let events = &*built.for_private();
     // A study is private when its report is. One with no report, or a report
@@ -621,6 +639,7 @@ pub fn build(
     if let Some(whole) = &built.whole {
         ties.extend(crate::bills::whole_ties(p, idx, texts, whole));
     }
+    let clinicians = clinicians::Clinicians::of(idx, &all_marks.clinicians);
     let judge = |given: bool| {
         let mut items: BTreeMap<String, Why> = BTreeMap::new();
         let label = |id: &str| {
@@ -631,6 +650,15 @@ pub fn build(
             let gave = || given::as_given(r).find_map(|x| record_why(&x));
             let w = record_why(r).or_else(|| gave().filter(|_| given));
             let w = w.or_else(|| label(&r.id));
+            let named = || {
+                let n = clinicians.named(r, given)?;
+                let learned = Some(n.learned);
+                Some(Why {
+                    learned,
+                    ..Why::of(n.area, "clinician")
+                })
+            };
+            let w = w.or_else(named);
             items.extend(w.map(|w| (r.id.clone(), w)));
         }
         for d in &idx.documents {
@@ -658,7 +686,14 @@ pub fn build(
         let shown = judge(false);
         for (id, w) in &mut items {
             *w = match shown.get(id) {
-                Some(w) => *w,
+                // What a source gave can tie its clinician more surely.
+                Some(s) => Why {
+                    learned: match (s.learned, w.learned) {
+                        (Some(a), Some(b)) => Some(a.min(b)),
+                        (a, _) => a,
+                    },
+                    ..*s
+                },
                 None => Why { given: true, ..*w },
             };
         }
@@ -970,7 +1005,7 @@ fn judged(
     state: &crate::labels::State,
 ) -> Value {
     let areas = crate::labels::areas(idx, events, state, &marks.providers);
-    build(p, idx, texts, events, &marks.private, &areas)
+    build(p, idx, texts, events, marks, &areas)
 }
 
 /// What a request would change of what the household decided.
@@ -1217,6 +1252,98 @@ pub fn mark(
     Ok((Some(new), true))
 }
 
+/// What the household's word on a record's clinician did.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ClinicianWord {
+    /// The ids of the marks it added, or took back.
+    pub marks: Vec<String>,
+    /// The person's items it opened, and those private again.
+    pub opened: usize,
+    pub held: usize,
+}
+
+/// Say that the clinician a record prints is of no private area (`open`):
+/// none of the person's items is private by the `clinician` rule for them. Or
+/// take that back. At the Mac alone: no request says it.
+pub fn clinician(
+    folder: &crate::folder::Folder,
+    h: &Household,
+    p: &Person,
+    item: &str,
+    open: bool,
+) -> Result<ClinicianWord, Failed> {
+    if !crate::ids::is_valid("r", item) {
+        let not = format!("{} is not a record id", crate::printable(item));
+        return Err(Failed::Refused(CliError::Usage(not)));
+    }
+    let idx = folder.index(p).map_err(failed(RECORDS))?;
+    let Some(r) = idx.records.iter().find(|r| r.id == item) else {
+        return Err(Failed::Refused(CliError::NotFound(format!(
+            "{item} is not one of {}'s records",
+            crate::printable(&p.name)
+        ))));
+    };
+    if clinicians::printing(&r.kind).is_none() {
+        let kind = crate::printable(&r.kind);
+        let none = format!("{item} is a {kind}, and prints no clinician");
+        return Err(Failed::Refused(CliError::Usage(none)));
+    }
+    let texts = folder.text(p).map_err(failed(RECORDS))?;
+    let overrides = folder.overrides(p).map_err(failed(READ_DECISIONS))?;
+    let state = known_labels(folder, p)?;
+    let built = crate::events::both_by(folder, h, p, Some(&overrides)).map_err(failed(RECORDS))?;
+    let private = |marks: &Marks| -> BTreeSet<String> {
+        let v = judged(p, &idx, &texts, &built, marks, &state);
+        Private::of(&v).items.into_keys().collect()
+    };
+    let mut marks = folder.marks(p).map_err(failed(READ))?;
+    let before = private(&marks);
+    let mut out = ClinicianWord::default();
+    if open {
+        let tied = clinicians::Clinicians::of(&idx, &marks.clinicians).tied(r);
+        let already = marks.clinicians.iter().any(|o| o.of(r));
+        if tied.is_empty() && !already {
+            let not = format!("{item} is not private by a clinician it prints");
+            return Err(Failed::Refused(CliError::Usage(not)));
+        }
+        let at = crate::refresh::time::fmt(crate::refresh::time::now());
+        for (text, (shown, people)) in tied {
+            let reading = |(surname, initial): (String, char)| clinicians::Reading {
+                surname,
+                initial: initial.to_string(),
+            };
+            let o = clinicians::Opened {
+                id: crate::ids::new("o"),
+                printed: shown.then_some(text),
+                given: !shown,
+                people: people.into_iter().map(reading).collect(),
+                item: item.to_string(),
+                at: at.clone(),
+                by: None,
+                other: serde_json::Map::new(),
+            };
+            out.marks.push(o.id.clone());
+            marks.clinicians.push(o);
+        }
+    } else {
+        let of = |o: &clinicians::Opened| o.of(r);
+        out.marks = marks
+            .clinicians
+            .iter()
+            .filter(|o| of(o))
+            .map(|o| o.id.clone())
+            .collect();
+        marks.clinicians.retain(|o| !of(o));
+    }
+    if !out.marks.is_empty() {
+        folder.save_marks(p, &marks).map_err(failed(WRITE))?;
+    }
+    let after = private(&marks);
+    out.opened = before.difference(&after).count();
+    out.held = after.difference(&before).count();
+    Ok(out)
+}
+
 /// Whether an item, or something in it, is private without these of the
 /// person's marks.
 fn private_without(
@@ -1437,6 +1564,19 @@ mod tests {
             ("Z81.2", Some(SUBSTANCE_USE)),
             ("Z81.8", Some(MENTAL_HEALTH)),
             ("Z82.49", None),
+            ("Z29.81", Some(SEXUAL_HEALTH)),
+            ("Z29.8", None),
+            ("Z97.5", Some(REPRODUCTIVE)),
+            ("Z97.4", None),
+            ("Z79.3", Some(REPRODUCTIVE)),
+            ("Z79.4", None),
+            ("O99.310", Some(SUBSTANCE_USE)),
+            ("O99.323", Some(SUBSTANCE_USE)),
+            ("O99.335", Some(SUBSTANCE_USE)),
+            ("O99.345", Some(MENTAL_HEALTH)),
+            ("O99.35", None),
+            ("O99.89", None),
+            ("Z34.00", None),
             ("I10", None),
             ("", None),
             ("F", None),
@@ -1527,6 +1667,10 @@ mod tests {
                 SEXUAL_HEALTH,
             ),
             ("Sexually transmissible infection", SEXUAL_HEALTH),
+            ("High risk sexual behavior", SEXUAL_HEALTH),
+            ("High risk heterosexual behavior", SEXUAL_HEALTH),
+            ("High-risk homosexual behavior", SEXUAL_HEALTH),
+            ("High risk bisexual behavior", SEXUAL_HEALTH),
         ] {
             let want = Some((area.to_string(), "words".to_string()));
             let why = |code: Value| why_of("condition", name, code, json!({}));
@@ -1552,6 +1696,8 @@ mod tests {
             "Nonalcoholic steatohepatitis",
             "Hearing aids",
             "HEARING AIDS",
+            "Walking aids",
+            "Depressed skull fracture",
             "Drug-induced movement disorder",
             "Opioid-induced constipation",
             "Long-term use of opioid analgesic",
@@ -1617,6 +1763,28 @@ mod tests {
             value("Chlamydia not seen".into()),
             words(SEXUAL_HEALTH, "test")
         );
+        // A result and a report are of their own names, and their parts', as
+        // a visit is.
+        let named = |kind: &str, name: &str| why_of(kind, name, Value::Null, json!({}));
+        for (kind, name, area) in [
+            ("result", "Psychotherapy session count", MENTAL_HEALTH),
+            ("report", "Depression screening report", MENTAL_HEALTH),
+            ("result", "Embryo grade", REPRODUCTIVE),
+            ("report", "Substance use evaluation", SUBSTANCE_USE),
+        ] {
+            assert_eq!(named(kind, name), words(area, "test"), "{name}");
+        }
+        for name in [
+            "Hemoglobin",
+            "ST depression",
+            "Gender identity",
+            "Hearing aids",
+        ] {
+            assert_eq!(named("result", name), None, "{name}");
+        }
+        let part = json!({"components": [{"code": {"display": "Anxiety score"}, "value": 2}]});
+        let of_part = why_of("result", "Example panel", Value::Null, part);
+        assert_eq!(of_part, words(MENTAL_HEALTH, "test"));
     }
 
     /// A medicine is of its brand too. A brand that is a name is of a medicine
@@ -1779,7 +1947,11 @@ mod tests {
             events: events.clone(),
             ..Built::default()
         };
-        build(p, idx, texts, &built, marks, &BTreeMap::new())
+        let marks = Marks {
+            private: marks.to_vec(),
+            ..Marks::new(&p.id)
+        };
+        build(p, idx, texts, &built, &marks, &BTreeMap::new())
     }
 
     #[test]
@@ -2167,7 +2339,14 @@ mod tests {
                 whole: Some(none()),
                 ..Built::default()
             };
-            let v = build(&person(), &idx, &texts, &both, &[], &BTreeMap::new());
+            let v = build(
+                &person(),
+                &idx,
+                &texts,
+                &both,
+                &Marks::new("p_test"),
+                &BTreeMap::new(),
+            );
             let after = areas(&v, "documents");
             for (id, area) in &before {
                 assert_eq!(after.get(id), Some(area), "{id} by {}", idx.documents[i].id);
@@ -2209,7 +2388,14 @@ mod tests {
             whole: Some(whole),
             ..Built::default()
         };
-        let v = build(&person(), &idx, &no_text(), &both, &[], &BTreeMap::new());
+        let v = build(
+            &person(),
+            &idx,
+            &no_text(),
+            &both,
+            &Marks::new("p_test"),
+            &BTreeMap::new(),
+        );
         for kind in ["records", "documents", "events", "studies"] {
             assert_eq!(areas(&v, kind), areas(&before, kind), "{kind}");
         }
@@ -2221,7 +2407,14 @@ mod tests {
             ..Built::default()
         };
         idx.records.remove(0);
-        let v = build(&person(), &idx, &no_text(), &gone, &[], &BTreeMap::new());
+        let v = build(
+            &person(),
+            &idx,
+            &no_text(),
+            &gone,
+            &Marks::new("p_test"),
+            &BTreeMap::new(),
+        );
         assert!(areas(&v, "events").is_empty(), "{v}");
     }
 

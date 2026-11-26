@@ -8,6 +8,7 @@ pub mod bill;
 pub mod bills;
 pub mod changes;
 pub mod claims;
+pub mod clinicians;
 pub mod code_names;
 pub mod config;
 pub mod corrections;

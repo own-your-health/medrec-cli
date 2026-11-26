@@ -311,12 +311,17 @@ const AROUND_A_NAME: &[&str] = &[
     "PSYD", "PT", "RD", "RN", "RPH", "SLP", "SR", "WHNP",
 ];
 
+/// Whether a word, in capitals, is what a printed name carries besides the name.
+pub fn around_a_name(word: &str) -> bool {
+    AROUND_A_NAME.contains(&word)
+}
+
 /// The words of a name in capitals, without what is around a name.
 pub fn name_words(printed: &str) -> Vec<String> {
     printed
         .split(|c: char| c.is_whitespace() || c == ',')
         .map(fold)
-        .filter(|t| !t.is_empty() && !AROUND_A_NAME.contains(&t.as_str()))
+        .filter(|t| !t.is_empty() && !around_a_name(t))
         .collect()
 }
 
