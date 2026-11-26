@@ -592,17 +592,14 @@ fn make(
                 .filter(|m| m.person == p.id && m.schema == crate::marks::SCHEMA)
                 .ok_or(())
         });
-        let payments = marks
+        let none = crate::marks::Marks::new(&p.id);
+        let read = marks
             .as_ref()
             .and_then(|m| m.as_ref().ok())
-            .map(|m| m.payments.as_slice())
-            .unwrap_or_default();
+            .unwrap_or(&none);
+        let payments = read.payments.as_slice();
         let mut bills = crate::bills::build(p, &me.idx, &me.texts, &events.events, payments);
-        let private_marks = marks
-            .as_ref()
-            .and_then(|m| m.as_ref().ok())
-            .map(|m| m.private.as_slice())
-            .unwrap_or_default();
+        let private_marks = read.private.as_slice();
         let last = old
             .as_ref()
             .filter(|o| o.schema == SCHEMA)
@@ -630,15 +627,11 @@ fn make(
                 text,
             });
         }
-        let corrections = marks
-            .as_ref()
-            .and_then(|m| m.as_ref().ok())
-            .map(|m| m.providers.as_slice())
-            .unwrap_or_default();
+        let corrections = read.providers.as_slice();
         let mut private = {
             let (idx, texts) = (&me.idx, &me.texts);
             let labelled = crate::labels::areas(idx, &events, &state, corrections);
-            crate::private::build(p, idx, texts, &events, private_marks, &labelled)
+            crate::private::build(p, idx, texts, &events, read, &labelled)
         };
         if state.lost() {
             private["labels_unreadable"] = Value::Bool(true);

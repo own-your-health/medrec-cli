@@ -79,6 +79,12 @@ real record, document, study or provider response.
   report and its paper, a paper named as one, a visit and claims of some of
   those days, and two pharmacy claims. `make.py` writes `index.json`; its
   sources are those of `standing/household.json`.
+- `clinicians/` is an invented person's claims that print a surname and an initial,
+  papers that name two of those clinicians, by an organization or a title, bills of a
+  practice's of a day with one clinician's claim and of one with two, and a visit, a
+  prescription and a procedure that print a clinician.
+  `make.py` writes `index.json`. Its sources are those of
+  `standing/household.json`.
 - `parts/` is an invented person's claims, procedures, bills and papers, one for
   each way the contract's "Private" reads a service and each kind of private
   part. `make.py` writes `index.json` and `text.json`; `parts.json` is what

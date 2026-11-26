@@ -721,9 +721,20 @@ enum PrivateCmd {
     Mark { id: String },
     /// Mark a record, document or event not private, whatever the rules say: of
     /// a claim or a paper with a private part, all of it.
-    Unmark { id: String },
+    Unmark {
+        id: String,
+        /// The clinician the record prints, in place of the record: no item of
+        /// the person's is private because of whom that clinician is tied to.
+        #[arg(long)]
+        clinician: bool,
+    },
     /// Drop the household's mark on an item: the rules decide again.
-    Reset { id: String },
+    Reset {
+        id: String,
+        /// Of the clinician the record prints.
+        #[arg(long)]
+        clinician: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -1819,11 +1830,30 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
             let mut parts = Vec::new();
             let mut unreadable: Vec<String> = Vec::new();
             let mut labels: Vec<String> = Vec::new();
+            let mut opened: Vec<serde_json::Value> = Vec::new();
             let mut in_error = 0;
             for p in medrec::people::selected(&h, person.as_deref())? {
                 let idx = f.index(p)?;
                 let gone: BTreeSet<&str> = medrec::standing::errors(&idx).collect();
                 let (v, events) = medrec::private::with_events(&f, &h, p, &idx)?;
+                // The clinicians the household opened, as it said them.
+                // A name is shown only while the record shows it: one that has
+                // left it since, or a record entered in error, is as given.
+                for o in f.marks(p).map(|m| m.clinicians).unwrap_or_default() {
+                    let record = idx.records.iter().find(|r| r.id == o.item);
+                    let record = record.filter(|r| !gone.contains(r.id.as_str()));
+                    let shows =
+                        |t: &&String| record.is_some_and(|r| medrec::clinicians::shows(r, t));
+                    let now = o.printed.as_ref().filter(shows);
+                    let mut row = serde_json::json!({
+                        "id": o.id, "clinician": now,
+                        "item": o.item, "at": o.at, "person": p.id, "person_name": p.name,
+                    });
+                    if now.is_none() {
+                        row["given"] = true.into();
+                    }
+                    opened.push(row);
+                }
                 if v.get("labels_unreadable").is_some() {
                     labels.push(p.id.clone());
                 } else if v.get("marks_unreadable").is_some() {
@@ -1912,6 +1942,9 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
                         if why["given"] == true {
                             row["given"] = true.into();
                         }
+                        if let Some(learned) = why.get("learned") {
+                            row["learned"] = learned.clone();
+                        }
                         items.push(row);
                     }
                 }
@@ -1932,6 +1965,9 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
             }
             let shown = list.take(&items);
             let mut doc = serde_json::json!({ "items": shown, "parts": list.take(&parts) });
+            if !opened.is_empty() {
+                doc["clinicians_opened"] = opened.into();
+            }
             if in_error > 0 {
                 let n = medrec::standing::in_error(in_error);
                 note(cli, &n);
@@ -1967,6 +2003,9 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
                     if i["given"] == true {
                         i["given"] = "yes".into();
                     }
+                    if let Some(learned) = i["learned"].as_str() {
+                        i["from"] = format!("clinician, {learned}").into();
+                    }
                 }
                 table(
                     &v,
@@ -1988,12 +2027,35 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
                         &["date", "person_name", "kind", "not_shown", "title", "id"],
                     );
                 }
+                let opened = v
+                    .get_mut("clinicians_opened")
+                    .and_then(|o| o.as_array_mut());
+                for o in opened.into_iter().flatten() {
+                    if o["given"] == true {
+                        o["given"] = "yes".into();
+                    }
+                }
+                if v.get("clinicians_opened").is_some() {
+                    println!();
+                    table(
+                        &serde_json::json!({"items": v["clinicians_opened"]}),
+                        &["at", "person_name", "clinician", "given", "item", "id"],
+                    );
+                }
             });
             return Ok(());
         }
         PrivateCmd::Mark { id } => (id, Some(true)),
-        PrivateCmd::Unmark { id } => (id, Some(false)),
-        PrivateCmd::Reset { id } => (id, None),
+        PrivateCmd::Unmark {
+            id,
+            clinician: true,
+        } => return clinician_cmd(cli, store, id, true),
+        PrivateCmd::Reset {
+            id,
+            clinician: true,
+        } => return clinician_cmd(cli, store, id, false),
+        PrivateCmd::Unmark { id, .. } => (id, Some(false)),
+        PrivateCmd::Reset { id, .. } => (id, None),
     };
     if !["r", "d", "e"].iter().any(|k| medrec::ids::is_valid(k, id)) {
         return Err(CliError::Usage(format!(
@@ -2019,6 +2081,44 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
             None => "back to the rules",
         };
         println!("{} {id} {what}", v["status"].as_str().unwrap_or(""))
+    });
+    Ok(())
+}
+
+/// `medrec private unmark|reset <ID> --clinician`.
+fn clinician_cmd(cli: &Cli, store: &ConfigStore, id: &str, open: bool) -> Result<(), CliError> {
+    if !medrec::ids::is_valid("r", id) {
+        return Err(CliError::Usage(format!(
+            "`{}` is not a record id (r_…)",
+            medrec::printable(id)
+        )));
+    }
+    let cfg = load(store, cli)?;
+    let f = Folder::open(&cfg, Access::Write)?;
+    let h = f.household()?;
+    let p = medrec::private::holder(&f, &h, id)?
+        .ok_or_else(|| CliError::NotFound(format!("no record {id}")))?;
+    let did = medrec::private::clinician(&f, &h, p, id, open)?;
+    let status = if did.marks.is_empty() {
+        "unchanged"
+    } else {
+        "recorded"
+    };
+    let v = serde_json::json!({
+        "item": id, "person": p.id, "clinician": true, "private": if open { Some(false) } else { None },
+        "marks": did.marks, "opened": did.opened, "held": did.held, "status": status,
+    });
+    output::emit(cli.common.json, "private-clinician", v, |v| {
+        let what = match open {
+            true => "its clinician is of no private area",
+            false => "its clinician is back to the rules",
+        };
+        println!(
+            "{} {id}: {what}; {} items open, {} private again",
+            v["status"].as_str().unwrap_or(""),
+            v["opened"],
+            v["held"]
+        )
     });
     Ok(())
 }

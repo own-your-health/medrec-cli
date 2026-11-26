@@ -759,6 +759,40 @@ fn a_local_folder_is_owner_only_and_lists_take_a_limit() {
     let _ = std::fs::remove_dir_all(Path::new(&e.root));
 }
 
+/// `doctor` names the `open` commands a `none` viewer holds, and where the
+/// viewer is from. It starts no viewer.
+#[test]
+fn doctor_says_which_open_a_none_viewer_holds() {
+    let e = Env::new("doctor-viewer");
+    setup(&e);
+    let viewer = |env: &[(&str, &str)]| -> String {
+        let out = e.run_env(&["--json", "doctor"], env);
+        let v: Value = serde_json::from_slice(&out.stdout).expect("one JSON document");
+        let checks = v["checks"].as_array().unwrap();
+        let c = checks.iter().find(|c| c["check"] == "viewer");
+        c.expect("a viewer check")["detail"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    // The harness's MEDREC_VIEWER=none holds both, and says so.
+    let both = viewer(&[]);
+    assert!(
+        both.contains("`images open` and `documents open`"),
+        "{both}"
+    );
+    assert!(both.contains("MEDREC_VIEWER"), "{both}");
+    // `config viewer none` holds studies alone.
+    e.ok(&["config", "set", "viewer", "none"]);
+    let studies = viewer(&[("MEDREC_VIEWER", "")]);
+    assert!(
+        studies.contains("papers still open in the system's viewer"),
+        "{studies}"
+    );
+    assert!(!studies.contains("MEDREC_VIEWER"), "{studies}");
+    let _ = std::fs::remove_dir_all(Path::new(&e.root));
+}
+
 #[test]
 fn a_reimport_names_the_patient_by_the_providers_label() {
     let base = Env::new("label");
