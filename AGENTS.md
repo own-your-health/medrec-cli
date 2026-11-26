@@ -65,6 +65,7 @@ quick-xml, lopdf), and so are local tools (poppler, tesseract, bsdtar).
 | `src/intake/` | Document intake: file types, text and OCR, detection with scores and evidence, duplicates |
 | `src/review.rs` | Filing what intake held back |
 | `src/import.rs`, `src/stream.rs`, `src/normalize.rs` | Provider import: the bounded subprocess, the `records-stream/v1` reader (medical-common's `pk-med-records`), FHIR to index records |
+| `src/against.rs` | `medrec verify --events`: what events and their records say, against the raw files as they are (not through what shaped them), in counts and ids |
 | `src/raw.rs` | `medrec records raw` and `records fields`: the raw files of records, the names of their elements with counts (no values but the codes of what a claim's amounts are), and what changed between the versions kept of each |
 | `src/served.rs` | What an import says of the records its source gave before: how many it does not give now, by kind, and the names of what changed in each it updated |
 | `src/changes.rs` | What a dry run of the reindex counts that the views would say otherwise, for each person (docs/data-contract.md, "A dry run") |

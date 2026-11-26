@@ -982,6 +982,10 @@ struct VerifyArgs {
     /// Download every document and compare its SHA-256 too.
     #[arg(long)]
     deep: bool,
+    /// Compare each event's place, and its records' names, days and sources,
+    /// with their raw files too: counts and ids.
+    #[arg(long)]
+    events: bool,
 }
 
 #[derive(Args, Debug)]
@@ -1393,8 +1397,15 @@ fn run(cli: &Cli) -> Result<(), CliError> {
         }
         Command::Verify(a) => {
             let cfg = load(&store, cli)?;
-            let f = Folder::open(&cfg, Access::Read)?;
-            let r = maint::verify(&f, a.deep)?;
+            // Not of a copy on this machine, which can be older than the files.
+            let f = Folder::open(&cfg, Access::Fresh)?;
+            let mut r = maint::verify(&f, a.deep)?;
+            for (id, e) in r.index_unread.iter().zip(&r.index_errors) {
+                eprintln!("medrec: the index of {id} does not read: {e}");
+            }
+            if a.events {
+                r.people = Some(medrec::against::events(&f, &f.household()?));
+            }
             let clean = r.clean();
             output::emit(json, "verify", to_value(&r), |v| {
                 println!(
@@ -1405,9 +1416,37 @@ fn run(cli: &Cli) -> Result<(), CliError> {
                     ("missing", "missing"),
                     ("changed", "changed"),
                     ("not indexed", "unindexed"),
+                    (
+                        "index that does not read (why is on stderr), of",
+                        "index_unread",
+                    ),
                 ] {
                     for p in v[key].as_array().into_iter().flatten() {
                         println!("{label}: {}", p.as_str().unwrap_or(""));
+                    }
+                }
+                for of in r.people.iter().flatten() {
+                    if of.not_compared {
+                        let code = of.error_code.unwrap_or("other");
+                        println!(
+                            "{}: not compared ({code}): its files did not read",
+                            of.person
+                        );
+                        continue;
+                    }
+                    println!(
+                        "{}: compared {} events of {} records with their raw files; {} places are \
+                         a linked person's or a paper's word",
+                        of.person, of.events, of.records, of.places_of_others
+                    );
+                    for (label, ids) in of.lists() {
+                        for id in ids {
+                            println!("{label}: {id}");
+                        }
+                    }
+                    if !of.read_errors.is_empty() {
+                        let codes: Vec<&str> = of.read_errors.iter().copied().collect();
+                        println!("raw files did not read, by error: {}", codes.join(", "));
                     }
                 }
             });

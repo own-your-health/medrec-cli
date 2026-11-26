@@ -250,6 +250,93 @@ fn cache_dir(spec: &DriveSpec) -> Option<PathBuf> {
     cache::cache_dir_for(BIN, &spec.to_string())
 }
 
+/// Whether `rel` is a relative path of plain names, with no root, `.` or `..`.
+/// A path an index gives is one: anyone who can write the folder can edit an
+/// index, so no such path may lead outside the place it is read in.
+pub fn plain_rel(rel: &str) -> bool {
+    !rel.is_empty()
+        && !rel.contains('\\')
+        && Path::new(rel)
+            .components()
+            .all(|c| matches!(c, std::path::Component::Normal(_)))
+}
+
+/// Every path a [`Store`] is given stays in the folder: it has no root and no
+/// `..`. A backslash, or any other character a file's name can hold, is the
+/// name's own, so a file another program named is read, answered and removed
+/// as it was before. The stricter [`plain_rel`] is for the paths an index
+/// gives. The error names no path: it is one an edited file gave.
+fn inside(rel: &str) -> Result<(), CliError> {
+    use std::path::Component;
+    let leaves = |c: Component| {
+        matches!(
+            c,
+            Component::RootDir | Component::Prefix(_) | Component::ParentDir
+        )
+    };
+    if !Path::new(rel).components().any(leaves) {
+        Ok(())
+    } else {
+        Err(CliError::Other(
+            "a path in the records folder's files leads outside it: an index or household.json may have been edited".into(),
+        ))
+    }
+}
+
+/// `rel` under `root`, where it is a [`plain_rel`]; `None` where it is not.
+pub fn within(root: &Path, rel: &str) -> Option<PathBuf> {
+    plain_rel(rel).then(|| root.join(rel))
+}
+
+#[cfg(test)]
+mod rel_tests {
+    use super::*;
+
+    /// A name that holds a backslash is a file's own, in the store; a root
+    /// or `..` is refused before anything is read.
+    #[test]
+    fn a_store_path_is_refused_only_where_it_leaves_the_folder() {
+        let root = crate::testutil::temp_dir("store-inside");
+        let dir = root.join("records");
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = Store::open(
+            &Location::Dir(dir.clone()),
+            Reads::Fresh,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+        store.write_text("inbox/a\\b.pdf", "x").unwrap();
+        assert_eq!(
+            store.read_text("inbox/a\\b.pdf").unwrap().as_deref(),
+            Some("x")
+        );
+        assert!(store.delete("inbox/a\\b.pdf").unwrap());
+        for rel in ["/etc/hosts", "../outside", "inbox/../../outside"] {
+            let err = store.read_text(rel).unwrap_err();
+            assert!(!err.to_string().contains(rel), "{err}");
+            assert!(store.write_text(rel, "x").is_err(), "{rel}");
+        }
+        assert!(!root.join("outside").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn only_a_relative_path_of_plain_names_is_within() {
+        let root = Path::new("/tmp/copy");
+        for ok in ["a/b.json", "Robin Testperson/Records/x/Claim", "a//b"] {
+            assert!(plain_rel(ok), "{ok}");
+            assert!(
+                within(root, ok).is_some_and(|p| p.starts_with(root)),
+                "{ok}"
+            );
+        }
+        for not in ["", "/a/b.json", "../a", "a/../b", "./a", "a\\b", "/"] {
+            assert!(!plain_rel(not), "{not}");
+            assert!(within(root, not).is_none(), "{not}");
+        }
+    }
+}
+
 pub fn expand_home(s: &str) -> PathBuf {
     if let Some(rest) = s.strip_prefix("~/") {
         if let Some(home) = std::env::var_os("HOME") {
@@ -331,11 +418,13 @@ impl Store {
     }
 
     pub fn read_text(&self, rel: &str) -> Result<Option<String>, CliError> {
+        inside(rel)?;
         self.backend.read_file(rel)
     }
 
     /// The same, never from the read cache.
     pub fn read_text_fresh(&self, rel: &str) -> Result<Option<String>, CliError> {
+        inside(rel)?;
         match &self.location {
             Location::Dir(_) => self.read_text(rel),
             Location::Drive(_) => self.remote().cat(rel),
@@ -343,6 +432,7 @@ impl Store {
     }
 
     pub fn write_text(&self, rel: &str, content: &str) -> Result<(), CliError> {
+        inside(rel)?;
         if let Location::Dir(root) = &self.location {
             // Atomic and owner-only on a local directory; pk-cli-drive's
             // mount write is a plain overwrite.
@@ -361,6 +451,7 @@ impl Store {
     /// Write bytes to `rel` whole, replacing any file there: atomic and
     /// owner-only on a local directory, one upload on Drive.
     pub fn write_bytes(&self, rel: &str, content: &[u8]) -> Result<(), CliError> {
+        inside(rel)?;
         if let Location::Dir(root) = &self.location {
             let path = root.join(rel);
             create_parent(&path)?;
@@ -386,6 +477,9 @@ impl Store {
     /// another, owner-only; on Drive a few at a time within pk-cli-drive's
     /// limit, skipping a file whose MD5 already matches. How many were sent.
     pub fn write_many(&self, files: &[(&str, &[u8])]) -> Result<usize, CliError> {
+        for (rel, _) in files {
+            inside(rel)?;
+        }
         if let Location::Dir(_) = &self.location {
             for (rel, bytes) in files {
                 self.write_bytes(rel, bytes)?;
@@ -398,6 +492,7 @@ impl Store {
     /// Upload a local file (binary-safe), replacing any file at `rel`. On a
     /// local directory the file is owner-only (0600) in owner-only folders.
     pub fn put_file(&self, local: &Path, rel: &str) -> Result<(), CliError> {
+        inside(rel)?;
         if let Location::Dir(root) = &self.location {
             return private_copy(local, &root.join(rel), Existing::Replace);
         }
@@ -407,6 +502,7 @@ impl Store {
     /// The bytes of `rel` on local disk (the file itself on a directory; a
     /// download into an owner-only temp dir otherwise).
     pub fn fetch(&self, rel: &str) -> Result<LocalCopy, CliError> {
+        inside(rel)?;
         self.backend.local_copy(rel)
     }
 
@@ -423,6 +519,7 @@ impl Store {
 
     /// The same, never from the read cache; `None` where the file is not there.
     pub fn read_bytes_fresh(&self, rel: &str) -> Result<Option<Vec<u8>>, CliError> {
+        inside(rel)?;
         let read = match &self.location {
             Location::Dir(root) => std::fs::read(root.join(rel)).map_err(|e| {
                 let says = format!("reading {}: {e}", self.display_path(rel));
@@ -442,17 +539,20 @@ impl Store {
     }
 
     pub fn exists(&self, rel: &str) -> Result<bool, CliError> {
+        inside(rel)?;
         self.backend.exists(rel)
     }
 
     /// Every file under `rel`, recursively, with sizes.
     pub fn list(&self, rel: &str) -> Result<Vec<FileEntry>, CliError> {
+        inside(rel)?;
         self.backend.list_entries(rel)
     }
 
     /// Delete one file. `Ok(false)` when it was not there. pk-cli-drive
     /// refuses an empty path, a folder, an absolute path and `..`.
     pub fn delete(&self, rel: &str) -> Result<bool, CliError> {
+        inside(rel)?;
         self.backend.delete_file(rel)
     }
 }
@@ -479,6 +579,7 @@ impl Store {
     /// listing. Use [`Store::md5`] for a single file.
     pub fn hashes(&self, rel: &str) -> Result<Vec<Hashed>, CliError> {
         let rel = rel.trim_matches('/');
+        inside(rel)?;
         match &self.location {
             Location::Dir(root) => {
                 let base = if rel.is_empty() {
@@ -489,11 +590,12 @@ impl Store {
                 let mut out = Vec::new();
                 if base.is_dir() {
                     walk(&base, &mut |p| {
-                        let sub = p
-                            .strip_prefix(root)
-                            .unwrap_or(p)
-                            .to_string_lossy()
-                            .replace('\\', "/");
+                        let sub = p.strip_prefix(root).unwrap_or(p).to_string_lossy();
+                        // A backslash is a separator on Windows alone; on this
+                        // Mac it is a character of the name.
+                        #[cfg(windows)]
+                        let sub = sub.replace('\\', "/");
+                        let sub = sub.to_string();
                         let size = p.metadata().map(|m| m.len()).unwrap_or(0);
                         out.push(Hashed {
                             rel: sub,
@@ -530,6 +632,7 @@ impl Store {
     /// not there.
     pub fn list_here(&self, rel: &str) -> Result<Vec<FileEntry>, CliError> {
         let rel = rel.trim_matches('/');
+        inside(rel)?;
         match &self.location {
             Location::Dir(root) => {
                 let dir = root.join(rel);
@@ -578,6 +681,7 @@ impl Store {
     /// location's own path names (an inbox inside the records folder).
     pub fn mkdir(&self, rel: &str) -> Result<(), CliError> {
         let rel = rel.trim_matches('/');
+        inside(rel)?;
         match &self.location {
             Location::Dir(root) => private_dirs(&root.join(rel)),
             Location::Drive(_) => match &self.backend {
@@ -589,6 +693,7 @@ impl Store {
 
     /// The MD5 the store holds for one file; `None` when it is not there.
     pub fn md5(&self, rel: &str) -> Result<Option<String>, CliError> {
+        inside(rel)?;
         match &self.location {
             Location::Dir(root) => {
                 let p = root.join(rel);
@@ -606,6 +711,7 @@ impl Store {
     /// with other bytes refuses the whole copy before anything is uploaded,
     /// so a filed file cannot be overwritten by a later upload.
     pub fn put_tree(&self, local: &Path, rel: &str) -> Result<(), CliError> {
+        inside(rel)?;
         match &self.location {
             Location::Dir(root) => copy_tree(local, &root.join(rel), Existing::Keep),
             Location::Drive(_) => self
@@ -618,6 +724,7 @@ impl Store {
     /// Copy a local directory's contents under `rel`, replacing a file there
     /// whose bytes differ (in place on Drive, keeping its id): a backup's.
     pub fn put_tree_replacing(&self, local: &Path, rel: &str) -> Result<(), CliError> {
+        inside(rel)?;
         match &self.location {
             Location::Dir(root) => copy_tree(local, &root.join(rel), Existing::Replace),
             Location::Drive(_) => self
@@ -629,6 +736,7 @@ impl Store {
 
     /// Copy everything under `rel` into a local directory (owner-only).
     pub fn fetch_tree(&self, rel: &str, local: &Path) -> Result<(), CliError> {
+        inside(rel)?;
         match &self.location {
             Location::Dir(root) => copy_tree(&root.join(rel), local, Existing::Replace),
             Location::Drive(_) => self.remote().fetch_tree(rel, local).map(|_| ()),
@@ -637,6 +745,8 @@ impl Store {
 
     /// Move a file within the store; refuses to replace one.
     pub fn move_no_clobber(&self, from: &str, to: &str) -> Result<(), CliError> {
+        inside(from)?;
+        inside(to)?;
         self.backend.move_no_clobber(from, to)
     }
 

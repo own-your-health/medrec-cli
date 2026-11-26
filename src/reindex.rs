@@ -25,6 +25,7 @@ use crate::model::{today, Household, InError, Person, PersonIndex, Provenance, R
 use crate::normalize;
 use crate::panels;
 use crate::people;
+use crate::store;
 use crate::viewfiles;
 
 #[derive(Debug, Default, Serialize)]
@@ -177,7 +178,10 @@ pub fn claims(
             .filter_map(|rel| rel.rsplit_once('/').map(|(d, _)| d.to_string()))
             .collect();
         for d in &dirs {
-            folder.store.fetch_tree(d, &tmp.path().join(d))?;
+            // A path no index can lead out of the copy by.
+            if let Some(to) = store::within(tmp.path(), d) {
+                folder.store.fetch_tree(d, &to)?;
+            }
         }
         let mut row = PersonReindexed {
             person: p.id.clone(),
@@ -327,7 +331,9 @@ fn fetch(
     for source in sources {
         for ty in types {
             let dir = format!("{source}/{ty}");
-            let to = tmp.join(&dir);
+            let Some(to) = store::within(tmp, &dir) else {
+                continue;
+            };
             if !fetched.contains(&dir) && !to.exists() && folder.store.exists(&dir)? {
                 folder.store.fetch_tree(&dir, &to)?;
             }
@@ -411,11 +417,13 @@ fn fetch_files(
     dir: &str,
     files: &[impl AsRef<str>],
 ) -> Result<(), CliError> {
-    let to = tmp.join(dir);
+    let Some(to) = store::within(tmp, dir) else {
+        return Ok(());
+    };
     let missing: Vec<&str> = files
         .iter()
         .map(AsRef::as_ref)
-        .filter(|rel| !tmp.join(rel).exists())
+        .filter(|rel| store::within(tmp, rel).is_some_and(|at| !at.exists()))
         .collect();
     let papers = dir.rsplit('/').next().is_some_and(import::describes_papers);
     if missing.len() > FEW || (papers && !missing.is_empty()) {
@@ -814,7 +822,7 @@ fn providers(idx: &mut PersonIndex, tmp: &Path) -> Result<usize, CliError> {
 
 /// A raw file, when it is there and reads.
 fn read(tmp: &Path, rel: &str) -> Option<Value> {
-    let text = std::fs::read_to_string(tmp.join(rel)).ok()?;
+    let text = std::fs::read_to_string(store::within(tmp, rel)?).ok()?;
     serde_json::from_str(&text).ok()
 }
 

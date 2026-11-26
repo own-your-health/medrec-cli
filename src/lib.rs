@@ -3,6 +3,7 @@
 //! the tests can reach them.
 
 pub mod about;
+pub mod against;
 pub mod batch;
 pub mod bill;
 pub mod bills;

@@ -8,6 +8,7 @@ use std::time::Duration;
 use pk_cli_core::CliError;
 use serde::Serialize;
 
+use crate::against::Against;
 use crate::config::Config;
 use crate::folder::{self, Access, Folder};
 use crate::hash;
@@ -521,11 +522,22 @@ pub struct Verify {
     pub changed: Vec<String>,
     /// Files under Documents, Claims or Imaging that no index entry names.
     pub unindexed: Vec<String>,
+    /// People whose index does not read, of whom nothing is checked (0.9.11
+    /// and later).
+    pub index_unread: Vec<String>,
+    /// Their errors, for stderr: they can name the file.
+    #[serde(skip)]
+    pub index_errors: Vec<CliError>,
+    /// With `--events`, each person's events against their raw files.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub people: Option<Vec<Against>>,
 }
 
 impl Verify {
     pub fn clean(&self) -> bool {
-        self.missing.is_empty() && self.changed.is_empty()
+        let events = self.people.iter().flatten().all(Against::clean);
+        let indexes = self.index_unread.is_empty();
+        self.missing.is_empty() && self.changed.is_empty() && indexes && events
     }
 }
 
@@ -539,7 +551,17 @@ pub fn verify(folder: &Folder, deep: bool) -> Result<Verify, CliError> {
         ..Default::default()
     };
     for p in &h.people {
-        let idx = folder.whole_index(p)?;
+        // One that does not read is in the report, and the others are checked;
+        // a sign-in or Drive that fails stops it, as nothing else would read.
+        let idx = match folder.whole_index(p) {
+            Ok(idx) => idx,
+            Err(e) if e.code() == "other" => {
+                v.index_unread.push(p.id.clone());
+                v.index_errors.push(e);
+                continue;
+            }
+            Err(e) => return Err(e),
+        };
         let listing: HashMap<String, Option<String>> = folder
             .store
             .hashes(&p.folder)?
