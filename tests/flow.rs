@@ -4100,6 +4100,22 @@ fn the_views_follow_every_write_and_only_files_that_change_are_written() {
         (Some(0), Some(0)),
         "{w}"
     );
+    // Views another build of this version wrote are made again: a rule can
+    // change between them.
+    let mut other: Value = serde_json::from_slice(&current).unwrap();
+    other["build"] = "0123456789abcdef0123456789abcdef01234567".into();
+    std::fs::write(records.join("views/views.json"), other.to_string()).unwrap();
+    let again = e.ok(&["views", "write"]);
+    let rebuilt = again["people_rebuilt"].as_u64();
+    assert_eq!(rebuilt, Some(people.len() as u64), "{again}");
+    let now: Value =
+        serde_json::from_slice(&std::fs::read(records.join("views/views.json")).unwrap()).unwrap();
+    assert_eq!(
+        now.get("build"),
+        serde_json::from_slice::<Value>(&current)
+            .unwrap()
+            .get("build")
+    );
 
     // Made again from the same files, every view keeps its name. A file of
     // a view's shape that no view names is removed; anything else is left.

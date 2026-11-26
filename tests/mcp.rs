@@ -3087,7 +3087,7 @@ fn what_a_questionnaire_asks_is_private_everywhere() {
 
 /// Each open item of the parts fixture with a private part, and what is said of
 /// it in its place.
-const PARTS: [(&str, &str); 9] = [
+const PARTS: [(&str, &str); 10] = [
     ("r_mixedaaaaaaaaaaaaaaa", "1 service not shown"),
     ("r_checksaaaaaaaaaaaaaa", "1 service not shown"),
     ("r_notedaaaaaaaaaaaaaaa", "1 service not shown"),
@@ -3100,9 +3100,12 @@ const PARTS: [(&str, &str); 9] = [
     ("r_beforeaaaaaaaaaaaaaa", "1 service not shown"),
     (ACCOUNT, "3 lines not shown"),
     (EXPLAINED, "3 lines not shown"),
+    (AFTERWARD, "1 line not shown"),
 ];
 const ACCOUNT: &str = "d_accountaaaaaaaaaaaaa";
 const EXPLAINED: &str = "d_explainedaaaaaaaaaaa";
+/// A paper that charges for nothing.
+const AFTERWARD: &str = "d_afterwardaaaaaaaaaaa";
 /// The words of them, each of which is in an answer about the person.
 const PRIVATE_WORDS: [&str; 9] = [
     "Quick feelings form",
@@ -3661,12 +3664,11 @@ fn a_private_part_of_an_open_item_is_in_no_answer_about_the_household() {
     }
     for word in PRIVATE_WORDS {
         for (name, v) in &shared {
-            // A search that names what is all private finds it, marked; and the
-            // words of a paper that charges for nothing are all there.
+            // A search that names what is all private finds it, marked.
             let all = [v.clone()];
             let items = v["items"].as_array().map_or(&all[..], Vec::as_slice);
             let open = items.iter().filter(|i| i.get("private").is_none());
-            for i in open.filter(|i| i["id"] != "d_afterwardaaaaaaaaaaa") {
+            for i in open {
                 assert!(!i.to_string().contains(word), "{name}: {word}: {i}");
             }
         }
@@ -3796,7 +3798,7 @@ fn a_private_part_of_an_open_item_is_in_no_answer_about_the_household() {
 /// Of a bill's, a receipt's or an explanation's text, the lines that say an
 /// area are read only where the person is named.
 #[test]
-fn a_bills_private_lines_are_read_only_where_its_person_is_named() {
+fn a_papers_private_lines_are_read_only_where_its_person_is_named() {
     let (e, alex) = parts_household("lines");
     let t = e.tools();
     let read = |args: Value| assert_fits(&t, DOCUMENT, &call(&t, DOCUMENT, args)).clone();
@@ -3814,10 +3816,16 @@ fn a_bills_private_lines_are_read_only_where_its_person_is_named() {
              This is not a bill",
             ["96127", "Behavioral", "health hour"],
         ),
+        (
+            AFTERWARD,
+            "Sample visit\n(1 line not shown)\n",
+            ["Depression", "screening", "done"],
+        ),
     ] {
         let v = read(json!({"id": id}));
         assert_eq!(v["text"], text);
-        let hint = "3 lines not shown: pass Alex Testperson as person for all of it.";
+        let of = PARTS.iter().find(|(p, _)| *p == id).unwrap().1;
+        let hint = format!("{of}: pass Alex Testperson as person for all of it.");
         assert_eq!(v["hint"], hint);
         let whole = read(json!({"id": id, "person": "Alex"}));
         assert!(whole.get("hint").is_none(), "{whole}");
@@ -3827,12 +3835,11 @@ fn a_bills_private_lines_are_read_only_where_its_person_is_named() {
         }
         assert_eq!(whole["text_chars"], files_text(&e, id).chars().count());
     }
-    // One with none, and a paper of no charge.
-    for id in ["d_paidslipaaaaaaaaaaaa", "d_afterwardaaaaaaaaaaa"] {
-        let v = read(json!({"id": id}));
-        assert!(v.get("hint").is_none(), "{v}");
-        assert_eq!(v["text"], files_text(&e, id));
-    }
+    // One with none.
+    let id = "d_paidslipaaaaaaaaaaaa";
+    let v = read(json!({"id": id}));
+    assert!(v.get("hint").is_none(), "{v}");
+    assert_eq!(v["text"], files_text(&e, id));
     let r = call(&t, DOCUMENT, json!({"id": ACCOUNT, "person": "Sam"}));
     assert!(r.is_error(), "{}", r.text());
     // A private record that tells of an open paper is named with its person.
@@ -4866,7 +4873,7 @@ fn a_dry_run_counts_papers_and_private_parts() {
     std::fs::write(&path, serde_json::to_vec(&v).unwrap()).unwrap();
     let v = changes_of(&e, &alex);
     assert_eq!(v["papers"], json!({"filed_before": 2, "source_found": 0}));
-    let want = json!({"claim": 9, "document": 2, "event": 9});
+    let want = json!({"claim": 9, "document": 3, "event": 9});
     assert_eq!(v["private"]["parts"], want);
     let _ = std::fs::remove_dir_all(&e.root);
 }

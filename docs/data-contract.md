@@ -1768,8 +1768,8 @@ removes and no reader reads. It never writes over a later
   it writes any of them.
 - **Only what changed.** A person keeps their views when their `index.json`,
   `text.json`, `overrides.json` and `marks.json` and their linked people's
-  `index.json` and `text.json` have the MD5s `views.json` recorded, under the same `household.json` and
-  medrec version, the code table on this machine, when there is one, is the
+  `index.json` and `text.json` have the MD5s `views.json` recorded, under the same `household.json`,
+  medrec version and `build`, the code table on this machine, when there is one, is the
   one they were made with (`code_table`), and the provider directory on it,
   when there is one, is not newer (`directory`). Otherwise their views are made
   again, and only views the folder does not already hold under their
@@ -1777,8 +1777,8 @@ removes and no reader reads. It never writes over a later
   written again. A person whose views lack one every person has
   (`summary.json`, `tests.json`, `documents.json`, `events.json`,
   `bills.json`, `private.json`, `standing.json`, `search-parts.json`) gets them
-  made again: a build
-  of the same version wrote them before that view existed.
+  made again: a medrec that did not record its build, or did not know it, wrote
+  them before that view existed.
 - **`views.json` last.** It records the MD5 of every view, so a reader
   checks each view it reads and never mixes two passes, whatever order an
   uploader sends them in. Views that it no longer names, a person's who
@@ -1843,6 +1843,7 @@ A reader decides freshness by MD5, as Drive reports it (`md5Checksum`):
 | Field | What |
 |---|---|
 | `medrec` | The version that wrote them. Another version makes every view again. |
+| `build` | The commit that medrec was built from, where it is known (0.9.10 and later); absent where it is not. Views recorded with another commit, or with one where this medrec knows none (or the reverse), are all made again, as another version's are. Builds of one commit, or with none known, are not told apart, uncommitted changes included. |
 | `household` | The MD5 (hex) of `household.json` as the views were made from it. |
 | `label_salt` | What the ids of provider labels are salted with: random, made with the folder's first label and kept (0.9.7 and later). Absent before that. A reader does not use it. |
 | `people.<id>.index`, `.text` | The MD5s of the person's `index.json` and `text.json` as read; `null` when the file is absent. |
@@ -2474,7 +2475,7 @@ nothing is private.
   | `provider` | was made by a practice or clinician whose name or credential says its area: a claim's provider or facility, a visit's place, location or clinician, a medicine's prescriber, a result's performer, a document's organization; or is a record that prints a provider with a sure label (Provider labels, above) whose name, practice or role does, or a record, document or event that prints one the household calls so (0.9.7 and later) |
   | `clinician` | is an item (0.9.10 and later) that prints a clinician, by surname and first initial: a claim's `provider`, a visit's `practitioner`, a medicine's `prescriber`, or a procedure's, result's or report's `performer`. It is private where a paper of the person names that clinician: in its `organization`, where that says an area as `provider` has it, or in its `title`, where that or the organization does. A claim is private too where it prints a clinician and is of the day of a `bill`, `receipt`, `discharge_summary`, `visit_summary`, `imaging_report` or `lab_report` from a practice whose organization says an area, and is not a pharmacy's (with "pharmacy" in its name) nor a records connection's name (`learned: day`): every such claim of that day, however the events are grouped. A claim of that day that prints a place is not. And an item is private where it prints a clinician linked to such a practice (`learned: linked`): by two days or more of such papers of one area on each of which the clinician has a claim, or by one such day on which they are the only clinician with a claim: a claim of the day prints them as shown or as a source gave it, and no claim of it, each version of which prints a clinician, is of another. A day alone holds no claim of another day. A surname cut to 8 letters or more is the one it begins. A name with no initial, no degree and no comma can be a place's: a claim's provider or a performer that is one is looked for in an organization alone, and is linked by no day. An immunization is judged by no clinician. The papers and the items are each read as shown and as a source gave them, then or now, those entered in error too, and the links are made again on each run, so a later claim of another clinician on a day can end a link by that day but not one by two days. An item private only by what a source gave of any of them, and none shows, has `given`; what is entered in error does not by itself make it so. Only the person's own papers and items are read, never another person's. A likely match: it holds the item back, and names, joins, sets a status and settles nothing. The household opens one item at the Mac (`medrec private unmark <id>`), or every item that a clinician makes private (`medrec private unmark <id> --clinician`, marks.json's `clinicians`, above) |
   | `medicine` | is a medicine of an area by its name, its brand (0.9.10 and later; Brands, below) or code, or (0.9.9 and later) a pharmacy claim its `display` names as one: antidepressants, antipsychotics, anxiolytics, stimulants and lithium; fertility drugs and contraceptives; HIV medicines and those for erectile dysfunction; medicines for substance use and smoking |
-  | `test` | is a result or report of a test of an area: sexually transmitted infections, pregnancy and fertility, drug screens; or (0.9.9 and later) of a questionnaire of one, or of tobacco use (Questionnaires, below); by its own name and code or those of any of its parts, or (0.9.10 and later) by a text that is its value or the value of a part, or a report's `conclusion`, as a line of a bill's text is (Private parts, below): by the words of a service, a medicine, a test or a questionnaire; or (0.9.10 and later) by its own name or a part's, as a visit's (`words`). A name that is "Gender identity" and no more is none |
+  | `test` | is a result or report of a test of an area: sexually transmitted infections, pregnancy and fertility, drug screens; or (0.9.9 and later) of a questionnaire of one, or of tobacco use (Questionnaires, below); by its own name and code or those of any of its parts, or (0.9.10 and later) by a text that is its value or the value of a part, or a report's `conclusion`, as a line of a paper's text is (Private parts, below): by the words of a service, a medicine, a test or a questionnaire; or (0.9.10 and later) by its own name or a part's, as a visit's (`words`). A name that is "Gender identity" and no more is none |
   | `members` | is an event with a private claim or portal visit, or whose own members are all private, or (0.9.10 and later) a panel or a report all of what one source lists of which (Panels, above), now or before, is private, with what is entered in error or without it |
   | `event` | is a member of a private event |
   | `words` | is a bill or receipt whose first page that has any text says an area, by a service, a medicine or a test, or any document whose title does (0.9.6 and later), or whose title is a questionnaire's, or with an `original_name` that says either (0.9.9 and later; `_`, `.` and `-` read as spaces); or (0.9.10 and later) a condition with no ICD-10 code whose name, or its code's, is of a condition of an area, or a visit whose name or `reason` is, or says one as a paper's title does |
@@ -2509,7 +2510,7 @@ nothing is private.
   entered in error or without it, is in `unreported_studies`; so one whose only
   report is, which is in `studies` too when that report was private.
 - **Brands** (0.9.10 and later). Wherever a text is judged by a medicine's words,
-  its brands are among them: a bill's page and lines, a service, a payer note, a
+  its brands are among them: a bill's page, the lines of a paper, a service, a payer note, a
   text value and a conclusion. A brand that is a person's name too, or a word
   ("Camila", "Plan B"), is one only as a medicine's name or code, or in a pharmacy
   claim's `display`, and in no other text.
@@ -2537,7 +2538,7 @@ nothing is private.
   in ranges, are in medrec's `src/services.rs`; a code whose `system` is of
   medicines, results, findings or diagnoses (NDC, RxNorm, LOINC, SNOMED, ICD-10)
   is none. A claim's category, its amounts and its dates say nothing.
-- **Private parts** (0.9.9 and later). A claim of several services, a bill and an
+- **Private parts** (0.9.9 and later). A claim of several services, a paper and an
   event stay open when only a part of them is private. `parts` has what is
   private in each open item, by its id, and how the item is shown without it.
   Where a reader leaves private items out (a shared screen, an answer that names
@@ -2568,10 +2569,11 @@ nothing is private.
     in whose place any version of any of its sources gave one that is. `display`
     is its name by the lines that are left, `category` theirs where that is
     another (null where none is left), and `date` its date.
-  - **A bill, a receipt or an explanation of benefits** has `text`: the byte
-    offset and length in its text (`text.json`) of each line that says an area,
-    by words or by a service's number, without its line end (a line feed or a
-    form feed). Words that go over from one line to the next are in both.
+  - **A paper** (before 0.9.10 only a bill, a receipt or an explanation of
+    benefits) has `text`: the byte offset and length in its text (`text.json`) of
+    each line that says an area, by words or by a service's number, without its
+    line end (a line feed or a form feed). Words that go over from one line to
+    the next are in both.
   - **An event** has what of `kind`, `title`, `what`, `what_from`, `place`,
     `place_from`, `clinicians`, `money` and `differences` its members that are
     not private do not say as `events.json` has it: as they say it, null where

@@ -777,7 +777,7 @@ fn parts_of(
         }
     }
     for d in idx.documents.iter().filter(|d| judged(&d.id)) {
-        let text = texts.texts.get(&d.id).filter(|_| crate::bill::charges(d));
+        let text = texts.texts.get(&d.id);
         let places = text.map(|t| parts::of_text(t)).unwrap_or_default();
         if !places.is_empty() {
             out.insert(d.id.clone(), parts::text_json(&places));
@@ -1748,7 +1748,7 @@ mod tests {
             )
         };
         assert_eq!(told("ST depression seen"), None);
-        // As a line of a bill's text is judged, a questionnaire's name included.
+        // As a line of a paper's text is judged, a questionnaire's name included.
         assert_eq!(told("PHQ-9 of 3"), words(MENTAL_HEALTH, "test"));
         assert_eq!(
             told("A smoker, 20 pack-years"),
