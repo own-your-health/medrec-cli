@@ -1768,8 +1768,8 @@ removes and no reader reads. It never writes over a later
   it writes any of them.
 - **Only what changed.** A person keeps their views when their `index.json`,
   `text.json`, `overrides.json` and `marks.json` and their linked people's
-  `index.json` and `text.json` have the MD5s `views.json` recorded, under the same `household.json` and
-  medrec version, the code table on this machine, when there is one, is the
+  `index.json` and `text.json` have the MD5s `views.json` recorded, under the same `household.json`,
+  medrec version and `build`, the code table on this machine, when there is one, is the
   one they were made with (`code_table`), and the provider directory on it,
   when there is one, is not newer (`directory`). Otherwise their views are made
   again, and only views the folder does not already hold under their
@@ -1777,8 +1777,8 @@ removes and no reader reads. It never writes over a later
   written again. A person whose views lack one every person has
   (`summary.json`, `tests.json`, `documents.json`, `events.json`,
   `bills.json`, `private.json`, `standing.json`, `search-parts.json`) gets them
-  made again: a build
-  of the same version wrote them before that view existed.
+  made again: a medrec that did not record its build, or did not know it, wrote
+  them before that view existed.
 - **`views.json` last.** It records the MD5 of every view, so a reader
   checks each view it reads and never mixes two passes, whatever order an
   uploader sends them in. Views that it no longer names, a person's who
@@ -1843,7 +1843,7 @@ A reader decides freshness by MD5, as Drive reports it (`md5Checksum`):
 | Field | What |
 |---|---|
 | `medrec` | The version that wrote them. Another version makes every view again. |
-| `build` | The commit that medrec was built from, where it is known (0.9.10 and later); absent where it is not. Another build makes every view again, as another version does. |
+| `build` | The commit that medrec was built from, where it is known (0.9.10 and later); absent where it is not. Views recorded with another commit, or with one where this medrec knows none (or the reverse), are all made again, as another version's are. Builds of one commit, or with none known, are not told apart, uncommitted changes included. |
 | `household` | The MD5 (hex) of `household.json` as the views were made from it. |
 | `label_salt` | What the ids of provider labels are salted with: random, made with the folder's first label and kept (0.9.7 and later). Absent before that. A reader does not use it. |
 | `people.<id>.index`, `.text` | The MD5s of the person's `index.json` and `text.json` as read; `null` when the file is absent. |
