@@ -849,7 +849,8 @@ enum DocumentsCmd {
     /// Open a document from a private local copy.
     Open {
         id: String,
-        /// Make the copy and print its path; open nothing.
+        /// Make the copy and print its path; open nothing (env MEDREC_VIEWER=none
+        /// does the same).
         #[arg(long)]
         no_launch: bool,
     },
@@ -924,7 +925,8 @@ enum ImagesCmd {
     /// Open a study in the viewer from a private local copy.
     Open {
         study: String,
-        /// Make the copy and print its path; open nothing.
+        /// Make the copy and print its path; open nothing (env MEDREC_VIEWER
+        /// overrides the viewer).
         #[arg(long)]
         no_launch: bool,
     },
@@ -3468,7 +3470,7 @@ fn documents_cmd(cli: &Cli, cmd: &DocumentsCmd, store: &ConfigStore) -> Result<(
             let said: Vec<String> = error.into_iter().chain(about).collect();
             said.iter().for_each(|n| note(cli, n));
             let path = private_copy(&f, &d.path, &d.id)?;
-            let launched = !*no_launch && launch(&view::Viewer::for_documents(None), &path)?;
+            let launched = !*no_launch && launch(&view::Viewer::for_documents(), &path)?;
             output::emit(
                 json,
                 "document-open",

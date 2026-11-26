@@ -390,11 +390,19 @@ fn ocr_languages(cfg: &Config) -> Check {
 }
 
 fn viewer_check(cfg: &Config) -> Check {
+    let mut c = viewer_check_of(cfg);
+    if view::for_this_run().is_some() {
+        c.detail = format!("{} ({}, over `config viewer`)", c.detail, view::VIEWER_ENV);
+    }
+    c
+}
+
+fn viewer_check_of(cfg: &Config) -> Check {
     match view::Viewer::for_images(cfg.viewer.as_deref()) {
         view::Viewer::None => check(
             "viewer",
             "skip",
-            "viewer is `none`: `images open` prints the copy's path",
+            "viewer is `none`: `images open` and `documents open` print the copy's path",
         ),
         view::Viewer::System => check("viewer", "ok", "the system's default application"),
         view::Viewer::Weasis => {

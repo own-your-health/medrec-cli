@@ -62,9 +62,9 @@ brew install poppler tesseract        # text extraction and OCR
 
 Weasis (https://weasis.org) is the default DICOM viewer. Another viewer is
 set with `medrec config set viewer <app or executable>`, or `none` to only
-copy a study. `MEDREC_VIEWER` sets it for one run, for papers too, which open in
-the system's viewer otherwise: `MEDREC_VIEWER=none` opens nothing and prints the
-copy's path.
+copy a study. `MEDREC_VIEWER` sets it for one run, over `config viewer`. Papers
+open in the system's viewer whatever is set, and `MEDREC_VIEWER=none` opens
+nothing, a paper or a study, and prints the copy's path.
 
 ## Quick start
 
@@ -795,7 +795,7 @@ this machine's:
 | `mount` | where Drive for desktop mounts the folder, for `doctor` to compare | none |
 | `inbox` | the inbox `--inbox` drains: a Drive spec or a local directory | `inbox/` in the folder |
 | `me` | the person id who writes notes on this machine | none |
-| `viewer` | the DICOM viewer, or `none` | Weasis |
+| `viewer` | the DICOM viewer, or `none` (`MEDREC_VIEWER` is over it for one run) | Weasis |
 | `ocr_languages`, `ocr_max_pages` | tesseract languages, and pages read per document | `eng`, 20 |
 | `max_file_mb` | the largest file intake or import keeps, MiB | 200 |
 | `import_max_mb` | the largest records stream one import reads, MiB; an import holds it until the trailer | 4096 |

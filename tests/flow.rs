@@ -68,8 +68,10 @@ impl Env {
 }
 
 /// A test's `open` of a paper or a study launches nothing on the machine:
-/// `MEDREC_VIEWER=none` holds it, and the first `open` and `xdg-open` on its
-/// `PATH` are the tests' own, which only say what they were given.
+/// `MEDREC_VIEWER=none` holds it (`launched: false`), and the first `open` and
+/// `xdg-open` on its `PATH` are the tests' own, which only say what they were
+/// given. That file is a check at best: a viewer is started and not waited
+/// for, so one could write after the read.
 fn launches_nothing(e: &Env, args: &[&str]) {
     let launched = medrec::testdata::no_viewer_dir().join("launched");
     let before = std::fs::read_to_string(&launched).unwrap_or_default();
@@ -1257,6 +1259,7 @@ fn held_import(e: &Env, hold: &Path) -> std::process::Child {
         .env("PATH", &e.path)
         .env("MEDREC_PROFILE", "home")
         .env("MEDREC_KEYCHAIN_SERVICE", "piekstra.medrec.hermetic-tests")
+        .env("MEDREC_VIEWER", "none")
         .env("FAKEPROV_HOLD", hold)
         .args([
             "--json",

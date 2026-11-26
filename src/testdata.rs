@@ -277,34 +277,6 @@ pub fn write_dicom(dicom: &Path) {
 /// With `FAKEPROV_WATCH=<DIR>` each export appends the checksum of
 /// `<DIR>/*/index.json` to `export-log`; with `FAKEPROV_EXIT_FOR=<P>` the
 /// export for `--patient <P>` answers that its session expired (exit 3).
-/// `PATH` for a test's run of medrec: `path` after a folder whose `open` and
-/// `xdg-open` launch nothing and only add their arguments to its `launched`
-/// file, so that a viewer a test reaches never opens on the machine. The
-/// tests also set `MEDREC_VIEWER=none`, which launches nothing at all.
-pub fn no_viewer_path(path: &str) -> String {
-    format!("{}:{path}", no_viewer_dir().display())
-}
-
-/// The folder of that `open` and `xdg-open`, one for the test process.
-pub fn no_viewer_dir() -> PathBuf {
-    use std::os::unix::fs::PermissionsExt;
-    let dir = std::env::temp_dir().join(format!("medrec-no-viewer-{}", std::process::id()));
-    for name in ["open", "xdg-open"] {
-        let bin = dir.join(name);
-        if bin.exists() {
-            continue;
-        }
-        std::fs::create_dir_all(&dir).unwrap();
-        // Written whole under another name, then renamed: tests run at once.
-        let part = dir.join(format!("{name}.{:?}", std::thread::current().id()));
-        let script = "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$(dirname \"$0\")/launched\"\n";
-        std::fs::write(&part, script).unwrap();
-        std::fs::set_permissions(&part, std::fs::Permissions::from_mode(0o755)).unwrap();
-        std::fs::rename(&part, &bin).unwrap();
-    }
-    dir
-}
-
 pub fn write_provider(provider: &Path, stream: &str) -> PathBuf {
     std::fs::create_dir_all(provider).unwrap();
     std::fs::write(provider.join("synthetic.ndjson"), stream).unwrap();
@@ -413,4 +385,38 @@ esac
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
     provider.to_path_buf()
+}
+
+/// `PATH` for a test's run of medrec: `path` after a folder whose `open` and
+/// `xdg-open` launch nothing and only add their arguments to its `launched`
+/// file, so that a viewer a test reaches never opens on the machine. The
+/// tests also set `MEDREC_VIEWER=none`, which launches nothing at all.
+pub fn no_viewer_path(path: &str) -> String {
+    format!("{}:{path}", no_viewer_dir().display())
+}
+
+/// The folder of that `open` and `xdg-open`, one for the test process: made
+/// new, under a name no one can foresee, for this user alone, and its files
+/// made new in it.
+pub fn no_viewer_dir() -> PathBuf {
+    static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        use std::io::Write;
+        use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+        let name = format!("medrec-no-viewer-{}", crate::ids::new("t"));
+        let dir = std::env::temp_dir().join(name);
+        std::fs::DirBuilder::new().mode(0o700).create(&dir).unwrap();
+        let script = "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$(dirname \"$0\")/launched\"\n";
+        for name in ["open", "xdg-open"] {
+            let mut f = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o700)
+                .open(dir.join(name))
+                .unwrap();
+            f.write_all(script.as_bytes()).unwrap();
+        }
+        dir
+    })
+    .clone()
 }
