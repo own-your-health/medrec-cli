@@ -112,21 +112,50 @@ pub enum Viewer {
     None,
 }
 
+/// The viewer for this run, over `config viewer` and the defaults
+/// (`MEDREC_VIEWER`, as `config viewer` takes it; for papers `none` or
+/// `system` alone). The tests set `none`, so that no test opens anything on the
+/// machine that runs it.
+pub const VIEWER_ENV: &str = "MEDREC_VIEWER";
+
+/// `MEDREC_VIEWER`, where it is set to something.
+pub fn for_this_run() -> Option<String> {
+    let v = std::env::var(VIEWER_ENV).ok()?;
+    let v = v.trim();
+    (!v.is_empty()).then(|| v.to_string())
+}
+
+/// The run's viewer over the configured one, and that over the default.
+fn choose(run: Option<&str>, configured: Option<&str>, default: Viewer) -> Viewer {
+    fn set(v: Option<&str>) -> Option<&str> {
+        v.map(str::trim).filter(|v| !v.is_empty())
+    }
+    match set(run).or(set(configured)) {
+        Some(v) => Viewer::parse(v),
+        None => default,
+    }
+}
+
+/// Of a paper: the system's viewer, or nothing. A DICOM viewer is never given
+/// a paper.
+fn for_a_paper(run: Option<&str>) -> Viewer {
+    match choose(run, None, Viewer::System) {
+        Viewer::None => Viewer::None,
+        _ => Viewer::System,
+    }
+}
+
 impl Viewer {
     /// From `config viewer`: unset means Weasis; `none`, `system`, a
-    /// `.app`, or an executable.
+    /// `.app`, or an executable. `MEDREC_VIEWER` is over it.
     pub fn for_images(configured: Option<&str>) -> Viewer {
-        match configured.map(str::trim) {
-            None | Some("") => Viewer::Weasis,
-            Some(v) => Viewer::parse(v),
-        }
+        choose(for_this_run().as_deref(), configured, Viewer::Weasis)
     }
 
-    pub fn for_documents(configured: Option<&str>) -> Viewer {
-        match configured.map(str::trim) {
-            None | Some("") => Viewer::System,
-            Some(v) => Viewer::parse(v),
-        }
+    /// The system's viewer for the file, or none where `MEDREC_VIEWER` is
+    /// `none`.
+    pub fn for_documents() -> Viewer {
+        for_a_paper(for_this_run().as_deref())
     }
 
     fn parse(v: &str) -> Viewer {
@@ -171,8 +200,38 @@ pub fn weasis_url(dir: &Path) -> String {
     out
 }
 
+/// Where the viewer being started is from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Source {
+    /// A paper's: the system's.
+    Paper,
+    /// A study's, by `config viewer` or the default.
+    Configured,
+    /// A study's, by `MEDREC_VIEWER`.
+    Run,
+}
+
+impl Source {
+    /// Of a study's viewer, now.
+    pub fn of_a_study() -> Source {
+        match for_this_run() {
+            Some(_) => Source::Run,
+            None => Source::Configured,
+        }
+    }
+}
+
+/// What to do when the viewer does not start.
+fn hint(from: Source) -> String {
+    match from {
+        Source::Paper => "a paper opens in the system's viewer: install its opener (`open`, or `xdg-open`), or open the copy with `--no-launch`".into(),
+        Source::Configured => "set another with `medrec config set viewer <app or command>`, or use `--no-launch`".into(),
+        Source::Run => format!("change or unset {VIEWER_ENV}, which this run's viewer is from, or use `--no-launch`"),
+    }
+}
+
 /// Start the viewer detached: no stdin, output discarded, not waited for.
-pub fn launch(cmd: &[OsString]) -> Result<(), CliError> {
+pub fn launch(cmd: &[OsString], from: Source) -> Result<(), CliError> {
     let (prog, args) = cmd
         .split_first()
         .ok_or_else(|| CliError::Other("no viewer command".into()))?;
@@ -185,8 +244,9 @@ pub fn launch(cmd: &[OsString]) -> Result<(), CliError> {
         .map(|_| ())
         .map_err(|e| {
             CliError::Other(format!(
-                "could not start the viewer `{}`: {e}; set another with `medrec config set viewer <app or command>`",
-                prog.to_string_lossy()
+                "could not start the viewer `{}`: {e}; {}",
+                prog.to_string_lossy(),
+                hint(from)
             ))
         })
 }
@@ -197,14 +257,49 @@ mod tests {
 
     #[test]
     fn viewers_parse_and_weasis_gets_a_local_folder_url() {
-        assert_eq!(Viewer::for_images(None), Viewer::Weasis);
-        assert_eq!(Viewer::for_images(Some("none")), Viewer::None);
-        assert_eq!(
-            Viewer::for_images(Some("/Applications/Horos.app")),
-            Viewer::App("/Applications/Horos.app".into())
-        );
-        assert_eq!(Viewer::for_documents(None), Viewer::System);
+        let app = || Viewer::App("/Applications/Horos.app".into());
+        let weasis = || Viewer::Weasis;
+        // (the run's, the configured, the default) and what is chosen.
+        for (run, configured, chosen) in [
+            (None, None, weasis()),
+            (None, Some("none"), Viewer::None),
+            (None, Some("/Applications/Horos.app"), app()),
+            (Some("none"), Some("/Applications/Horos.app"), Viewer::None),
+            (Some("system"), Some("none"), Viewer::System),
+            (Some("/Applications/Horos.app"), None, app()),
+            (Some("  "), Some("none"), Viewer::None),
+            (Some(""), None, weasis()),
+        ] {
+            assert_eq!(
+                choose(run, configured, weasis()),
+                chosen,
+                "{run:?} {configured:?}"
+            );
+        }
+        // A paper goes to the system's viewer, or nowhere.
+        for (run, chosen) in [
+            (None, Viewer::System),
+            (Some("none"), Viewer::None),
+            (Some("system"), Viewer::System),
+            (Some("weasis"), Viewer::System),
+            (Some("/Applications/Horos.app"), Viewer::System),
+            (Some("/usr/local/bin/viewer"), Viewer::System),
+        ] {
+            assert_eq!(for_a_paper(run), chosen, "{run:?}");
+        }
         assert!(Viewer::None.command(Path::new("/x")).is_none());
+        // What a viewer that does not start asks for, by where it is from.
+        for (from, says) in [
+            (Source::Paper, "the system's viewer"),
+            (Source::Configured, "medrec config set viewer"),
+            (Source::Run, "MEDREC_VIEWER"),
+        ] {
+            let hint = hint(from);
+            assert!(hint.contains(says), "{from:?}: {hint}");
+            assert!(hint.contains("--no-launch"), "{from:?}: {hint}");
+        }
+        assert!(!hint(Source::Paper).contains("config set viewer"));
+        assert!(!hint(Source::Paper).contains("MEDREC_VIEWER"));
         assert_eq!(
             weasis_url(Path::new("/tmp/a b")),
             "weasis://%24dicom%3Aget%20-l%20%22/tmp/a%20b%22"

@@ -860,7 +860,8 @@ enum DocumentsCmd {
     /// Open a document from a private local copy.
     Open {
         id: String,
-        /// Make the copy and print its path; open nothing.
+        /// Make the copy and print its path; open nothing (env MEDREC_VIEWER=none
+        /// does the same).
         #[arg(long)]
         no_launch: bool,
     },
@@ -935,7 +936,8 @@ enum ImagesCmd {
     /// Open a study in the viewer from a private local copy.
     Open {
         study: String,
-        /// Make the copy and print its path; open nothing.
+        /// Make the copy and print its path; open nothing (env MEDREC_VIEWER
+        /// overrides the viewer).
         #[arg(long)]
         no_launch: bool,
     },
@@ -3568,7 +3570,8 @@ fn documents_cmd(cli: &Cli, cmd: &DocumentsCmd, store: &ConfigStore) -> Result<(
             let said: Vec<String> = error.into_iter().chain(about).collect();
             said.iter().for_each(|n| note(cli, n));
             let path = private_copy(&f, &d.path, &d.id)?;
-            let launched = !*no_launch && launch(&view::Viewer::for_documents(None), &path)?;
+            let viewer = view::Viewer::for_documents();
+            let launched = !*no_launch && launch(&viewer, &path, view::Source::Paper)?;
             output::emit(
                 json,
                 "document-open",
@@ -3613,9 +3616,13 @@ fn documents_cmd(cli: &Cli, cmd: &DocumentsCmd, store: &ConfigStore) -> Result<(
     Ok(())
 }
 
-fn launch(viewer: &view::Viewer, path: &std::path::Path) -> Result<bool, CliError> {
+fn launch(
+    viewer: &view::Viewer,
+    path: &std::path::Path,
+    from: view::Source,
+) -> Result<bool, CliError> {
     match viewer.command(path) {
-        Some(cmd) => view::launch(&cmd).map(|_| true),
+        Some(cmd) => view::launch(&cmd, from).map(|_| true),
         None => Ok(false),
     }
 }
@@ -3770,8 +3777,12 @@ fn images_cmd(cli: &Cli, cmd: &ImagesCmd, store: &ConfigStore) -> Result<(), Cli
             let (_, s) = imaging::find(&f, &h, study)?;
             let dir = view::new_open_dir(&s.id)?;
             f.store.fetch_tree(&s.path, &dir)?;
-            let launched =
-                !*no_launch && launch(&view::Viewer::for_images(cfg.viewer.as_deref()), &dir)?;
+            let launched = !*no_launch
+                && launch(
+                    &view::Viewer::for_images(cfg.viewer.as_deref()),
+                    &dir,
+                    view::Source::of_a_study(),
+                )?;
             output::emit(
                 json,
                 "study-open",

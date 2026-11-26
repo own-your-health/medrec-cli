@@ -37,7 +37,7 @@ impl Env {
         let path = format!(
             "{}:{}",
             dir.display(),
-            std::env::var("PATH").unwrap_or_default()
+            medrec::testdata::no_viewer_path(&std::env::var("PATH").unwrap_or_default())
         );
         let e = Env { root, path };
         e.ok(&["profiles", "add", "home"]);
@@ -55,6 +55,7 @@ impl Env {
             .env("MEDREC_KEYCHAIN_SERVICE", "piekstra.medrec.hermetic-tests")
             .env("MEDREC_LAUNCH_AGENTS_DIR", self.root.join("LaunchAgents"))
             .env("MEDREC_LAUNCHCTL", self.root.join("launchctl"))
+            .env("MEDREC_VIEWER", "none")
             .env("MEDREC_TEST_AUTH_WAIT_SECS", "1")
             .env_remove("NO_COLOR")
             .env_remove("FAKEPROV_AUTH");
