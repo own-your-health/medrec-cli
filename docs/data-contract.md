@@ -1843,6 +1843,7 @@ A reader decides freshness by MD5, as Drive reports it (`md5Checksum`):
 | Field | What |
 |---|---|
 | `medrec` | The version that wrote them. Another version makes every view again. |
+| `build` | The commit that medrec was built from, where it is known (0.9.10 and later); absent where it is not. Another build makes every view again, as another version does. |
 | `household` | The MD5 (hex) of `household.json` as the views were made from it. |
 | `label_salt` | What the ids of provider labels are salted with: random, made with the folder's first label and kept (0.9.7 and later). Absent before that. A reader does not use it. |
 | `people.<id>.index`, `.text` | The MD5s of the person's `index.json` and `text.json` as read; `null` when the file is absent. |
