@@ -591,13 +591,15 @@ ICD-10 code by what it is called, a report by its conclusion and a result by a
 value that is a text, a document by its title, the name its file came with or
 any private record that links it, a bill or receipt by its own words, with its
 copies and the statements and payments before and after it, and a study by its
-report. A claim, a visit, a prescription, a procedure or a result is private
-too where the clinician it prints, by surname and first initial, is one whom a
-paper of the person's ties to what they treat, even when it spells out more of
-the name. So is a claim of the day of a paper from such a practice, and an item
-of a clinician linked to one: by two such days of theirs, or by one on which
-theirs is the only clinician's claim. Each is a likely match: `medrec private
-unmark <id>` opens one item, and `--clinician` every item of that clinician's. A study with no report is left out of answers
+report. A claim, a visit, a prescription, a procedure, a result or a report is
+private too where the clinician it prints, by surname and first initial, is one
+whom a paper of the person's ties to what they treat, even when it spells out
+more of the name. So is a claim that prints a clinician and is of the day of a
+bill, a receipt or a visit's paper from such a practice (not a pharmacy), and
+an item of a clinician linked to one: by two such days of theirs, or by one on
+which theirs is the only clinician's claim. Each is a likely match: `medrec
+private unmark <id>` opens one item, and `--clinician` every item that is
+private only because of that clinician; other rules still hold theirs. A study with no report is left out of answers
 about the whole household too. An item stays private by what any of its sources
 gave of it, then or now, whatever it shows: the list says `given` of one that is
 private only by that. The household has the last word.

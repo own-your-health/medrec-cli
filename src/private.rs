@@ -1301,19 +1301,21 @@ pub fn clinician(
     let mut out = ClinicianWord::default();
     if open {
         let tied = clinicians::Clinicians::of(&idx, &marks.clinicians).tied(r);
-        let printed = clinicians::printed(r);
-        let of = |o: &clinicians::Opened| o.person().is_some_and(|x| printed.contains(&x));
-        let already = marks.clinicians.iter().any(of);
+        let already = marks.clinicians.iter().any(|o| o.of(r));
         if tied.is_empty() && !already {
             let not = format!("{item} is not private by a clinician it prints");
             return Err(Failed::Refused(CliError::Usage(not)));
         }
         let at = crate::refresh::time::fmt(crate::refresh::time::now());
-        for (surname, initial) in tied {
-            let o = clinicians::Opened {
-                id: crate::ids::new("o"),
+        for (printed, people) in tied {
+            let reading = |(surname, initial): (String, char)| clinicians::Reading {
                 surname,
                 initial: initial.to_string(),
+            };
+            let o = clinicians::Opened {
+                id: crate::ids::new("o"),
+                printed,
+                people: people.into_iter().map(reading).collect(),
                 item: item.to_string(),
                 at: at.clone(),
                 by: None,
@@ -1323,8 +1325,7 @@ pub fn clinician(
             marks.clinicians.push(o);
         }
     } else {
-        let printed = clinicians::printed(r);
-        let of = |o: &clinicians::Opened| o.person().is_some_and(|x| printed.contains(&x));
+        let of = |o: &clinicians::Opened| o.of(r);
         out.marks = marks
             .clinicians
             .iter()

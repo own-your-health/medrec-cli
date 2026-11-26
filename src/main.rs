@@ -1837,7 +1837,7 @@ fn private_cmd(cli: &Cli, cmd: &PrivateCmd, store: &ConfigStore) -> Result<(), C
                 // The clinicians the household opened, as it said them.
                 for o in f.marks(p).map(|m| m.clinicians).unwrap_or_default() {
                     opened.push(serde_json::json!({
-                        "id": o.id, "clinician": format!("{} {}", o.initial, o.surname),
+                        "id": o.id, "clinician": o.printed,
                         "item": o.item, "at": o.at, "person": p.id, "person_name": p.name,
                     }));
                 }

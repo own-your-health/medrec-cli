@@ -3306,10 +3306,13 @@ fn a_clinician_a_paper_names_makes_claims_private_everywhere() {
     }
     let marks = std::fs::read_to_string(dir.join("marks.json")).unwrap();
     let marks: Value = serde_json::from_str(&marks).unwrap();
-    assert_eq!(marks["clinicians"][0]["surname"], "SAMPLETON");
+    let people = json!([{"surname": "SAMPLETON", "initial": "E"}]);
+    assert_eq!(marks["clinicians"].as_array().unwrap().len(), 1);
+    assert_eq!(marks["clinicians"][0]["printed"], "SAMPLETON, ED");
+    assert_eq!(marks["clinicians"][0]["people"], people);
     assert_eq!(marks["clinicians"][0]["item"], later);
     let list = e.ok(&["private", "list"]);
-    assert_eq!(list["clinicians_opened"][0]["clinician"], "E SAMPLETON");
+    assert_eq!(list["clinicians_opened"][0]["clinician"], "SAMPLETON, ED");
     assert_eq!(list["clinicians_opened"][0]["item"], later);
     let row = |id: &str| {
         list["items"]
