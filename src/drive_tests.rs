@@ -410,3 +410,66 @@ fn a_raw_path_that_is_not_relative_is_never_copied_to() {
     assert_eq!((count.records, count.unread), (1, 1));
     assert!(!outside.path().join("Claim").exists());
 }
+
+/// A folder of raw files that cannot be copied keeps its error's kind for
+/// `records fields`, and its records are unread, with its code, for `verify
+/// --events`.
+#[test]
+fn a_raw_folder_that_cannot_be_copied_keeps_its_error() {
+    use crate::model::{PersonIndex, Record};
+    use pk_cli_drive::google::fake::When;
+    let h = Harness::new(true);
+    h.sign_in();
+    let records = h.fake.add_folder(ROOT_ID, "Medical Records");
+    let loc = h.location(&records);
+    let mut cfg = Config::default();
+    maint::init(&mut cfg, &loc, false, BUDGET).unwrap();
+    let rel = |n: usize| format!("Robin Testperson/Records/one/Claim/c-{n}.json");
+    {
+        let f = Folder::open_at(&loc, Access::Write, BUDGET).unwrap();
+        let mut hh = f.household().unwrap();
+        hh.people.push(
+            serde_json::from_value(serde_json::json!({
+                "id": "p_drive", "name": "Robin Testperson", "folder": "Robin Testperson",
+                "created_at": "2026-01-01T00:00:00Z"
+            }))
+            .unwrap(),
+        );
+        f.save_household(&mut hh).unwrap();
+        let mut idx = PersonIndex::new("p_drive");
+        idx.records = (0..2)
+            .map(|n| -> Record {
+                serde_json::from_value(serde_json::json!({
+                    "id": format!("r_{n}"), "kind": "claim", "key": format!("k_{n}"),
+                    "display": "Office visit", "date": "2026-01-02", "fields": {},
+                    "provenance": [{
+                        "source": {"kind": "fhir", "cli": "fakeprov"}, "method": "fhir-api",
+                        "filed_at": "2026-01-02T10:00:00Z", "filed_by": "medrec",
+                        "raw_path": rel(n)}]
+                }))
+                .unwrap()
+            })
+            .collect();
+        f.save_index(&hh.people[0], &mut idx).unwrap();
+        for n in 0..2 {
+            let raw = format!(r#"{{"resourceType": "Claim", "id": "c-{n}", "item": [{{}}]}}"#);
+            f.store.write_text(&rel(n), &raw).unwrap();
+        }
+    }
+    let file = h.fake.find(&format!("Medical Records/{}", rel(0))).unwrap();
+    h.fake
+        .fail_next(&file, 403, "forbidden", 1000, When::Before);
+    let f = Folder::open_at(&loc, Access::Read, BUDGET).unwrap();
+    let hh = f.household().unwrap();
+    let err = crate::raw::fields(&f, &hh, None, &[]).unwrap_err();
+    assert_eq!(err.code(), "auth", "{err}");
+    let of = crate::against::events(&f, &hh);
+    assert_eq!(of.len(), 1);
+    assert!(!of[0].not_compared, "{:?}", of[0]);
+    assert_eq!(of[0].unread, ["r_0", "r_1"]);
+    assert_eq!(
+        of[0].read_errors.iter().copied().collect::<Vec<_>>(),
+        ["auth"]
+    );
+    assert!(!of[0].clean());
+}

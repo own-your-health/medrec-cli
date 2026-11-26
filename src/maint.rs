@@ -522,6 +522,9 @@ pub struct Verify {
     pub changed: Vec<String>,
     /// Files under Documents, Claims or Imaging that no index entry names.
     pub unindexed: Vec<String>,
+    /// People whose index does not read, of whom nothing is checked (0.9.11
+    /// and later).
+    pub index_unread: Vec<String>,
     /// With `--events`, each person's events against their raw files.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub people: Option<Vec<Against>>,
@@ -530,7 +533,8 @@ pub struct Verify {
 impl Verify {
     pub fn clean(&self) -> bool {
         let events = self.people.iter().flatten().all(Against::clean);
-        self.missing.is_empty() && self.changed.is_empty() && events
+        let indexes = self.index_unread.is_empty();
+        self.missing.is_empty() && self.changed.is_empty() && indexes && events
     }
 }
 
@@ -544,7 +548,16 @@ pub fn verify(folder: &Folder, deep: bool) -> Result<Verify, CliError> {
         ..Default::default()
     };
     for p in &h.people {
-        let idx = folder.whole_index(p)?;
+        // One that does not read is in the report, and the others are checked;
+        // a sign-in or Drive that fails stops it, as nothing else would read.
+        let idx = match folder.whole_index(p) {
+            Ok(idx) => idx,
+            Err(e) if e.code() == "other" => {
+                v.index_unread.push(p.id.clone());
+                continue;
+            }
+            Err(e) => return Err(e),
+        };
         let listing: HashMap<String, Option<String>> = folder
             .store
             .hashes(&p.folder)?

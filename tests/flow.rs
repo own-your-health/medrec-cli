@@ -352,7 +352,8 @@ fn verify_compares_events_with_their_raw_files() {
     let (code, v) = compared();
     assert_eq!(code, Some(0), "{v}");
     assert!(v["records"].as_u64() > Some(1), "{v}");
-    assert!(e.ok(&["verify"]).get("people").is_none());
+    let plain = e.ok(&["verify"]);
+    assert!(plain.get("people").is_none() && plain["index_unread"] == serde_json::json!([]));
     let event = e.ok(&["events", "list", "--person", "Robin"]);
     let event = event["items"][0]["id"].as_str().unwrap().to_string();
     const LISTS: [&str; 7] = [
@@ -500,11 +501,32 @@ fn verify_compares_events_with_their_raw_files() {
         .unwrap()
         .iter()
         .find(|p| p["not_compared"] == true);
-    assert!(robin.is_some_and(|p| p["events"] == 0), "{v}");
+    assert!(
+        robin.is_some_and(|p| p["events"] == 0 && p["error_code"] == "other"),
+        "{v}"
+    );
     match kept {
         Some(t) => std::fs::write(&text, t).unwrap(),
         None => std::fs::remove_file(&text).unwrap(),
     }
+    assert_eq!(compared().0, Some(0));
+    // An index that does not read is in the report, and the rest is checked.
+    std::fs::write(&path, "{").unwrap();
+    let out = e.run(&["--json", "verify", "--events"]);
+    let v: Value = serde_json::from_slice(&out.stdout).expect("one JSON document");
+    assert_eq!(out.status.code(), Some(1), "{v}");
+    let unread = v["index_unread"].as_array().unwrap();
+    assert_eq!(unread.len(), 1, "{v}");
+    let people = v["people"].as_array().unwrap();
+    let robin = people.iter().find(|p| p["person"] == unread[0]);
+    assert!(robin.is_some_and(|p| p["not_compared"] == true), "{v}");
+    let said = e.run(&["verify", "--events"]);
+    let said = String::from_utf8_lossy(&said.stdout).to_string();
+    assert!(
+        said.contains("index that does not read") && said.contains("not compared (other)"),
+        "{said}"
+    );
+    std::fs::write(&path, serde_json::to_string(&filed).unwrap()).unwrap();
     assert_eq!(compared().0, Some(0));
     let out = e.run(&["verify", "--events"]);
     let text = String::from_utf8_lossy(&out.stdout).to_string();

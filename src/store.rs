@@ -261,6 +261,18 @@ pub fn plain_rel(rel: &str) -> bool {
             .all(|c| matches!(c, std::path::Component::Normal(_)))
 }
 
+/// Every path a [`Store`] is given is the folder itself (empty) or a
+/// [`plain_rel`] in it. The error names no path: it is one an edited file gave.
+fn inside(rel: &str) -> Result<(), CliError> {
+    if rel.is_empty() || plain_rel(rel) {
+        Ok(())
+    } else {
+        Err(CliError::Other(
+            "a path in the records folder's files leads outside it: an index or household.json may have been edited".into(),
+        ))
+    }
+}
+
 /// `rel` under `root`, where it is a [`plain_rel`]; `None` where it is not.
 pub fn within(root: &Path, rel: &str) -> Option<PathBuf> {
     plain_rel(rel).then(|| root.join(rel))
@@ -368,11 +380,13 @@ impl Store {
     }
 
     pub fn read_text(&self, rel: &str) -> Result<Option<String>, CliError> {
+        inside(rel)?;
         self.backend.read_file(rel)
     }
 
     /// The same, never from the read cache.
     pub fn read_text_fresh(&self, rel: &str) -> Result<Option<String>, CliError> {
+        inside(rel)?;
         match &self.location {
             Location::Dir(_) => self.read_text(rel),
             Location::Drive(_) => self.remote().cat(rel),
@@ -380,6 +394,7 @@ impl Store {
     }
 
     pub fn write_text(&self, rel: &str, content: &str) -> Result<(), CliError> {
+        inside(rel)?;
         if let Location::Dir(root) = &self.location {
             // Atomic and owner-only on a local directory; pk-cli-drive's
             // mount write is a plain overwrite.
@@ -398,6 +413,7 @@ impl Store {
     /// Write bytes to `rel` whole, replacing any file there: atomic and
     /// owner-only on a local directory, one upload on Drive.
     pub fn write_bytes(&self, rel: &str, content: &[u8]) -> Result<(), CliError> {
+        inside(rel)?;
         if let Location::Dir(root) = &self.location {
             let path = root.join(rel);
             create_parent(&path)?;
@@ -423,6 +439,9 @@ impl Store {
     /// another, owner-only; on Drive a few at a time within pk-cli-drive's
     /// limit, skipping a file whose MD5 already matches. How many were sent.
     pub fn write_many(&self, files: &[(&str, &[u8])]) -> Result<usize, CliError> {
+        for (rel, _) in files {
+            inside(rel)?;
+        }
         if let Location::Dir(_) = &self.location {
             for (rel, bytes) in files {
                 self.write_bytes(rel, bytes)?;
@@ -435,6 +454,7 @@ impl Store {
     /// Upload a local file (binary-safe), replacing any file at `rel`. On a
     /// local directory the file is owner-only (0600) in owner-only folders.
     pub fn put_file(&self, local: &Path, rel: &str) -> Result<(), CliError> {
+        inside(rel)?;
         if let Location::Dir(root) = &self.location {
             return private_copy(local, &root.join(rel), Existing::Replace);
         }
@@ -444,6 +464,7 @@ impl Store {
     /// The bytes of `rel` on local disk (the file itself on a directory; a
     /// download into an owner-only temp dir otherwise).
     pub fn fetch(&self, rel: &str) -> Result<LocalCopy, CliError> {
+        inside(rel)?;
         self.backend.local_copy(rel)
     }
 
@@ -460,6 +481,7 @@ impl Store {
 
     /// The same, never from the read cache; `None` where the file is not there.
     pub fn read_bytes_fresh(&self, rel: &str) -> Result<Option<Vec<u8>>, CliError> {
+        inside(rel)?;
         let read = match &self.location {
             Location::Dir(root) => std::fs::read(root.join(rel)).map_err(|e| {
                 let says = format!("reading {}: {e}", self.display_path(rel));
@@ -479,17 +501,20 @@ impl Store {
     }
 
     pub fn exists(&self, rel: &str) -> Result<bool, CliError> {
+        inside(rel)?;
         self.backend.exists(rel)
     }
 
     /// Every file under `rel`, recursively, with sizes.
     pub fn list(&self, rel: &str) -> Result<Vec<FileEntry>, CliError> {
+        inside(rel)?;
         self.backend.list_entries(rel)
     }
 
     /// Delete one file. `Ok(false)` when it was not there. pk-cli-drive
     /// refuses an empty path, a folder, an absolute path and `..`.
     pub fn delete(&self, rel: &str) -> Result<bool, CliError> {
+        inside(rel)?;
         self.backend.delete_file(rel)
     }
 }
@@ -516,6 +541,7 @@ impl Store {
     /// listing. Use [`Store::md5`] for a single file.
     pub fn hashes(&self, rel: &str) -> Result<Vec<Hashed>, CliError> {
         let rel = rel.trim_matches('/');
+        inside(rel)?;
         match &self.location {
             Location::Dir(root) => {
                 let base = if rel.is_empty() {
@@ -567,6 +593,7 @@ impl Store {
     /// not there.
     pub fn list_here(&self, rel: &str) -> Result<Vec<FileEntry>, CliError> {
         let rel = rel.trim_matches('/');
+        inside(rel)?;
         match &self.location {
             Location::Dir(root) => {
                 let dir = root.join(rel);
@@ -615,6 +642,7 @@ impl Store {
     /// location's own path names (an inbox inside the records folder).
     pub fn mkdir(&self, rel: &str) -> Result<(), CliError> {
         let rel = rel.trim_matches('/');
+        inside(rel)?;
         match &self.location {
             Location::Dir(root) => private_dirs(&root.join(rel)),
             Location::Drive(_) => match &self.backend {
@@ -626,6 +654,7 @@ impl Store {
 
     /// The MD5 the store holds for one file; `None` when it is not there.
     pub fn md5(&self, rel: &str) -> Result<Option<String>, CliError> {
+        inside(rel)?;
         match &self.location {
             Location::Dir(root) => {
                 let p = root.join(rel);
@@ -643,6 +672,7 @@ impl Store {
     /// with other bytes refuses the whole copy before anything is uploaded,
     /// so a filed file cannot be overwritten by a later upload.
     pub fn put_tree(&self, local: &Path, rel: &str) -> Result<(), CliError> {
+        inside(rel)?;
         match &self.location {
             Location::Dir(root) => copy_tree(local, &root.join(rel), Existing::Keep),
             Location::Drive(_) => self
@@ -655,6 +685,7 @@ impl Store {
     /// Copy a local directory's contents under `rel`, replacing a file there
     /// whose bytes differ (in place on Drive, keeping its id): a backup's.
     pub fn put_tree_replacing(&self, local: &Path, rel: &str) -> Result<(), CliError> {
+        inside(rel)?;
         match &self.location {
             Location::Dir(root) => copy_tree(local, &root.join(rel), Existing::Replace),
             Location::Drive(_) => self
@@ -666,6 +697,7 @@ impl Store {
 
     /// Copy everything under `rel` into a local directory (owner-only).
     pub fn fetch_tree(&self, rel: &str, local: &Path) -> Result<(), CliError> {
+        inside(rel)?;
         match &self.location {
             Location::Dir(root) => copy_tree(&root.join(rel), local, Existing::Replace),
             Location::Drive(_) => self.remote().fetch_tree(rel, local).map(|_| ()),
@@ -674,6 +706,8 @@ impl Store {
 
     /// Move a file within the store; refuses to replace one.
     pub fn move_no_clobber(&self, from: &str, to: &str) -> Result<(), CliError> {
+        inside(from)?;
+        inside(to)?;
         self.backend.move_no_clobber(from, to)
     }
 

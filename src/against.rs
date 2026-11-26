@@ -24,6 +24,10 @@ pub struct Against {
     /// compared (absent otherwise).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub not_compared: bool,
+    /// With `not_compared`, the code of the error that stopped it (`auth`,
+    /// `upstream`, `other`, …).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<&'static str>,
     pub events: usize,
     /// The records in them.
     pub records: usize,
@@ -46,6 +50,10 @@ pub struct Against {
     /// Records of which a raw file is not there, does not read, or is in a
     /// folder that could not be copied.
     pub unread: Vec<String>,
+    /// The codes of the errors that made records unread, where one did: a
+    /// folder that could not be copied, or a file the folder did not give.
+    #[serde(skip_serializing_if = "BTreeSet::is_empty")]
+    pub read_errors: BTreeSet<&'static str>,
 }
 
 impl Against {
@@ -80,9 +88,10 @@ impl Against {
 /// read is `not_compared`, and the others are compared all the same.
 pub fn events(folder: &Folder, h: &Household) -> Vec<Against> {
     let one = |p: &Person| {
-        of(folder, h, p).unwrap_or_else(|_| Against {
+        of(folder, h, p).unwrap_or_else(|e| Against {
             person: p.id.clone(),
             not_compared: true,
+            error_code: Some(e.code()),
             ..Against::default()
         })
     };
@@ -185,10 +194,19 @@ impl Against {
         for pv in &r.provenance {
             let Some(path) = &pv.raw_path else { continue };
             let path = import::current_of(path).unwrap_or_else(|| path.clone());
-            // A folder that could not be copied is unread, as a file not there is.
-            let Some(v) = files.read(&path).ok().flatten() else {
-                unread = true;
-                continue;
+            // A folder that could not be copied is unread, as a file not there
+            // is, with the code of its error.
+            let v = match files.read(&path) {
+                Ok(Some(v)) => v,
+                Ok(None) => {
+                    unread = true;
+                    continue;
+                }
+                Err(e) => {
+                    self.read_errors.insert(e.code());
+                    unread = true;
+                    continue;
+                }
             };
             read += 1;
             let dir = import::source_dir_of(&path);

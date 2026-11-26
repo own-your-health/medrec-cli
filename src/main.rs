@@ -1413,6 +1413,7 @@ fn run(cli: &Cli) -> Result<(), CliError> {
                     ("missing", "missing"),
                     ("changed", "changed"),
                     ("not indexed", "unindexed"),
+                    ("index that does not read, of", "index_unread"),
                 ] {
                     for p in v[key].as_array().into_iter().flatten() {
                         println!("{label}: {}", p.as_str().unwrap_or(""));
@@ -1420,7 +1421,11 @@ fn run(cli: &Cli) -> Result<(), CliError> {
                 }
                 for of in r.people.iter().flatten() {
                     if of.not_compared {
-                        println!("{}: not compared: its files could not be read", of.person);
+                        let code = of.error_code.unwrap_or("other");
+                        println!(
+                            "{}: not compared ({code}): its files did not read",
+                            of.person
+                        );
                         continue;
                     }
                     println!(
@@ -1432,6 +1437,10 @@ fn run(cli: &Cli) -> Result<(), CliError> {
                         for id in ids {
                             println!("{label}: {id}");
                         }
+                    }
+                    if !of.read_errors.is_empty() {
+                        let codes: Vec<&str> = of.read_errors.iter().copied().collect();
+                        println!("raw files did not read, by error: {}", codes.join(", "));
                     }
                 }
             });

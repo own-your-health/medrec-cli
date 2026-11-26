@@ -262,8 +262,9 @@ pub fn fields(
 /// copy: one per folder of them, not one call per file. No error names a file.
 pub(crate) enum Files<'a> {
     There(&'a Folder),
-    /// The copies, and the folders that could not be copied.
-    Copied(pk_cli_drive::TempDir, BTreeSet<String>),
+    /// The copies, and the folders that could not be copied, with the error
+    /// each gave, naming no file.
+    Copied(pk_cli_drive::TempDir, BTreeMap<String, CliError>),
 }
 
 impl<'a> Files<'a> {
@@ -279,7 +280,7 @@ impl<'a> Files<'a> {
             .flat_map(currents)
             .filter_map(|(rel, _)| rel.rsplit_once('/').map(|(d, _)| d.to_string()))
             .collect();
-        let mut failed = BTreeSet::new();
+        let mut failed = BTreeMap::new();
         for d in &dirs {
             // A path no index can lead out of the copy by: its files are not there.
             let Some(to) = store::within(tmp.path(), d) else {
@@ -290,8 +291,8 @@ impl<'a> Files<'a> {
                 Ok(false) => Ok(()),
                 Err(e) => Err(e),
             };
-            if copied.is_err() {
-                failed.insert(d.clone());
+            if let Err(e) = copied {
+                failed.insert(d.clone(), unnamed(e));
             }
         }
         Ok(Files::Copied(tmp, failed))
@@ -305,16 +306,14 @@ impl<'a> Files<'a> {
         }
         match self {
             Files::There(folder) => bytes(folder, rel).map_err(unnamed),
-            Files::Copied(_, failed)
-                if rel
-                    .rsplit_once('/')
-                    .is_some_and(|(d, _)| failed.contains(d)) =>
-            {
-                Err(CliError::Other(
-                    "a folder of raw files could not be copied".into(),
-                ))
+            Files::Copied(tmp, failed) => {
+                let dir = rel.rsplit_once('/').map(|(d, _)| d);
+                // Its folder's error, of the kind it was: a sign-in, Drive, or a file.
+                match dir.and_then(|d| failed.get(d)) {
+                    Some(e) => Err(e.clone()),
+                    None => copy(tmp.path(), rel),
+                }
             }
-            Files::Copied(tmp, _) => copy(tmp.path(), rel),
         }
     }
 
