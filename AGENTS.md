@@ -139,8 +139,12 @@ make install     # signed release build into ~/.cargo/bin
 cargo test --test flow   # the end-to-end flow on synthetic data
 ```
 
-Tests never read the Keychain and never use the network. The black-box tests
-set `MEDREC_KEYCHAIN_SERVICE` to an empty service; the Drive tests sign in to
+Tests never read the Keychain, never use the network and never open a viewer.
+The black-box tests set `MEDREC_KEYCHAIN_SERVICE` to an empty service and
+`MEDREC_VIEWER` to `none`, and run with `testdata::no_viewer_path`: the first
+`open` and `xdg-open` on their `PATH` launch nothing. A test of a viewer checks
+the command it would run (`Viewer::command`), never runs it. Every harness that
+runs the binary sets both; the Drive tests sign in to
 cli-common's fake Drive server with keys in memory (`store::testing`).
 OCR and poppler assertions are skipped when those tools are missing.
 

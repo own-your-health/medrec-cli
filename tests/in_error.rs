@@ -42,7 +42,7 @@ impl Env {
     }
 
     fn run(&self, args: &[&str]) -> std::process::Output {
-        let path = std::env::var("PATH").unwrap_or_default();
+        let path = medrec::testdata::no_viewer_path(&std::env::var("PATH").unwrap_or_default());
         Command::cargo_bin("medrec")
             .unwrap()
             .env("XDG_CONFIG_HOME", self.root.join("config"))
@@ -55,6 +55,7 @@ impl Env {
             )
             .env("MEDREC_PROFILE", "home")
             .env("MEDREC_KEYCHAIN_SERVICE", "piekstra.medrec.hermetic-tests")
+            .env("MEDREC_VIEWER", "none")
             .arg("--json")
             .args(args)
             .output()
@@ -1309,7 +1310,7 @@ fn what_another_source_calls_a_paper_holds_it_private() {
         assert_eq!(e.private()[&id]["given"], true, "{title}");
         assert_eq!(e.paper().organization.as_deref(), Some(OPEN));
         // It shows nothing of it, and keeps it when it is said no more.
-        let shown = e.ok(&["documents", "open", &id]).to_string();
+        let shown = e.ok(&["documents", "open", &id, "--no-launch"]).to_string();
         assert!(
             !shown.contains("Psycho") && !shown.contains(PRIVATE),
             "{shown}"
