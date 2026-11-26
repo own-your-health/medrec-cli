@@ -268,9 +268,21 @@ fn scans_file_duplicates_are_caught_and_review_finishes_the_rest() {
         e.records().join("inbox/scan_0002.pdf"),
     )
     .unwrap();
+    // A name with a backslash is a file's own.
+    std::fs::copy(
+        scans.join("visit_alex.pdf"),
+        e.records().join("inbox/scan\\0003.pdf"),
+    )
+    .unwrap();
     let inbox = e.ok(&["intake", "--inbox"]);
-    assert_eq!(inbox["items"][0]["status"], "duplicate");
+    let items = inbox["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2, "{inbox}");
+    assert!(items.iter().all(|i| i["status"] == "duplicate"), "{inbox}");
     assert!(!e.records().join("inbox/scan_0002.pdf").exists());
+    assert!(
+        !e.records().join("inbox/scan\\0003.pdf").exists(),
+        "{inbox}"
+    );
 
     let v = e.ok(&["verify"]);
     assert_eq!(v["missing"].as_array().unwrap().len(), 0);
@@ -520,11 +532,16 @@ fn verify_compares_events_with_their_raw_files() {
     let people = v["people"].as_array().unwrap();
     let robin = people.iter().find(|p| p["person"] == unread[0]);
     assert!(robin.is_some_and(|p| p["not_compared"] == true), "{v}");
-    let said = e.run(&["verify", "--events"]);
-    let said = String::from_utf8_lossy(&said.stdout).to_string();
+    let said_by = e.run(&["verify", "--events"]);
+    let said = String::from_utf8_lossy(&said_by.stdout).to_string();
     assert!(
         said.contains("index that does not read") && said.contains("not compared (other)"),
         "{said}"
+    );
+    let why = String::from_utf8_lossy(&said_by.stderr).to_string();
+    assert!(
+        why.contains("does not read") && why.contains("index.json"),
+        "{why}"
     );
     std::fs::write(&path, serde_json::to_string(&filed).unwrap()).unwrap();
     assert_eq!(compared().0, Some(0));

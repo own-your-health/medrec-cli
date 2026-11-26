@@ -473,3 +473,39 @@ fn a_raw_folder_that_cannot_be_copied_keeps_its_error() {
     );
     assert!(!of[0].clean());
 }
+
+/// A sign-in that Drive refuses for a person's index stops `verify` with its
+/// own code, as nothing else would read: it is no index that does not read.
+#[test]
+fn an_index_drive_refuses_stops_verify() {
+    use pk_cli_drive::google::fake::When;
+    let h = Harness::new(true);
+    h.sign_in();
+    let records = h.fake.add_folder(ROOT_ID, "Medical Records");
+    let loc = h.location(&records);
+    let mut cfg = Config::default();
+    maint::init(&mut cfg, &loc, false, BUDGET).unwrap();
+    {
+        let f = Folder::open_at(&loc, Access::Write, BUDGET).unwrap();
+        let mut hh = f.household().unwrap();
+        hh.people.push(
+            serde_json::from_value(serde_json::json!({
+                "id": "p_drive", "name": "Robin Testperson", "folder": "Robin Testperson",
+                "created_at": "2026-01-01T00:00:00Z"
+            }))
+            .unwrap(),
+        );
+        f.save_household(&mut hh).unwrap();
+        let mut idx = crate::model::PersonIndex::new("p_drive");
+        f.save_index(&hh.people[0], &mut idx).unwrap();
+    }
+    let file = h
+        .fake
+        .find("Medical Records/Robin Testperson/index.json")
+        .unwrap();
+    h.fake
+        .fail_next(&file, 403, "forbidden", 1000, When::Before);
+    let f = Folder::open_at(&loc, Access::Fresh, BUDGET).unwrap();
+    let err = maint::verify(&f, false).unwrap_err();
+    assert_eq!(err.code(), "auth", "{err}");
+}

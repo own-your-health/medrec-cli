@@ -1400,6 +1400,9 @@ fn run(cli: &Cli) -> Result<(), CliError> {
             // Not of a copy on this machine, which can be older than the files.
             let f = Folder::open(&cfg, Access::Fresh)?;
             let mut r = maint::verify(&f, a.deep)?;
+            for (id, e) in r.index_unread.iter().zip(&r.index_errors) {
+                eprintln!("medrec: the index of {id} does not read: {e}");
+            }
             if a.events {
                 r.people = Some(medrec::against::events(&f, &f.household()?));
             }
@@ -1413,7 +1416,10 @@ fn run(cli: &Cli) -> Result<(), CliError> {
                     ("missing", "missing"),
                     ("changed", "changed"),
                     ("not indexed", "unindexed"),
-                    ("index that does not read, of", "index_unread"),
+                    (
+                        "index that does not read (why is on stderr), of",
+                        "index_unread",
+                    ),
                 ] {
                     for p in v[key].as_array().into_iter().flatten() {
                         println!("{label}: {}", p.as_str().unwrap_or(""));

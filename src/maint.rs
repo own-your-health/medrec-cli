@@ -525,6 +525,9 @@ pub struct Verify {
     /// People whose index does not read, of whom nothing is checked (0.9.11
     /// and later).
     pub index_unread: Vec<String>,
+    /// Their errors, for stderr: they can name the file.
+    #[serde(skip)]
+    pub index_errors: Vec<CliError>,
     /// With `--events`, each person's events against their raw files.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub people: Option<Vec<Against>>,
@@ -554,6 +557,7 @@ pub fn verify(folder: &Folder, deep: bool) -> Result<Verify, CliError> {
             Ok(idx) => idx,
             Err(e) if e.code() == "other" => {
                 v.index_unread.push(p.id.clone());
+                v.index_errors.push(e);
                 continue;
             }
             Err(e) => return Err(e),

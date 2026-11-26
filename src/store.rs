@@ -261,10 +261,20 @@ pub fn plain_rel(rel: &str) -> bool {
             .all(|c| matches!(c, std::path::Component::Normal(_)))
 }
 
-/// Every path a [`Store`] is given is the folder itself (empty) or a
-/// [`plain_rel`] in it. The error names no path: it is one an edited file gave.
+/// Every path a [`Store`] is given stays in the folder: it has no root and no
+/// `..`. A backslash, or any other character a file's name can hold, is the
+/// name's own, so a file another program named is read, answered and removed
+/// as it was before. The stricter [`plain_rel`] is for the paths an index
+/// gives. The error names no path: it is one an edited file gave.
 fn inside(rel: &str) -> Result<(), CliError> {
-    if rel.is_empty() || plain_rel(rel) {
+    use std::path::Component;
+    let leaves = |c: Component| {
+        matches!(
+            c,
+            Component::RootDir | Component::Prefix(_) | Component::ParentDir
+        )
+    };
+    if !Path::new(rel).components().any(leaves) {
         Ok(())
     } else {
         Err(CliError::Other(
@@ -281,6 +291,34 @@ pub fn within(root: &Path, rel: &str) -> Option<PathBuf> {
 #[cfg(test)]
 mod rel_tests {
     use super::*;
+
+    /// A name that holds a backslash is a file's own, in the store; a root
+    /// or `..` is refused before anything is read.
+    #[test]
+    fn a_store_path_is_refused_only_where_it_leaves_the_folder() {
+        let root = crate::testutil::temp_dir("store-inside");
+        let dir = root.join("records");
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = Store::open(
+            &Location::Dir(dir.clone()),
+            Reads::Fresh,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+        store.write_text("inbox/a\\b.pdf", "x").unwrap();
+        assert_eq!(
+            store.read_text("inbox/a\\b.pdf").unwrap().as_deref(),
+            Some("x")
+        );
+        assert!(store.delete("inbox/a\\b.pdf").unwrap());
+        for rel in ["/etc/hosts", "../outside", "inbox/../../outside"] {
+            let err = store.read_text(rel).unwrap_err();
+            assert!(!err.to_string().contains(rel), "{err}");
+            assert!(store.write_text(rel, "x").is_err(), "{rel}");
+        }
+        assert!(!root.join("outside").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn only_a_relative_path_of_plain_names_is_within() {
@@ -552,11 +590,12 @@ impl Store {
                 let mut out = Vec::new();
                 if base.is_dir() {
                     walk(&base, &mut |p| {
-                        let sub = p
-                            .strip_prefix(root)
-                            .unwrap_or(p)
-                            .to_string_lossy()
-                            .replace('\\', "/");
+                        let sub = p.strip_prefix(root).unwrap_or(p).to_string_lossy();
+                        // A backslash is a separator on Windows alone; on this
+                        // Mac it is a character of the name.
+                        #[cfg(windows)]
+                        let sub = sub.replace('\\', "/");
+                        let sub = sub.to_string();
                         let size = p.metadata().map(|m| m.len()).unwrap_or(0);
                         out.push(Hashed {
                             rel: sub,

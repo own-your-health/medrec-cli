@@ -389,6 +389,12 @@ fn refresh_imports_on_request_and_never_waits_on_a_person() {
         b"{\"please\": true}",
     )
     .unwrap();
+    // A name with a backslash is answered as any other that is not a request's.
+    std::fs::write(
+        e.records().join("_requests/a\\note.json"),
+        b"{\"please\": true}",
+    )
+    .unwrap();
     let v = e.ok(&["refresh", "--scheduled"]);
     assert_eq!(v["attempts"][0]["trigger"], "request", "{v}");
     assert_eq!(v["attempts"][0]["outcome"], "ok", "{v}");
@@ -416,7 +422,7 @@ fn refresh_imports_on_request_and_never_waits_on_a_person() {
             invalid += 1;
         }
     });
-    assert_eq!(invalid, 1);
+    assert_eq!(invalid, 2);
 
     // A sign-in that waits on an approval nobody gives is stopped, and the
     // source needs a person, with the command to run.
