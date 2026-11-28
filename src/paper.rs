@@ -509,15 +509,18 @@ fn day_in(head: &str, paper: Option<Civil>) -> Option<(String, Dated)> {
         told.push((at, day));
     }
     // A day printed whole, on or after the paper's own, is what the paper
-    // says; else the first told. One before it is what the follow-up is of.
+    // says; else the first other day told. One printed before it is what the
+    // follow-up is of, its day only when nothing else is told.
     told.sort_by_key(|(at, _)| *at);
     let from = paper.map(iso);
-    let printed = told.iter().find_map(|(_, d)| {
-        let after = |day: &String| from.as_ref().is_none_or(|p| day >= p);
-        d.clone()
-            .filter(|(day, how)| *how == Dated::Printed && after(day))
-    });
-    printed.or_else(|| told.into_iter().find_map(|(_, day)| day))
+    let after = |day: &String| from.as_ref().is_none_or(|p| day >= p);
+    let printed = |d: &(String, Dated)| d.1 == Dated::Printed;
+    let first = |keep: &dyn Fn(&(String, Dated)) -> bool| {
+        told.iter().find_map(|(_, d)| d.clone().filter(|d| keep(d)))
+    };
+    first(&|d| printed(d) && after(&d.0))
+        .or_else(|| first(&|d| !printed(d) || after(&d.0)))
+        .or_else(|| first(&|_| true))
 }
 
 fn add_days(p: Civil, n: i64) -> Option<Civil> {
@@ -547,14 +550,18 @@ fn names(words: &str) -> Vec<String> {
     out
 }
 
-/// Every name words may print, wherever it stands, for the privacy judge,
-/// which matches a name whole: each run of words that start with a capital,
-/// cut at a word of when or why, a month and a comma, and every part of each
-/// run of up to `PART` words that neither starts nor ends with a join.
+/// Every name words may print, wherever it stands, for the clinician rule,
+/// which reads a name whole: each run of words that start with a capital,
+/// with the small words between them (joins and words of when or why) and a
+/// comma between two, and every part of each run of up to `PART` words that
+/// starts and ends with a capital. A month or a small word that starts with
+/// a capital is one of the name's words ("June Placeholder", "At Sample
+/// Group" and "Sample Group").
 pub(crate) fn spans(words: &str) -> Vec<String> {
     const PART: usize = 8;
     static WORD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\S+").unwrap());
-    let mut runs: Vec<Vec<&str>> = vec![Vec::new()];
+    // Each word, with whether a comma follows it.
+    let mut runs: Vec<Vec<(&str, bool)>> = vec![Vec::new()];
     for w in WORD.find_iter(words) {
         let raw = w
             .as_str()
@@ -562,28 +569,35 @@ pub(crate) fn spans(words: &str) -> Vec<String> {
         let word = raw.trim_end_matches([',', ';', ':', ')']);
         let b = bare(word);
         let capital = word.chars().next().is_some_and(char::is_uppercase);
-        let stop = !INITIAL.is_match(word) && (STOP.contains(&b.as_str()) || MONTH.is_match(&b));
-        if stop || !(capital || JOIN.contains(&b.as_str())) || word.is_empty() {
+        let small = JOIN.contains(&b.as_str()) || STOP.contains(&b.as_str());
+        if word.is_empty() || !(capital || small) {
             runs.push(Vec::new());
             continue;
         }
+        let end = &raw[word.len()..];
         if let Some(run) = runs.last_mut() {
-            run.push(word);
+            run.push((word, end == ","));
         }
-        if raw.len() != word.len() {
+        if !end.is_empty() && end != "," {
             runs.push(Vec::new());
         }
     }
-    let joins = |w: &&str| JOIN.contains(&bare(w).as_str());
+    let edge = |w: &(&str, bool)| w.0.chars().next().is_some_and(char::is_uppercase);
     let mut out = Vec::new();
     for run in &runs {
         for i in 0..run.len() {
             for j in i + 1..=run.len().min(i + PART) {
                 let part = &run[i..j];
-                if part.first().is_some_and(joins) || part.last().is_some_and(joins) {
+                if !part.first().is_some_and(edge) || !part.last().is_some_and(edge) {
                     continue;
                 }
-                let name = part.join(" ");
+                let mut name = String::new();
+                for (k, (w, comma)) in part.iter().enumerate() {
+                    name.push_str(w);
+                    if k + 1 < part.len() {
+                        name.push_str(if *comma { ", " } else { " " });
+                    }
+                }
                 let title = matches!(bare(&name).as_str(), "dr" | "doctor");
                 if !title && !out.contains(&name) {
                     out.push(name);
@@ -884,6 +898,10 @@ mod tests {
             on("2027-01-24", Dated::Relative)
         );
         assert_eq!(
+            day("Follow up to review 1/5/2027 labs in 2 weeks"),
+            on("2027-01-24", Dated::Relative)
+        );
+        assert_eq!(
             day("Follow up on 1/5/2027"),
             on("2027-01-05", Dated::Printed)
         );
@@ -999,7 +1017,13 @@ mod tests {
             ("Call Sample Group in 2 weeks", "Sample Group"),
             ("At Sample Group", "Sample Group"),
             ("TO SAMPLE GROUP", "SAMPLE GROUP"),
-            ("in 2 weeks: June Placeholder", "Placeholder"),
+            ("in 2 weeks: June Placeholder", "June Placeholder"),
+            (
+                "Return to Center for Placeholder Health",
+                "Center for Placeholder Health",
+            ),
+            ("with PLACEHOLDER, JUNE in 1 month", "PLACEHOLDER, JUNE"),
+            ("in 2 weeks: Kim Placeholder, LCSW", "Kim Placeholder, LCSW"),
             ("Contact Sample Group Tuesday", "Sample Group"),
             ("with Dr. A. Sample (Sample Group)", "Dr. A. Sample"),
             ("with Dr. A. Sample (Sample Group)", "Sample Group"),
@@ -1009,6 +1033,7 @@ mod tests {
         assert!(spans("in 2 weeks as needed").is_empty());
         assert!(!has("with Dr. in 2 weeks", "Dr."));
         assert!(!has("Sample of the Group", "of the Group"));
+        assert!(!has("Return to Sample Group", "to Sample Group"));
     }
 
     #[test]
