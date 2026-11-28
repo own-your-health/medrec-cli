@@ -41,6 +41,12 @@ const SCHEMA_V1: &str = "medrec-views/v1";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// The commit this medrec was built from, empty where it is not known.
 const BUILD: &str = env!("BUILD_COMMIT");
+/// The oldest medrec whose contract a reader must follow to read these views
+/// (`views.json` `reader`). Raise it to the release's version, and say so in
+/// its notes, in the release that gives a view a field that changes what a
+/// reader must leave out or hold back: such a field cannot be ignored, yet it
+/// changes no layout. 0.9.10 gave `private.json` `heading`.
+pub const READER: &str = "0.9.10";
 
 /// The views every person has. A person whose `views.json` entry lacks
 /// one was written by an earlier build of the same version, before that
@@ -94,6 +100,9 @@ pub struct ViewsIndex {
     /// change between builds of one version.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub build: String,
+    /// [`READER`] as it was (0.9.11 and later; empty before).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub reader: String,
     /// The MD5 (hex) of `household.json` as the views were made from it.
     pub household: String,
     /// What the ids of provider labels are salted with: random, made once
@@ -452,6 +461,7 @@ fn make(
         schema: SCHEMA.into(),
         medrec: VERSION.into(),
         build: BUILD.into(),
+        reader: READER.into(),
         household: household.clone(),
         label_salt: salt.get().cloned(),
         people,
@@ -1711,6 +1721,13 @@ fn search_part(it: &views::Searchable, open: &views::OpenPart) -> Value {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    /// A reader is never asked for a contract newer than the medrec that
+    /// wrote the views.
+    #[test]
+    fn the_reader_asked_for_is_no_newer_than_this_medrec() {
+        let parts = |v: &str| -> Vec<u32> { v.split('.').map(|n| n.parse().unwrap()).collect() };
+        assert!(parts(READER) <= parts(VERSION), "{READER} {VERSION}");
+    }
 
     thread_local! {
         static BEFORE_WRITING: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
