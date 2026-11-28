@@ -1,8 +1,9 @@
 BIN := medrec
 CARGO ?= cargo
-# Where cargo puts what it builds: CARGO_TARGET_DIR when it is set, so the
-# binary signed and smoke-tested is the one just built.
-TARGET_DIR := $(or $(CARGO_TARGET_DIR),target)
+# Where cargo puts what it builds, as cargo says (CARGO_TARGET_DIR,
+# CARGO_BUILD_TARGET_DIR or build.target-dir), so the binary signed and
+# smoke-tested is the one just built. Asked once, by the targets that use it.
+TARGET_DIR = $(eval TARGET_DIR := $$(or $$(shell $(CARGO) metadata --format-version 1 --no-deps | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p'),target))$(TARGET_DIR)
 
 .PHONY: build release test lint fmt fmt-check clean install deps smoke verify dev
 
@@ -53,10 +54,10 @@ SMOKE_HELP := profiles init people intake review import providers tables refresh
 	results meds conditions allergies immunizations records documents events bills private labels \
 	note images doctor verify reindex views backup drive config auth self-update mcp cache
 smoke: build
-	@$(TARGET_DIR)/debug/$(BIN) --version >/dev/null
-	@$(TARGET_DIR)/debug/$(BIN) info --json >/dev/null
-	@$(TARGET_DIR)/debug/$(BIN) completions bash >/dev/null
-	@for c in $(SMOKE_HELP); do $(TARGET_DIR)/debug/$(BIN) $$c --help >/dev/null || exit 1; done
+	@"$(TARGET_DIR)/debug/$(BIN)" --version >/dev/null
+	@"$(TARGET_DIR)/debug/$(BIN)" info --json >/dev/null
+	@"$(TARGET_DIR)/debug/$(BIN)" completions bash >/dev/null
+	@for c in $(SMOKE_HELP); do "$(TARGET_DIR)/debug/$(BIN)" $$c --help >/dev/null || exit 1; done
 	@echo "smoke ok"
 
 verify: fmt-check lint test smoke
