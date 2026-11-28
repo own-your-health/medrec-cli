@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Invented, in the shape of CDC's CDSi ScheduleSupportingData.xml: the
+     antigens and CVX codes (951 to 954) are no real ones. -->
+<scheduleSupportingData>
+  <liveVirusConflicts>
+    <liveVirusConflict>
+      <previous>
+        <vaccineType>Samplepox</vaccineType>
+        <cvx>952</cvx>
+      </previous>
+      <current>
+        <vaccineType>Samplepox</vaccineType>
+        <cvx>952</cvx>
+      </current>
+      <conflictBeginInterval>0 days</conflictBeginInterval>
+      <minConflictEndInterval>28 days - 4 days</minConflictEndInterval>
+      <conflictEndInterval>28 days</conflictEndInterval>
+    </liveVirusConflict>
+  </liveVirusConflicts>
+  <cvxToAntigenMap>
+    <cvxMap>
+      <cvx>951</cvx>
+      <shortDescription>Examplitis</shortDescription>
+      <association>
+        <antigen>Examplitis</antigen>
+        <associationBeginAge></associationBeginAge>
+        <associationEndAge></associationEndAge>
+      </association>
+    </cvxMap>
+    <cvxMap>
+      <cvx>952</cvx>
+      <shortDescription>Samplepox A and B</shortDescription>
+      <association>
+        <antigen>Samplepox A</antigen>
+        <associationBeginAge></associationBeginAge>
+        <associationEndAge></associationEndAge>
+      </association>
+      <association>
+        <antigen>Samplepox B</antigen>
+        <associationBeginAge></associationBeginAge>
+        <associationEndAge></associationEndAge>
+      </association>
+    </cvxMap>
+    <cvxMap>
+      <cvx>953</cvx>
+      <shortDescription>Samplepox C, seasonal</shortDescription>
+      <association>
+        <antigen>Samplepox C</antigen>
+        <associationBeginAge></associationBeginAge>
+        <associationEndAge></associationEndAge>
+      </association>
+    </cvxMap>
+    <cvxMap>
+      <cvx>954</cvx>
+      <shortDescription>Samplepox A, under 2 years</shortDescription>
+      <association>
+        <antigen>Samplepox A</antigen>
+        <associationBeginAge>0 days</associationBeginAge>
+        <associationEndAge>2 years</associationEndAge>
+      </association>
+    </cvxMap>
+  </cvxToAntigenMap>
+  <vaccineGroups>
+    <vaccineGroup>
+      <name>Examplitis</name>
+      <administerFullVaccineGroup>No</administerFullVaccineGroup>
+    </vaccineGroup>
+    <vaccineGroup>
+      <name>Samplepox</name>
+      <administerFullVaccineGroup>Yes</administerFullVaccineGroup>
+    </vaccineGroup>
+  </vaccineGroups>
+  <vaccineGroupToAntigenMap>
+    <vaccineGroupMap>
+      <name>Examplitis</name>
+      <antigen>Examplitis</antigen>
+    </vaccineGroupMap>
+    <vaccineGroupMap>
+      <name>Samplepox</name>
+      <antigen>Samplepox A</antigen>
+      <antigen>Samplepox B</antigen>
+      <antigen>Samplepox C</antigen>
+    </vaccineGroupMap>
+  </vaccineGroupToAntigenMap>
+</scheduleSupportingData>

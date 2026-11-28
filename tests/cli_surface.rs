@@ -112,6 +112,7 @@ fn every_command_renders_its_help() {
         &["conditions"],
         &["allergies"],
         &["immunizations"],
+        &["schedule"],
         &["records", "show"],
         &["records", "raw"],
         &["records", "fields"],
@@ -638,16 +639,16 @@ fn the_code_tables_need_no_profile_and_start_absent() {
     let v = json_of(&out);
     let rows = v["items"].as_array().unwrap();
     let ids: Vec<&str> = rows.iter().map(|r| r["id"].as_str().unwrap()).collect();
-    assert_eq!(ids, ["icd10cm", "cvx", "cpt-cvx", "nppes"]);
+    assert_eq!(ids, ["icd10cm", "cvx", "cpt-cvx", "cdsi", "nppes"]);
     for r in rows {
         assert_eq!(r["state"], "absent", "{r}");
         assert!(r.get("accepted").is_none(), "{r}");
     }
     for k in ["version", "date", "bytes", "rows", "sha256"] {
-        assert!(rows[3][k].is_null(), "{k}");
+        assert!(rows[4][k].is_null(), "{k}");
     }
-    assert!(rows[3].get("folder").is_none());
-    for r in &rows[..3] {
+    assert!(rows[4].get("folder").is_none());
+    for r in &rows[..4] {
         assert_eq!(r["sha256"].as_str().unwrap().len(), 64, "{r}");
     }
     for (args, why) in [
@@ -669,7 +670,7 @@ fn the_code_tables_need_no_profile_and_start_absent() {
         ),
         (
             &["tables", "fetch", "icd10cm", "--accept", "00"][..],
-            "no version (cvx, cpt-cvx)",
+            "in place (cvx, cpt-cvx, cdsi)",
         ),
     ] {
         let out = medrec().args(args).output().unwrap();

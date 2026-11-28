@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Invented, in the shape of a CDC CDSi antigen file. -->
+<antigenSupportingData>
+<immunity></immunity>
+<contraindications></contraindications>
+<series>
+<seriesName>Samplepox A 2-dose series</seriesName>
+<targetDisease>Samplepox A</targetDisease>
+<vaccineGroup>Samplepox</vaccineGroup>
+<seriesAdminGuidance>
+</seriesAdminGuidance>
+<seriesType>Standard</seriesType>
+<selectSeries>
+<defaultSeries>Yes</defaultSeries>
+<productPath>No</productPath>
+<seriesGroupName>Standard</seriesGroupName>
+<seriesGroup>1</seriesGroup>
+<seriesPriority>A</seriesPriority>
+<seriesPreference>1</seriesPreference>
+<minAgeToStart>
+</minAgeToStart>
+<maxAgeToStart>
+</maxAgeToStart>
+</selectSeries>
+<seriesDose>
+<doseNumber>Dose 1</doseNumber>
+<age>
+<absMinAge>
+</absMinAge>
+<minAge>
+</minAge>
+<earliestRecAge>12 months</earliestRecAge>
+<latestRecAge>
+</latestRecAge>
+<maxAge>
+</maxAge>
+<effectiveDate>
+</effectiveDate>
+<cessationDate>
+</cessationDate>
+</age>
+<preferableVaccine>
+<vaccineType>Sample vaccine</vaccineType>
+<cvx>952</cvx>
+<beginAge>6 weeks</beginAge>
+<endAge>
+</endAge>
+<tradeName>
+</tradeName>
+<mvx>
+</mvx>
+<volume>0.5</volume>
+<forecastVaccineType>N</forecastVaccineType>
+</preferableVaccine>
+<recurringDose>No</recurringDose>
+<seasonalRecommendation>
+<startDate>
+</startDate>
+<endDate>
+</endDate>
+</seasonalRecommendation>
+</seriesDose>
+<seriesDose>
+<doseNumber>Dose 2</doseNumber>
+<age>
+<absMinAge>
+</absMinAge>
+<minAge>
+</minAge>
+<earliestRecAge>4 years</earliestRecAge>
+<latestRecAge>
+</latestRecAge>
+<maxAge>
+</maxAge>
+<effectiveDate>
+</effectiveDate>
+<cessationDate>
+</cessationDate>
+</age>
+<preferableVaccine>
+<vaccineType>Sample vaccine</vaccineType>
+<cvx>952</cvx>
+<beginAge>6 weeks</beginAge>
+<endAge>
+</endAge>
+<tradeName>
+</tradeName>
+<mvx>
+</mvx>
+<volume>0.5</volume>
+<forecastVaccineType>N</forecastVaccineType>
+</preferableVaccine>
+<recurringDose>No</recurringDose>
+<seasonalRecommendation>
+<startDate>
+</startDate>
+<endDate>
+</endDate>
+</seasonalRecommendation>
+</seriesDose>
+</series>
+</antigenSupportingData>

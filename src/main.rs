@@ -112,7 +112,7 @@ enum Command {
     #[command(subcommand)]
     Providers(ProvidersCmd),
     /// Published code tables kept on this machine: the plain names of
-    /// diagnosis codes, and which codes are vaccines.
+    /// diagnosis codes, which codes are vaccines, and CDC's vaccine schedules.
     #[command(subcommand)]
     Tables(TablesCmd),
     /// Import each source set up for it: on a schedule (a LaunchAgent), on
@@ -133,6 +133,10 @@ enum Command {
     Allergies(RecordArgs),
     /// Immunizations.
     Immunizations(RecordArgs),
+    /// The doses of vaccines CDC's schedules recommend by age, on the dates
+    /// those ages fall on for each person, beside the doses on file. It says
+    /// nothing of what is due. Needs `medrec tables fetch cdsi`.
+    Schedule(ScheduleArgs),
     /// One record by its id, and the ids of what is in a chart and about
     /// somebody else.
     #[command(subcommand)]
@@ -361,11 +365,11 @@ enum TablesCmd {
     /// The tables medrec knows, and whether each is on this machine.
     List,
     /// Download whole tables from their publishers (all the code tables, or
-    /// those named), checked against the SHA-256 medrec records. CDC's
-    /// vaccine tables (`cvx`, `cpt-cvx`) have no version: one named is
-    /// downloaded again, and one that is now another file is refused (exit 6,
-    /// after every table is tried) with its SHA-256 and the command that
-    /// keeps it, with --accept and that hash. The provider
+    /// those named), checked against the SHA-256 medrec records. CDC can
+    /// change its files in place (`cvx`, `cpt-cvx`, and the schedules'
+    /// `cdsi`): one named is downloaded again, and one that is now another
+    /// file is refused (exit 6, after every table is tried) with its SHA-256
+    /// and the command that keeps it, with --accept and that hash. The provider
     /// directory, `nppes`, is fetched only when it is named: one file of over
     /// a gigabyte, whose size is stated first, read as it arrives for the
     /// providers the --profile folder's records need.
@@ -373,10 +377,10 @@ enum TablesCmd {
         /// Tables by id (default: the code tables).
         ids: Vec<String>,
         /// Keep this downloaded file (a zip, or CDC's text file) as the one
-        /// code table named.
+        /// table named.
         #[arg(long, value_name = "FILE", requires = "ids")]
         file: Option<std::path::PathBuf>,
-        /// Keep the one text table named although it is not the file medrec
+        /// Keep the one CDC table named although it is not the file medrec
         /// records, when its SHA-256 is this one: the person's word.
         #[arg(long, value_name = "SHA256", requires = "ids")]
         accept: Option<String>,
@@ -677,6 +681,12 @@ struct SearchArgs {
     /// At most this many hits (1 or more).
     #[arg(long, value_name = "N", default_value_t = 50, value_parser = clap::value_parser!(u64).range(1..))]
     limit: u64,
+}
+
+#[derive(Args, Debug)]
+struct ScheduleArgs {
+    #[arg(long)]
+    person: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -1408,6 +1418,7 @@ fn run(cli: &Cli) -> Result<(), CliError> {
         Command::Conditions(a) => records_cmd(cli, &store, a, &["condition"], "condition"),
         Command::Allergies(a) => records_cmd(cli, &store, a, &["allergy"], "allergy"),
         Command::Immunizations(a) => records_cmd(cli, &store, a, &["immunization"], "immunization"),
+        Command::Schedule(a) => schedule_cmd(cli, &store, a),
         Command::Records(cmd) => one_record_cmd(cli, cmd, &store),
         Command::Documents(cmd) => documents_cmd(cli, cmd, &store),
         Command::Events(cmd) => events_cmd(cli, cmd, &store),
@@ -3492,6 +3503,30 @@ fn print_import(r: &import::Report) {
             }
         }
     }
+}
+
+fn schedule_cmd(cli: &Cli, store: &ConfigStore, a: &ScheduleArgs) -> Result<(), CliError> {
+    let (f, h) = read(store, cli)?;
+    let codes = medrec::vaccines::Codes::here();
+    if codes.schedules().is_empty() {
+        return Err(CliError::NotFound(
+            "no schedule is kept on this machine: `medrec tables fetch cdsi` keeps CDC's".into(),
+        ));
+    }
+    let mut people = Vec::new();
+    let mut names = Vec::new();
+    for p in medrec::people::selected(&h, a.person.as_deref())? {
+        let idx = f.index(p)?;
+        people.push(medrec::schedule::of_index(p, &idx, &codes, None));
+        names.push(p.name.clone());
+    }
+    let out = serde_json::json!({ "people": people });
+    output::emit(cli.common.json, "schedule", out, |v| {
+        let each = v["people"].as_array().into_iter().flatten().zip(&names);
+        let texts: Vec<String> = each.map(|(p, n)| medrec::schedule::text(p, n)).collect();
+        print!("{}", texts.join("\n"));
+    });
+    Ok(())
 }
 
 fn records_cmd(

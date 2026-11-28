@@ -148,6 +148,11 @@ pub struct PersonViews {
     /// again.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vaccine_tables: Option<String>,
+    /// The schedule tables `schedule.json` was made with (`cdsi <SHA-256>`),
+    /// absent when the pass that made these views had none, and made none
+    /// (0.9.12 and later). A reader need not check it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schedule_tables: Option<String>,
     /// The provider directory these views' labels were made with, absent as
     /// `code_table` is (0.9.7 and later). A reader need not check it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -481,6 +486,7 @@ fn make(
 
     let code_table = titles.as_ref().map(|_| crate::tables::Titles::identity());
     let vaccine_tables = codes.identity().map(str::to_string);
+    let schedule_tables = codes.schedule_identity().map(str::to_string);
     let directory = match directories
         .map(|d| crate::labels::Directory::open(&crate::nppes::path(d, &h.folder_id)))
     {
@@ -505,6 +511,7 @@ fn make(
             // A machine without a table leaves what one with it made.
             if (code_table.is_none() || was.code_table == code_table)
                 && (vaccine_tables.is_none() || was.vaccine_tables == vaccine_tables)
+                && (schedule_tables.is_none() || was.schedule_tables == schedule_tables)
                 // An older directory's pass leaves what a newer one's made.
                 && was.directory >= directory_made
                 && EVERY_PERSON.iter().all(|f| was.files.contains_key(*f))
@@ -1356,6 +1363,13 @@ pub(crate) fn person(
     for r in &claimed {
         by_kind.entry("immunization").or_default().push(r);
     }
+    // The schedule, where this machine has one: with no dose on file nor
+    // earliest record that is private, and none at all where the household's
+    // marks do not read, so a reader shows all of it.
+    if !from.vaccines.schedules().is_empty() {
+        let v = crate::schedule::of_index(p, idx, &from.vaccines, Some(&from.private));
+        put(crate::schedule::FILE, json(&v));
+    }
     let mut records = BTreeMap::new();
     let mut place: HashMap<*const Record, (i64, usize)> = HashMap::new();
     for (kind, mut list) in by_kind {
@@ -1644,6 +1658,7 @@ pub(crate) fn person(
         linked: from.linked,
         code_table: from.code_table,
         vaccine_tables: from.vaccines.identity().map(str::to_string),
+        schedule_tables: from.vaccines.schedule_identity().map(str::to_string),
         directory: from.directory,
         provider_state: from.provider_state,
         in_error: st.in_error,

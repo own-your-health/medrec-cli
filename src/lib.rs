@@ -49,6 +49,7 @@ pub mod refresh;
 pub mod reindex;
 pub mod review;
 pub mod roles;
+pub mod schedule;
 pub mod served;
 pub mod services;
 pub mod sources;
@@ -64,6 +65,7 @@ pub mod version;
 pub mod view;
 pub mod viewfiles;
 pub mod views;
+pub mod xml;
 
 /// Create `path` owner-only (0600) and write `bytes`; never replaces a file.
 pub fn write_private(path: &std::path::Path, bytes: &[u8]) -> Result<(), pk_cli_core::CliError> {
