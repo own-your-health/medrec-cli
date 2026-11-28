@@ -53,6 +53,7 @@ pub const FIELDS: &[(&str, &[&str])] = &[
             "category",
             "categories",
             "issued",
+            "performer",
             crate::panels::MEMBERS,
             crate::about::FIELD,
         ],
@@ -66,6 +67,7 @@ pub const FIELDS: &[(&str, &[&str])] = &[
             "categories",
             "results",
             "issued",
+            "performer",
             crate::panels::MEMBERS,
         ],
     ),
@@ -292,6 +294,7 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
             );
             put(&mut fields, "categories", categories(r));
             put_str(&mut fields, "issued", path_str(r, "issued"));
+            put_str(&mut fields, "performer", printed(r, "performer"));
             put_str(&mut fields, crate::about::FIELD, about(r));
         }
         "DiagnosticReport" => {
@@ -310,6 +313,7 @@ pub fn record(r: &Value, provenance: Provenance) -> Option<Record> {
                     .map(|a| json!(a.len())),
             );
             put_str(&mut fields, "issued", path_str(r, "issued"));
+            put_str(&mut fields, "performer", printed(r, "performer"));
         }
         "Condition" => {
             stated(&mut fields, r);
@@ -1615,6 +1619,7 @@ mod tests {
         assert_eq!(med.date.as_deref(), Some("2026-02-01"));
         let report = rec("report-stu3");
         assert_eq!(report.fields["category"], json!("Laboratory"));
+        assert_eq!(report.fields["performer"], json!("Example Reader"));
         assert_eq!(report.date.as_deref(), Some("2026-02-20"));
     }
 

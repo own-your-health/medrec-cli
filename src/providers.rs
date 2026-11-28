@@ -64,6 +64,9 @@ fn references(resource_type: &str) -> &'static [(&'static str, &'static [&'stati
         "MedicationRequest" => &[("prescriber", &["requester", "requester.agent"])],
         "MedicationDispense" => &[("pharmacy", &["performer.0.actor", "location"])],
         "Immunization" => &[("performer", &["performer.0.actor", "practitioner.0.actor"])],
+        "Observation" => &[("performer", &["performer.0"])],
+        // STU3 names each performer's `actor`.
+        "DiagnosticReport" => &[("performer", &["performer.0", "performer.0.actor"])],
         "Procedure" => &[
             ("performer", &["performer.0.actor"]),
             ("location", &["location"]),
@@ -73,14 +76,58 @@ fn references(resource_type: &str) -> &'static [(&'static str, &'static [&'stati
     }
 }
 
-/// The element that prints `field` of `r`, and what it prints.
+/// The element that prints `field` of `r`, and what it prints. An element
+/// that refers to a patient or a relative prints no provider: the next one of
+/// its list stands in its place.
 fn printed_by<'a>(r: &'a Value, field: &str) -> Option<(&'a Value, &'a str)> {
     let ty = r.get("resourceType").and_then(Value::as_str)?;
     let (_, paths) = references(ty).iter().find(|(f, _)| *f == field)?;
     paths.iter().find_map(|p| {
-        let at = path(r, p)?;
+        let at = match p.contains(".0") {
+            // The first of the list that is no person.
+            true => (0..)
+                .map(|n| path(r, &p.replacen(".0", &format!(".{n}"), 1)))
+                .take_while(Option::is_some)
+                .flatten()
+                .find(|at| !a_person(r, at))?,
+            false => path(r, p).filter(|at| !a_person(r, at))?,
+        };
         Some((at, path_str(at, "display")?))
     })
+}
+
+/// Whether a reference is to a patient or a relative, by its `type`, its
+/// `reference` or the contained resource it names.
+fn a_person(r: &Value, at: &Value) -> bool {
+    let kinds = ["Patient", "RelatedPerson"];
+    if at
+        .get("type")
+        .and_then(Value::as_str)
+        .is_some_and(|t| kinds.contains(&t))
+    {
+        return true;
+    }
+    let Some(reference) = at.get("reference").and_then(Value::as_str) else {
+        return false;
+    };
+    if let Some(id) = reference.strip_prefix('#') {
+        let all = r
+            .get("contained")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten();
+        return all.filter(|c| c["id"] == id).any(|c| {
+            c["resourceType"]
+                .as_str()
+                .is_some_and(|t| kinds.contains(&t))
+        });
+    }
+    let segments: Vec<&str> = reference.split('/').collect();
+    let end = segments
+        .iter()
+        .position(|s| *s == "_history")
+        .unwrap_or(segments.len());
+    end >= 2 && kinds.contains(&segments[end - 2])
 }
 
 /// The provider `field` of `r` prints.
@@ -625,6 +672,72 @@ mod tests {
         assert!(of(&fill, &fields, &mut One).unwrap().refs.is_empty());
     }
 
+    /// A result's and a report's performer is followed as a procedure's is:
+    /// a result's and an R4 report's is the reference itself, an STU3 report's
+    /// its `actor`.
+    #[test]
+    fn a_result_and_a_report_print_their_first_performer() {
+        let reading = json!({
+            "resourceType": "Observation",
+            "performer": [
+                {"reference": "Practitioner/a1", "display": "Jordan Sample"},
+                {"display": "Example Lab"}
+            ]
+        });
+        assert_eq!(printed(&reading, "performer"), Some("Jordan Sample"));
+        let fields = map(json!({"performer": "Jordan Sample"}));
+        assert_eq!(
+            of(&reading, &fields, &mut One).unwrap().refs,
+            [entry("performer", Some("0000000006"), None)]
+        );
+        let r4 =
+            json!({"resourceType": "DiagnosticReport", "performer": [{"display": "Example Lab"}]});
+        assert_eq!(printed(&r4, "performer"), Some("Example Lab"));
+        let stu3 = json!({
+            "resourceType": "DiagnosticReport",
+            "performer": [{"role": {"text": "Reader"}, "actor": {"display": "Jordan Sample"}}]
+        });
+        assert_eq!(printed(&stu3, "performer"), Some("Jordan Sample"));
+    }
+
+    /// A reading the person or a relative entered names them as its performer:
+    /// no provider. The next performer is read in its place.
+    #[test]
+    fn a_patient_or_a_relative_is_no_performer() {
+        let with = |first: Value| {
+            json!({
+                "resourceType": "Observation",
+                "contained": [{"resourceType": "RelatedPerson", "id": "rp1"}],
+                "performer": [first, {"reference": "Organization/o1", "display": "Example Lab"}]
+            })
+        };
+        for first in [
+            json!({"reference": "Patient/p1", "display": "Alex Testperson"}),
+            json!({"reference": "https://fhir.example.org/r4/Patient/p1/_history/2", "display": "Alex Testperson"}),
+            json!({"reference": "RelatedPerson/rp1", "display": "Robin Testperson"}),
+            json!({"type": "Patient", "display": "Alex Testperson"}),
+            json!({"reference": "#rp1", "display": "Robin Testperson"}),
+        ] {
+            assert_eq!(
+                printed(&with(first.clone()), "performer"),
+                Some("Example Lab"),
+                "{first}"
+            );
+        }
+        let alone = json!({"resourceType": "Observation",
+            "performer": [{"reference": "Patient/p1", "display": "Alex Testperson"}]});
+        assert_eq!(printed(&alone, "performer"), None);
+        let fields = map(json!({"performer": "Alex Testperson"}));
+        assert!(of(&alone, &fields, &mut One).unwrap().refs.is_empty());
+        // A practitioner, as before.
+        let clinician = with(json!({"reference": "Practitioner/a1", "display": "Jordan Sample"}));
+        assert_eq!(printed(&clinician, "performer"), Some("Jordan Sample"));
+        let stu3 = json!({"resourceType": "DiagnosticReport", "performer": [
+            {"actor": {"reference": "Patient/p1", "display": "Alex Testperson"}},
+            {"actor": {"display": "Example Lab"}}]});
+        assert_eq!(printed(&stu3, "performer"), Some("Example Lab"));
+    }
+
     /// An id is unique only on its own server.
     #[test]
     fn an_absolute_reference_is_followed_only_on_its_sources_server() {
@@ -750,6 +863,8 @@ mod tests {
             "Immunization",
             "Procedure",
             "ExplanationOfBenefit",
+            "Observation",
+            "DiagnosticReport",
         ] {
             assert!(!references(ty).is_empty());
             for (f, _) in references(ty) {

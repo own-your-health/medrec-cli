@@ -25,5 +25,5 @@
   {"resourceType": "DiagnosticReport", "id": "report-stu3", "meta": {"lastUpdated": "2026-03-01T00:00:00Z"},
    "status": "final", "category": {"coding": [{"system": "http://hl7.org/fhir/v2/0074", "code": "LAB", "display": "Laboratory"}]},
    "code": {"text": "Example panel"}, "subject": {"reference": "Patient/pat-0001"},
-   "effectiveDateTime": "2026-02-20", "issued": "2026-02-21T10:00:00Z", "result": [{"reference": "Observation/obs-0001"}]}
+   "effectiveDateTime": "2026-02-20", "issued": "2026-02-21T10:00:00Z", "performer": [{"role": {"text": "Reader"}, "actor": {"display": "Example Reader"}}], "result": [{"reference": "Observation/obs-0001"}]}
 ]
