@@ -62,6 +62,8 @@ pub struct MedrecTools {
     /// This process has read the Drive sign-in from the Keychain once
     /// without waiting on a dialog, so a call reads it in place.
     keychain_read: std::sync::atomic::AtomicBool,
+    /// Where the code tables are: this machine's, or a test's.
+    tables: Option<std::path::PathBuf>,
 }
 
 impl MedrecTools {
@@ -72,7 +74,21 @@ impl MedrecTools {
         MedrecTools {
             cfg: Some(cfg),
             keychain_read: Default::default(),
+            tables: crate::tables::dir(),
         }
+    }
+
+    /// The code tables of `dir` in place of this machine's, as a test keeps
+    /// them.
+    pub fn with_tables(mut self, dir: std::path::PathBuf) -> Self {
+        self.tables = Some(dir);
+        self
+    }
+
+    /// What CDC's tables say of vaccine codes.
+    fn codes(&self) -> crate::vaccines::Codes {
+        let dir = self.tables.as_deref();
+        dir.map_or_else(Default::default, crate::vaccines::Codes::load)
     }
 
     /// For `mcp --list-tools`: no profile, and a call is refused.
@@ -80,6 +96,7 @@ impl MedrecTools {
         MedrecTools {
             cfg: None,
             keychain_read: Default::default(),
+            tables: None,
         }
     }
 
@@ -1037,6 +1054,8 @@ impl MedrecTools {
             None => None,
             Some(q) => {
                 let p = people::resolve(&h, q).map_err(person_error)?;
+                // An answer that names the person leaves nothing out of a
+                // claim (`Parts::named`), nor the vaccine a line tells of.
                 let s = summary::person(
                     &f,
                     &h,
@@ -1045,6 +1064,8 @@ impl MedrecTools {
                     summary::Limits {
                         per_list: SUMMARY_LINES,
                     },
+                    &self.codes(),
+                    &crate::parts::Parts::default(),
                 )?;
                 let mut s = sections(s);
                 let private = PrivateItems::of(&f, &h, &[p])?;
@@ -1226,9 +1247,21 @@ impl MedrecTools {
                         item
                     };
                     if !standing::KINDS.contains(&kind) {
+                        // The vaccines claims tell of are immunizations too.
+                        let claimed = match kind {
+                            "immunization" => {
+                                // What an answer leaves out of a claim is out
+                                // of `idx` already.
+                                let all: Vec<&Record> = idx.records.iter().collect();
+                                let whole = crate::parts::Parts::default();
+                                crate::vaccines::of_claims(&all, &self.codes(), &whole)
+                            }
+                            _ => Vec::new(),
+                        };
                         items.extend(
                             idx.records
                                 .iter()
+                                .chain(&claimed)
                                 .filter(|x| asked(x))
                                 .filter(|x| {
                                     !active
@@ -1733,11 +1766,14 @@ fn sections(s: summary::Summary) -> PersonSummary {
             .map(|v| Line {
                 name: v.vaccine,
                 date: v.last_date,
-                detail: Some(format!(
-                    "{} dose{} on file",
-                    v.doses,
-                    if v.doses == 1 { "" } else { "s" }
-                )),
+                detail: Some(match v.from_claim {
+                    true => "from a claim".into(),
+                    false => format!(
+                        "{} dose{} on file",
+                        v.doses,
+                        if v.doses == 1 { "" } else { "s" }
+                    ),
+                }),
                 source: v.source,
                 id: v.id,
                 ..Line::default()

@@ -663,7 +663,7 @@ static VACCINES: LazyLock<Vec<(&'static str, Regex)>> = LazyLock::new(|| {
         .collect()
 });
 
-fn vaccine_family(text: &str) -> Option<&'static str> {
+pub(crate) fn vaccine_family(text: &str) -> Option<&'static str> {
     VACCINES
         .iter()
         .find(|(_, r)| r.is_match(text))

@@ -654,7 +654,9 @@ contained resource) is none. Where the element is one of a list, the next one is
 read in its place; otherwise the field is absent, or comes from its fallback
 element (a MedicationRequest whose `requester` is the patient has no
 `prescriber`). Claims, results and reports filed before take this with `medrec
-reindex`; other records when their source serves them again. `npi` is a National Provider
+reindex`, and so does a fill's `pharmacy`, whose `fields` reindex reads again; a
+prescription keeps an earlier `prescriber` through reindex, and other records
+take it when their source serves them again. `npi` is a National Provider
 Identifier whose check digit holds, from the identifier of the reference
 that prints the field or from the resource it points at. `state` is two
 letters, from that resource's first address that gives one, and `city` (0.9.8
@@ -783,10 +785,11 @@ its totals leave one out.
   `quantity`, `net`, `adjudication` (`[{category, amount, reason}]` as the
   payer wrote them), `payer_notes`, `counted`, `codes` and `records`.
   `revenue`, `payer_notes` and `counted` are present only when they say
-  something. `codes` (0.9.11 and later) is every coding of the line's service,
-  `[{system, code}]` in the payer's order, where it has more than one:
-  `service` keeps the first, and a payer can give an RxNorm code, an NDC or a
-  CVX code after a code of its own. A claim filed before has it after `medrec
+  something. `codes` (0.9.11 and later) is every coding of the line's service
+  that has a system and a code, `[{system, code}]` in the payer's order, where
+  they say more than `service`: more than one, or one that is not the first
+  coding. `service` keeps the first, and a payer can give an RxNorm code, an
+  NDC or a CVX code after a code of its own, or after a display alone. A claim filed before has it after `medrec
   reindex`.
 - A line's `payer_notes` (0.8.2 and later): the texts of the
   `processNote` entries its `noteNumber` points at, in that order, as the
@@ -1817,8 +1820,10 @@ removes and no reader reads. It never writes over a later
   `text.json`, `overrides.json` and `marks.json` and their linked people's
   `index.json` and `text.json` have the MD5s `views.json` recorded, under the same `household.json`,
   medrec version and `build`, the code table on this machine, when there is one, is the
-  one they were made with (`code_table`), and the provider directory on it,
-  when there is one, is not newer (`directory`). Otherwise their views are made
+  one they were made with (`code_table`), CDC's vaccine tables on it, when
+  there are both, are those they were made with (`vaccine_tables`), and the
+  provider directory on it, when there is one, is not newer (`directory`).
+  Otherwise their views are made
   again, and only views the folder does not already hold under their
   stored names are uploaded. An unchanged view keeps its name and is not
   written again. A person whose views lack one every person has
@@ -1899,6 +1904,7 @@ A reader decides freshness by MD5, as Drive reports it (`md5Checksum`):
 | `people.<id>.marks` | The MD5 of the person's `marks.json` as read; `null` when there is none (0.9.1 and later). |
 | `people.<id>.linked` | For each person linked to this one (Events, below), the MD5s of their `index.json` and `text.json` as read, as `{"index", "text"}`, each `null` when the file is absent; `{}` when no one is linked (0.9.0 and later). |
 | `people.<id>.code_table` | The code table the person's names were made with (`icd10cm FY2027`); absent when the pass that made the views had none, whatever names it carried over (0.9.4 and later). A pass on a machine with another table makes the person's views again, which fills in the names; one on a machine with none leaves them. |
+| `people.<id>.vaccine_tables` | CDC's vaccine tables the person's vaccines from claims were read with, `<id> <SHA-256>` each (`cvx …, cpt-cvx …`); absent when the pass that made the views had not both, since one alone names no vaccine by a CPT code (0.9.11 and later). A pass on a machine with both, and other ones, makes the person's views again; one on a machine without both leaves them, and when it makes them for another reason lists only the vaccines its tables name. |
 | `people.<id>.directory` | Which provider directory the pass that made the views had: the last day it covers and when it was fetched, so that a newer one sorts after (0.9.7 and later). Absent when it had none. A pass on a machine with a newer one makes the person's views again; one with an older one or none leaves them. |
 | `people.<id>.provider_state` | The MD5 of the person's `provider-state.json`, absent when there is none (0.9.7 and later). Another one makes four of the person's views stale (above). |
 | `people.<id>.in_error` | `standing.json`'s `in_error`, as it is there: the ids of the person's records entered in error, by kind, and of their papers, `{"condition": ["r_…"], "document": ["d_…"]}`; absent when there is none (0.9.9 and later). |
@@ -1920,9 +1926,10 @@ only in a release whose notes name the connector version that reads it.
 A field can change what a reader must leave out or hold back, or what it must
 say of an item it shows, without changing the layout: `heading` in
 `private.json` (0.9.10), with which a reader that ignores it shows what it must
-not, or leaves out what it need not; and a fill's `from_claim` in
-`standing.json` (0.9.11), with which a reader that ignores it shows a payer's
-claim as the pharmacy's fill.
+not, or leaves out what it need not; and `from_claim` (0.9.11), of a fill in
+`standing.json` and of a vaccine in `records-immunization-<n>.json` and
+`summary.json`, with which a reader that ignores it shows a payer's claim as
+the pharmacy's fill or as a record of the vaccine.
 `reader` (0.9.11 and later) is the oldest medrec version whose contract a
 reader must follow to read the views: medrec raises it, in the release that
 adds such a field, to that release's version, and its notes say so. It is
@@ -1970,6 +1977,32 @@ with the patient unknown name it, by steps 3 and 4.
 
 A result that is a heading (Panels, above; 0.9.10 and later) has `heading: true`,
 and another has no `heading`.
+
+`records-immunization-<n>.json` also holds the vaccines claims tell of (0.9.11
+and later). Each is listed as an immunization with its claim's `id`, `date` the
+line's day (`serviced`, else the claim's), `display` the line's service text,
+else the claim's, `status` `completed`, `provenance` the claim's, and `fields`
+`{from_claim: true, cvx: [codes]}`; `code` is the CVX code where there is one.
+It is no record, and what is private of the claim is private of it, by the id;
+the claim's entry in `private.json`'s `parts` is the claim's alone, and a
+reader applies none of it (its `display`, its `lines`) to such an immunization.
+A counted line of a claim that is not cancelled (as a reversal is), planned or
+entered in error, nor denied with nothing of it paid (Standing, `filled`),
+names a vaccine by its CVX code, any of its `codes` (else `service`) that is
+CVX's; or, where it has none, with both of CDC's tables on the machine that
+writes the views (README, "Code tables"), its CPT code's CVX codes by
+`cpt-cvx` that `cvx` lists as vaccines. A line's own CVX code that `cvx` marks
+no vaccine (`nonvaccine`) is none, one it does not list is one, and 998 and 999
+never are. A line `private.json`'s `parts` leaves out of an open claim tells of
+none in the views, since a reader could not leave it out where it leaves the
+line out; `medrec mcp`'s answers that name the person, which leave nothing out
+of a claim, list it, and those that name no person do not. One is listed for
+each vaccine and day that no immunization of the person's has, by its CVX code,
+or by its kind of vaccine where that immunization has no CVX code, and once for
+two claims of it; an immunization entered in error, or not given (`not-done`, a
+refusal), has none. A reader shows it as "from a claim", as `medrec mcp` does
+(its `detail`). Which tables made the views is `vaccine_tables` in
+`views.json`.
 
 A record whose sources differ on whether it is entered in error, or that is, has
 `says` (0.9.9 and later), unless it is a condition, an allergy or a medicine
@@ -2022,7 +2055,12 @@ It is made without the household's payments: a reader leaves out the
 bills `bills.json` has `settled` as it answers (0.9.1 and later). Each
 medicine, condition, allergy and visit carries its record's `id`, a
 vaccine its last dose's and a latest result its own (0.9.1 and later), so
-a reader finds them in `private.json`. A condition whose code can have a
+a reader finds them in `private.json`. A vaccine a claim tells of (Records,
+above; 0.9.11 and later) is a line of its own with `from_claim: true`, one dose
+and the claim's `id`, so that a private claim's dose never adds to a line shown;
+`medrec mcp`'s summary says "from a claim" of it in place of its doses. Where its
+line has no name of its own it has its claim's, as the claim is shown without
+its private parts, never with them. A condition whose code can have a
 name carries `name_key`, its key in `code-names.json` (0.9.4 and later).
 
 `medications`, `conditions` and `allergies` are 0.9.8's lists, by each record's

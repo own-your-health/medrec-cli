@@ -725,30 +725,58 @@ source gives a bare code, an abbreviation or capitals, and beside the source's
 words where those are plain. The records keep the source's words, and search
 and filters go by them.
 
+A claim line can name a vaccine by its CVX code, or by a CPT code that CDC's
+table gives a CVX code. With CDC's two tables here, such a line is listed among
+the person's immunizations as "from a claim" (docs/data-contract.md, Records).
+
 ```sh
 medrec tables list                      # the tables, and whether each is here
 medrec tables fetch                     # download them
 medrec tables fetch icd10cm --file ZIP  # or keep a zip downloaded by hand
+medrec tables fetch cvx --accept SHA256 # keep CDC's file that is now another
 ```
 
 | Table | Publisher | Version | File |
 |---|---|---|---|
 | `icd10cm`, ICD-10-CM code titles | Centers for Medicare & Medicaid Services | FY2027, dated 2026-06-01 | [2027 Code Descriptions in Tabular Order](https://www.cms.gov/files/zip/2027-code-descriptions-tabular-order.zip), 2.2 MB, 98,403 rows |
+| `cvx`, CVX vaccine codes | Centers for Disease Control and Prevention | none; rows changed up to 2026-09-10 | [cvx.txt](https://www2a.cdc.gov/vaccines/iis/iisstandards/downloads/cvx.txt), 55 kB, 290 rows |
+| `cpt-cvx`, CPT codes of vaccines with their CVX codes | Centers for Disease Control and Prevention | none; rows changed up to 2026-07-07 | [cpt.txt](https://www2a.cdc.gov/vaccines/iis/iisstandards/downloads/cpt.txt), 33 kB, 163 rows |
 
 - **medrec includes no table.** It downloads the publisher's whole file, and
   keeps it only if its size, SHA-256 and row count are those recorded in
-  `src/tables.rs`. No code is ever looked up over the network, so no request
-  says which codes the records hold.
+  `src/tables.rs`, except a CDC file you accept by its SHA-256 (below). No code
+  is ever looked up over the network, so no request says which codes the
+  records hold.
+- **CDC's files have no version.** CDC changes them in place, so `tables fetch
+  cvx` (or `cpt-cvx`) downloads the file again even when one is kept, and
+  `tables fetch` with no name keeps what it has. A file that is not the
+  recorded one, nor the one kept, is refused with its size and SHA-256 and the
+  command that keeps it, which `--json` gives as `keep_with`; the file kept
+  before stays in use. Every table named is tried, each has its row, and the
+  run exits 6 when one was refused. Run that command (`--accept` and the
+  SHA-256, with `--file` when the file was one) to keep it: medrec then uses it
+  as it would the recorded one, and `tables list` says `ready (accepted)`
+  (`accepted` in `--json`). A file whose rows do not read, or that has none, is
+  never kept nor offered. Of `cpt.txt` medrec reads the two code numbers of
+  each row; its descriptions are never read, stored or shown. Of `cvx.txt` it
+  reads each code and whether it is a vaccine (`nonvaccine`). Without `cvx`,
+  only a claim line's own CVX code names a vaccine, since only that table
+  tells a vaccine from an immune globulin.
 - **No table, no new names.** Without the file, or with one that is not the
   recorded one, a pass keeps the names another machine wrote for codes still
   in use, and adds none. A code with no name shows the source's own words. A
   code the table lacks (another year's, withdrawn or invalid) has no name.
-- The file is in `~/.cache/medrec/tables`. After fetching it, run `medrec
-  views write` on each profile, or let the next write do it.
+- The files are in `~/.cache/medrec/tables`. After fetching them, run `medrec
+  views write` on each profile, or let the next write do it: a person's views
+  made with another ICD-10 or vaccine table, or without one, are made again.
+  Fetch both of CDC's tables, the same files, on every machine that writes the
+  views: one without both lists only the vaccines a claim line's own CVX code
+  names when it makes a person's views again, and two with different files
+  make each other's views again on every pass.
 - The names a person's records use are in `views/` as `code-names.json`
   (docs/data-contract.md). Like any view, they are on the Drive folder.
 
-medrec is not affiliated with or endorsed by the publisher.
+medrec is not affiliated with or endorsed by the publishers.
 
 ### Provider directory
 

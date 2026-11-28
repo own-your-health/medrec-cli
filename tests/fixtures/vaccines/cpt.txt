@@ -1,0 +1,4 @@
+00011|Sample product A||Sample A|900||2025/01/02|901
+00012|Sample globulin||Sample globulin|901||2025/01/02|902
+00013|Sample product A and B||Sample A|900||2025/01/02|903
+00013|Sample product A and B||Sample B|902||2025/02/03|

@@ -104,6 +104,22 @@ fn paid_some(r: &Record) -> bool {
     r.fields.get("amounts").is_some_and(more) || lines.any(more)
 }
 
+/// Whether a claim says something was given: it is not cancelled (as a
+/// reversal is), planned or entered in error, nor denied with nothing of it
+/// paid by the household.
+pub(crate) fn gave(r: &Record) -> bool {
+    let skipped = r.status.as_deref();
+    let skipped = skipped.is_some_and(|s| SKIPPED_STATUS.contains(&s));
+    !skipped && !record_in_error(r) && !(denied(r) && !paid_some(r))
+}
+
+/// The lines of a claim its totals count, with their places in its `items`.
+pub(crate) fn counted_lines(r: &Record) -> impl Iterator<Item = (usize, &Value)> + '_ {
+    let lines = r.fields.get("items").and_then(Value::as_array);
+    let lines = lines.into_iter().flatten().enumerate();
+    lines.filter(|(_, l)| l.get("counted") != Some(&Value::Bool(false)))
+}
+
 /// The codes of the drug a claim is for: each code of a line its totals
 /// count, first or not.
 fn of_claim(r: &Record) -> impl Iterator<Item = Drug> + '_ {
@@ -130,14 +146,10 @@ pub fn of_claims(idx: &PersonIndex) -> BTreeMap<String, Vec<Filled>> {
     }
     let mut out: BTreeMap<String, Vec<Filled>> = BTreeMap::new();
     for r in idx.records.iter().filter(|r| r.kind == "claim") {
-        let skipped = r.status.as_deref();
-        let skipped = skipped.is_some_and(|s| SKIPPED_STATUS.contains(&s));
         let (Some(name), Some(day)) = (crate::private::dispensed(r), day(r.date.as_deref())) else {
             continue;
         };
-        // A reversal is cancelled; a denial the household paid none of gave
-        // nothing.
-        if skipped || record_in_error(r) || (denied(r) && !paid_some(r)) {
+        if !gave(r) {
             continue;
         }
         let mut of: BTreeSet<&String> = of_claim(r)
@@ -236,28 +248,11 @@ mod tests {
     /// and normalizing keeps every one of them.
     #[test]
     fn each_code_of_a_line_tells_its_drug_whichever_is_first() {
-        use crate::model::{Provenance, ProvenanceSource};
         let eob: Value = serde_json::from_str(include_str!(
             "../tests/fixtures/fhir/pharmacy-eob-codings.json"
         ))
         .unwrap();
-        let provenance = Provenance {
-            source: ProvenanceSource {
-                kind: "fhir".into(),
-                cli: Some("fakeprov".into()),
-                cli_version: None,
-                organization_id: None,
-                fhir_base: None,
-            },
-            method: "fhir-api".into(),
-            source_resource: None,
-            fetched_at: None,
-            filed_at: "2026-03-11T00:00:00Z".into(),
-            raw_path: None,
-            classified_by: None,
-            derived_from: None,
-            filed_by: crate::model::filed_by(),
-        };
+        let provenance = provenance();
         let claim = crate::normalize::record(&eob, provenance).unwrap();
         let line = &claim.fields["items"][0];
         assert_eq!(
@@ -284,6 +279,54 @@ mod tests {
             .find(|r| r.id.starts_with("r_coded"))
             .unwrap();
         assert!(one.fields["items"][0].get("codes").is_none());
+    }
+
+    /// The one code of a line is kept where it is not the first coding: one
+    /// before it can have a display alone.
+    #[test]
+    fn a_lines_one_code_is_kept_after_a_coding_of_none() {
+        let mut eob: Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/fhir/pharmacy-eob-codings.json"
+        ))
+        .unwrap();
+        fn coding(eob: &mut Value) -> &mut Vec<Value> {
+            let of = &mut eob["item"][0]["productOrService"]["coding"];
+            of.as_array_mut().unwrap()
+        }
+        coding(&mut eob)[0] = serde_json::json!({"display": "SMPL CRM"});
+        coding(&mut eob).remove(1);
+        let claim = crate::normalize::record(&eob, provenance()).unwrap();
+        let line = &claim.fields["items"][0];
+        let rxnorm = serde_json::json!([{"system": RXNORM, "code": "RX-6"}]);
+        assert_eq!(line["codes"], rxnorm);
+        let codes: Vec<Drug> = of_claim(&claim).collect();
+        assert_eq!(codes, [Drug::RxNorm("RX-6".into())]);
+        // One that is the first coding says nothing `service` does not.
+        coding(&mut eob).remove(0);
+        let claim = crate::normalize::record(&eob, provenance()).unwrap();
+        assert!(claim.fields["items"][0].get("codes").is_none());
+    }
+
+    /// A provenance of the fake source, for what a test normalizes.
+    fn provenance() -> crate::model::Provenance {
+        use crate::model::{Provenance, ProvenanceSource};
+        Provenance {
+            source: ProvenanceSource {
+                kind: "fhir".into(),
+                cli: Some("fakeprov".into()),
+                cli_version: None,
+                organization_id: None,
+                fhir_base: None,
+            },
+            method: "fhir-api".into(),
+            source_resource: None,
+            fetched_at: None,
+            filed_at: "2026-03-11T00:00:00Z".into(),
+            raw_path: None,
+            classified_by: None,
+            derived_from: None,
+            filed_by: crate::model::filed_by(),
+        }
     }
 
     #[test]

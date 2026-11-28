@@ -575,6 +575,59 @@ fn drive_profiles_are_medrecs_own_and_none_is_a_default() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("home-drive"));
 }
 
+/// A CDC file that is not the recorded one has its row, with its SHA-256 and
+/// the command that keeps it, and the run exits 6; kept, both the list and
+/// the fetch say on a terminal that it was accepted.
+#[test]
+fn a_refused_cdc_file_has_its_row_and_the_command_that_keeps_it() {
+    static SEQ: AtomicU32 = AtomicU32::new(0);
+    let dir = std::env::temp_dir().join(format!(
+        "medrec-surface-accept-{}-{}",
+        std::process::id(),
+        SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let run = |args: &[&str]| {
+        medrec()
+            .env("XDG_CACHE_HOME", dir.join("cache"))
+            .env("HOME", &dir)
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    let file =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/vaccines/cvx.txt");
+    let sha = medrec::hash::sha256_hex(&std::fs::read(&file).unwrap());
+    let path = file.to_str().unwrap();
+    let out = run(&["--json", "tables", "fetch", "cvx", "--file", path]);
+    assert_eq!(out.status.code(), Some(6));
+    let v = json_of(&out);
+    let row = &v["items"][0];
+    let keep = format!("medrec tables fetch cvx --accept {sha} --file {path}");
+    assert_eq!(
+        (
+            row["status"].as_str(),
+            row["sha256"].as_str(),
+            row["keep_with"].as_str()
+        ),
+        (Some("refused"), Some(sha.as_str()), Some(keep.as_str()))
+    );
+    assert!(String::from_utf8_lossy(&out.stderr).contains(&keep));
+    let list = json_of(&run(&["--json", "tables", "list"]));
+    assert_eq!(list["items"][1]["state"], "absent");
+
+    let out = run(&["tables", "fetch", "cvx", "--file", path, "--accept", &sha]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(String::from_utf8_lossy(&out.stdout).contains("copied (accepted)"));
+    let out = run(&["tables", "list"]);
+    assert!(String::from_utf8_lossy(&out.stdout).contains("ready (accepted)"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn the_code_tables_need_no_profile_and_start_absent() {
     let out = medrec()
@@ -584,16 +637,19 @@ fn the_code_tables_need_no_profile_and_start_absent() {
     assert!(out.status.success());
     let v = json_of(&out);
     let rows = v["items"].as_array().unwrap();
-    assert_eq!(rows.len(), 2);
-    assert_eq!(rows[0]["id"], "icd10cm");
-    assert_eq!(rows[0]["state"], "absent");
-    assert_eq!(rows[1]["id"], "nppes");
-    assert_eq!(rows[1]["state"], "absent");
-    for k in ["version", "date", "bytes", "rows", "sha256"] {
-        assert!(rows[1][k].is_null(), "{k}");
+    let ids: Vec<&str> = rows.iter().map(|r| r["id"].as_str().unwrap()).collect();
+    assert_eq!(ids, ["icd10cm", "cvx", "cpt-cvx", "nppes"]);
+    for r in rows {
+        assert_eq!(r["state"], "absent", "{r}");
+        assert!(r.get("accepted").is_none(), "{r}");
     }
-    assert!(rows[1].get("folder").is_none());
-    assert_eq!(rows[0]["sha256"].as_str().unwrap().len(), 64);
+    for k in ["version", "date", "bytes", "rows", "sha256"] {
+        assert!(rows[3][k].is_null(), "{k}");
+    }
+    assert!(rows[3].get("folder").is_none());
+    for r in &rows[..3] {
+        assert_eq!(r["sha256"].as_str().unwrap().len(), 64, "{r}");
+    }
     for (args, why) in [
         (&["tables", "fetch", "nosuch"][..], "no table `nosuch`"),
         (
@@ -606,6 +662,15 @@ fn the_code_tables_need_no_profile_and_start_absent() {
         ),
         (&["tables", "fetch", "icd10cm", "--force"][..], "--force"),
         (&["tables", "fetch", "--force"][..], "required"),
+        (&["tables", "fetch", "--accept", "00"][..], "required"),
+        (
+            &["tables", "fetch", "cvx", "cpt-cvx", "--accept", "00"][..],
+            "one table's SHA-256",
+        ),
+        (
+            &["tables", "fetch", "icd10cm", "--accept", "00"][..],
+            "no version (cvx, cpt-cvx)",
+        ),
     ] {
         let out = medrec().args(args).output().unwrap();
         assert_eq!(out.status.code(), Some(2), "{args:?}");
@@ -676,9 +741,13 @@ fn cache_clear_keeps_the_code_tables() {
             .unwrap()
     };
     // One that does not read is there for its folder, and never used.
+    let state = |v: &Value, id: &str| {
+        let rows = v["items"].as_array().unwrap();
+        rows.iter().find(|r| r["id"] == id).unwrap().clone()
+    };
     let v = json_of(&run(&["--json", "tables", "list"]));
-    assert_eq!(v["items"][1]["state"], "changed");
-    assert_eq!(v["items"][1]["folder"], "f_x");
+    assert_eq!(state(&v, "nppes")["state"], "changed");
+    assert_eq!(state(&v, "nppes")["folder"], "f_x");
     let out = run(&["--json", "cache", "clear"]);
     assert!(out.status.success());
     assert_eq!(json_of(&out)["files"], 2);
@@ -687,7 +756,7 @@ fn cache_clear_keeps_the_code_tables() {
     assert!(!base.join("copies").exists());
     // A file that is not the recorded one is there and never read.
     let v = json_of(&run(&["--json", "tables", "list"]));
-    assert_eq!(v["items"][0]["state"], "changed");
-    assert_eq!(v["items"][1]["state"], "absent");
+    assert_eq!(state(&v, "icd10cm")["state"], "changed");
+    assert_eq!(state(&v, "nppes")["state"], "absent");
     let _ = std::fs::remove_dir_all(&dir);
 }
