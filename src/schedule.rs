@@ -1088,7 +1088,7 @@ mod tests {
         }
     }
 
-    const BIRTH: &str = "2027-01-15";
+    const BIRTH: &str = "2020-02-02";
 
     #[test]
     fn an_archive_is_read_by_its_folder_files_and_release_notes() {
@@ -1130,16 +1130,16 @@ mod tests {
         assert_eq!(
             doses(ex),
             vec![
-                (1, "Dose 1".into(), o("2 months"), o("2027-03-15")),
+                (1, "Dose 1".into(), o("2 months"), o("2020-04-02")),
                 // A skip of a condition medrec does not read keeps it.
-                (2, "Dose 2".into(), o("4 months"), o("2027-05-15")),
+                (2, "Dose 2".into(), o("4 months"), o("2020-06-02")),
                 // A skip of evaluation alone keeps it.
-                (3, "Dose 3".into(), o("12 months - 4 days"), o("2028-01-11")),
+                (3, "Dose 3".into(), o("12 months - 4 days"), o("2021-01-29")),
                 // Dose 4 is skipped: more than two given. The age in effect,
                 // and a set out of effect skips nothing.
-                (4, "Dose 5".into(), o("4 years"), o("2031-01-15")),
+                (4, "Dose 5".into(), o("4 years"), o("2024-02-02")),
                 (5, "Dose 6".into(), None, None),
-                (6, "Dose 7".into(), o("11 years"), o("2038-01-15")),
+                (6, "Dose 7".into(), o("11 years"), o("2031-02-02")),
             ]
         );
         assert_eq!(ex["doses"][4]["after"], 4);
@@ -1165,7 +1165,7 @@ mod tests {
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[0]["antigens"], json!(["Samplepox C"]));
         let seasonal = &lines[0]["doses"][0];
-        assert_eq!(seasonal["date"], "2027-07-15");
+        assert_eq!(seasonal["date"], "2020-08-02");
         assert_eq!(
             seasonal["season"],
             json!({"from": "2027-08-01", "to": "2028-06-30"})
@@ -1232,12 +1232,12 @@ mod tests {
     fn the_doses_on_file_go_under_the_groups_their_codes_count_for() {
         let s = invented();
         let filed = [
-            on("one", "2027-03-20", &[951], false),
-            on("claim", "2028-01-20", &[952], true),
-            on("young", "2028-02-01", &[954], false),
+            on("one", "2020-04-05", &[951], false),
+            on("claim", "2021-02-05", &[952], true),
+            on("young", "2021-03-01", &[954], false),
             // CVX 954 counts for Samplepox A under 2 years alone.
-            on("old", "2032-02-01", &[954], false),
-            on("unknown", "2028-02-01", &[999], false),
+            on("old", "2025-03-01", &[954], false),
+            on("unknown", "2021-03-01", &[999], false),
             on("none", "", &[], false),
         ];
         let v = of_person("p_x", Some(BIRTH), &[(&CDSI, &s)], &filed, None);
@@ -1284,7 +1284,7 @@ mod tests {
     #[test]
     fn a_dose_before_the_records_begin_is_marked_and_folded() {
         let s = invented();
-        let v = of_person("p_x", Some(BIRTH), &[(&CDSI, &s)], &[], Some("2027-06-01"));
+        let v = of_person("p_x", Some(BIRTH), &[(&CDSI, &s)], &[], Some("2020-07-01"));
         let before: Vec<bool> = v["groups"][0]["lines"][0]["doses"]
             .as_array()
             .unwrap()
@@ -1294,25 +1294,25 @@ mod tests {
         assert_eq!(before, [true, true, false, false, false, false]);
         let words = text(&v, "Robin");
         let lines: Vec<&str> = words.lines().collect();
-        assert!(lines[0].starts_with("Robin, born Jan 15, 2027: the recommended doses by age, from CDC CDSi 0.1, Sep 8, 2026"), "{words}");
+        assert!(lines[0].starts_with("Robin, born Feb 2, 2020: the recommended doses by age, from CDC CDSi 0.1, Sep 8, 2026"), "{words}");
         let at = lines.iter().position(|l| *l == "Examplitis").unwrap();
         assert_eq!(
             &lines[at + 1..at + 6],
             [
                 "  Before these records begin: dose 1 at 2 months, dose 2 at 4 months (CDC CDSi 0.1, Sep 8, 2026)",
-                "  Dose 3: recommended at 12 months - 4 days: Jan 11, 2028 (CDC CDSi 0.1, Sep 8, 2026)",
-                "  Dose 4: recommended at 4 years: Jan 15, 2031 (CDC CDSi 0.1, Sep 8, 2026)",
+                "  Dose 3: recommended at 12 months - 4 days: Jan 29, 2021 (CDC CDSi 0.1, Sep 8, 2026)",
+                "  Dose 4: recommended at 4 years: Feb 2, 2024 (CDC CDSi 0.1, Sep 8, 2026)",
                 "  Dose 5: after dose 4, at no age of its own (CDC CDSi 0.1, Sep 8, 2026)",
-                "  Dose 6: recommended at 11 years: Jan 15, 2038, then again (CDC CDSi 0.1, Sep 8, 2026)",
+                "  Dose 6: recommended at 11 years: Feb 2, 2031, then again (CDC CDSi 0.1, Sep 8, 2026)",
             ]
         );
         assert!(words.contains("\nSamplepox (Samplepox A, Samplepox B, Samplepox C)\n"));
-        assert!(words.contains("  Samplepox C seasonal series: Dose 1: recommended at 6 months: Jul 15, 2027, then again, in the season Aug 1, 2027 to Jun 30, 2028 (CDC CDSi 0.1, Sep 8, 2026)\n"), "{words}");
+        assert!(words.contains("  Samplepox C seasonal series: Dose 1: recommended at 6 months: Aug 2, 2020, then again, in the season Aug 1, 2027 to Jun 30, 2028 (CDC CDSi 0.1, Sep 8, 2026)\n"), "{words}");
         // An adult's childhood doses fold whole, a dose of no age with the
         // one before it.
         let v = of_person(
             "p_y",
-            Some("1980-05-31"),
+            Some("1990-01-01"),
             &[(&CDSI, &s)],
             &[],
             Some("2015-01-01"),
@@ -1327,10 +1327,10 @@ mod tests {
             Some(BIRTH),
             &[(&CDSI, &s)],
             &[],
-            Some("2027-06-01"),
+            Some("2020-07-01"),
         ));
         assert_eq!(rows[0].0, "Examplitis");
-        assert_eq!(rows[0].1.as_deref(), Some("2028-01-11"));
+        assert_eq!(rows[0].1.as_deref(), Some("2021-01-29"));
         assert!(rows[0]
             .2
             .starts_with("Before these records begin: dose 1 at 2 months"));
@@ -1348,7 +1348,7 @@ mod tests {
         let p: crate::model::Person =
             serde_json::from_value(json!({"id": "p_robinaaaaaaaaaaaaaaa",
             "name": "Robin Example", "folder": "Robin Example", "birth_date": BIRTH,
-            "created_at": "2027-01-16T10:00:00Z"}))
+            "created_at": "2020-02-03T10:00:00Z"}))
             .unwrap();
         let immunization = |id: &str, date: &str, cvx: &str| -> Record {
             serde_json::from_value(json!({"id": id, "kind": "immunization", "key": id,
@@ -1359,8 +1359,8 @@ mod tests {
         };
         let mut idx = crate::model::PersonIndex::new(&p.id);
         idx.records = vec![
-            immunization("r_openaaaaaaaaaaaaaaaa", "2027-06-01", "951"),
-            immunization("r_heldaaaaaaaaaaaaaaaa", "2027-03-20", "952"),
+            immunization("r_openaaaaaaaaaaaaaaaa", "2020-07-01", "951"),
+            immunization("r_heldaaaaaaaaaaaaaaaa", "2020-04-05", "952"),
         ];
         let codes = crate::vaccines::Codes::default().with_schedules(vec![(&CDSI, invented())]);
         let private = json!({"records": {"r_heldaaaaaaaaaaaaaaaa": {"area": "sample"}},

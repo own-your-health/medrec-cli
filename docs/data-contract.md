@@ -2571,18 +2571,18 @@ says nothing of what is due: no dose on file is matched to a dose of the
 schedule, and no word says one is due, overdue or missed.
 
 ```json
-{"schema": "medrec-schedule/v1", "person": "p_…", "birth_date": "2027-01-15",
+{"schema": "medrec-schedule/v1", "person": "p_…", "birth_date": "2020-02-02",
  "sources": [{"id": "cdsi", "title": "CDSi supporting data: immunization schedules",
               "publisher": "Centers for Disease Control and Prevention",
               "version": "4.66", "date": "2026-10-09", "url": "https://www.cdc.gov/…"}],
  "groups": [{"group": "Examplitis", "antigens": ["Examplitis"],
              "lines": [{"antigens": ["Examplitis"], "series": ["Examplitis 4-dose series"],
                         "doses": [{"dose": 1, "series_dose": "Dose 1", "age": "2 months",
-                                   "date": "2027-03-15", "before_records": false,
+                                   "date": "2020-04-02", "before_records": false,
                                    "sources": [{"id": "cdsi", "version": "4.66", "date": "2026-10-09"}]}]}],
-             "on_file": [{"id": "r_…", "date": "2027-03-20", "cvx": [951],
+             "on_file": [{"id": "r_…", "date": "2020-04-05", "cvx": [951],
                           "display": "Sample vaccine", "from_claim": true}]}],
- "not_placed": [{"id": "r_…", "date": "2027-03-20", "cvx": [], "display": "…", "why": "no CVX code"}]}
+ "not_placed": [{"id": "r_…", "date": "2020-04-05", "cvx": [], "display": "…", "why": "no CVX code"}]}
 ```
 
 - `birth_date` is the person's; without one, `groups` and `not_placed` are
@@ -2619,7 +2619,7 @@ schedule, and no word says one is due, overdue or missed.
   open records and papers. Nothing is private or open by the schedule.
 - The text of `medrec schedule` gives each group under its name, its doses
   before the records begin on one line, and each other dose as "Dose 3:
-  recommended at 12 months - 4 days: Jan 11, 2028 (CDC CDSi 4.66, Oct 9,
+  recommended at 12 months - 4 days: Jan 29, 2021 (CDC CDSi 4.66, Oct 9,
   2026)".
 
 ### Private (`private.json`, `medrec-private/v1`, 0.9.1 and later)

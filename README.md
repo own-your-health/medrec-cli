@@ -733,7 +733,7 @@ the person's immunizations as "from a claim" (docs/data-contract.md, Records).
 With CDC's CDSi supporting data here (`cdsi`), `medrec schedule --person
 <P>` gives a person's vaccine schedule: of each vaccine group, the doses of its
 routine series at the ages CDC recommends them, on the dates those ages fall on
-for the person ("recommended at 2 months: Mar 15, 2027"), each with the table's
+for the person ("recommended at 2 months: Apr 2, 2020"), each with the table's
 version and date, and beside them the doses on file, "from a claim" where a
 claim alone tells of one. A dose is listed only where CDC's own skips keep it
 when every dose before it is given at its earliest recommended age. Doses
