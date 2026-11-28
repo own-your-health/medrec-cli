@@ -104,6 +104,20 @@ fn paid_some(r: &Record) -> bool {
     r.fields.get("amounts").is_some_and(more) || lines.any(more)
 }
 
+/// Whether a claim says something was given: it is not cancelled (as a
+/// reversal is), planned or entered in error, nor denied with nothing of it
+/// paid by the household.
+pub(crate) fn gave(r: &Record) -> bool {
+    let skipped = r.status.as_deref();
+    let skipped = skipped.is_some_and(|s| SKIPPED_STATUS.contains(&s));
+    !skipped && !record_in_error(r) && !(denied(r) && !paid_some(r))
+}
+
+/// The lines of a claim its totals count.
+pub(crate) fn counted_lines(r: &Record) -> impl Iterator<Item = &Value> + '_ {
+    counted(r)
+}
+
 /// The codes of the drug a claim is for.
 fn of_claim(r: &Record) -> impl Iterator<Item = Drug> + '_ {
     let service = counted(r).filter_map(|l| l.get("service"));
@@ -132,14 +146,10 @@ pub fn of_claims(idx: &PersonIndex) -> BTreeMap<String, Vec<Filled>> {
     }
     let mut out: BTreeMap<String, Vec<Filled>> = BTreeMap::new();
     for r in idx.records.iter().filter(|r| r.kind == "claim") {
-        let skipped = r.status.as_deref();
-        let skipped = skipped.is_some_and(|s| SKIPPED_STATUS.contains(&s));
         let (Some(name), Some(day)) = (crate::private::dispensed(r), day(r.date.as_deref())) else {
             continue;
         };
-        // A reversal is cancelled; a denial the household paid none of gave
-        // nothing.
-        if skipped || record_in_error(r) || (denied(r) && !paid_some(r)) {
+        if !gave(r) {
             continue;
         }
         let mut of: BTreeSet<&String> = of_claim(r)

@@ -62,6 +62,8 @@ pub struct MedrecTools {
     /// This process has read the Drive sign-in from the Keychain once
     /// without waiting on a dialog, so a call reads it in place.
     keychain_read: std::sync::atomic::AtomicBool,
+    /// Where the code tables are: this machine's, or a test's.
+    tables: Option<std::path::PathBuf>,
 }
 
 impl MedrecTools {
@@ -72,7 +74,21 @@ impl MedrecTools {
         MedrecTools {
             cfg: Some(cfg),
             keychain_read: Default::default(),
+            tables: crate::tables::dir(),
         }
+    }
+
+    /// The code tables of `dir` in place of this machine's, as a test keeps
+    /// them.
+    pub fn with_tables(mut self, dir: std::path::PathBuf) -> Self {
+        self.tables = Some(dir);
+        self
+    }
+
+    /// What CDC's tables say of vaccine codes.
+    fn codes(&self) -> crate::vaccines::Codes {
+        let dir = self.tables.as_deref();
+        dir.map_or_else(Default::default, crate::vaccines::Codes::load)
     }
 
     /// For `mcp --list-tools`: no profile, and a call is refused.
@@ -80,6 +96,7 @@ impl MedrecTools {
         MedrecTools {
             cfg: None,
             keychain_read: Default::default(),
+            tables: None,
         }
     }
 
@@ -1045,6 +1062,7 @@ impl MedrecTools {
                     summary::Limits {
                         per_list: SUMMARY_LINES,
                     },
+                    &self.codes(),
                 )?;
                 let mut s = sections(s);
                 let private = PrivateItems::of(&f, &h, &[p])?;
@@ -1226,9 +1244,18 @@ impl MedrecTools {
                         item
                     };
                     if !standing::KINDS.contains(&kind) {
+                        // The vaccines claims tell of are immunizations too.
+                        let claimed = match kind {
+                            "immunization" => {
+                                let all: Vec<&Record> = idx.records.iter().collect();
+                                crate::vaccines::of_claims(&all, &self.codes())
+                            }
+                            _ => Vec::new(),
+                        };
                         items.extend(
                             idx.records
                                 .iter()
+                                .chain(&claimed)
                                 .filter(|x| asked(x))
                                 .filter(|x| {
                                     !active

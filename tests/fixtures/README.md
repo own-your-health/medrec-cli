@@ -70,6 +70,11 @@ real record, document, study or provider response.
   `make.py` writes `index.json`; its sources are those of
   `standing/household.json`, and its codes are invented (an NDC under the
   unassigned labeler `00000`).
+- `vaccines/` is an invented person's vaccine record and claims, one for each
+  rule of the vaccines claims tell of, with `cvx.txt` and `cpt.txt` in the
+  layouts of CDC's files, every text in them invented. `make.py` writes all
+  three; the sources are those of `standing/household.json`. Its CPT codes are
+  below the first CPT code (00100), and its CVX codes are none CDC assigns.
 - `errors/` is an invented person's records and papers entered in error, one
   of each kind the contract's "Entered in error" names, beside ones that stand
   and ones their sources differ on, with what the household decided of them

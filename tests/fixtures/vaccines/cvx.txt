@@ -1,0 +1,3 @@
+﻿900|Sample A|Sample vaccine A||Active|False|2025/01/02
+901|Sample globulin|Sample immune globulin||Active|True|2025/01/02
+902|Sample B|Sample vaccine B||Active|False|2025/02/03

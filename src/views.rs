@@ -309,6 +309,9 @@ pub(crate) fn record_detail(r: &Record) -> Option<String> {
                 .or_else(|| r.status.clone())
         }
         "medication" => text("dosage").or_else(|| r.status.clone()),
+        "immunization" if f.get("from_claim") == Some(&Value::Bool(true)) => {
+            Some("from a claim".into())
+        }
         "claim"
             if f.get("amounts")
                 .is_some_and(|a| a.as_object().is_some_and(|o| !o.is_empty())) =>
@@ -460,10 +463,16 @@ pub fn records(
         let asked =
             |r: &Record| range.holds(r.date.as_deref()) && code.is_none_or(|q| matches_code(r, q));
         let st = Standings::of(&h.sources, p, &idx);
+        let all: Vec<&Record> = idx.records.iter().collect();
+        let claimed = match kinds.contains(&"immunization") {
+            true => crate::vaccines::listed(&all),
+            false => Vec::new(),
+        };
         for kind in kinds {
             if !standing::KINDS.contains(kind) {
                 let errors = st.in_error.get(*kind);
-                for r in idx.records.iter().filter(|r| r.kind == *kind && asked(r)) {
+                let own = idx.records.iter().chain(&claimed);
+                for r in own.filter(|r| r.kind == *kind && asked(r)) {
                     if errors.is_some_and(|e| e.contains(&r.id)) {
                         in_error += 1;
                     } else if !active || !is_ended(r.status.as_deref()) {

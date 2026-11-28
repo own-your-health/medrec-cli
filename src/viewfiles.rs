@@ -1285,6 +1285,7 @@ pub(crate) fn person(
             per_list: crate::mcp::SUMMARY_LINES,
         },
         &Default::default(),
+        &crate::vaccines::Codes::here(),
     );
     let sources = crate::sources::Sources::of(&h.sources, idx);
     let by_status = |kind: &str| summary::by_status(sources, idx, kind, crate::mcp::SUMMARY_LINES);
@@ -1314,6 +1315,12 @@ pub(crate) fn person(
     let mut by_kind: BTreeMap<&str, Vec<&Record>> = BTreeMap::new();
     for r in &idx.records {
         by_kind.entry(r.kind.as_str()).or_default().push(r);
+    }
+    // The vaccines claims tell of are immunizations too, by their claim's id.
+    let all: Vec<&Record> = idx.records.iter().collect();
+    let claimed = crate::vaccines::listed(&all);
+    for r in &claimed {
+        by_kind.entry("immunization").or_default().push(r);
     }
     let mut records = BTreeMap::new();
     let mut place: HashMap<*const Record, (i64, usize)> = HashMap::new();

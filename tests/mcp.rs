@@ -3272,6 +3272,156 @@ fn a_pharmacy_claim_is_a_fill_of_a_medicine_ended_by_its_date() {
     let _ = std::fs::remove_dir_all(&e.root);
 }
 
+/// A claim line's vaccine, by its own CVX code or by CDC's tables kept on the
+/// person's word, is an immunization from a claim in every answer and view,
+/// with its claim's id, so private as its claim is. None is listed where a
+/// record has that vaccine and day.
+#[test]
+fn a_claims_vaccine_is_an_immunization_from_a_claim() {
+    let e = Env::new("claim-vaccines");
+    fixture_household(&e, "vaccines", &["index.json"]);
+    let alex = h_id(&e, "Alex Testperson");
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/vaccines");
+    let id = |name: &str| format!("{:a<22}", format!("r_{name}"));
+    let shots = |t: &MedrecTools, person: Option<&str>| -> Vec<Value> {
+        let mut args = json!({"kind": "immunizations", "limit": 50});
+        if let Some(p) = person {
+            args["person"] = p.into();
+        }
+        let v = assert_fits(t, RECORDS, &call(t, RECORDS, args)).clone();
+        v["items"].as_array().unwrap().clone()
+    };
+    let ids = |items: &[Value]| -> Vec<String> {
+        let each = items.iter().map(|i| i["id"].as_str().unwrap().to_string());
+        each.collect()
+    };
+    let tables = e.root.join("cache/medrec/tables");
+    let t = e.tools().with_tables(tables.clone());
+
+    // With no table, a line's own CVX code alone.
+    assert_eq!(
+        ids(&shots(&t, Some("Alex"))),
+        [id("cvxline"), id("flushot")]
+    );
+
+    // CDC's files have no version: one that is not the recorded file is
+    // refused, with its SHA-256, and kept on the person's word.
+    for (table, file) in [("cvx", "cvx.txt"), ("cpt-cvx", "cpt.txt")] {
+        let path = fixtures.join(file);
+        let sha = medrec::hash::sha256_hex(&std::fs::read(&path).unwrap());
+        let path = path.to_str().unwrap();
+        let out = e.run(&["tables", "fetch", table, "--file", path]);
+        assert_eq!(out.status.code(), Some(6), "{table}");
+        let said = String::from_utf8_lossy(&out.stderr);
+        assert!(said.contains(&format!("--accept {sha}")), "{said}");
+        let kept = e.ok(&["tables", "fetch", table, "--file", path, "--accept", &sha]);
+        assert_eq!(kept["items"][0]["accepted"], true, "{kept}");
+    }
+    let listed = e.ok(&["tables", "list"]);
+    let rows = listed["items"].as_array().unwrap();
+    let row = |table: &str| rows.iter().find(|r| r["id"] == table).unwrap().clone();
+    assert_eq!(
+        (row("cvx")["state"].clone(), row("cvx")["accepted"].clone()),
+        (json!("ready"), json!(true))
+    );
+    assert_eq!(row("cpt-cvx")["date"], "2025-02-03");
+
+    // By CDC's tables: the pharmacy's, the line's own, and the one of two
+    // vaccines; not the clinic's (a record has it), the immune globulin, the
+    // denied one, nor the cancelled one.
+    let items = shots(&t, Some("Alex"));
+    let want = [
+        id("pharmacyflu"),
+        id("twovaccines"),
+        id("cvxline"),
+        id("flushot"),
+    ];
+    assert_eq!(ids(&items), want);
+    for i in &items[..3] {
+        assert_eq!(i["kind"], "immunization", "{i}");
+        assert_eq!(i["detail"], "from a claim", "{i}");
+    }
+    assert!(items[3].get("detail").is_none(), "{}", items[3]);
+    assert_eq!(items[0]["title"], "SAMPLE VACCINE A");
+    assert_eq!(
+        (items[0]["date"].clone(), items[0]["code"].clone()),
+        (json!("2025-10-02"), json!("900"))
+    );
+    assert!(items[1].get("code").is_none(), "{}", items[1]);
+    let detailed = call(
+        &t,
+        RECORDS,
+        json!({"kind": "immunizations", "person": "Alex", "response_format": "detailed", "limit": 50}),
+    );
+    let detailed = assert_fits(&t, RECORDS, &detailed).clone();
+    assert_eq!(detailed["items"][1]["fields"]["cvx"], json!(["900", "902"]));
+
+    // The summary: each on a line of its own.
+    let s = call(&t, SUMMARY, json!({"person": "Alex"}));
+    let s = assert_fits(&t, SUMMARY, &s).clone();
+    let sections = s["summary"]["sections"].as_array().unwrap();
+    let shots_line = sections
+        .iter()
+        .find(|x| x["section"] == "immunizations")
+        .unwrap();
+    assert_eq!(ids(shots_line["items"].as_array().unwrap()), want);
+
+    // The views, as a machine with the tables writes them.
+    let (files, _) = views_of(&e, &alex);
+    let summary = &files["summary"]["immunizations"]["items"];
+    let from: Vec<bool> = summary
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v["from_claim"] == true)
+        .collect();
+    assert_eq!(from, [true, true, true, false]);
+    let shards: Vec<&Value> = files
+        .iter()
+        .filter(|(k, _)| k.starts_with("records-immunization-"))
+        .flat_map(|(_, v)| v.as_array().unwrap())
+        .collect();
+    assert_eq!(shards.len(), 4);
+    assert_eq!(
+        shards
+            .iter()
+            .filter(|v| v["fields"]["from_claim"] == true)
+            .count(),
+        3
+    );
+    // The command lists them too.
+    let cli = e.ok(&["immunizations", "--person", "Alex"]);
+    assert_eq!(ids(cli["items"].as_array().unwrap()), want);
+
+    // Private as its claim is: shown to no household, and marked for the person.
+    e.ok(&["private", "mark", &id("twovaccines")]);
+    let shared = ids(&shots(&t, None));
+    assert!(!shared.contains(&id("twovaccines")), "{shared:?}");
+    assert!(shared.contains(&id("pharmacyflu")), "{shared:?}");
+    let own = shots(&t, Some("Alex"));
+    let held = own
+        .iter()
+        .find(|i| i["id"] == id("twovaccines").as_str())
+        .unwrap();
+    assert!(held["private"].is_string(), "{held}");
+    let s = call(&t, SUMMARY, json!({"person": "Alex"}));
+    let s = assert_fits(&t, SUMMARY, &s).clone();
+    let line = s["summary"]["sections"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|x| x["section"] == "immunizations")
+        .unwrap()["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|l| l["id"] == id("twovaccines").as_str())
+        .unwrap()
+        .clone();
+    assert!(line["private"].is_string(), "{line}");
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
 /// An item that prints a clinician is private where a paper of the person's
 /// names them beside a practice or a credential of an area, or where they are
 /// of the day of such a practice's paper, or linked to it by such days, in every

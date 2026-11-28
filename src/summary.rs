@@ -107,9 +107,14 @@ pub struct Vaccine {
     pub last_date: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
-    /// The last dose's record id (0.9.1 and later).
+    /// The last dose's record id (0.9.1 and later), or of one a claim tells
+    /// of, the claim's.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
+    /// A dose a claim tells of, and no record (0.9.11 and later): a line of
+    /// its own, of one dose.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub from_claim: bool,
 }
 
 /// One lab result: its value as the lab reported it, with the lab's own
@@ -221,19 +226,22 @@ pub fn person(
     p: &Person,
     today: &str,
     limits: Limits,
+    codes: &crate::vaccines::Codes,
 ) -> Result<Summary, CliError> {
     let idx = folder.index(p)?;
     let notes = folder.notes(p)?.len();
     let bills = crate::bills::of_person(folder, h, p)?;
     let settled = crate::bills::settled(&bills);
-    let mut out = of_index(h, p, &idx, notes, today, limits, &settled);
+    let mut out = of_index(h, p, &idx, notes, today, limits, &settled, codes);
     let gone = crate::bills::in_error(&bills, &|_| true);
     out.notes.extend(gone.map(|n| ("bills", n)));
     Ok(out)
 }
 
 /// [`person`] from the person's index already read, with `notes` notes and
-/// the bills `bills.json` says are settled.
+/// the bills `bills.json` says are settled, and the vaccines claims tell of by
+/// `codes`.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn of_index(
     h: &Household,
     p: &Person,
@@ -242,6 +250,7 @@ pub(crate) fn of_index(
     today: &str,
     limits: Limits,
     settled: &std::collections::BTreeSet<String>,
+    codes: &crate::vaccines::Codes,
 ) -> Summary {
     let n = limits.per_list;
     let mut records: Vec<&Record> = idx.records.iter().collect();
@@ -319,7 +328,10 @@ pub(crate) fn of_index(
         conditions: current(&conditions.current),
         allergies: current(&allergies.current),
         notes: said,
-        immunizations: Listed::cut(vaccines(from, &records), n),
+        immunizations: Listed::cut(
+            vaccines(from, &records, &crate::vaccines::of_claims(&records, codes)),
+            n,
+        ),
         latest_results: Listed::cut(latest_results(from, &records), n),
         recent_visits: Listed::cut(
             records
@@ -429,7 +441,10 @@ pub(crate) fn by_status(from: Sources, idx: &PersonIndex, kind: &str, n: usize) 
     Listed::cut(found.collect(), n)
 }
 
-fn vaccines(from: Sources, records: &[&Record]) -> Vec<Vaccine> {
+/// Each vaccine's doses, and each one a claim tells of (`claimed`) on a line
+/// of its own: a line is private by its one id, so a claim's dose never adds
+/// to a record's. Newest first by their last dose.
+fn vaccines(from: Sources, records: &[&Record], claimed: &[Record]) -> Vec<Vaccine> {
     let mut by: Vec<(String, Vaccine)> = Vec::new();
     for r in records.iter().filter(|r| r.kind == "immunization") {
         if r.status.as_deref() == Some("not-done") {
@@ -448,11 +463,24 @@ fn vaccines(from: Sources, records: &[&Record]) -> Vec<Vaccine> {
                     last_date: day(r.date.as_deref()),
                     source: record_source(from, r),
                     id: Some(r.id.clone()),
+                    from_claim: false,
                 },
             )),
         }
     }
-    by.into_iter().map(|(_, v)| v).collect()
+    let mut out: Vec<Vaccine> = by.into_iter().map(|(_, v)| v).collect();
+    out.extend(claimed.iter().map(|r| Vaccine {
+        vaccine: clip(&r.display, CLIP),
+        code: r.code.as_ref().and_then(|c| c.code.clone()),
+        doses: 1,
+        last_date: day(r.date.as_deref()),
+        source: record_source(from, r),
+        id: Some(r.id.clone()),
+        from_claim: true,
+    }));
+    // Stable: series keep their order among themselves.
+    out.sort_by(|a, b| b.last_date.cmp(&a.last_date));
+    out
 }
 
 /// A result's value and unit as the lab reported them.

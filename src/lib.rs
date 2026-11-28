@@ -58,6 +58,7 @@ pub mod summary;
 pub mod tables;
 #[doc(hidden)]
 pub mod testdata;
+pub mod vaccines;
 pub mod version;
 pub mod view;
 pub mod viewfiles;

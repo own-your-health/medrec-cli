@@ -767,8 +767,12 @@ its totals leave one out.
   (`{system, code, display}`), `revenue` (a facility line's revenue code,
   the same shape; 0.8.2 and later), `serviced` (a date or `{start, end}`),
   `quantity`, `net`, `adjudication` (`[{category, amount, reason}]` as the
-  payer wrote them), `payer_notes`, `counted` and `records`. `revenue`,
-  `payer_notes` and `counted` are present only when they say something.
+  payer wrote them), `payer_notes`, `counted`, `cvx` and `records`.
+  `revenue`, `payer_notes` and `counted` are present only when they say
+  something. `cvx` (0.9.11 and later) is the code of the line's service coding
+  whose system is CVX's (`http://hl7.org/fhir/sid/cvx`), first or not, where it
+  has one; `service` keeps the first coding. A claim filed before has it after
+  `medrec reindex`.
 - A line's `payer_notes` (0.8.2 and later): the texts of the
   `processNote` entries its `noteNumber` points at, in that order, as the
   payer wrote them (UHC's start with their code: `XX -- …`). The claim's
@@ -1933,6 +1937,23 @@ with the patient unknown name it, by steps 3 and 4.
 A result that is a heading (Panels, above; 0.9.10 and later) has `heading: true`,
 and another has no `heading`.
 
+`records-immunization-<n>.json` also holds the vaccines claims tell of (0.9.11
+and later). Each is listed as an immunization with its claim's `id`, `date` the
+line's day (`serviced`, else the claim's), `display` the line's service text,
+else the claim's, `status` `completed`, `provenance` the claim's, and `fields`
+`{from_claim: true, cvx: [codes]}`; `code` is the CVX code where there is one.
+It is no record, and what is private of the claim is private of it, by the id. A
+counted line of a claim that is not cancelled (as a reversal is), planned or
+entered in error, nor denied with nothing of it paid (Standing, `filled`),
+names a vaccine by its CVX code: its `cvx`, or `service` when that is CVX's;
+or, with both of CDC's tables on the machine that writes the views (README,
+"Code tables"), its CPT code's CVX codes by `cpt-cvx`. A code `cvx` has as no
+vaccine (`nonvaccine`) is none, and without that table neither is 998 or 999.
+One is listed for each vaccine and day that no immunization of the person's has,
+by its CVX code, or by its kind of vaccine where that immunization has no CVX
+code, and once for two claims of it. A reader shows it as "from a claim", as
+`medrec mcp` does (its `detail`).
+
 A record whose sources differ on whether it is entered in error, or that is, has
 `says` (0.9.9 and later), unless it is a condition, an allergy or a medicine
 other than a fill, whose words `standing.json` has: what each of its provenances
@@ -1984,7 +2005,9 @@ It is made without the household's payments: a reader leaves out the
 bills `bills.json` has `settled` as it answers (0.9.1 and later). Each
 medicine, condition, allergy and visit carries its record's `id`, a
 vaccine its last dose's and a latest result its own (0.9.1 and later), so
-a reader finds them in `private.json`. A condition whose code can have a
+a reader finds them in `private.json`. A vaccine a claim tells of (Records,
+above; 0.9.11 and later) is a line of its own with `from_claim: true`, one dose
+and the claim's `id`, so that a private claim's dose never adds to a line shown. A condition whose code can have a
 name carries `name_key`, its key in `code-names.json` (0.9.4 and later).
 
 `medications`, `conditions` and `allergies` are 0.9.8's lists, by each record's

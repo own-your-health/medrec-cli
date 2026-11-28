@@ -1268,6 +1268,18 @@ fn eob_items(r: &Value, pharmacy: bool) -> Option<Value> {
             if marked_not_counted(it) {
                 line["counted"] = Value::Bool(false);
             }
+            // A vaccine's CVX code, where one coding of its service is one,
+            // first or not (0.9.11 and later).
+            let codings = it
+                .pointer("/productOrService/coding")
+                .and_then(Value::as_array);
+            let cvx = codings.into_iter().flatten().find(|c| c["system"] == CVX);
+            if let Some(code) = cvx
+                .and_then(|c| c["code"].as_str())
+                .filter(|c| !c.trim().is_empty())
+            {
+                line["cvx"] = code.trim().into();
+            }
             let texts: Vec<Value> = note_numbers(it)
                 .into_iter()
                 .filter_map(|k| notes.iter().find(|(n, _)| *n == Some(k)))

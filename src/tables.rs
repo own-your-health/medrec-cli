@@ -1,11 +1,14 @@
 //! Published code tables, kept on this machine: the plain names of
-//! diagnosis codes.
+//! diagnosis codes, and which codes are vaccines.
 //!
 //! medrec ships none of them. `medrec tables fetch` downloads each
 //! publisher's whole file from the address below, keeps it only when its
 //! SHA-256 is the one recorded here, and nothing is ever looked up by code
 //! over the network. Without a table, or with a file whose hash is not the
 //! recorded one, a code has no name and the source's own text stands.
+//! CDC's vaccine tables have no version: one that is not the recorded file
+//! is kept only when the person says so (`--accept`), and is then used as
+//! the recorded one is.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
@@ -13,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use pk_cli_core::{private_file, CliError};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::hash::sha256_hex;
 use crate::nppes;
@@ -30,10 +33,24 @@ pub struct Table {
     pub url: &'static str,
     pub sha256: &'static str,
     pub bytes: u64,
-    /// The file inside the zip, and how many codes it has.
-    pub member: &'static str,
-    pub member_bytes: u64,
+    pub form: Form,
+    /// How many codes it has.
     pub rows: usize,
+}
+
+/// How a table's file is kept and read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Form {
+    /// One file of a zip, of exactly `bytes` bytes.
+    Zip { member: &'static str, bytes: u64 },
+    /// The publisher's text file itself, with no version: rows of `columns`
+    /// values between `|`, each column of `numbers` a code number, and in
+    /// `changed` the day the row last changed (`YYYY/MM/DD`).
+    Text {
+        columns: usize,
+        numbers: &'static [usize],
+        changed: usize,
+    },
 }
 
 pub const ICD10CM: Table = Table {
@@ -45,12 +62,71 @@ pub const ICD10CM: Table = Table {
     url: "https://www.cms.gov/files/zip/2027-code-descriptions-tabular-order.zip",
     sha256: "91c6c9d1117764ce72375a0f3a5493b1725dafbc1ab283b55799076c9e194965",
     bytes: 2_208_022,
-    member: "Code Descriptions/icd10cm_order_2027.txt",
-    member_bytes: 14_724_229,
+    form: Form::Zip {
+        member: "Code Descriptions/icd10cm_order_2027.txt",
+        bytes: 14_724_229,
+    },
     rows: 98_403,
 };
 
-pub const TABLES: &[&Table] = &[&ICD10CM];
+/// CDC's CVX codes, and which of them are no vaccine (`nonvaccine`). Its
+/// version is the newest day a row changed.
+pub const CVX: Table = Table {
+    id: "cvx",
+    title: "CVX vaccine codes",
+    publisher: "Centers for Disease Control and Prevention",
+    version: "2026-09-10",
+    date: "2026-09-10",
+    url: "https://www2a.cdc.gov/vaccines/iis/iisstandards/downloads/cvx.txt",
+    sha256: "efd2a6770f0f648ce76e10ac2889602b2ea8fa8ca4b63deb33ca883e7d0d7413",
+    bytes: 55_005,
+    form: Form::Text {
+        columns: 7,
+        numbers: &[0],
+        changed: 6,
+    },
+    rows: 290,
+};
+
+/// CDC's CPT codes of vaccines, each with its CVX code. Of a row only the two
+/// code numbers are read; its descriptions never are.
+pub const CPT_CVX: Table = Table {
+    id: "cpt-cvx",
+    title: "CPT codes of vaccines, with their CVX codes",
+    publisher: "Centers for Disease Control and Prevention",
+    version: "2026-07-07",
+    date: "2026-07-07",
+    url: "https://www2a.cdc.gov/vaccines/iis/iisstandards/downloads/cpt.txt",
+    sha256: "878759ca30defe5ded69258ec9e25aa4f76efde134f0bb22edce1b94e6ef5e64",
+    bytes: 33_097,
+    form: Form::Text {
+        columns: 8,
+        numbers: &[0, 4],
+        changed: 6,
+    },
+    rows: 163,
+};
+
+pub const TABLES: &[&Table] = &[&ICD10CM, &CVX, &CPT_CVX];
+
+/// The most a text table may be: it is read whole into memory.
+const TEXT_MAX: u64 = 4 << 20;
+
+/// What the person accepted of a text table that is not the recorded file
+/// (`medrec-table-accepted/v1`), kept beside it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Accepted {
+    pub schema: String,
+    pub sha256: String,
+    pub bytes: u64,
+    pub rows: u64,
+    /// The newest day one of its rows changed.
+    pub date: String,
+    /// The day it was kept.
+    pub accepted: String,
+}
+
+const ACCEPTED: &str = "medrec-table-accepted/v1";
 
 /// How long one download may take.
 const TIMEOUT: Duration = Duration::from_secs(180);
@@ -90,15 +166,30 @@ pub struct Row {
     pub folder: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kept: Option<u64>,
+    /// The file used is one the person accepted (`--accept`), and `version`,
+    /// `date`, `bytes`, `rows` and `sha256` are its own.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub accepted: bool,
 }
 
 #[derive(Debug, Serialize)]
 pub struct Fetched {
     pub id: &'static str,
-    pub version: &'static str,
+    pub version: String,
     /// `unchanged`, `downloaded` or `copied`.
     pub status: &'static str,
     pub bytes: u64,
+    /// It is not the recorded file, and was kept on the person's word.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub accepted: bool,
+}
+
+/// A table on this machine: whether it may be used, its bytes when it may,
+/// and what the person accepted when it is not the recorded file.
+struct Kept {
+    state: State,
+    bytes: Option<Vec<u8>>,
+    accepted: Option<Accepted>,
 }
 
 /// Where the tables are: under the cache, since they can be fetched again.
@@ -115,27 +206,144 @@ pub fn by_id(id: &str) -> Result<&'static Table, CliError> {
 
 impl Table {
     fn path(&self, dir: &Path) -> PathBuf {
-        dir.join(format!("{}-{}.zip", self.id, self.version))
+        match self.form {
+            Form::Zip { .. } => dir.join(format!("{}-{}.zip", self.id, self.version)),
+            Form::Text { .. } => dir.join(format!("{}.txt", self.id)),
+        }
     }
 
-    /// The file's bytes when its hash is the recorded one.
-    fn verified(&self, dir: &Path) -> (State, Option<Vec<u8>>) {
+    fn accepted_path(&self, dir: &Path) -> PathBuf {
+        dir.join(format!("{}.accepted.json", self.id))
+    }
+
+    fn is_text(&self) -> bool {
+        matches!(self.form, Form::Text { .. })
+    }
+
+    /// What the person accepted of this table, if it is a text table.
+    fn accepted(&self, dir: &Path) -> Option<Accepted> {
+        if !self.is_text() {
+            return None;
+        }
+        let a: Accepted =
+            serde_json::from_slice(&std::fs::read(self.accepted_path(dir)).ok()?).ok()?;
+        (a.schema == ACCEPTED).then_some(a)
+    }
+
+    /// The file's bytes when its hash is the recorded one, or one the person
+    /// accepted.
+    fn kept(&self, dir: &Path) -> Kept {
+        let changed = Kept {
+            state: State::Changed,
+            bytes: None,
+            accepted: None,
+        };
         let path = self.path(dir);
+        let accepted = self.accepted(dir);
+        let size = |n: u64| n == self.bytes || accepted.as_ref().is_some_and(|a| a.bytes == n);
         match std::fs::metadata(&path) {
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (State::Absent, None),
-            Ok(m) if m.len() == self.bytes => {}
-            _ => return (State::Changed, None),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Kept {
+                    state: State::Absent,
+                    ..changed
+                }
+            }
+            Ok(m) if size(m.len()) => {}
+            _ => return changed,
         }
-        match std::fs::read(&path) {
-            Ok(b) if sha256_hex(&b) == self.sha256 => (State::Ready, Some(b)),
-            _ => (State::Changed, None),
+        let Ok(b) = std::fs::read(&path) else {
+            return changed;
+        };
+        let sha = sha256_hex(&b);
+        if b.len() as u64 == self.bytes && sha == self.sha256 {
+            return Kept {
+                state: State::Ready,
+                bytes: Some(b),
+                accepted: None,
+            };
         }
+        match accepted.filter(|a| a.sha256 == sha && a.bytes == b.len() as u64) {
+            Some(a) => Kept {
+                state: State::Ready,
+                bytes: Some(b),
+                accepted: Some(a),
+            },
+            None => changed,
+        }
+    }
+
+    /// The file's bytes when it may be used.
+    fn verified(&self, dir: &Path) -> (State, Option<Vec<u8>>) {
+        let k = self.kept(dir);
+        (k.state, k.bytes)
     }
 
     /// The table's file, decompressed, when it is on this machine and whole.
     fn read(&self, dir: &Path) -> Option<Vec<u8>> {
-        member(&self.verified(dir).1?, self.member, self.member_bytes)
+        match self.form {
+            Form::Zip { member: m, bytes } => member(&self.verified(dir).1?, m, bytes),
+            Form::Text { .. } => None,
+        }
     }
+
+    /// Of each row of a text table on this machine, the values of the columns
+    /// `wanted`; none when it is absent, changed, or not a text table.
+    pub fn columns(&self, dir: &Path, wanted: &[usize]) -> Option<Vec<Vec<String>>> {
+        let file = self.verified(dir).1?;
+        let rows = text_rows(&file, self.form)?;
+        let of = |r: &Vec<&str>| {
+            wanted
+                .iter()
+                .map(|&i| r.get(i).map(|v| v.to_string()))
+                .collect()
+        };
+        rows.iter().map(of).collect()
+    }
+}
+
+/// The values of each row of a text table, trimmed, when every row has the
+/// form's columns, numbers and day; `None` for a zip's form or a file that
+/// does not.
+fn text_rows(file: &[u8], form: Form) -> Option<Vec<Vec<&str>>> {
+    let Form::Text {
+        columns,
+        numbers,
+        changed,
+    } = form
+    else {
+        return None;
+    };
+    let file = std::str::from_utf8(file.strip_prefix(b"\xef\xbb\xbf").unwrap_or(file)).ok()?;
+    let digits = |v: &str| !v.is_empty() && v.bytes().all(|b| b.is_ascii_digit());
+    let day = |v: &str| {
+        let b = v.as_bytes();
+        b.len() == 10
+            && b[4] == b'/'
+            && b[7] == b'/'
+            && digits(&v[..4])
+            && digits(&v[5..7])
+            && digits(&v[8..])
+    };
+    file.split('\n')
+        .map(|l| l.strip_suffix('\r').unwrap_or(l))
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| {
+            let row: Vec<&str> = l.split('|').map(str::trim).collect();
+            let whole = row.len() == columns
+                && numbers.iter().all(|&i| digits(row[i]))
+                && day(row[changed]);
+            whole.then_some(row)
+        })
+        .collect()
+}
+
+/// The newest day a row of a text table changed, as `YYYY-MM-DD`.
+fn newest(rows: &[Vec<&str>], form: Form) -> String {
+    let Form::Text { changed, .. } = form else {
+        return String::new();
+    };
+    let max = rows.iter().map(|r| r[changed]).max().unwrap_or_default();
+    max.replace('/', "-")
 }
 
 /// Every table, and the provider directory once for each records folder it
@@ -144,19 +352,25 @@ pub fn list() -> Vec<Row> {
     let dir = dir();
     let mut rows: Vec<Row> = TABLES
         .iter()
-        .map(|t| Row {
-            id: t.id,
-            title: t.title,
-            publisher: t.publisher,
-            version: Some(t.version.into()),
-            date: Some(t.date.into()),
-            state: dir.as_deref().map_or(State::Absent, |d| t.verified(d).0),
-            bytes: Some(t.bytes),
-            rows: Some(t.rows as u64),
-            sha256: Some(t.sha256.into()),
-            url: t.url.into(),
-            folder: None,
-            kept: None,
+        .map(|t| {
+            let k = dir.as_deref().map(|d| t.kept(d));
+            let state = k.as_ref().map_or(State::Absent, |k| k.state);
+            let a = k.and_then(|k| k.accepted);
+            Row {
+                id: t.id,
+                title: t.title,
+                publisher: t.publisher,
+                version: Some(a.as_ref().map_or(t.version.into(), |a| a.date.clone())),
+                date: Some(a.as_ref().map_or(t.date.into(), |a| a.date.clone())),
+                state,
+                bytes: Some(a.as_ref().map_or(t.bytes, |a| a.bytes)),
+                rows: Some(a.as_ref().map_or(t.rows as u64, |a| a.rows)),
+                sha256: Some(a.as_ref().map_or(t.sha256.into(), |a| a.sha256.clone())),
+                url: t.url.into(),
+                folder: None,
+                kept: None,
+                accepted: a.is_some(),
+            }
         })
         .collect();
     let kept = nppes::dir().map(|d| nppes::list(&d)).unwrap_or_default();
@@ -189,18 +403,41 @@ fn directory_row(folder: Option<String>, k: Option<nppes::Kept>, state: State) -
         url: k.map_or_else(|| nppes::CMS.base.into(), |k| k.url.clone()),
         folder,
         kept: k.map(|k| k.kept),
+        accepted: false,
     }
 }
 
 /// Keep `t` on this machine: from its publisher, or from a file someone
-/// downloaded. Nothing is kept unless it is the recorded file.
-pub fn fetch(t: &Table, dir: &Path, from: Option<&Path>) -> Result<Fetched, CliError> {
-    if from.is_none() && t.verified(dir).0 == State::Ready {
+/// downloaded. Nothing is kept unless it is the recorded file, or, of a text
+/// table, the file whose SHA-256 is `accept`: the person's word, given after
+/// a run that refused it said its hash.
+pub fn fetch(
+    t: &Table,
+    dir: &Path,
+    from: Option<&Path>,
+    accept: Option<&str>,
+) -> Result<Fetched, CliError> {
+    if accept.is_some() && !t.is_text() {
+        let text: Vec<&str> = TABLES
+            .iter()
+            .filter(|t| t.is_text())
+            .map(|t| t.id)
+            .collect();
+        return Err(CliError::Usage(format!(
+            "--accept is for a table whose publisher gives no version ({}), not {}",
+            text.join(", "),
+            t.id
+        )));
+    }
+    let k = t.kept(dir);
+    if from.is_none() && accept.is_none() && k.state == State::Ready {
+        let a = k.accepted.as_ref();
         return Ok(Fetched {
             id: t.id,
-            version: t.version,
+            version: a.map_or(t.version.into(), |a| a.date.clone()),
             status: "unchanged",
-            bytes: t.bytes,
+            bytes: a.map_or(t.bytes, |a| a.bytes),
+            accepted: a.is_some(),
         });
     }
     let (bytes, status) = match from {
@@ -211,22 +448,77 @@ pub fn fetch(t: &Table, dir: &Path, from: Option<&Path>) -> Result<Fetched, CliE
         }
         None => (download(t)?, "downloaded"),
     };
-    let file = member(&bytes, t.member, t.member_bytes)
-        .ok_or_else(|| CliError::Other(format!("{} {} cannot be unpacked", t.id, t.version)))?;
-    if icd_rows(&file).count() != t.rows {
-        return Err(CliError::Other(format!(
-            "{} {} does not have the rows medrec expects",
-            t.id, t.version
+    let sha = sha256_hex(&bytes);
+    let recorded = bytes.len() as u64 == t.bytes && sha == t.sha256;
+    if !recorded && !accept.is_some_and(|a| a.trim().eq_ignore_ascii_case(&sha)) {
+        return Err(CliError::ConfirmationRequired(format!(
+            "{} is now another file than the one medrec was written against ({} bytes, \
+             SHA-256 {sha}; medrec's has {} bytes, SHA-256 {}), so it was not kept. Of its \
+             rows medrec reads code numbers alone. To keep it, run this again with --accept {sha}",
+            t.id,
+            bytes.len(),
+            t.bytes,
+            t.sha256
         )));
     }
-    private_file::create_dir_all(dir)
-        .and_then(|()| private_file::write(&t.path(dir), &bytes, private_file::Replace::Always))
-        .map_err(|e| CliError::Other(format!("keeping {}: {e}", t.id)))?;
+    let unread = || {
+        CliError::Other(format!(
+            "{} {} does not have the rows medrec expects",
+            t.id, t.version
+        ))
+    };
+    let accepted = match t.form {
+        Form::Zip {
+            member: m,
+            bytes: size,
+        } => {
+            let file = member(&bytes, m, size).ok_or_else(|| {
+                CliError::Other(format!("{} {} cannot be unpacked", t.id, t.version))
+            })?;
+            if icd_rows(&file).count() != t.rows {
+                return Err(unread());
+            }
+            None
+        }
+        Form::Text { .. } => {
+            let rows = text_rows(&bytes, t.form).ok_or_else(unread)?;
+            if rows.is_empty() || (recorded && rows.len() != t.rows) {
+                return Err(unread());
+            }
+            (!recorded).then(|| Accepted {
+                schema: ACCEPTED.into(),
+                sha256: sha.clone(),
+                bytes: bytes.len() as u64,
+                rows: rows.len() as u64,
+                date: newest(&rows, t.form),
+                accepted: crate::model::today(),
+            })
+        }
+    };
+    let keep = |e: std::io::Error| CliError::Other(format!("keeping {}: {e}", t.id));
+    private_file::create_dir_all(dir).map_err(keep)?;
+    // The word goes first, so a file is never there without the word that
+    // lets it be used, nor the recorded file with an old one.
+    let word = t.accepted_path(dir);
+    match &accepted {
+        Some(a) => {
+            let json = serde_json::to_vec(a).map_err(|e| CliError::Other(e.to_string()))?;
+            private_file::write(&word, &json, private_file::Replace::Always).map_err(keep)?;
+        }
+        None => match std::fs::remove_file(&word) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(keep(e)),
+            _ => {}
+        },
+    }
+    private_file::write(&t.path(dir), &bytes, private_file::Replace::Always).map_err(keep)?;
     Ok(Fetched {
         id: t.id,
-        version: t.version,
+        version: accepted
+            .as_ref()
+            .map_or(t.version.into(), |a| a.date.clone()),
         status,
-        bytes: t.bytes,
+        bytes: bytes.len() as u64,
+        accepted: accepted.is_some(),
     })
 }
 
@@ -256,13 +548,18 @@ fn download(t: &Table) -> Result<Vec<u8>, CliError> {
     whole(t, r).map_err(CliError::Upstream)
 }
 
-/// Everything `r` has, when it is the recorded file.
+/// Everything `r` has: of a zip, only the recorded file; of a text table, any
+/// file of at most [`TEXT_MAX`] bytes, which [`fetch`] checks.
 fn whole(t: &Table, r: impl Read) -> Result<Vec<u8>, String> {
+    let most = if t.is_text() { TEXT_MAX } else { t.bytes };
     let mut bytes = Vec::with_capacity(t.bytes as usize);
-    r.take(t.bytes + 1)
+    r.take(most + 1)
         .read_to_end(&mut bytes)
         .map_err(|e| format!("reading {}: {e}", t.id))?;
-    if bytes.len() as u64 != t.bytes || sha256_hex(&bytes) != t.sha256 {
+    if bytes.len() as u64 > most {
+        return Err(format!("{} is over {most} bytes, so it was not kept", t.id));
+    }
+    if !t.is_text() && (bytes.len() as u64 != t.bytes || sha256_hex(&bytes) != t.sha256) {
         return Err(format!(
             "this is not {} {} as medrec records it (another size or SHA-256), so it was not kept",
             t.id, t.version
@@ -466,8 +763,10 @@ mod tests {
         let t = Table {
             sha256: sha,
             bytes: z.len() as u64,
-            member: "o.txt",
-            member_bytes: data.len() as u64,
+            form: Form::Zip {
+                member: "o.txt",
+                bytes: data.len() as u64,
+            },
             rows: 1,
             ..ICD10CM
         };
@@ -479,15 +778,24 @@ mod tests {
         other[40] ^= 1;
         std::fs::write(&src, &other).unwrap();
         assert!(matches!(
-            fetch(&t, &local, Some(&src)),
+            fetch(&t, &local, Some(&src), None),
             Err(CliError::Usage(_))
         ));
         assert!(!local.exists());
+        // A zip has a version: no word keeps another file.
+        let sha_other = sha256_hex(&other);
+        assert!(matches!(
+            fetch(&t, &local, Some(&src), Some(&sha_other)),
+            Err(CliError::Usage(_))
+        ));
 
         std::fs::write(&src, &z).unwrap();
-        assert_eq!(fetch(&t, &local, Some(&src)).unwrap().status, "copied");
+        assert_eq!(
+            fetch(&t, &local, Some(&src), None).unwrap().status,
+            "copied"
+        );
         assert_eq!(t.verified(&local).0, State::Ready);
-        assert_eq!(fetch(&t, &local, None).unwrap().status, "unchanged");
+        assert_eq!(fetch(&t, &local, None, None).unwrap().status, "unchanged");
         assert_eq!(std::fs::read_dir(&local).unwrap().count(), 1);
 
         std::fs::write(t.path(&local), &other).unwrap();
@@ -538,6 +846,167 @@ mod tests {
                 Err(CliError::Upstream(_))
             ));
         }
+    }
+
+    /// Invented rows in CDC's layouts: a CVX code, three texts, a status, the
+    /// no-vaccine flag and the day; a CPT code, its text, an empty column,
+    /// the CVX text and code, a comment, the day and an id.
+    pub(crate) fn cdc(rows: &[&[&str]]) -> Vec<u8> {
+        let mut out = b"\xef\xbb\xbf".to_vec();
+        for r in rows {
+            out.extend(r.join("|").into_bytes());
+            out.extend(b"\r\n");
+        }
+        out
+    }
+
+    fn text_table(file: &[u8], form: Form) -> Table {
+        Table {
+            sha256: Box::leak(sha256_hex(file).into_boxed_str()),
+            bytes: file.len() as u64,
+            form,
+            rows: text_rows(file, form).unwrap().len(),
+            ..CVX
+        }
+    }
+
+    #[test]
+    fn a_text_tables_rows_are_whole_or_none_are_read() {
+        let form = CVX.form;
+        let good = cdc(&[
+            &[
+                "900",
+                "Sample",
+                "Sample vaccine",
+                "",
+                "Active",
+                "False",
+                "2024/01/02",
+            ],
+            &[
+                "901",
+                "Sample",
+                "Sample globulin",
+                "",
+                "Active",
+                "True",
+                "2024/03/04",
+            ],
+        ]);
+        let rows = text_rows(&good, form).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!((rows[0][0], rows[1][5]), ("900", "True"));
+        assert_eq!(newest(&rows, form), "2024-03-04");
+        for bad in [
+            cdc(&[&["900", "Sample", "Sample vaccine", "", "Active", "False"]]),
+            cdc(&[&[
+                "9O0",
+                "Sample",
+                "Sample vaccine",
+                "",
+                "Active",
+                "False",
+                "2024/01/02",
+            ]]),
+            cdc(&[&[
+                "900",
+                "Sample",
+                "Sample vaccine",
+                "",
+                "Active",
+                "False",
+                "2024-01-02",
+            ]]),
+            vec![0xff, b'|'],
+        ] {
+            assert_eq!(text_rows(&bad, form), None);
+        }
+        assert_eq!(text_rows(&good, ICD10CM.form), None);
+    }
+
+    #[test]
+    fn a_text_table_that_changed_is_kept_only_on_the_persons_word() {
+        let dir = std::env::temp_dir().join(format!("medrec-text-tables-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let first = cdc(&[&[
+            "900",
+            "Sample",
+            "Sample vaccine",
+            "",
+            "Active",
+            "False",
+            "2024/01/02",
+        ]]);
+        let later = cdc(&[
+            &[
+                "900",
+                "Sample",
+                "Sample vaccine",
+                "",
+                "Active",
+                "False",
+                "2024/01/02",
+            ],
+            &[
+                "902",
+                "Sample",
+                "Sample vaccine B",
+                "",
+                "Active",
+                "False",
+                "2024/05/06",
+            ],
+        ]);
+        let t = text_table(&first, CVX.form);
+        let local = dir.join("tables");
+        let src = dir.join("cvx.txt");
+        std::fs::write(&src, &later).unwrap();
+        let sha = sha256_hex(&later);
+        // Refused, with the hash to accept it by.
+        match fetch(&t, &local, Some(&src), None) {
+            Err(CliError::ConfirmationRequired(m)) => {
+                assert!(m.contains(&format!("--accept {sha}")), "{m}")
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(
+            fetch(&t, &local, Some(&src), Some(&sha_of("another"))),
+            Err(CliError::ConfirmationRequired(_))
+        ));
+        assert_eq!(t.verified(&local).0, State::Absent);
+
+        let kept = fetch(&t, &local, Some(&src), Some(&sha.to_uppercase())).unwrap();
+        assert!(kept.accepted);
+        assert_eq!(
+            (kept.version.as_str(), kept.bytes),
+            ("2024-05-06", later.len() as u64)
+        );
+        assert_eq!(t.verified(&local).0, State::Ready);
+        let a = t.accepted(&local).unwrap();
+        assert_eq!((a.sha256.as_str(), a.rows), (sha.as_str(), 2));
+        let codes = t.columns(&local, &[0, 5]).unwrap();
+        assert_eq!(codes, [["900", "False"], ["902", "False"]]);
+        let again = fetch(&t, &local, None, None).unwrap();
+        assert_eq!((again.status, again.accepted), ("unchanged", true));
+
+        // A file that is neither is not used.
+        std::fs::write(t.path(&local), &first[..first.len() - 2]).unwrap();
+        assert_eq!(t.verified(&local), (State::Changed, None));
+        assert_eq!(t.columns(&local, &[0]), None);
+
+        // The recorded file needs no word, and leaves none behind.
+        std::fs::write(&src, &first).unwrap();
+        let back = fetch(&t, &local, Some(&src), None).unwrap();
+        assert!(!back.accepted);
+        assert_eq!(back.version, t.version);
+        assert!(t.accepted(&local).is_none());
+        assert_eq!(std::fs::read_dir(&local).unwrap().count(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn sha_of(s: &str) -> String {
+        sha256_hex(s.as_bytes())
     }
 
     #[test]
