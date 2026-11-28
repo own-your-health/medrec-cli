@@ -42,8 +42,9 @@ struct Cli {
     #[arg(long, global = true, value_name = "NAME", value_parser = profile_name_text)]
     profile: Option<String>,
     /// Read a records folder on Google Drive from Drive itself, and not from
-    /// this machine's copies, which can be up to a day old. What it reads is
-    /// not kept: the copies stay as they are (env MEDREC_NO_CACHE).
+    /// this machine's copies, which by default can be up to a day old, or
+    /// older when Drive cannot be reached. What it reads is not kept: the
+    /// copies stay as they are (env MEDREC_NO_CACHE).
     #[arg(long, global = true, visible_alias = "no-cache")]
     fresh: bool,
     #[command(subcommand)]
