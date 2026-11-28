@@ -3,7 +3,8 @@
 clinician than a surname and an initial, papers that name two of them, one by its
 organization and one by its title, a bill of a third's visit, from the practice
 they are of, a day two clinicians share with such a bill, and a visit, a
-prescription and a procedure that print the first. The sources are those of
+prescription, a procedure, a result, a report and an immunization that print
+the first. The sources are those of
 ../standing/household.json."""
 
 import json
@@ -73,7 +74,7 @@ def printing(name, kind, day, display, field, who):
         "date": day,
         "display": display,
         "status": "completed" if kind != "medication" else "active",
-        "fields": {field: who},
+        "fields": {field: who, **({"value": "4"} if kind == "result" else {})},
         "provenance": [provenance(name)],
     }
 
@@ -112,6 +113,9 @@ INDEX = {
         printing("visit", "encounter", "2024-09-24", "Office visit", "practitioner", "Kim Placeholder"),
         printing("refill", "medication", "2024-09-24", "Sample tablet", "prescriber", "PLACEHOLDER, KIM"),
         printing("procedure", "procedure", "2024-09-24", "Sample procedure", "performer", "K Placeholder"),
+        printing("reading", "result", "2024-09-24", "Sample reading", "performer", "PLACEHOLDER, KIM"),
+        printing("summary", "report", "2024-09-24", "Sample summary", "performer", "K. Placeholder"),
+        printing("vaccine", "immunization", "2024-09-24", "Sample vaccine", "performer", "K Placeholder"),
     ],
     "studies": [],
     "imports": [],

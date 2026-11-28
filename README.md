@@ -317,7 +317,7 @@ medrec note add Robin "Ask about the recheck" --tag question --about <record id>
 
 medrec verify                                   # every indexed file against the index
 medrec verify --events                          # and each event's place, and its records' names, days and sources, against their raw files: counts and ids
-medrec reindex                                  # claims shaped again, providers, statuses, what each source gave and what else served a paper read again from the raw files, results' parts and categories too, what panels and reports list, the records' links made again, results about somebody else put in a record of their own, and bills and receipts read again, after an upgrade
+medrec reindex                                  # claims shaped again, providers, statuses, what each source gave and what else served a paper read again from the raw files, results' parts, categories and performers too, reports' performers, what panels and reports list, the records' links made again, results about somebody else put in a record of their own, and bills and receipts read again, after an upgrade
 medrec backup --to "/Volumes/Backup/Medical Records"
 ```
 
@@ -601,8 +601,8 @@ ICD-10 code by what it is called, a report by its conclusion and a result by a
 value that is a text, a document by its title, the name its file came with or
 any private record that links it, a bill or receipt by its own words, with its
 copies and the statements and payments before and after it, and a study by its
-report. A claim, a visit, a prescription, a procedure, a result or a report is
-private too where the clinician it prints, by surname and first initial, is one
+report. A claim, a visit, a prescription, a procedure, a result, a report or a
+vaccine is private too where the clinician it prints, by surname and first initial, is one
 whom a paper of the person's ties to what they treat, even when it spells out
 more of the name. So is a claim that prints a clinician and is of the day of a
 bill, a receipt or a visit's paper from such a practice (not a pharmacy), and
