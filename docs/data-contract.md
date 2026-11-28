@@ -785,10 +785,11 @@ its totals leave one out.
   `quantity`, `net`, `adjudication` (`[{category, amount, reason}]` as the
   payer wrote them), `payer_notes`, `counted`, `codes` and `records`.
   `revenue`, `payer_notes` and `counted` are present only when they say
-  something. `codes` (0.9.11 and later) is every coding of the line's service,
-  `[{system, code}]` in the payer's order, where it has more than one:
-  `service` keeps the first, and a payer can give an RxNorm code, an NDC or a
-  CVX code after a code of its own. A claim filed before has it after `medrec
+  something. `codes` (0.9.11 and later) is every coding of the line's service
+  that has a system and a code, `[{system, code}]` in the payer's order, where
+  they say more than `service`: more than one, or one that is not the first
+  coding. `service` keeps the first, and a payer can give an RxNorm code, an
+  NDC or a CVX code after a code of its own, or after a display alone. A claim filed before has it after `medrec
   reindex`.
 - A line's `payer_notes` (0.8.2 and later): the texts of the
   `processNote` entries its `noteNumber` points at, in that order, as the

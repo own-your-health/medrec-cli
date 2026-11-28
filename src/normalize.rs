@@ -1273,9 +1273,13 @@ fn eob_items(r: &Value, pharmacy: bool) -> Option<Value> {
                 line["counted"] = Value::Bool(false);
             }
             // `service` keeps the first coding; a payer can give the drug's
-            // RxNorm code, its NDC or a vaccine's CVX code after another.
+            // RxNorm code, its NDC or a vaccine's CVX code after another, or
+            // after one with no system or code.
             let codes = claims::coding_pairs(it.get("productOrService"));
-            if codes.len() > 1 {
+            let first = it.pointer("/productOrService/coding/0");
+            let first = first.map(|c| (c.get("system"), c.get("code")));
+            let as_first = |c: &Value| first == Some((c.get("system"), c.get("code")));
+            if codes.len() > 1 || codes.first().is_some_and(|c| !as_first(c)) {
                 line["codes"] = Value::Array(codes);
             }
             let texts: Vec<Value> = note_numbers(it)

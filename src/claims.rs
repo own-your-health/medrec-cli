@@ -252,6 +252,18 @@ fn add(a: &Value, b: &Value) -> Option<Value> {
 /// payer's `you_owe`, else `deductible` + `copay` + `coinsurance` +
 /// `not_covered` of those given (never `discount`), and whether it is that
 /// sum. Never written into `amounts`, where a missing name stays unknown.
+pub fn member_share(amounts: &Value) -> Option<(Value, bool)> {
+    if let Some(v) = amounts.get("you_owe") {
+        return Some((v.clone(), false));
+    }
+    let mut parts = ["deductible", "copay", "coinsurance", "not_covered"]
+        .iter()
+        .filter_map(|k| amounts.get(*k));
+    let first = parts.next()?.clone();
+    let sum = parts.try_fold(first, |acc, v| add(&acc, v))?;
+    Some((sum, true))
+}
+
 /// Every coding of a concept, `{system, code}`, in the order given.
 pub fn coding_pairs(concept: Option<&Value>) -> Vec<Value> {
     codings(concept)
@@ -273,18 +285,6 @@ pub fn service_codes(line: &Value) -> Vec<(&str, &str)> {
         Some(codes) => codes.iter().filter_map(pair).collect(),
         None => line.get("service").and_then(pair).into_iter().collect(),
     }
-}
-
-pub fn member_share(amounts: &Value) -> Option<(Value, bool)> {
-    if let Some(v) = amounts.get("you_owe") {
-        return Some((v.clone(), false));
-    }
-    let mut parts = ["deductible", "copay", "coinsurance", "not_covered"]
-        .iter()
-        .filter_map(|k| amounts.get(*k));
-    let first = parts.next()?.clone();
-    let sum = parts.try_fold(first, |acc, v| add(&acc, v))?;
-    Some((sum, true))
 }
 
 /// Amounts under fixed names from `(raw category, money)` pairs: of a
