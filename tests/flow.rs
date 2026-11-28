@@ -3743,10 +3743,14 @@ fn a_results_parts_and_categories_come_with_an_import_and_by_reindex() {
     let report = of_day(&whole, "2024-04-30");
     assert_eq!(report["members"], serde_json::json!([id_of("sum-1")]));
     assert_eq!(of_day(&whole, "2024-04-25")["performer"], "Jordan Sample");
-    let performed = whole["records"].as_array().unwrap().iter();
-    let performed = performed.clone().find(|r| r["date"] == "2024-04-25").unwrap();
+    let mut all = whole["records"].as_array().unwrap().iter();
+    let performed = all.find(|r| r["date"] == "2024-04-25").unwrap();
     let by = &performed["providers"][0];
-    assert_eq!((&by["field"], &by["npi"]), (&"performer".into(), &"0000000006".into()), "{performed}");
+    assert_eq!(
+        (&by["field"], &by["npi"]),
+        (&"performer".into(), &"0000000006".into()),
+        "{performed}"
+    );
     assert_eq!(report["results"], 2);
     let rows = base.ok(&["results", "--person", "Robin"]);
     let mut rows = rows["items"].as_array().unwrap().iter();

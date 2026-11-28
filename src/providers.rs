@@ -646,7 +646,8 @@ mod tests {
             of(&reading, &fields, &mut One).unwrap().refs,
             [entry("performer", Some("0000000006"), None)]
         );
-        let r4 = json!({"resourceType": "DiagnosticReport", "performer": [{"display": "Example Lab"}]});
+        let r4 =
+            json!({"resourceType": "DiagnosticReport", "performer": [{"display": "Example Lab"}]});
         assert_eq!(printed(&r4, "performer"), Some("Example Lab"));
         let stu3 = json!({
             "resourceType": "DiagnosticReport",
