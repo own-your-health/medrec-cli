@@ -64,6 +64,9 @@ fn references(resource_type: &str) -> &'static [(&'static str, &'static [&'stati
         "MedicationRequest" => &[("prescriber", &["requester", "requester.agent"])],
         "MedicationDispense" => &[("pharmacy", &["performer.0.actor", "location"])],
         "Immunization" => &[("performer", &["performer.0.actor", "practitioner.0.actor"])],
+        "Observation" => &[("performer", &["performer.0"])],
+        // STU3 names each performer's `actor`.
+        "DiagnosticReport" => &[("performer", &["performer.0", "performer.0.actor"])],
         "Procedure" => &[
             ("performer", &["performer.0.actor"]),
             ("location", &["location"]),
@@ -625,6 +628,33 @@ mod tests {
         assert!(of(&fill, &fields, &mut One).unwrap().refs.is_empty());
     }
 
+    /// A result's and a report's performer is followed as a procedure's is:
+    /// a result's and an R4 report's is the reference itself, an STU3 report's
+    /// its `actor`.
+    #[test]
+    fn a_result_and_a_report_print_their_first_performer() {
+        let reading = json!({
+            "resourceType": "Observation",
+            "performer": [
+                {"reference": "Practitioner/a1", "display": "Jordan Sample"},
+                {"display": "Example Lab"}
+            ]
+        });
+        assert_eq!(printed(&reading, "performer"), Some("Jordan Sample"));
+        let fields = map(json!({"performer": "Jordan Sample"}));
+        assert_eq!(
+            of(&reading, &fields, &mut One).unwrap().refs,
+            [entry("performer", Some("0000000006"), None)]
+        );
+        let r4 = json!({"resourceType": "DiagnosticReport", "performer": [{"display": "Example Lab"}]});
+        assert_eq!(printed(&r4, "performer"), Some("Example Lab"));
+        let stu3 = json!({
+            "resourceType": "DiagnosticReport",
+            "performer": [{"role": {"text": "Reader"}, "actor": {"display": "Jordan Sample"}}]
+        });
+        assert_eq!(printed(&stu3, "performer"), Some("Jordan Sample"));
+    }
+
     /// An id is unique only on its own server.
     #[test]
     fn an_absolute_reference_is_followed_only_on_its_sources_server() {
@@ -750,6 +780,8 @@ mod tests {
             "Immunization",
             "Procedure",
             "ExplanationOfBenefit",
+            "Observation",
+            "DiagnosticReport",
         ] {
             assert!(!references(ty).is_empty());
             for (f, _) in references(ty) {

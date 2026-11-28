@@ -3204,7 +3204,7 @@ fn what_services_say_makes_claims_and_procedures_private() {
 #[test]
 fn a_clinician_a_paper_names_makes_claims_private_everywhere() {
     // Each held item, and what ties its clinician.
-    const HELD: [(&str, Option<&str>); 9] = [
+    const HELD: [(&str, Option<&str>); 12] = [
         ("r_byorgaaaaaaaaaaaaaaa", None),
         ("r_bytitleaaaaaaaaaaaaa", None),
         ("r_billedaaaaaaaaaaaaaa", Some("linked")),
@@ -3214,6 +3214,9 @@ fn a_clinician_a_paper_names_makes_claims_private_everywhere() {
         ("r_visitaaaaaaaaaaaaaaa", None),
         ("r_refillaaaaaaaaaaaaaa", None),
         ("r_procedureaaaaaaaaaaa", None),
+        ("r_readingaaaaaaaaaaaaa", None),
+        ("r_summaryaaaaaaaaaaaaa", None),
+        ("r_vaccineaaaaaaaaaaaaa", None),
     ];
     const CLAIMS: usize = 6;
     let e = Env::new("clinicians");
@@ -3281,11 +3284,15 @@ fn a_clinician_a_paper_names_makes_claims_private_everywhere() {
         true
     });
     let private = changes_of(&e, &alex)["private"].clone();
-    let kinds = json!({"claim": 6, "encounter": 1, "medication": 1, "procedure": 1});
+    let kinds = json!({
+        "claim": 6, "encounter": 1, "medication": 1, "procedure": 1,
+        "result": 1, "report": 1, "immunization": 1
+    });
     assert_eq!(private["clinician"], kinds, "{private}");
-    assert_eq!(private["added_by"]["clinician"], 9, "{private}");
+    assert_eq!(private["added_by"]["clinician"], 12, "{private}");
     assert_eq!(private["clinician_day"], 2);
     assert_eq!(private["clinician_linked"], 2);
+    assert_eq!(private["clinician_performer"], 3);
 
     // Only the household opens it: one item,
     let first = HELD[0].0;

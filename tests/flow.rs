@@ -3673,6 +3673,14 @@ fn a_results_parts_and_categories_come_with_an_import_and_by_reindex() {
         "category": [{"coding": [
             {"system": "http://terminology.hl7.org/CodeSystem/v2-0074", "code": "LAB"}]}],
     }));
+    // A result that prints who read it, with an NPI beside the reference.
+    resources.push(serde_json::json!({
+        "resourceType": "Observation", "id": "performed-1", "status": "final",
+        "code": {"text": "Example reading"}, "effectiveDateTime": "2024-04-25T09:30:00Z",
+        "valueQuantity": {"value": 4, "unit": "mg/dL"},
+        "performer": [{"reference": "Practitioner/not-served", "display": "Jordan Sample",
+            "identifier": {"system": "http://hl7.org/fhir/sid/us-npi", "value": "0000000006"}}],
+    }));
     let observations = resources.len() - 1;
     for r in &mut resources {
         r["subject"] = serde_json::json!({"reference": "Patient/pat-0001"});
@@ -3734,6 +3742,11 @@ fn a_results_parts_and_categories_come_with_an_import_and_by_reindex() {
     assert_eq!(heading["members"], want);
     let report = of_day(&whole, "2024-04-30");
     assert_eq!(report["members"], serde_json::json!([id_of("sum-1")]));
+    assert_eq!(of_day(&whole, "2024-04-25")["performer"], "Jordan Sample");
+    let performed = whole["records"].as_array().unwrap().iter();
+    let performed = performed.clone().find(|r| r["date"] == "2024-04-25").unwrap();
+    let by = &performed["providers"][0];
+    assert_eq!((&by["field"], &by["npi"]), (&"performer".into(), &"0000000006".into()), "{performed}");
     assert_eq!(report["results"], 2);
     let rows = base.ok(&["results", "--person", "Robin"]);
     let mut rows = rows["items"].as_array().unwrap().iter();
@@ -3796,12 +3809,18 @@ fn a_results_parts_and_categories_come_with_an_import_and_by_reindex() {
     let given = less.map(without).filter(|had| *had).count();
     assert_eq!(given, 1);
     for r in old["records"].as_array_mut().unwrap() {
+        if r["fields"].get("performer").is_some() {
+            r.as_object_mut().unwrap().remove("providers");
+        }
         let listing = r.as_object_mut().unwrap().remove("lists").is_some();
         let fields = r["fields"].as_object_mut().unwrap();
         fields.remove("members");
         let parts = fields.remove("components").is_some();
         let had = fields.len();
-        fields.retain(|k, v| k != "categories" && !(k == "value" && parts && v.is_string()));
+        fields.retain(|k, v| {
+            let earlier = k != "categories" && k != "performer";
+            earlier && !(k == "value" && parts && v.is_string())
+        });
         lacking += usize::from(listing || parts || fields.len() < had);
     }
     std::fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();

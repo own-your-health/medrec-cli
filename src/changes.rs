@@ -94,6 +94,10 @@ pub struct Changes {
     pub papers: Papers,
 }
 
+/// The kinds rule A judges by the performer they print, which medrec before
+/// 0.9.11 did not.
+const PERFORMED: &[&str] = &["result", "report", "immunization"];
+
 #[derive(Debug, Default, Serialize)]
 pub struct Private {
     /// Open before, or not there, by kind.
@@ -117,6 +121,9 @@ pub struct Private {
     /// clinician linked to one.
     pub clinician_day: usize,
     pub clinician_linked: usize,
+    /// Of those, the results, reports and immunizations: by the performer
+    /// they print (0.9.11 and later).
+    pub clinician_performer: usize,
     /// Open with a private part, by kind.
     pub parts: Counts,
 }
@@ -296,6 +303,9 @@ fn private(
             one(&mut out.added_by, from.to_string());
             if from == "clinician" {
                 one(&mut out.clinician, kind.clone());
+                if PERFORMED.contains(&kind.as_str()) {
+                    out.clinician_performer += 1;
+                }
                 match why["learned"].as_str() {
                     Some("day") => out.clinician_day += 1,
                     Some("linked") => out.clinician_linked += 1,
@@ -447,6 +457,10 @@ impl Changes {
             (
                 "of them through a clinician linked to a practice",
                 some(p.clinician_linked, "items"),
+            ),
+            (
+                "of them by the performer of a result, a report or an immunization",
+                some(p.clinician_performer, "items"),
             ),
             ("their questionnaires", asked),
             ("private before, open now", counts(&p.opened)),
