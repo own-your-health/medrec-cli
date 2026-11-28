@@ -3191,6 +3191,77 @@ fn what_services_say_makes_claims_and_procedures_private() {
     let _ = std::fs::remove_dir_all(&e.root);
 }
 
+/// A pharmacy claim is a fill of the medicine it names, which every answer says
+/// is from a claim. It makes no medicine, and what is private of it is shown to
+/// no household.
+#[test]
+fn a_pharmacy_claim_is_a_fill_of_a_medicine_ended_by_its_date() {
+    let e = Env::new("claim-fills");
+    fixture_household(&e, "fills", &["index.json"]);
+    let alex = h_id(&e, "Alex Testperson");
+    e.ok(&["views", "write"]);
+    let t = e.tools();
+    let ended = |person: Option<&str>, id: &str| -> Value {
+        let mut args = json!({"kind": "medications", "limit": 50});
+        if let Some(p) = person {
+            args["person"] = p.into();
+        }
+        let v = assert_fits(&t, RECORDS, &call(&t, RECORDS, args)).clone();
+        row_of(&v, id)["standing"].clone()
+    };
+    let says = |filled: &str| {
+        json!(format!(
+            "ended by its date 2024-03-31 (prescription){filled}"
+        ))
+    };
+    let capsule = "r_capsuleaaaaaaaaaaaaa";
+    let package = "r_packageaaaaaaaaaaaaa";
+    assert_eq!(
+        ended(Some("Alex"), capsule),
+        says(", filled 2024-06-07 (from a claim)")
+    );
+    for (id, day) in [
+        ("r_tabletaaaaaaaaaaaaaa", "2024-05-07"),
+        ("r_dropsaaaaaaaaaaaaaaa", "2024-05-09"),
+        ("r_syrupaaaaaaaaaaaaaaa", "2024-05-10"),
+    ] {
+        let want = says(&format!(", filled {day} (from a claim)"));
+        assert_eq!(ended(None, id), want, "{id}");
+    }
+    // A claim of a drug there is no medicine of makes none.
+    let v = call(
+        &t,
+        RECORDS,
+        json!({"kind": "medications", "person": "Alex", "limit": 50}),
+    );
+    let v = assert_fits(&t, RECORDS, &v).clone();
+    for i in v["items"].as_array().unwrap() {
+        assert!(!i.to_string().contains("Example ointment"), "{i}");
+        assert!(!i["id"].as_str().unwrap().contains("nomedicine"), "{i}");
+    }
+    // What is private is no fill where the household is asked of.
+    e.ok(&["private", "mark", package]);
+    let shared = ended(None, capsule);
+    assert_eq!(shared, says(", filled 2024-05-06 (from a claim)"));
+    e.ok(&["private", "mark", "r_codedaaaaaaaaaaaaaaa"]);
+    assert_eq!(ended(None, capsule), says(", filled 2024-04-05"));
+    assert_eq!(
+        ended(Some("Alex"), capsule),
+        says(", filled 2024-06-07 (from a claim)")
+    );
+    // The views have it, and say which are from a claim.
+    let (files, _) = views_of(&e, &alex);
+    assert_eq!(
+        files["standing"]["records"][capsule]["filled"],
+        json!([
+            {"record": package, "date": "2024-06-07", "from_claim": true},
+            {"record": "r_codedaaaaaaaaaaaaaaa", "date": "2024-05-06", "from_claim": true},
+            {"record": "r_capsulefillaaaaaaaaa", "date": "2024-04-05"}
+        ])
+    );
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
 /// The words, number and name of a private line, diagnosis or payer note of an
 /// open item are in no answer that names no person: not in its title, its
 /// event, a search, or what an answer counts. Its amounts are, and what is left

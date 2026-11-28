@@ -2350,7 +2350,16 @@ word wins over another's. Every person has one.
 - **`filled`**: the fills of the medicine after `until`, newest first, of one
   day the greater record id first: those whose `status` is `completed` or
   `unknown`, or that have none. Of a medicine ended by its date a reader shows
-  the first it may, a fact beside it that changes nothing.
+  the first it may, a fact beside it that changes nothing. A pharmacy claim is
+  one too, with `from_claim: true` (0.9.11 and later; absent otherwise), and a
+  reader says "from a claim" wherever it shows it. Its `record` is the claim, and
+  what is private of the claim decides whether it is shown. It is a fill of each
+  medicine that an RxNorm code or an NDC of a line its totals count is equal to
+  (the medicine's own, or the `ndc` of a fill of it; an NDC as eleven digits, five,
+  four and two, where it has hyphens), else of each whose folded name is the
+  drug's in its `display`. One that is cancelled or entered in error is none, and
+  neither is one where a fill of that medicine and day is filed. A claim makes no
+  medicine, and says nothing of what is current.
 - **`differs`**: its words differ: some say another `is` than the rest (`visit`
   and `error` say nothing here), or give another `verification`.
   **`differs_after`**: they differ after this day, when a word that says it is
@@ -2604,7 +2613,8 @@ readers ship with medrec:
     - an item, or a summary's line, has `standing`, what it is on the day of
       the answer, and `says`, what each source says, and no `status`, which is
       one source's. `standing` is `current`, `on hold`, `ended by its date
-      <until> (<until_of>)` with `, filled <date>` for the fill shown, `draft`,
+      <until> (<until_of>)` with `, filled <date>` for the fill shown
+      (`, filled <date> (from a claim)` where a claim tells of it, 0.9.11 and later), `draft`,
       `ended`, `refuted` or `diagnosis from a visit`; then `, sources differ`
       where they do; then `, not every source heard` where one is `unheard`.
       `says` is what each word says, each once, joined by `; `: the words of

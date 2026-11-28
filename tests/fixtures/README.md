@@ -65,6 +65,11 @@ real record, document, study or provider response.
   places. `make.py` writes `household.json` and `index.json`, medrec gives
   `standing.json` from them, and `lists.json` is the lists a reader makes of
   it, each with the day, the records it may not show, and why.
+- `fills/` is an invented person's medicines, each ended by its date, the
+  pharmacy's fills of some, and pharmacy claims, one for each rule of `filled`.
+  `make.py` writes `index.json`; its sources are those of
+  `standing/household.json`, and its codes are invented (an NDC under the
+  unassigned labeler `00000`).
 - `errors/` is an invented person's records and papers entered in error, one
   of each kind the contract's "Entered in error" names, beside ones that stand
   and ones their sources differ on, with what the household decided of them

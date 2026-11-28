@@ -1348,7 +1348,7 @@ fn claim_what(c: &Record) -> Option<String> {
 }
 
 /// Those entered in error are not in the index the events are made of.
-const SKIPPED_STATUS: &[&str] = &["planned", "cancelled"];
+pub(crate) const SKIPPED_STATUS: &[&str] = &["planned", "cancelled"];
 
 fn record_start(r: &Record) -> Option<&str> {
     r.fields

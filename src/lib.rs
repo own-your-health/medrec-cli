@@ -14,6 +14,7 @@ pub mod corrections;
 pub mod dicom;
 pub mod documents;
 pub mod events;
+pub mod fills;
 pub mod folder;
 pub mod given;
 pub mod hash;
