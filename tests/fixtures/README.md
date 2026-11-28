@@ -78,6 +78,13 @@ real record, document, study or provider response.
   layouts of CDC's files, every text in them invented. `make.py` writes all
   three; the sources are those of `standing/household.json`. Its CPT codes are
   below the first CPT code (00100), and its CVX codes are none CDC assigns.
+- `schedule/` is an invented CDSi supporting data archive's files, in the
+  shape of CDC's published XML: `ScheduleSupportingData.xml` (its CVX map and
+  vaccine groups), and the antigen files and the release notes' `document.xml`
+  that `make.py` writes, a series or dose for each rule of `src/schedule.rs`.
+  Its antigens (`Examplitis`, `Samplepox A` to `C`) and CVX codes (951 to 954)
+  are none CDC has. `medrec::testdata::cdsi_archive` zips them under
+  `Version 0.1 - 508/`.
 - `errors/` is an invented person's records and papers entered in error, one
   of each kind the contract's "Entered in error" names, beside ones that stand
   and ones their sources differ on, with what the household decided of them

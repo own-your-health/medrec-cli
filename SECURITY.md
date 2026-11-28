@@ -71,10 +71,13 @@ client's secret as not confidential, and PKCE protects each sign-in.
   network call with study data. Weasis's own update check is a Weasis setting;
   turn it off in Weasis's preferences.
 - `medrec tables fetch` asks each table's publisher (www.cms.gov; www2a.cdc.gov
-  for `cvx` and `cpt-cvx`) for one fixed file per table over https, whole, and
-  keeps it only if its SHA-256 is the recorded one. A CDC file, which has no
-  version, is also kept when its rows read and the person gives its SHA-256
-  with `--accept`. `medrec tables fetch nppes` asks download.cms.gov for the
+  for `cvx` and `cpt-cvx`; www.cdc.gov for `cdsi`) for one fixed file per table
+  over https, whole, and keeps it only if its SHA-256 is the recorded one. A
+  CDC file, which CDC can change in place, is also kept when its rows (of
+  `cdsi`, its schedule files) read and the person gives its SHA-256 with
+  `--accept`. The schedule `medrec schedule` and the views give is worked out
+  on this machine from the zip kept; no request carries a birth date or a
+  vaccine. `medrec tables fetch nppes` asks download.cms.gov for the
   page that lists its provider file, and for that file, whole. No other
   command contacts any of them, and no request carries a code, a name, an NPI
   or anything else from the records. The titles a person's codes have and the labels of their

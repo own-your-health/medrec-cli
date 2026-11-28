@@ -57,7 +57,7 @@
     },
     {
       "name": "medrec_records",
-      "description": "One kind of record, newest first: medications, conditions, allergies, immunizations, visits, procedures, results (one test over time), tests (the latest of each), reports, claims, coverage, bills, documents, notes, the timeline, or events: what happened, one per visit, ER trip, stay, test or fill, with its cost."
+      "description": "One kind of record, newest first: medications, conditions, allergies, immunizations, visits, procedures, results (one test over time), tests (the latest of each), reports, claims, coverage, bills, documents, notes, the timeline, events: what happened, one per visit, ER trip, stay, test or fill, with its cost, or a person's schedule: the vaccine doses CDC's schedule recommends by age, on the dates they fall on, beside those on file."
     },
     {
       "name": "medrec_document",

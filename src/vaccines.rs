@@ -6,6 +6,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
+use std::sync::Arc;
 
 use serde_json::{json, Map, Value};
 
@@ -21,8 +22,9 @@ pub use crate::normalize::CVX as CVX_SYSTEM;
 /// "unknown"), with CDC's CVX table or without it.
 const NO_VACCINE: &[u32] = &[998, 999];
 
-/// What CDC's tables on this machine say of codes: of each CVX code whether it
-/// is a vaccine, and each CPT code's CVX codes.
+/// What CDC's tables on this machine say of vaccines: of each CVX code whether
+/// it is a vaccine, each CPT code's CVX codes, and (0.9.12 and later) the
+/// schedules.
 #[derive(Debug, Clone, Default)]
 pub struct Codes {
     vaccine: Option<BTreeMap<u32, bool>>,
@@ -30,6 +32,12 @@ pub struct Codes {
     /// `<id> <SHA-256>` of both tables, as a view records them; none where
     /// either is not here.
     identity: Option<String>,
+    schedules: Vec<(
+        &'static crate::tables::Table,
+        Arc<crate::schedule::Schedules>,
+    )>,
+    /// `<id> <SHA-256>` of each schedule's table, comma-separated.
+    schedule_identity: Option<String>,
 }
 
 impl Codes {
@@ -59,11 +67,38 @@ impl Codes {
         // One table alone names no vaccine by a CPT code, so it is not a set a
         // pass makes views again by.
         let identity = (ids.len() == 2).then(|| ids.join(", "));
+        let mut schedules = Vec::new();
+        let mut kept = Vec::new();
+        for t in crate::schedule::SOURCES {
+            let read = t
+                .archive(dir)
+                .and_then(|z| crate::schedule::Schedules::read(&z));
+            if let (Some(s), Some(id)) = (read, t.identity(dir)) {
+                schedules.push((*t, Arc::new(s)));
+                kept.push(id);
+            }
+        }
         Codes {
             vaccine,
             of_cpt,
             identity,
+            schedules,
+            schedule_identity: (!kept.is_empty()).then(|| kept.join(", ")),
         }
+    }
+
+    /// The schedules on this machine, each with its table.
+    pub fn schedules(&self) -> Vec<(&'static crate::tables::Table, &crate::schedule::Schedules)> {
+        self.schedules
+            .iter()
+            .map(|(t, s)| (*t, s.as_ref()))
+            .collect()
+    }
+
+    /// The tables the schedules are of, `<id> <SHA-256>` each,
+    /// comma-separated; none without one.
+    pub fn schedule_identity(&self) -> Option<&str> {
+        self.schedule_identity.as_deref()
     }
 
     /// The tables these codes are of, `<id> <SHA-256>` each, comma-separated;
@@ -75,6 +110,19 @@ impl Codes {
     /// Invented tables: each CVX code with whether it is a vaccine, and each
     /// CPT code with its CVX codes.
     #[cfg(test)]
+    /// These codes with `schedules` beside them, as tests give them.
+    #[cfg(test)]
+    pub(crate) fn with_schedules(
+        mut self,
+        schedules: Vec<(&'static crate::tables::Table, crate::schedule::Schedules)>,
+    ) -> Codes {
+        self.schedules = schedules
+            .into_iter()
+            .map(|(t, s)| (t, Arc::new(s)))
+            .collect();
+        self
+    }
+
     pub fn invented(vaccine: &[(&str, bool)], of_cpt: &[(&str, &[&str])]) -> Codes {
         Codes {
             vaccine: Some(
@@ -90,6 +138,7 @@ impl Codes {
                     .collect(),
             ),
             identity: Some("invented".into()),
+            ..Codes::default()
         }
     }
 

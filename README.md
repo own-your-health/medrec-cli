@@ -315,6 +315,7 @@ medrec records fields --kind claim             # the elements in many raw files,
 medrec search hemoglobin
 medrec results --code 718-7
 medrec meds --active
+medrec schedule --person Robin                 # the vaccine doses CDC's schedule recommends by age, on their dates, beside those on file
 medrec note add Robin "Ask about the recheck" --tag question --about <record id>
 
 medrec verify                                   # every indexed file against the index
@@ -729,11 +730,25 @@ A claim line can name a vaccine by its CVX code, or by a CPT code that CDC's
 table gives a CVX code. With CDC's two tables here, such a line is listed among
 the person's immunizations as "from a claim" (docs/data-contract.md, Records).
 
+With CDC's CDSi supporting data here (`cdsi`), `medrec schedule --person
+<P>` gives a person's vaccine schedule: of each vaccine group, the doses of its
+routine series at the ages CDC recommends them, on the dates those ages fall on
+for the person ("recommended at 2 months: Mar 15, 2027"), each with the table's
+version and date, and beside them the doses on file, "from a claim" where a
+claim alone tells of one. A dose is listed only where CDC's own skips keep it
+when every dose before it is given at its earliest recommended age. Doses
+before the person's earliest record of any kind are marked, and the text folds
+them into one line, "Before these records begin". It never says a dose is
+due, overdue or missed, and pairs no dose on file with one of the schedule.
+The views have it as `schedule.json`, and `medrec_records` as kind `schedule`
+(docs/data-contract.md, "Schedule").
+
 ```sh
 medrec tables list                      # the tables, and whether each is here
 medrec tables fetch                     # download them
 medrec tables fetch icd10cm --file ZIP  # or keep a zip downloaded by hand
 medrec tables fetch cvx --accept SHA256 # keep CDC's file that is now another
+medrec schedule --person Robin          # with cdsi: a person's vaccine schedule
 ```
 
 | Table | Publisher | Version | File |
@@ -741,6 +756,7 @@ medrec tables fetch cvx --accept SHA256 # keep CDC's file that is now another
 | `icd10cm`, ICD-10-CM code titles | Centers for Medicare & Medicaid Services | FY2027, dated 2026-06-01 | [2027 Code Descriptions in Tabular Order](https://www.cms.gov/files/zip/2027-code-descriptions-tabular-order.zip), 2.2 MB, 98,403 rows |
 | `cvx`, CVX vaccine codes | Centers for Disease Control and Prevention | none; rows changed up to 2026-09-10 | [cvx.txt](https://www2a.cdc.gov/vaccines/iis/iisstandards/downloads/cvx.txt), 55 kB, 290 rows |
 | `cpt-cvx`, CPT codes of vaccines with their CVX codes | Centers for Disease Control and Prevention | none; rows changed up to 2026-07-07 | [cpt.txt](https://www2a.cdc.gov/vaccines/iis/iisstandards/downloads/cpt.txt), 33 kB, 163 rows |
+| `cdsi`, CDSi supporting data: immunization schedules | Centers for Disease Control and Prevention | 4.66, dated 2026-10-09 | [supporting-data-4.66-508.zip](https://www.cdc.gov/iis/downloads/supporting-data-4.66-508.zip), 2.6 MB, 150 series |
 
 - **medrec includes no table.** It downloads the publisher's whole file, and
   keeps it only if its size, SHA-256 and row count are those recorded in
@@ -762,13 +778,22 @@ medrec tables fetch cvx --accept SHA256 # keep CDC's file that is now another
   reads each code and whether it is a vaccine (`nonvaccine`). Without `cvx`,
   only a claim line's own CVX code names a vaccine, since only that table
   tells a vaccine from an immune globulin.
+- **CDSi is refused when it changes, too.** CDC can publish another file at
+  the same address, so `tables fetch cdsi` downloads it again, and a zip that
+  is not the recorded one is refused and kept on `--accept` as CDC's text
+  files are; `tables list` then gives the version and date the zip itself
+  says (its folder's name and its release notes). Of its files medrec reads
+  the series, their doses' ages, skips and seasons, and the maps of CVX codes
+  to antigens and of antigens to vaccine groups; nothing is sent anywhere. A
+  zip whose files do not read is never kept nor offered.
 - **No table, no new names.** Without the file, or with one that is not the
   recorded one, a pass keeps the names another machine wrote for codes still
   in use, and adds none. A code with no name shows the source's own words. A
   code the table lacks (another year's, withdrawn or invalid) has no name.
 - The files are in `~/.cache/medrec/tables`. After fetching them, run `medrec
   views write` on each profile, or let the next write do it: a person's views
-  made with another ICD-10 or vaccine table, or without one, are made again.
+  made with another ICD-10, vaccine or schedule table, or without one, are made
+  again.
   Fetch both of CDC's tables, the same files, on every machine that writes the
   views: one without both lists only the vaccines a claim line's own CVX code
   names when it makes a person's views again, and two with different files
@@ -917,7 +942,7 @@ supported.
 |---|---|
 | `medrec_summary` | The household's people. With `person`: their current medicines (and those on hold or ended by their date), conditions and allergies, immunizations, the latest result of each test with the lab's range and flag, recent visits, and bills with an amount due |
 | `medrec_search` | Documents, records, imaging studies and notes holding every word of a query; a query naming lab tests (`blood tests`, `labs`) also finds every lab result, report and lab claim |
-| `medrec_records` | One kind, newest first: `medications`, `conditions`, `allergies`, `immunizations`, `visits`, `procedures`, `results` (with `name`, one test over time), `tests` (the latest result of each), `reports`, `claims`, `coverage`, `bills`, `documents`, `notes`, `timeline` or `events` (what happened: one per visit, ER trip, stay, test or fill, with `you_owe`; `id` gives one with its money and members); `active` keeps current ones (not for `events`, whose `status` says which are still waiting), and conditions, allergies and medicines say what each source says of them ("What is current") |
+| `medrec_records` | One kind, newest first: `medications`, `conditions`, `allergies`, `immunizations`, `visits`, `procedures`, `results` (with `name`, one test over time), `tests` (the latest result of each), `reports`, `claims`, `coverage`, `bills`, `documents`, `notes`, `timeline`, `events` (what happened: one per visit, ER trip, stay, test or fill, with `you_owe`; `id` gives one with its money and members) or `schedule` (with `person`, 0.9.12 and later: of each vaccine group, the doses CDC's schedule recommends by age on the dates they fall on, beside the doses on file, each with the table's version and date; never what is due); `active` keeps current ones (not for `events`, whose `status` says which are still waiting), and conditions, allergies and medicines say what each source says of them ("What is current") |
 | `medrec_document` | A filed document's extracted text, in parts of up to 16,000 characters, with page breaks marked |
 
 Private items (above) are left out of an answer about the whole household,

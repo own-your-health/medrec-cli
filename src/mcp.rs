@@ -288,10 +288,11 @@ pub enum Kind {
     Notes,
     Timeline,
     Events,
+    Schedule,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 16] = [
+    pub const ALL: [Kind; 17] = [
         Kind::Medications,
         Kind::Conditions,
         Kind::Allergies,
@@ -308,6 +309,7 @@ impl Kind {
         Kind::Notes,
         Kind::Timeline,
         Kind::Events,
+        Kind::Schedule,
     ];
 
     /// Its name in calls, `medications`.
@@ -331,17 +333,20 @@ impl Kind {
             Kind::Reports => "report",
             Kind::Claims => "claim",
             Kind::Coverage => "coverage",
-            Kind::Bills | Kind::Documents | Kind::Notes | Kind::Timeline | Kind::Events => {
-                return None
-            }
+            Kind::Bills
+            | Kind::Documents
+            | Kind::Notes
+            | Kind::Timeline
+            | Kind::Events
+            | Kind::Schedule => return None,
         })
     }
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct RecordsArgs {
-    /// visits: encounters. tests: each test's latest result. bills: filed
-    /// statements. timeline: all.
+    /// tests: each test's latest result. bills: statements. timeline: all.
+    /// schedule: vaccines by age.
     pub kind: Kind,
     /// Name, alias or id.
     #[serde(default)]
@@ -562,9 +567,8 @@ impl Toolset for MedrecTools {
             ToolDef::read(
                 RECORDS,
                 "List records",
-                "One kind of record, newest first. events: what happened, one per visit, stay \
-                 or fill, with you_owe; id gives one in full. results with name: one test over \
-                 time.",
+                "One kind of record, newest first. events: one per visit, stay or fill, with \
+                 you_owe; id gives one in full. results with name: one test over time.",
             )
             .input::<RecordsArgs>()
             .output::<Page<Item>>(),
@@ -1151,6 +1155,11 @@ impl MedrecTools {
         if id.is_some() && a.kind != Kind::Events {
             return Err(ToolError::usage("id applies to kind `events` only"));
         }
+        if a.kind == Kind::Schedule && (person.is_none() || active) {
+            return Err(ToolError::usage(
+                "kind `schedule` takes a person, and not active",
+            ));
+        }
         if active && a.kind == Kind::Events {
             return Err(ToolError::usage(
                 "active does not apply to kind `events`; status says which are still waiting",
@@ -1294,6 +1303,37 @@ impl MedrecTools {
                         Some(_) => n,
                         None => format!("{}: {n}", crate::printable(&p.name)),
                     }));
+                }
+            }
+            (Kind::Schedule, None) => {
+                let codes = self.codes();
+                if codes.schedules().is_empty() {
+                    notes.push(
+                        "no schedule is kept on this machine: `medrec tables fetch cdsi` keeps CDC's"
+                            .into(),
+                    );
+                }
+                let some = !codes.schedules().is_empty();
+                for p in selected.iter().filter(|_| some) {
+                    let idx = f.index(p)?;
+                    let v = crate::schedule::of_index(p, &idx, &codes, None);
+                    let rows = crate::schedule::rows(&v);
+                    for (n, (title, date, detail)) in rows.into_iter().enumerate() {
+                        if !named(&title) {
+                            continue;
+                        }
+                        items.push(Item {
+                            kind: "schedule".into(),
+                            person: p.name.clone(),
+                            person_id: p.id.clone(),
+                            group: u8::try_from(n).unwrap_or(u8::MAX),
+                            date,
+                            id: format!("schedule:{}:{n}", p.id),
+                            title,
+                            detail: Some(detail),
+                            ..Default::default()
+                        });
+                    }
                 }
             }
             (Kind::Notes, None) => {
@@ -1471,8 +1511,12 @@ impl MedrecTools {
                 }
             }
         }
+        let code = match a.kind {
+            Kind::Schedule => "no-schedule",
+            _ => "no-problem-list",
+        };
         for note in notes {
-            out.warn("no-problem-list", note);
+            out.warn(code, note);
         }
         let lists = matches!(
             a.kind,

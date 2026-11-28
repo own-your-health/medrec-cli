@@ -118,6 +118,101 @@ pub fn write_shared_key(provider: &Path) {
     }
 }
 
+/// An invented CDSi supporting data archive in the shape of CDC's
+/// (tests/fixtures/schedule): its XML files under "Version 0.1 - 508/XML/"
+/// and its release notes, a document whose first date is the table's.
+pub fn cdsi_archive() -> Vec<u8> {
+    const AT: &str = "Version 0.1 - 508";
+    let fixture = |name: &str| -> &'static str {
+        match name {
+            "ScheduleSupportingData.xml" => {
+                include_str!("../tests/fixtures/schedule/ScheduleSupportingData.xml")
+            }
+            "AntigenSupportingData- Examplitis.xml" => {
+                include_str!("../tests/fixtures/schedule/AntigenSupportingData- Examplitis.xml")
+            }
+            "AntigenSupportingData- Samplepox A.xml" => {
+                include_str!("../tests/fixtures/schedule/AntigenSupportingData- Samplepox A.xml")
+            }
+            "AntigenSupportingData- Samplepox B.xml" => {
+                include_str!("../tests/fixtures/schedule/AntigenSupportingData- Samplepox B.xml")
+            }
+            "AntigenSupportingData- Samplepox C.xml" => {
+                include_str!("../tests/fixtures/schedule/AntigenSupportingData- Samplepox C.xml")
+            }
+            _ => include_str!("../tests/fixtures/schedule/document.xml"),
+        }
+    };
+    let notes = zip_of(&[(
+        "word/document.xml",
+        fixture("document.xml").as_bytes(),
+        (2026, 9, 8),
+    )]);
+    let mut files: Vec<(String, Vec<u8>)> = [
+        "ScheduleSupportingData.xml",
+        "AntigenSupportingData- Examplitis.xml",
+        "AntigenSupportingData- Samplepox A.xml",
+        "AntigenSupportingData- Samplepox B.xml",
+        "AntigenSupportingData- Samplepox C.xml",
+    ]
+    .iter()
+    .map(|n| (format!("{AT}/XML/{n}"), fixture(n).as_bytes().to_vec()))
+    .collect();
+    files.push((format!("{AT}/Release Notes.docx"), notes));
+    let named: Vec<Zipped> = files
+        .iter()
+        .map(|(n, b)| (n.as_str(), b.as_slice(), (2026, 9, 1)))
+        .collect();
+    zip_of(&named)
+}
+
+/// A file of a zip: its name, its bytes and its day (year, month, day).
+pub type Zipped<'a> = (&'a str, &'a [u8], (u16, u16, u16));
+
+/// A zip of deflated files, each stamped with its day: what medrec's zip
+/// reader reads, with no CRC.
+pub fn zip_of(files: &[Zipped]) -> Vec<u8> {
+    use std::io::Write;
+    let mut z = Vec::new();
+    let mut central = Vec::new();
+    for (name, data, (y, m, d)) in files {
+        let mut enc = flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::best());
+        enc.write_all(data).unwrap();
+        let packed = enc.finish().unwrap();
+        let day = ((y - 1980) << 9) | (m << 5) | d;
+        let n = name.len() as u16;
+        let at = z.len() as u32;
+        z.extend(b"PK\x03\x04\x14\0\0\0\x08\0\0\0");
+        z.extend(day.to_le_bytes());
+        z.extend([0u8; 4]);
+        z.extend((packed.len() as u32).to_le_bytes());
+        z.extend((data.len() as u32).to_le_bytes());
+        z.extend(n.to_le_bytes());
+        z.extend([0u8; 2]);
+        z.extend(name.as_bytes());
+        z.extend(&packed);
+        central.extend(b"PK\x01\x02\x14\0\x14\0\0\0\x08\0\0\0");
+        central.extend(day.to_le_bytes());
+        central.extend([0u8; 4]);
+        central.extend((packed.len() as u32).to_le_bytes());
+        central.extend((data.len() as u32).to_le_bytes());
+        central.extend(n.to_le_bytes());
+        central.extend([0u8; 12]);
+        central.extend(at.to_le_bytes());
+        central.extend(name.as_bytes());
+    }
+    let (at, len) = (z.len() as u32, central.len() as u32);
+    z.extend(central);
+    let count = (files.len() as u16).to_le_bytes();
+    z.extend(b"PK\x05\x06\0\0\0\0");
+    z.extend(count);
+    z.extend(count);
+    z.extend(len.to_le_bytes());
+    z.extend(at.to_le_bytes());
+    z.extend([0u8; 2]);
+    z
+}
+
 pub fn write(path: &Path, bytes: &[u8]) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, bytes).unwrap();

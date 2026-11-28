@@ -51,6 +51,10 @@ pub enum Form {
         numbers: &'static [usize],
         changed: usize,
     },
+    /// The publisher's zip of XML files, kept whole and read where it is
+    /// used: CDC's CDSi supporting data, whose series `rows` counts. Its
+    /// version is its folder's name, and its date its release notes'.
+    Archive,
 }
 
 pub const ICD10CM: Table = Table {
@@ -107,12 +111,31 @@ pub const CPT_CVX: Table = Table {
     rows: 163,
 };
 
-pub const TABLES: &[&Table] = &[&ICD10CM, &CVX, &CPT_CVX];
+/// CDC's CDSi supporting data: the schedules of the Advisory Committee on
+/// Immunization Practices, as series of doses by age, and which vaccines each
+/// CVX code counts for. Its date is its release notes'.
+pub const CDSI: Table = Table {
+    id: "cdsi",
+    title: "CDSi supporting data: immunization schedules",
+    publisher: "Centers for Disease Control and Prevention",
+    version: "4.66",
+    date: "2026-10-09",
+    url: "https://www.cdc.gov/iis/downloads/supporting-data-4.66-508.zip",
+    sha256: "64797032e1420f193766665271f5fecbb0e635d16a6d021ef47125c8c36c8739",
+    bytes: 2_596_260,
+    form: Form::Archive,
+    rows: 150,
+};
+
+pub const TABLES: &[&Table] = &[&ICD10CM, &CVX, &CPT_CVX, &CDSI];
 
 /// The most a text table may be: it is read whole into memory.
 const TEXT_MAX: u64 = 4 << 20;
 
-/// What the person accepted of a text table that is not the recorded file
+/// The most an archive table may be.
+const ARCHIVE_MAX: u64 = 16 << 20;
+
+/// What the person accepted of a table that is not the recorded file
 /// (`medrec-table-accepted/v1`), kept beside it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Accepted {
@@ -120,7 +143,10 @@ pub struct Accepted {
     pub sha256: String,
     pub bytes: u64,
     pub rows: u64,
-    /// The newest day one of its rows changed.
+    /// Of an archive, the version it says; a text table's is its `date`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// The newest day one of its rows changed, or an archive's own date.
     pub date: String,
     /// The day it was kept.
     pub accepted: String,
@@ -199,6 +225,13 @@ impl Fetched {
     }
 }
 
+impl Accepted {
+    /// The version it says: an archive's own, or a text table's newest day.
+    fn version(&self) -> String {
+        self.version.clone().unwrap_or_else(|| self.date.clone())
+    }
+}
+
 /// A table on this machine: whether it may be used, its bytes when it may,
 /// and what the person accepted when it is not the recorded file.
 struct Kept {
@@ -224,6 +257,7 @@ impl Table {
         match self.form {
             Form::Zip { .. } => dir.join(format!("{}-{}.zip", self.id, self.version)),
             Form::Text { .. } => dir.join(format!("{}.txt", self.id)),
+            Form::Archive => dir.join(format!("{}.zip", self.id)),
         }
     }
 
@@ -231,13 +265,16 @@ impl Table {
         dir.join(format!("{}.accepted.json", self.id))
     }
 
-    fn is_text(&self) -> bool {
-        matches!(self.form, Form::Text { .. })
+    /// Whether its publisher can change the file at its address, so that one
+    /// named is downloaded again, and another file is kept on the person's
+    /// word (`--accept`).
+    fn accepts(&self) -> bool {
+        !matches!(self.form, Form::Zip { .. })
     }
 
-    /// What the person accepted of this table, if it is a text table.
+    /// What the person accepted of this table, if it may be another file.
     fn accepted(&self, dir: &Path) -> Option<Accepted> {
-        if !self.is_text() {
+        if !self.accepts() {
             return None;
         }
         let a: Accepted =
@@ -304,8 +341,15 @@ impl Table {
     fn read(&self, dir: &Path) -> Option<Vec<u8>> {
         match self.form {
             Form::Zip { member: m, bytes } => member(&self.verified(dir).1?, m, bytes),
-            Form::Text { .. } => None,
+            Form::Text { .. } | Form::Archive => None,
         }
+    }
+
+    /// An archive table's zip, when it is on this machine and may be used.
+    pub fn archive(&self, dir: &Path) -> Option<Vec<u8>> {
+        matches!(self.form, Form::Archive)
+            .then(|| self.verified(dir).1)
+            .flatten()
     }
 
     /// Of each row of a text table on this machine, the values of the columns
@@ -382,7 +426,7 @@ pub fn list() -> Vec<Row> {
                 id: t.id,
                 title: t.title,
                 publisher: t.publisher,
-                version: Some(a.as_ref().map_or(t.version.into(), |a| a.date.clone())),
+                version: Some(a.as_ref().map_or(t.version.into(), Accepted::version)),
                 date: Some(a.as_ref().map_or(t.date.into(), |a| a.date.clone())),
                 state,
                 bytes: Some(a.as_ref().map_or(t.bytes, |a| a.bytes)),
@@ -442,14 +486,14 @@ pub fn fetch(
     accept: Option<&str>,
     again: bool,
 ) -> Result<Fetched, CliError> {
-    if accept.is_some() && !t.is_text() {
+    if accept.is_some() && !t.accepts() {
         let text: Vec<&str> = TABLES
             .iter()
-            .filter(|t| t.is_text())
+            .filter(|t| t.accepts())
             .map(|t| t.id)
             .collect();
         return Err(CliError::Usage(format!(
-            "--accept is for a table whose publisher gives no version ({}), not {}",
+            "--accept is for a table whose publisher can change its file in place ({}), not {}",
             text.join(", "),
             t.id
         )));
@@ -459,7 +503,7 @@ pub fn fetch(
         let a = k.accepted.as_ref();
         Fetched {
             id: t.id,
-            version: a.map_or(t.version.into(), |a| a.date.clone()),
+            version: a.map_or(t.version.into(), Accepted::version),
             status: "unchanged",
             bytes: a.map_or(t.bytes, |a| a.bytes),
             accepted: a.is_some(),
@@ -469,7 +513,7 @@ pub fn fetch(
         }
     };
     let ready = k.state == State::Ready;
-    if from.is_none() && accept.is_none() && ready && !(again && t.is_text()) {
+    if from.is_none() && accept.is_none() && ready && !(again && t.accepts()) {
         return Ok(unchanged());
     }
     let (bytes, status) = match from {
@@ -494,6 +538,7 @@ pub fn fetch(
         ))
     };
     // A file whose rows do not read is never offered to be kept.
+    let mut schedules = None;
     let rows = match t.form {
         Form::Zip { .. } => None,
         Form::Text { .. } => {
@@ -504,6 +549,20 @@ pub fn fetch(
             }
             Some(rows)
         }
+        Form::Archive => {
+            let s = crate::schedule::Schedules::read(&bytes).ok_or_else(unread)?;
+            if recorded && s.series != t.rows {
+                return Err(unread());
+            }
+            schedules = Some(s);
+            None
+        }
+    };
+    // What the file says it is: a text table's newest day, an archive's own.
+    let said = || match (&rows, &schedules) {
+        (Some(r), _) => (newest(r, t.form), newest(r, t.form), r.len() as u64),
+        (_, Some(s)) => (s.version.clone(), s.date.clone(), s.series as u64),
+        _ => (String::new(), String::new(), 0),
     };
     if !recorded && !accept.is_some_and(|a| a.trim().eq_ignore_ascii_case(&sha)) {
         let mut keep_with = format!("medrec tables fetch {} --accept {sha}", t.id);
@@ -512,12 +571,17 @@ pub fn fetch(
         }
         let refusal = format!(
             "{} is now another file than the one medrec was written against ({} bytes, \
-             SHA-256 {sha}; medrec's has {} bytes, SHA-256 {}), so it was not kept. Of its \
-             rows medrec reads code numbers alone.{} To keep it: {keep_with}",
+             SHA-256 {sha}; medrec's has {} bytes, SHA-256 {}), so it was not kept. {}{} \
+             To keep it: {keep_with}",
             t.id,
             bytes.len(),
             t.bytes,
             t.sha256,
+            match t.form {
+                Form::Archive =>
+                    "Of its files medrec reads the series, their ages and codes alone.",
+                _ => "Of its rows medrec reads code numbers alone.",
+            },
             if ready {
                 " The file kept before is still used."
             } else {
@@ -526,9 +590,7 @@ pub fn fetch(
         );
         return Ok(Fetched {
             id: t.id,
-            version: rows
-                .as_ref()
-                .map_or_else(String::new, |r| newest(r, t.form)),
+            version: said().0,
             status: "refused",
             bytes: bytes.len() as u64,
             accepted: false,
@@ -550,14 +612,15 @@ pub fn fetch(
             }
             None
         }
-        Form::Text { .. } => {
-            let rows = rows.unwrap_or_default();
+        Form::Text { .. } | Form::Archive => {
+            let (version, date, rows) = said();
             (!recorded).then(|| Accepted {
                 schema: ACCEPTED.into(),
                 sha256: sha.clone(),
                 bytes: bytes.len() as u64,
-                rows: rows.len() as u64,
-                date: newest(&rows, t.form),
+                rows,
+                version: matches!(t.form, Form::Archive).then_some(version),
+                date,
                 accepted: crate::model::today(),
             })
         }
@@ -582,7 +645,7 @@ pub fn fetch(
         id: t.id,
         version: accepted
             .as_ref()
-            .map_or(t.version.into(), |a| a.date.clone()),
+            .map_or(t.version.into(), Accepted::version),
         status,
         bytes: bytes.len() as u64,
         accepted: accepted.is_some(),
@@ -630,7 +693,11 @@ fn download(t: &Table) -> Result<Vec<u8>, CliError> {
 /// Everything `r` has: of a zip, only the recorded file; of a text table, any
 /// file of at most [`TEXT_MAX`] bytes, which [`fetch`] checks.
 fn whole(t: &Table, r: impl Read) -> Result<Vec<u8>, String> {
-    let most = if t.is_text() { TEXT_MAX } else { t.bytes };
+    let most = match t.form {
+        Form::Text { .. } => TEXT_MAX,
+        Form::Archive => ARCHIVE_MAX,
+        Form::Zip { .. } => t.bytes,
+    };
     let mut bytes = Vec::with_capacity(t.bytes as usize);
     r.take(most + 1)
         .read_to_end(&mut bytes)
@@ -638,7 +705,7 @@ fn whole(t: &Table, r: impl Read) -> Result<Vec<u8>, String> {
     if bytes.len() as u64 > most {
         return Err(format!("{} is over {most} bytes, so it was not kept", t.id));
     }
-    if !t.is_text() && (bytes.len() as u64 != t.bytes || sha256_hex(&bytes) != t.sha256) {
+    if !t.accepts() && (bytes.len() as u64 != t.bytes || sha256_hex(&bytes) != t.sha256) {
         return Err(format!(
             "this is not {} {} as medrec records it (another size or SHA-256), so it was not kept",
             t.id, t.version
@@ -655,47 +722,77 @@ fn u32_at(b: &[u8], at: usize) -> Option<usize> {
     Some(u32::from_le_bytes(b.get(at..at + 4)?.try_into().ok()?) as usize)
 }
 
-/// One file of a zip, of exactly `size` bytes: stored or deflated, found
-/// through the central directory.
-fn member(zip: &[u8], name: &str, size: u64) -> Option<Vec<u8>> {
+/// One file of a zip, as its central directory gives it.
+pub(crate) struct Entry {
+    pub name: String,
+    method: usize,
+    packed: usize,
+    pub size: u64,
+    local: usize,
+    /// The day its time stamp says, `YYYY-MM-DD`.
+    pub day: Option<String>,
+}
+
+/// Every file of a zip, through its central directory.
+pub(crate) fn entries(zip: &[u8]) -> Option<Vec<Entry>> {
     let end = (0..=zip.len().checked_sub(22)?)
         .rev()
         .take(66_000)
         .find(|at| zip[*at..].starts_with(b"PK\x05\x06"))?;
     let mut at = u32_at(zip, end + 16)?;
+    let mut out = Vec::new();
     for _ in 0..u16_at(zip, end + 10)? {
         if !zip.get(at..)?.starts_with(b"PK\x01\x02") {
             return None;
         }
-        let (method, packed) = (u16_at(zip, at + 10)?, u32_at(zip, at + 20)?);
         let (n, x, c) = (
             u16_at(zip, at + 28)?,
             u16_at(zip, at + 30)?,
             u16_at(zip, at + 32)?,
         );
-        if zip.get(at + 46..at + 46 + n)? == name.as_bytes() {
-            let local = u32_at(zip, at + 42)?;
-            if !zip.get(local..)?.starts_with(b"PK\x03\x04") {
-                return None;
-            }
-            let start = local + 30 + u16_at(zip, local + 26)? + u16_at(zip, local + 28)?;
-            let data = zip.get(start..start.checked_add(packed)?)?;
-            let mut out = Vec::new();
-            match method {
-                0 => out.extend_from_slice(data),
-                8 => {
-                    flate2::read::DeflateDecoder::new(data)
-                        .take(size + 1)
-                        .read_to_end(&mut out)
-                        .ok()?;
-                }
-                _ => return None,
-            }
-            return (out.len() as u64 == size).then_some(out);
-        }
+        let d = u16_at(zip, at + 14)?;
+        let (y, m, day) = (1980 + (d >> 9), (d >> 5) & 15, d & 31);
+        out.push(Entry {
+            name: String::from_utf8_lossy(zip.get(at + 46..at + 46 + n)?).into_owned(),
+            method: u16_at(zip, at + 10)?,
+            packed: u32_at(zip, at + 20)?,
+            size: u32_at(zip, at + 24)? as u64,
+            local: u32_at(zip, at + 42)?,
+            day: ((1..=12).contains(&m) && (1..=31).contains(&day))
+                .then(|| format!("{y:04}-{m:02}-{day:02}")),
+        });
         at += 46 + n + x + c;
     }
-    None
+    Some(out)
+}
+
+/// The bytes of `e`, stored or deflated, when they are its whole size.
+pub(crate) fn unpack(zip: &[u8], e: &Entry) -> Option<Vec<u8>> {
+    let local = e.local;
+    if !zip.get(local..)?.starts_with(b"PK\x03\x04") {
+        return None;
+    }
+    let start = local + 30 + u16_at(zip, local + 26)? + u16_at(zip, local + 28)?;
+    let data = zip.get(start..start.checked_add(e.packed)?)?;
+    let mut out = Vec::new();
+    match e.method {
+        0 => out.extend_from_slice(data),
+        8 => {
+            flate2::read::DeflateDecoder::new(data)
+                .take(e.size + 1)
+                .read_to_end(&mut out)
+                .ok()?;
+        }
+        _ => return None,
+    }
+    (out.len() as u64 == e.size).then_some(out)
+}
+
+/// One file of a zip, of exactly `size` bytes: stored or deflated, found
+/// through the central directory.
+fn member(zip: &[u8], name: &str, size: u64) -> Option<Vec<u8>> {
+    let e = entries(zip)?.into_iter().find(|e| e.name == name)?;
+    (e.size == size).then(|| unpack(zip, &e)).flatten()
 }
 
 /// The code and long title of each row of CMS's "order" file: fixed

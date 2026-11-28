@@ -81,7 +81,9 @@ quick-xml, lopdf), and so are local tools (poppler, tesseract, bsdtar).
 | `src/corrections.rs` | What the household says of a provider its items print (a name, practice, role or phone; that two names are one provider or are not; that a label is wrong): checked, written and undone in `marks.json` for `medrec labels` and provider requests alike, and applied in `src/labels.rs` (docs/data-contract.md, "marks.json" and "Provider requests") |
 | `src/sources.rs` | Which of a person's sources a record or document came from, and the name and place it gives: only the person's own, told apart by patient, and none where several differ (docs/data-contract.md, "Which source") |
 | `src/fills.rs` | The fills that pharmacy claims tell of, by RxNorm, NDC or name, for `standing.json`'s `filled` |
-| `src/vaccines.rs` | The vaccines claims tell of, by a line's CVX code or CDC's CPT table, listed as immunizations of their claim's id |
+| `src/vaccines.rs` | The vaccines claims tell of, by a line's CVX code or CDC's CPT table, listed as immunizations of their claim's id; the schedules kept on this machine |
+| `src/schedule.rs` | A person's vaccine schedule by CDC's CDSi supporting data: the archive read, each antigen's routine series on the path where every dose is given at its earliest recommended age (CDC's skips of a forecast), the dates by CDC's rules, the doses on file under their groups by CVX code, `medrec schedule`, `schedule.json` and the records tool's `schedule` (docs/data-contract.md, "Schedule") |
+| `src/xml.rs` | A small reader of XML elements and text, for CDC's schedule files |
 | `src/standing.rs` | `standing.json` (`medrec-standing/v1`): what is current among conditions, allergies and medicines by every source's word, and the lists a reader makes of it (docs/data-contract.md, "Standing") |
 | `src/given.rs` | What a source gave of an item that the item does not show, which the private rules read beside it (docs/data-contract.md, "What a source gave") |
 | `src/about.rs` | What a person's chart holds about somebody else, which no list, view or answer has (docs/data-contract.md, "About another person") |

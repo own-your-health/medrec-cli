@@ -5138,3 +5138,124 @@ fn a_dry_run_counts_papers_and_private_parts() {
     assert_eq!(v["private"]["parts"], want);
     let _ = std::fs::remove_dir_all(&e.root);
 }
+
+/// A person's schedule needs CDC's table, which is refused until accepted
+/// where its file is not the recorded one; then the command, the views and
+/// the records tool give the routine doses by age beside those on file, with
+/// the table's version and date beside each, and nothing said due.
+#[test]
+fn a_schedule_is_the_routine_doses_by_age_beside_those_on_file() {
+    let e = Env::new("schedule");
+    household(&e);
+    let robin = h_id(&e, "Robin Testperson");
+    let t = e.tools();
+    let warned = |v: &Value, code: &str| -> Vec<String> {
+        let all = v["warnings"].as_array().into_iter().flatten();
+        all.filter(|w| w["code"] == code)
+            .map(|w| w["message"].as_str().unwrap().to_string())
+            .collect()
+    };
+
+    // No table, no schedule.
+    let out = e.run(&["schedule", "--person", "Robin"]);
+    assert_eq!(out.status.code(), Some(4));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("medrec tables fetch cdsi"));
+    let r = call(&t, RECORDS, json!({"kind": "schedule", "person": "Robin"}));
+    let v = assert_fits(&t, RECORDS, &r).clone();
+    assert_eq!(v["items"], json!([]));
+    assert_eq!(warned(&v, "no-schedule").len(), 1, "{v}");
+    let (files, views) = views_of(&e, &robin);
+    assert!(!files.contains_key("schedule"));
+    assert!(views.get("schedule_tables").is_none(), "{views}");
+
+    // An archive that is not the recorded one is refused, and kept on the
+    // person's word.
+    let zip = e.root.join("cdsi.zip");
+    let bytes = medrec::testdata::cdsi_archive();
+    std::fs::write(&zip, &bytes).unwrap();
+    let sha = medrec::hash::sha256_hex(&bytes);
+    let path = zip.to_str().unwrap();
+    let out = e.run(&["tables", "fetch", "cdsi", "--file", path]);
+    assert_eq!(out.status.code(), Some(6));
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(said.contains(&format!("--accept {sha}")), "{said}");
+    let kept = e.ok(&["tables", "fetch", "cdsi", "--file", path, "--accept", &sha]);
+    assert_eq!(kept["items"][0]["accepted"], true, "{kept}");
+    let listed = e.ok(&["tables", "list"]);
+    let rows = listed["items"].as_array().unwrap();
+    let row = rows.iter().find(|r| r["id"] == "cdsi").unwrap();
+    assert_eq!(
+        (&row["state"], &row["version"], &row["date"]),
+        (&json!("ready"), &json!("0.1"), &json!("2026-09-08")),
+        "{row}"
+    );
+
+    // The command: each group's routine doses, the one on file beside them,
+    // matched to none.
+    let v = e.ok(&["schedule", "--person", "Robin"]);
+    let s = &v["people"][0];
+    assert_eq!(s["schema"], "medrec-schedule/v1");
+    assert_eq!(s["birth_date"], "2020-02-02");
+    let groups: Vec<&str> = s["groups"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|g| g["group"].as_str().unwrap())
+        .collect();
+    assert_eq!(groups, ["Examplitis", "Samplepox"]);
+    let dose = &s["groups"][0]["lines"][0]["doses"][0];
+    assert_eq!(
+        (&dose["age"], &dose["date"], &dose["sources"][0]["version"]),
+        (&json!("2 months"), &json!("2020-04-02"), &json!("0.1"))
+    );
+    // Robin's records begin the day after the birth.
+    assert_eq!(dose["before_records"], false);
+    // The stream's vaccine has a CVX code the invented table does not place.
+    assert_eq!(
+        s["not_placed"][0]["why"],
+        "a CVX code the schedule does not place"
+    );
+    let text = e.run(&["--profile", "home", "schedule", "--person", "Robin"]);
+    let text = String::from_utf8_lossy(&text.stdout);
+    assert!(
+        text.contains(
+            "  Dose 1: recommended at 2 months: Apr 2, 2020 (CDC CDSi 0.1, Sep 8, 2026)\n"
+        ),
+        "{text}"
+    );
+    for word in ["due", "overdue", "missed"] {
+        assert!(!text.contains(word), "{word}");
+    }
+
+    // The views: the same document, and the table that made it.
+    let (files, views) = views_of(&e, &robin);
+    assert_eq!(files["schedule"], *s);
+    assert_eq!(views["schedule_tables"], format!("cdsi {sha}"));
+
+    // The records tool: one item per group, of a person alone.
+    let t = e.tools();
+    let r = call(&t, RECORDS, json!({"kind": "schedule", "person": "Robin"}));
+    let v = assert_fits(&t, RECORDS, &r).clone();
+    let items = v["items"].as_array().unwrap();
+    let titles: Vec<&str> = items.iter().map(|i| i["title"].as_str().unwrap()).collect();
+    assert_eq!(
+        titles,
+        [
+            "Examplitis",
+            "Samplepox (Samplepox A, Samplepox B, Samplepox C)",
+            "On file, in no group"
+        ]
+    );
+    assert_eq!(items[0]["kind"], "schedule");
+    assert!(items[0]["detail"]
+        .as_str()
+        .unwrap()
+        .starts_with("Dose 1: recommended at 2 months: Apr 2, 2020 (CDC CDSi 0.1"));
+    assert!(warned(&v, "no-schedule").is_empty());
+    for args in [
+        json!({"kind": "schedule"}),
+        json!({"kind": "schedule", "person": "Robin", "active": true}),
+    ] {
+        assert!(call(&t, RECORDS, args).is_error());
+    }
+}

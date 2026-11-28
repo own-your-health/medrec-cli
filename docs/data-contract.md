@@ -1905,6 +1905,7 @@ A reader decides freshness by MD5, as Drive reports it (`md5Checksum`):
 | `people.<id>.linked` | For each person linked to this one (Events, below), the MD5s of their `index.json` and `text.json` as read, as `{"index", "text"}`, each `null` when the file is absent; `{}` when no one is linked (0.9.0 and later). |
 | `people.<id>.code_table` | The code table the person's names were made with (`icd10cm FY2027`); absent when the pass that made the views had none, whatever names it carried over (0.9.4 and later). A pass on a machine with another table makes the person's views again, which fills in the names; one on a machine with none leaves them. |
 | `people.<id>.vaccine_tables` | CDC's vaccine tables the person's vaccines from claims were read with, `<id> <SHA-256>` each (`cvx …, cpt-cvx …`); absent when the pass that made the views had not both, since one alone names no vaccine by a CPT code (0.9.11 and later). A pass on a machine with both, and other ones, makes the person's views again; one on a machine without both leaves them, and when it makes them for another reason lists only the vaccines its tables name. |
+| `people.<id>.schedule_tables` | The vaccine schedules the person's `schedule.json` was made with, `<id> <SHA-256>` each, comma-separated (`cdsi …`); absent when the pass that made the views had none, and then the views have no `schedule.json` (0.9.12 and later). A pass on a machine with other schedules makes the person's views again; one with none leaves them, and when it makes them for another reason leaves `schedule.json` out. |
 | `people.<id>.directory` | Which provider directory the pass that made the views had: the last day it covers and when it was fetched, so that a newer one sorts after (0.9.7 and later). Absent when it had none. A pass on a machine with a newer one makes the person's views again; one with an older one or none leaves them. |
 | `people.<id>.provider_state` | The MD5 of the person's `provider-state.json`, absent when there is none (0.9.7 and later). Another one makes four of the person's views stale (above). |
 | `people.<id>.in_error` | `standing.json`'s `in_error`, as it is there: the ids of the person's records entered in error, by kind, and of their papers, `{"condition": ["r_…"], "document": ["d_…"]}`; absent when there is none (0.9.9 and later). |
@@ -2559,6 +2560,67 @@ and `ended_by_date` are lines, each with `records` (those of it that are there,
 the first its name's), `against` (those that rule 4 adds),
 `differs`, `filled` (the fill shown) and `unheard`; `in_error` is how many, and
 `without_problem_list` the places in `sources` of those that rule 6 names.
+
+### Schedule (`schedule.json`, `medrec-schedule/v1`, 0.9.12 and later)
+
+A person's vaccine schedule, by the schedules kept on the machine that writes
+the views (`medrec tables fetch cdsi`: CDC's CDSi supporting data, its version
+recorded in `src/tables.rs`); absent where it has none. `medrec schedule
+--person <P> --json` gives the same document for each person (`people`). It
+says nothing of what is due: no dose on file is matched to a dose of the
+schedule, and no word says one is due, overdue or missed.
+
+```json
+{"schema": "medrec-schedule/v1", "person": "p_…", "birth_date": "2027-01-15",
+ "sources": [{"id": "cdsi", "title": "CDSi supporting data: immunization schedules",
+              "publisher": "Centers for Disease Control and Prevention",
+              "version": "4.66", "date": "2026-10-09", "url": "https://www.cdc.gov/…"}],
+ "groups": [{"group": "Examplitis", "antigens": ["Examplitis"],
+             "lines": [{"antigens": ["Examplitis"], "series": ["Examplitis 4-dose series"],
+                        "doses": [{"dose": 1, "series_dose": "Dose 1", "age": "2 months",
+                                   "date": "2027-03-15", "before_records": false,
+                                   "sources": [{"id": "cdsi", "version": "4.66", "date": "2026-10-09"}]}]}],
+             "on_file": [{"id": "r_…", "date": "2027-03-20", "cvx": [951],
+                          "display": "Sample vaccine", "from_claim": true}]}],
+ "not_placed": [{"id": "r_…", "date": "2027-03-20", "cvx": [], "display": "…", "why": "no CVX code"}]}
+```
+
+- `birth_date` is the person's; without one, `groups` and `not_placed` are
+  empty.
+- Each schedule's routine series are each antigen's standard series that it
+  chooses by default. A series holds the doses of catch-up too, so a dose is
+  listed only where the schedule's own conditional skips of a forecast keep it
+  when every dose before it is given at its earliest recommended age (CDC's
+  Logic Specification, Tables 6-6 to 6-11; a skip of evaluation alone, a set
+  out of effect that day and a condition medrec does not read skip nothing).
+- `groups`: one per vaccine group, by the date of its first dose, then its
+  name. `antigens` are the group's antigens that have a line. A group's
+  `lines` are its series whose doses are the same, merged (their `antigens`
+  and `series` together); series whose doses differ are each a line.
+- A dose: `dose` is its number in the line; `series_dose` the schedule's
+  ("Dose 5" where dose 4 is skipped); `age` its earliest recommended age, as
+  the schedule writes it ("12 months - 4 days"); `date` the day that age falls
+  on, by CDC's rules (the years, then the months, then the days; a day that
+  does not exist moves to the first of the next month). A dose of no age of its
+  own has `age` and `date` null and `after`, the dose it comes after.
+  `recurring` is true of a dose given again and again; `season` (`from`, `to`)
+  is a seasonal dose's season. `before_records` is true where its day, or that
+  of the dose it comes after, is before the person's earliest record or paper
+  of any kind: a reader can fold those under "Before these records begin".
+  `sources` are the schedules that give it, each with its version and date; a
+  line two schedules give alike has both.
+- `on_file`: the person's immunizations (not those entered in error or not
+  given) and the vaccines claims tell of (`from_claim`), under each group a CVX
+  code of theirs counts for by the schedule's CVX map, on their day. They are
+  not paired with doses. `not_placed` are the ones under no group, with `why`:
+  "no CVX code" or "a CVX code the schedule does not place".
+- In the views, a private record is no dose on file, nor is the vaccine of a
+  claim line `private.json` holds back, and the earliest record is that of the
+  open records and papers. Nothing is private or open by the schedule.
+- The text of `medrec schedule` gives each group under its name, its doses
+  before the records begin on one line, and each other dose as "Dose 3:
+  recommended at 12 months - 4 days: Jan 11, 2028 (CDC CDSi 4.66, Oct 9,
+  2026)".
 
 ### Private (`private.json`, `medrec-private/v1`, 0.9.1 and later)
 
