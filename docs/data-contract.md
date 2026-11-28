@@ -654,7 +654,9 @@ contained resource) is none. Where the element is one of a list, the next one is
 read in its place; otherwise the field is absent, or comes from its fallback
 element (a MedicationRequest whose `requester` is the patient has no
 `prescriber`). Claims, results and reports filed before take this with `medrec
-reindex`; other records when their source serves them again. `npi` is a National Provider
+reindex`, and so does a fill's `pharmacy`, whose `fields` reindex reads again; a
+prescription keeps an earlier `prescriber` through reindex, and other records
+take it when their source serves them again. `npi` is a National Provider
 Identifier whose check digit holds, from the identifier of the reference
 that prints the field or from the resource it points at. `state` is two
 letters, from that resource's first address that gives one, and `city` (0.9.8
