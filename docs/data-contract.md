@@ -251,8 +251,11 @@ it says nothing of them.
     "PRN", "unless", "should"); a day after one is the condition's, so "as
     needed" or "if symptoms persist" keeps the words with no `date`. A day
     printed whole on or after the paper's `date` is the one told, wherever it
-    stands; else the first told ("in 2 weeks to review labs from 1/5" is two
-    weeks after the paper).
+    stands; else the first other day told. A day printed whole before the
+    paper's `date` is the one told only where the words tell no other ("in 2
+    weeks to review labs from 1/5/2027", and "to review 1/5/2027 labs in 2
+    weeks", are two weeks after a paper of 2027-01-10; "on 1/5/2027" alone is
+    that day).
     `dated` says how: `printed`, a day printed whole; `relative`, a time after
     the paper's own `date`, where the words start with it or "in", "within" or
     "after" comes before it, with "about" or "approximately" between or not
@@ -2780,9 +2783,13 @@ nothing is private.
     `provider`), or name, in `with` or as any run of words that start with a
     capital wherever it stands or any part of one, a clinician the `clinician`
     rule ties to one (by a paper that names them or a link to a practice's, not
-    by a day) or a name the household's provider word, of every item that
-    prints it, gives an area (`medrec providers`), whatever its case and
-    punctuation; and a field that prints an ICD-10 code of an area. These are read from the paper's text as
+    by a day; a run keeps the small words, months and commas inside a name,
+    so "June Placeholder" and "Center for Placeholder Health" are whole); a
+    follow-up whose words, or a drug whose name or directions, print anywhere,
+    whole and on word boundaries, a name the household's provider word, of
+    every item that prints it, gives an area (`medrec providers`), whatever
+    its case and punctuation, the last word on each name deciding; and a field
+    that prints an ICD-10 code of an area. These are read from the paper's text as
     the views are written, never from its `fields` in `index.json`, which a
     medrec older than 0.9.12 drops: what is held back is the same before a
     `medrec reindex` as after it. `documents.json` has no field any of whose
