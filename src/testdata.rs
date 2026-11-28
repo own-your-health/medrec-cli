@@ -122,6 +122,15 @@ pub fn write_shared_key(provider: &Path) {
 /// (tests/fixtures/schedule): its XML files under "Version 0.1 - 508/XML/"
 /// and its release notes, a document whose first date is the table's.
 pub fn cdsi_archive() -> Vec<u8> {
+    cdsi_archive_of(None)
+}
+
+/// [`cdsi_archive`] with `notes` as its release notes' document.
+pub fn cdsi_archive_with_notes(notes: &[u8]) -> Vec<u8> {
+    cdsi_archive_of(Some(notes))
+}
+
+fn cdsi_archive_of(notes: Option<&[u8]>) -> Vec<u8> {
     const AT: &str = "Version 0.1 - 508";
     let fixture = |name: &str| -> &'static str {
         match name {
@@ -143,11 +152,13 @@ pub fn cdsi_archive() -> Vec<u8> {
             _ => include_str!("../tests/fixtures/schedule/document.xml"),
         }
     };
-    let notes = zip_of(&[(
-        "word/document.xml",
-        fixture("document.xml").as_bytes(),
-        (2026, 9, 8),
-    )]);
+    let notes = notes.map(<[u8]>::to_vec).unwrap_or_else(|| {
+        zip_of(&[(
+            "word/document.xml",
+            fixture("document.xml").as_bytes(),
+            (2026, 9, 8),
+        )])
+    });
     let mut files: Vec<(String, Vec<u8>)> = [
         "ScheduleSupportingData.xml",
         "AntigenSupportingData- Examplitis.xml",

@@ -1364,7 +1364,8 @@ pub(crate) fn person(
         by_kind.entry("immunization").or_default().push(r);
     }
     // The schedule, where this machine has one: with no dose on file nor
-    // earliest record that is private, so a reader shows all of it.
+    // earliest record that is private, and none at all where the household's
+    // marks do not read, so a reader shows all of it.
     if !from.vaccines.schedules().is_empty() {
         let v = crate::schedule::of_index(p, idx, &from.vaccines, Some(&from.private));
         put(crate::schedule::FILE, json(&v));

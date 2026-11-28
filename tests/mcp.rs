@@ -5254,13 +5254,45 @@ fn a_schedule_is_the_routine_doses_by_age_beside_those_on_file() {
         .as_str()
         .unwrap()
         .starts_with("Dose 1: recommended at 2 months: Apr 2, 2020 (CDC CDSi 0.1"));
+    // A row has no date of its own: each dose's is in its words.
+    assert!(
+        items[0].get("date").is_none_or(Value::is_null),
+        "{}",
+        items[0]
+    );
     assert!(warned(&v, "no-schedule").is_empty());
     for args in [
         json!({"kind": "schedule"}),
         json!({"kind": "schedule", "person": "Robin", "active": true}),
+        json!({"kind": "schedule", "person": "Robin", "since": "2021-01-01"}),
+        json!({"kind": "schedule", "person": "Robin", "until": "2021-01-01"}),
     ] {
         assert!(call(&t, RECORDS, args).is_error());
     }
+
+    // A private dose on file: out of the view, and in the answer about the
+    // person with its row marked private.
+    let vaccine = s["not_placed"][0]["id"].as_str().unwrap().to_string();
+    e.ok(&["private", "mark", &vaccine]);
+    let (files, _) = views_of(&e, &robin);
+    assert!(!files["schedule"].to_string().contains(&vaccine));
+    let t = e.tools();
+    let r = call(&t, RECORDS, json!({"kind": "schedule", "person": "Robin"}));
+    let v = assert_fits(&t, RECORDS, &r).clone();
+    let items = v["items"].as_array().unwrap();
+    let last = items.last().unwrap();
+    assert_eq!(last["title"], "On file, in no group");
+    assert!(last["private"].is_string(), "{last}");
+    assert!(items[0]["private"].is_null(), "{}", items[0]);
+
+    // No birth date, no schedule: the answer says so.
+    e.ok(&["people", "add", "Sam Testperson"]);
+    let r = call(&t, RECORDS, json!({"kind": "schedule", "person": "Sam"}));
+    let v = assert_fits(&t, RECORDS, &r).clone();
+    assert_eq!(v["items"], json!([]));
+    let said = warned(&v, "no-birth-date");
+    assert_eq!(said.len(), 1, "{v}");
+    assert!(said[0].contains("--birth-date"), "{said:?}");
 }
 
 /// A paper's follow-ups and drugs are read from its labeled lines, a run

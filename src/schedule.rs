@@ -76,7 +76,7 @@ fn on(y: i64, m: i64, d: i64) -> Option<Day> {
     day(&format!("{y:04}-{m:02}-{d:02}")).or_else(|| on(y, m + 1, 1))
 }
 
-/// "Mar 15, 2027".
+/// "Mar 15, 2000".
 pub fn us_day(iso: &str) -> String {
     let (Some(y), Some(m), Some(d)) = (iso.get(..4), iso.get(5..7), iso.get(8..10)) else {
         return iso.to_string();
@@ -406,7 +406,8 @@ impl Schedules {
                 let doc = tables::entries(&docx)?
                     .into_iter()
                     .find(|e| e.name == "word/document.xml")?;
-                let body = String::from_utf8(tables::unpack(&docx, &doc)?).ok()?;
+                let body = (doc.size <= FILE_MAX).then(|| tables::unpack(&docx, &doc))??;
+                let body = String::from_utf8(body).ok()?;
                 let text = regex::Regex::new(r"<[^>]*>").ok()?.replace_all(&body, " ");
                 written_day(&text.split_whitespace().collect::<Vec<_>>().join(" "))
             });
@@ -482,11 +483,11 @@ fn met(c: &Condition, birth: Day, reference: Day, given: &[(Day, Vec<String>)]) 
     })
 }
 
-/// Whether CDC's skips of a forecast skip `dose` on `reference` (Tables 6-10
-/// and 6-11). A set out of effect that day counts for nothing; a condition
-/// medrec does not read keeps the dose.
+/// Whether one of CDC's skips of a forecast skips `dose` on `reference`
+/// (Tables 6-10 and 6-11). A set out of effect that day counts for nothing; a
+/// skip with a condition medrec does not read skips nothing.
 fn skipped(dose: &Dose, birth: Day, reference: Day, given: &[(Day, Vec<String>)]) -> bool {
-    for skip in &dose.skips {
+    let skips = |skip: &Skip| {
         let mut sets = Vec::new();
         for set in &skip.sets {
             let effective =
@@ -507,15 +508,13 @@ fn skipped(dose: &Dose, birth: Day, reference: Day, given: &[(Day, Vec<String>)]
                 false => met.iter().any(|m| *m),
             });
         }
-        if sets.is_empty() {
-            continue;
-        }
-        return match skip.all {
-            true => sets.iter().all(|s| *s),
-            false => sets.iter().any(|s| *s),
-        };
-    }
-    false
+        !sets.is_empty()
+            && match skip.all {
+                true => sets.iter().all(|s| *s),
+                false => sets.iter().any(|s| *s),
+            }
+    };
+    dose.skips.iter().any(skips)
 }
 
 /// The doses of `s` a person born on `birth` is given on the routine path.
@@ -646,8 +645,16 @@ pub fn of_person(
         })
         .collect();
     let Some(birth) = birth.and_then(day) else {
+        let not_placed: Vec<Value> = on_file
+            .iter()
+            .map(|f| {
+                let mut v = f.json();
+                v["why"] = "no birth date on file".into();
+                v
+            })
+            .collect();
         return json!({"schema": SCHEMA, "person": person, "birth_date": null,
-            "sources": sources, "groups": [], "not_placed": []});
+            "sources": sources, "groups": [], "not_placed": not_placed});
     };
     let earliest = earliest.and_then(day);
     let mut groups: BTreeMap<String, Vec<Line>> = BTreeMap::new();
@@ -776,14 +783,18 @@ pub fn of_person(
 /// A person's schedule from their index, by the schedules in `codes`. With
 /// `private` (`private.json`), as in the views: no dose on file that is
 /// private, nor a vaccine of a claim line it holds back, and the earliest
-/// record of those that are open.
+/// record of those that are open. Where it says the household's marks do not
+/// read (`marks_unreadable`), any item may be private: no dose on file and
+/// no earliest record, and the document says so.
 pub fn of_index(
     p: &crate::model::Person,
     idx: &crate::model::PersonIndex,
     codes: &crate::vaccines::Codes,
     private: Option<&Value>,
 ) -> Value {
-    let is_private = |kind: &str, id: &str| private.is_some_and(|v| v[kind].get(id).is_some());
+    let unread = private.is_some_and(|v| v.get("marks_unreadable").is_some());
+    let is_private =
+        |kind: &str, id: &str| unread || private.is_some_and(|v| v[kind].get(id).is_some());
     let held = private.map(crate::parts::Parts::of).unwrap_or_default();
     let all: Vec<&Record> = idx.records.iter().collect();
     let claimed = crate::vaccines::of_claims(&all, codes, &held);
@@ -808,13 +819,17 @@ pub fn of_index(
         .chain(documents)
         .filter_map(|d| d.get(..10).filter(|d| day(d).is_some()))
         .min();
-    of_person(
+    let mut v = of_person(
         &p.id,
         p.birth_date.as_deref(),
         &codes.schedules(),
         &on_file,
         earliest,
-    )
+    );
+    if unread {
+        v["marks_unreadable"] = true.into();
+    }
+    v
 }
 
 /// The words of one table beside a dose: "CDC CDSi 4.66, Oct 9, 2026".
@@ -882,10 +897,13 @@ fn group_lines(g: &Value) -> Vec<String> {
         if !before.is_empty() {
             let ages: Vec<String> = before
                 .iter()
-                .map(|d| match (d["age"].as_str(), d["after"].as_u64()) {
-                    (Some(age), _) => format!("dose {} at {age}", d["dose"]),
-                    (None, Some(n)) => format!("dose {} after dose {n}", d["dose"]),
-                    (None, None) => format!("dose {}", d["dose"]),
+                .map(|d| {
+                    let at = match (d["age"].as_str(), d["after"].as_u64()) {
+                        (Some(age), _) => format!("dose {} at {age}", d["dose"]),
+                        (None, Some(n)) => format!("dose {} after dose {n}", d["dose"]),
+                        (None, None) => format!("dose {}", d["dose"]),
+                    };
+                    format!("{at}{}", repeats(d))
                 })
                 .collect();
             out.push(format!(
@@ -903,13 +921,7 @@ fn group_lines(g: &Value) -> Vec<String> {
                     None => s.push_str("at no age of its own"),
                 },
             }
-            if d["recurring"] == true {
-                s.push_str(", then again");
-            }
-            if let Some(season) = d["season"].as_object() {
-                let day = |k: &str| season[k].as_str().map(us_day).unwrap_or_default();
-                s.push_str(&format!(", in the season {} to {}", day("from"), day("to")));
-            }
+            s.push_str(&repeats(d));
             s.push_str(&format!(" ({})", sources_said(d)));
             out.push(s);
         }
@@ -918,6 +930,20 @@ fn group_lines(g: &Value) -> Vec<String> {
         out.push(format!("On file: {}", on_file_said(f)));
     }
     out
+}
+
+/// The words of a dose that comes again, or in a season: ", then again, in
+/// the season Aug 1, 2027 to Jun 30, 2028".
+fn repeats(d: &Value) -> String {
+    let mut s = String::new();
+    if d["recurring"] == true {
+        s.push_str(", then again");
+    }
+    if let Some(season) = d["season"].as_object() {
+        let day = |k: &str| season[k].as_str().map(us_day).unwrap_or_default();
+        s.push_str(&format!(", in the season {} to {}", day("from"), day("to")));
+    }
+    s
 }
 
 /// The schedule's opening line.
@@ -943,17 +969,37 @@ fn opening(v: &Value, name: &str) -> Option<String> {
     ))
 }
 
-/// Each group of `of_person`'s document as a row: its heading, the date of
-/// its first dose after the person's records begin, and its lines joined.
-pub fn rows(v: &Value) -> Vec<(String, Option<String>, String)> {
+/// One group of a schedule, or the doses on file in none, as an answer
+/// gives it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Row {
+    /// The group's heading, or "On file, in no group".
+    pub title: String,
+    /// Its lines joined by "; ".
+    pub detail: String,
+    /// The ids of the records on file it prints, each once.
+    pub members: Vec<String>,
+}
+
+/// Each group of `of_person`'s document as a row, in its order (by the date
+/// of its first dose), then the doses on file in no group.
+pub fn rows(v: &Value) -> Vec<Row> {
+    let ids = |list: &Value| {
+        let mut out: Vec<String> = Vec::new();
+        for f in list.as_array().into_iter().flatten() {
+            if let Some(id) = f["id"].as_str().filter(|id| !out.iter().any(|o| o == id)) {
+                out.push(id.to_string());
+            }
+        }
+        out
+    };
     let mut out = Vec::new();
     for g in v["groups"].as_array().into_iter().flatten() {
-        let lines = g["lines"].as_array().into_iter().flatten();
-        let first = lines
-            .flat_map(|l| l["doses"].as_array().into_iter().flatten())
-            .filter(|d| d["before_records"] != true)
-            .find_map(|d| d["date"].as_str().map(String::from));
-        out.push((heading(g), first, group_lines(g).join("; ")));
+        out.push(Row {
+            title: heading(g),
+            detail: group_lines(g).join("; "),
+            members: ids(&g["on_file"]),
+        });
     }
     let not_placed: Vec<String> = v["not_placed"]
         .as_array()
@@ -968,7 +1014,11 @@ pub fn rows(v: &Value) -> Vec<(String, Option<String>, String)> {
         })
         .collect();
     if !not_placed.is_empty() {
-        out.push(("On file, in no group".into(), None, not_placed.join("; ")));
+        out.push(Row {
+            title: "On file, in no group".into(),
+            detail: not_placed.join("; "),
+            members: ids(&v["not_placed"]),
+        });
     }
     out
 }
@@ -976,10 +1026,10 @@ pub fn rows(v: &Value) -> Vec<(String, Option<String>, String)> {
 /// `of_person`'s document as lines of text: each group's heading, then its
 /// lines.
 pub fn text(v: &Value, name: &str) -> String {
-    let Some(open) = opening(v, name) else {
-        return format!("{name}: no birth date on file, so no schedule\n");
+    let mut out = match opening(v, name) {
+        Some(open) => format!("{open}\n"),
+        None => format!("{name}: no birth date on file, so no schedule\n"),
     };
-    let mut out = format!("{open}\n");
     for g in v["groups"].as_array().into_iter().flatten() {
         out.push_str(&format!("\n{}\n", heading(g)));
         for l in group_lines(g) {
@@ -1104,6 +1154,15 @@ mod tests {
         while let Some(at) = z.windows(notes.len()).position(|w| w == notes) {
             z[at] = b'X';
         }
+        assert_eq!(Schedules::read(&z).unwrap().date, "2026-09-01");
+        // A document in the release notes larger than any file is read for
+        // nothing, so the date is the newest file's.
+        let mut long = br#"<w:document><w:t>September 8, 2026</w:t>"#.to_vec();
+        long.resize((FILE_MAX + 1) as usize, b' ');
+        long.extend_from_slice(b"</w:document>");
+        let docx = crate::testdata::zip_of(&[("word/document.xml", &long, (2026, 9, 8))]);
+        assert!((docx.len() as u64) < FILE_MAX);
+        let z = crate::testdata::cdsi_archive_with_notes(&docx);
         assert_eq!(Schedules::read(&z).unwrap().date, "2026-09-01");
         // An archive with no schedule file, or one that does not read, is none.
         assert!(Schedules::read(b"PK no zip").is_none());
@@ -1318,29 +1377,306 @@ mod tests {
             Some("2015-01-01"),
         );
         let adult = text(&v, "Alex");
-        assert!(adult.contains("  Before these records begin: dose 1 at 2 months, dose 2 at 4 months, dose 3 at 12 months - 4 days, dose 4 at 4 years, dose 5 after dose 4, dose 6 at 11 years (CDC CDSi 0.1, Sep 8, 2026)\n"), "{adult}");
+        assert!(adult.contains("  Before these records begin: dose 1 at 2 months, dose 2 at 4 months, dose 3 at 12 months - 4 days, dose 4 at 4 years, dose 5 after dose 4, dose 6 at 11 years, then again (CDC CDSi 0.1, Sep 8, 2026)\n"), "{adult}");
+        assert!(adult.contains("  Samplepox C seasonal series: Before these records begin: dose 1 at 6 months, then again, in the season Aug 1, 2027 to Jun 30, 2028 (CDC CDSi 0.1, Sep 8, 2026)\n"), "{adult}");
         assert!(!adult.contains("  Dose "), "{adult}");
-        // Rows, as an answer gives them: a group's lines joined, and the
-        // first date after the records begin.
+        // Rows, as an answer gives them: a group's lines joined, with the
+        // records on file each prints, and the doses in no group last.
+        let filed = [
+            on("one", "2020-04-05", &[951], false),
+            on("two", "2020-08-05", &[951], false),
+            on("none", "", &[], false),
+        ];
         let rows = rows(&of_person(
             "p_x",
             Some(BIRTH),
             &[(&CDSI, &s)],
-            &[],
+            &filed,
             Some("2020-07-01"),
         ));
-        assert_eq!(rows[0].0, "Examplitis");
-        assert_eq!(rows[0].1.as_deref(), Some("2021-01-29"));
+        let titles: Vec<&str> = rows.iter().map(|r| r.title.as_str()).collect();
+        assert_eq!(
+            titles,
+            [
+                "Examplitis",
+                "Samplepox (Samplepox A, Samplepox B, Samplepox C)",
+                "On file, in no group"
+            ]
+        );
         assert!(rows[0]
-            .2
+            .detail
             .starts_with("Before these records begin: dose 1 at 2 months"));
-        // No birth date, no schedule.
-        let v = of_person("p_z", None, &[(&CDSI, &s)], &[], None);
+        assert_eq!(rows[0].members, [filed[0].id.clone(), filed[1].id.clone()]);
+        assert!(rows[1].members.is_empty());
+        assert_eq!(rows[2].members, [filed[2].id.clone()]);
+        // No birth date, no schedule: the doses on file are in no group.
+        let v = of_person("p_z", None, &[(&CDSI, &s)], &filed[..1], None);
         assert_eq!(v["groups"], json!([]));
+        assert_eq!(v["not_placed"][0]["why"], "no birth date on file");
         assert_eq!(
             text(&v, "Sam"),
-            "Sam: no birth date on file, so no schedule\n"
+            "Sam: no birth date on file, so no schedule\n\nOn file, in no group\n  \
+             Apr 5, 2020, Sample vaccine one (CVX 951) (no birth date on file)\n"
         );
+        assert_eq!(super::rows(&v)[0].title, "On file, in no group");
+    }
+
+    /// CDC's conditions of a skip, each met and not at its edge, and how sets
+    /// and skips join them (Tables 6-6 to 6-11).
+    #[test]
+    fn a_skips_conditions_are_met_at_their_edges_and_joined_by_their_logic() {
+        let birth = d(BIRTH);
+        let age = |s: &str| Age::parse(s).unwrap();
+        type Given = Vec<(Day, Vec<String>)>;
+        let given = |days: &[(&str, &str)]| -> Given {
+            days.iter()
+                .map(|(on, cvx)| (d(on), vec![cvx.to_string()]))
+                .collect()
+        };
+        let none = given(&[]);
+        let two = given(&[("2020-04-02", "951"), ("2020-06-02", "952")]);
+        let count = |count: usize, logic: Ordering| Condition::Count {
+            types: vec!["951".into()],
+            begin: None,
+            end: None,
+            start: None,
+            end_date: None,
+            count,
+            logic,
+        };
+        let cases: Vec<(&str, Condition, &str, &Given, bool)> = vec![
+            // An age: from its beginning, up to its end.
+            (
+                "age before",
+                Condition::Age {
+                    begin: Some(age("4 years")),
+                    end: None,
+                },
+                "2024-02-01",
+                &none,
+                false,
+            ),
+            (
+                "age at",
+                Condition::Age {
+                    begin: Some(age("4 years")),
+                    end: None,
+                },
+                "2024-02-02",
+                &none,
+                true,
+            ),
+            (
+                "age at its end",
+                Condition::Age {
+                    begin: None,
+                    end: Some(age("5 years")),
+                },
+                "2025-02-02",
+                &none,
+                false,
+            ),
+            (
+                "age before its end",
+                Condition::Age {
+                    begin: None,
+                    end: Some(age("5 years")),
+                },
+                "2025-02-01",
+                &none,
+                true,
+            ),
+            // An interval from the last dose given; none given, none met.
+            (
+                "interval short",
+                Condition::Interval(age("4 weeks")),
+                "2020-06-29",
+                &two,
+                false,
+            ),
+            (
+                "interval at",
+                Condition::Interval(age("4 weeks")),
+                "2020-06-30",
+                &two,
+                true,
+            ),
+            (
+                "interval, none given",
+                Condition::Interval(age("4 weeks")),
+                "2020-06-30",
+                &none,
+                false,
+            ),
+            // A count of the doses given of its types.
+            (
+                "more than one",
+                count(1, Ordering::Greater),
+                "2021-01-01",
+                &two,
+                false,
+            ),
+            (
+                "more than none",
+                count(0, Ordering::Greater),
+                "2021-01-01",
+                &two,
+                true,
+            ),
+            (
+                "fewer than two",
+                count(2, Ordering::Less),
+                "2021-01-01",
+                &two,
+                true,
+            ),
+            (
+                "equal to one",
+                count(1, Ordering::Equal),
+                "2021-01-01",
+                &two,
+                true,
+            ),
+            (
+                "equal to two",
+                count(2, Ordering::Equal),
+                "2021-01-01",
+                &two,
+                false,
+            ),
+        ];
+        for (what, c, on, given, want) in &cases {
+            assert_eq!(met(c, birth, d(on), given), Some(*want), "{what}");
+        }
+        // A count of any type, and between dates and ages.
+        let any = Condition::Count {
+            types: Vec::new(),
+            begin: None,
+            end: None,
+            start: Some(d("2020-05-01")),
+            end_date: None,
+            count: 1,
+            logic: Ordering::Equal,
+        };
+        assert_eq!(met(&any, birth, d("2021-01-01"), &two), Some(true));
+        let young = Condition::Count {
+            types: Vec::new(),
+            begin: None,
+            end: Some(age("3 months")),
+            start: None,
+            end_date: Some(d("2020-12-31")),
+            count: 1,
+            logic: Ordering::Equal,
+        };
+        assert_eq!(met(&young, birth, d("2021-01-01"), &two), Some(true));
+        assert_eq!(met(&Condition::Other, birth, d("2021-01-01"), &two), None);
+
+        // Sets and skips.
+        let yes = || Condition::Age {
+            begin: None,
+            end: None,
+        };
+        let no = || Condition::Interval(age("40 years"));
+        let set = |all: bool, conditions: Vec<Condition>| Set {
+            all,
+            from: None,
+            until: None,
+            conditions,
+        };
+        let dose = |skips: Vec<Skip>| Dose {
+            number: "Dose 2".into(),
+            earliest: None,
+            recurring: false,
+            season: None,
+            vaccines: Vec::new(),
+            skips,
+        };
+        let on = d("2021-01-01");
+        let skip = |all: bool, sets: Vec<Set>| Skip { all, sets };
+        let cases: Vec<(&str, Dose, bool)> = vec![
+            (
+                "AND of met and not",
+                dose(vec![skip(false, vec![set(true, vec![yes(), no()])])]),
+                false,
+            ),
+            (
+                "OR of met and not",
+                dose(vec![skip(false, vec![set(false, vec![yes(), no()])])]),
+                true,
+            ),
+            (
+                "sets AND",
+                dose(vec![skip(
+                    true,
+                    vec![set(true, vec![yes()]), set(true, vec![no()])],
+                )]),
+                false,
+            ),
+            (
+                "sets OR",
+                dose(vec![skip(
+                    false,
+                    vec![set(true, vec![no()]), set(true, vec![yes()])],
+                )]),
+                true,
+            ),
+            (
+                "one not read",
+                dose(vec![skip(
+                    false,
+                    vec![set(false, vec![yes(), Condition::Other])],
+                )]),
+                false,
+            ),
+            (
+                "ceased",
+                dose(vec![skip(
+                    false,
+                    vec![Set {
+                        until: Some(d("2020-12-31")),
+                        ..set(true, vec![yes()])
+                    }],
+                )]),
+                false,
+            ),
+            (
+                "not yet in effect",
+                dose(vec![skip(
+                    false,
+                    vec![Set {
+                        from: Some(d("2021-01-02")),
+                        ..set(true, vec![yes()])
+                    }],
+                )]),
+                false,
+            ),
+            (
+                "a second skip, the first out of effect",
+                dose(vec![
+                    skip(
+                        false,
+                        vec![Set {
+                            until: Some(d("2020-12-31")),
+                            ..set(true, vec![no()])
+                        }],
+                    ),
+                    skip(false, vec![set(true, vec![yes()])]),
+                ]),
+                true,
+            ),
+            (
+                "a second skip, the first not met",
+                dose(vec![
+                    skip(false, vec![set(true, vec![no()])]),
+                    skip(false, vec![set(true, vec![yes()])]),
+                ]),
+                true,
+            ),
+            ("no skip", dose(Vec::new()), false),
+        ];
+        for (what, dose, want) in &cases {
+            assert_eq!(skipped(dose, birth, on, &two), *want, "{what}");
+        }
     }
 
     #[test]
@@ -1358,17 +1694,49 @@ mod tests {
             .unwrap()
         };
         let mut idx = crate::model::PersonIndex::new(&p.id);
+        // A claim whose second line, a vaccine, is private.
+        let claim: Record = serde_json::from_value(json!({"id": "r_claimaaaaaaaaaaaaaaa",
+            "kind": "claim", "key": "claim|r_claim", "date": "2020-07-01",
+            "display": "Example Clinic · Example Health Plan", "status": "active",
+            "fields": {"items": [
+                {"sequence": 1, "service": {"system": crate::normalize::CVX, "code": "953",
+                    "display": "Sample vaccine C"}},
+                {"sequence": 2, "service": {"system": crate::normalize::CVX, "code": "952",
+                    "display": "Sample vaccine B"}}]},
+            "provenance": []}))
+        .unwrap();
         idx.records = vec![
             immunization("r_openaaaaaaaaaaaaaaaa", "2020-07-01", "951"),
             immunization("r_heldaaaaaaaaaaaaaaaa", "2020-04-05", "952"),
+            claim,
+        ];
+        // A private paper, earlier than every record.
+        idx.documents = vec![
+            serde_json::from_value(json!({"id": "d_heldaaaaaaaaaaaaaaaa",
+            "path": "x.pdf", "sha256": "0", "md5": "0", "size": 1, "media_type": "application/pdf",
+            "title": "Letter", "date": "2020-03-01", "filed_at": "2020-03-02T10:00:00Z",
+            "origin": {"kind": "file", "action": "copied"},
+            "provenance": {"source": {"kind": "scan"}, "method": "file",
+                "filed_at": "2020-03-02T10:00:00Z", "filed_by": "medrec"}}))
+            .unwrap(),
         ];
         let codes = crate::vaccines::Codes::default().with_schedules(vec![(&CDSI, invented())]);
         let private = json!({"records": {"r_heldaaaaaaaaaaaaaaaa": {"area": "sample"}},
-            "documents": {}, "parts": {}});
+            "documents": {"d_heldaaaaaaaaaaaaaaaa": {"area": "sample"}},
+            "parts": {"r_claimaaaaaaaaaaaaaaa": {"lines": [1]}}});
         let v = of_index(&p, &idx, &codes, Some(&private));
         let all = v.to_string();
         assert!(!all.contains("r_heldaaaaaaaaaaaaaaaa"), "{all}");
+        assert!(!all.contains("Sample vaccine B"), "{all}");
+        assert!(v.get("marks_unreadable").is_none());
         assert_eq!(v["groups"][0]["on_file"][0]["id"], "r_openaaaaaaaaaaaaaaaa");
+        // The claim's open line is a dose on file, from a claim.
+        let pox = &v["groups"][1]["on_file"];
+        assert_eq!(pox.as_array().unwrap().len(), 1, "{pox}");
+        assert_eq!(
+            (&pox[0]["cvx"], &pox[0]["from_claim"]),
+            (&json!([953]), &json!(true))
+        );
         // The earliest record is the open one's: dose 2 is not before it.
         let first = &v["groups"][0]["lines"][0]["doses"];
         assert_eq!(first[1]["before_records"], true);
@@ -1378,13 +1746,26 @@ mod tests {
             whole["groups"][1]["on_file"][0]["id"],
             "r_heldaaaaaaaaaaaaaaaa"
         );
+        assert!(whole.to_string().contains("Sample vaccine B"));
+        // The private paper is the earliest of all: dose 1 is after it.
         let first = &whole["groups"][0]["lines"][0]["doses"];
-        assert_eq!(first[1]["before_records"], false);
+        assert_eq!(first[0]["before_records"], false);
+        // Marks that do not read: any item may be private, so none is on file
+        // and none says where the records begin.
+        let unread = json!({"records": {}, "documents": {}, "parts": {},
+            "marks_unreadable": true});
+        let v = of_index(&p, &idx, &codes, Some(&unread));
+        assert_eq!(v["marks_unreadable"], true);
+        assert_eq!(v["not_placed"], json!([]));
+        for g in v["groups"].as_array().unwrap() {
+            assert_eq!(g["on_file"], json!([]), "{g}");
+        }
+        assert!(!v.to_string().contains("\"before_records\":true"));
     }
 
     #[test]
     fn a_day_reads_as_people_write_it() {
-        assert_eq!(us_day("2027-03-15"), "Mar 15, 2027");
+        assert_eq!(us_day("2000-03-15"), "Mar 15, 2000");
         assert_eq!(us_day("2026-10-09"), "Oct 9, 2026");
         assert_eq!(
             written_day("Release Notes 4.0 October 9, 2026 Overview"),

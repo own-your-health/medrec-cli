@@ -740,8 +740,9 @@ when every dose before it is given at its earliest recommended age. Doses
 before the person's earliest record of any kind are marked, and the text folds
 them into one line, "Before these records begin". It never says a dose is
 due, overdue or missed, and pairs no dose on file with one of the schedule.
-The views have it as `schedule.json`, and `medrec_records` as kind `schedule`
-(docs/data-contract.md, "Schedule").
+The views have it as `schedule.json`, without the private doses on file, and
+`medrec_records` as kind `schedule`, an item per group with its private doses
+marked (docs/data-contract.md, "Schedule").
 
 ```sh
 medrec tables list                      # the tables, and whether each is here
@@ -956,7 +957,7 @@ supported.
 |---|---|
 | `medrec_summary` | The household's people. With `person`: their current medicines (and those on hold or ended by their date), conditions and allergies, immunizations, the latest result of each test with the lab's range and flag, recent visits, and bills with an amount due |
 | `medrec_search` | Documents, records, imaging studies and notes holding every word of a query; a query naming lab tests (`blood tests`, `labs`) also finds every lab result, report and lab claim |
-| `medrec_records` | One kind, newest first: `medications`, `conditions`, `allergies`, `immunizations`, `visits`, `procedures`, `results` (with `name`, one test over time), `tests` (the latest result of each), `reports`, `claims`, `coverage`, `bills`, `documents`, `notes`, `timeline`, `events` (what happened: one per visit, ER trip, stay, test or fill, with `you_owe`; `id` gives one with its money and members) or `schedule` (with `person`, 0.9.12 and later: of each vaccine group, the doses CDC's schedule recommends by age on the dates they fall on, beside the doses on file, each with the table's version and date; never what is due); `active` keeps current ones (not for `events`, whose `status` says which are still waiting), and conditions, allergies and medicines say what each source says of them ("What is current") |
+| `medrec_records` | One kind, newest first: `medications`, `conditions`, `allergies`, `immunizations`, `visits`, `procedures`, `results` (with `name`, one test over time), `tests` (the latest result of each), `reports`, `claims`, `coverage`, `bills`, `documents`, `notes`, `timeline`, `events` (what happened: one per visit, ER trip, stay, test or fill, with `you_owe`; `id` gives one with its money and members) or `schedule` (with `person`, and not `active`, `since` or `until`, 0.9.12 and later: of each vaccine group, in the order of their first doses rather than newest first, the doses CDC's schedule recommends by age on the dates they fall on, beside the doses on file, each with the table's version and date; never what is due); `active` keeps current ones (not for `events`, whose `status` says which are still waiting), and conditions, allergies and medicines say what each source says of them ("What is current") |
 | `medrec_document` | A filed document's extracted text, in parts of up to 16,000 characters, with page breaks marked, and its `labeled` lines, a line each and at most 20: a bill's amount due, and (0.9.12 and later) the follow-ups and drugs its labeled lines give, a drug "from a paper" |
 
 Private items (above) are left out of an answer about the whole household,

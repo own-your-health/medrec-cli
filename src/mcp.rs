@@ -1210,9 +1210,10 @@ impl MedrecTools {
         if id.is_some() && a.kind != Kind::Events {
             return Err(ToolError::usage("id applies to kind `events` only"));
         }
-        if a.kind == Kind::Schedule && (person.is_none() || active) {
+        let dated = r.since.is_some() || r.until.is_some();
+        if a.kind == Kind::Schedule && (person.is_none() || active || dated) {
             return Err(ToolError::usage(
-                "kind `schedule` takes a person, and not active",
+                "kind `schedule` takes a person, and not active, since or until",
             ));
         }
         if active && a.kind == Kind::Events {
@@ -1262,6 +1263,10 @@ impl MedrecTools {
         let open =
             |title: &str| person.is_some() || name.is_some_and(|n| crate::private::names(title, n));
         let mut notes: Vec<String> = Vec::new();
+        let mut unborn: Vec<String> = Vec::new();
+        // CDC's tables, read once for every person of the answer.
+        let codes = std::cell::OnceCell::new();
+        let codes = || codes.get_or_init(|| self.codes());
         match (a.kind, a.kind.record_kind()) {
             (Kind::Tests, _) => {
                 for p in &selected {
@@ -1318,7 +1323,7 @@ impl MedrecTools {
                                 // of `idx` already.
                                 let all: Vec<&Record> = idx.records.iter().collect();
                                 let whole = crate::parts::Parts::default();
-                                crate::vaccines::of_claims(&all, &self.codes(), &whole)
+                                crate::vaccines::of_claims(&all, codes(), &whole)
                             }
                             _ => Vec::new(),
                         };
@@ -1361,7 +1366,7 @@ impl MedrecTools {
                 }
             }
             (Kind::Schedule, None) => {
-                let codes = self.codes();
+                let codes = codes();
                 if codes.schedules().is_empty() {
                     notes.push(
                         "no schedule is kept on this machine: `medrec tables fetch cdsi` keeps CDC's"
@@ -1371,21 +1376,31 @@ impl MedrecTools {
                 let some = !codes.schedules().is_empty();
                 for p in selected.iter().filter(|_| some) {
                     let idx = f.index(p)?;
-                    let v = crate::schedule::of_index(p, &idx, &codes, None);
+                    // An answer about one person: its private doses are in
+                    // it, and its rows carry their area by their members.
+                    let v = crate::schedule::of_index(p, &idx, codes, None);
+                    if v["birth_date"].is_null() {
+                        unborn.push(format!(
+                            "{} has no birth date on file, so no schedule: `medrec people edit \
+                             <PERSON> --birth-date YYYY-MM-DD` gives one",
+                            crate::printable(&p.name)
+                        ));
+                    }
                     let rows = crate::schedule::rows(&v);
-                    for (n, (title, date, detail)) in rows.into_iter().enumerate() {
-                        if !named(&title) {
+                    for (n, row) in rows.into_iter().enumerate() {
+                        if !named(&row.title) {
                             continue;
                         }
+                        // No date of its own: each dose's is in its detail.
                         items.push(Item {
                             kind: "schedule".into(),
                             person: p.name.clone(),
                             person_id: p.id.clone(),
                             group: u8::try_from(n).unwrap_or(u8::MAX),
-                            date,
                             id: format!("schedule:{}:{n}", p.id),
-                            title,
-                            detail: Some(detail),
+                            title: row.title,
+                            detail: Some(row.detail),
+                            members: row.members,
                             ..Default::default()
                         });
                     }
@@ -1548,7 +1563,11 @@ impl MedrecTools {
             }
         }
         private.label(&f, &h, &selected, &page, &mut items, person.is_none());
-        let mut out = page.page(items, "person, since/until, active or name")?;
+        let narrow = match a.kind {
+            Kind::Schedule => "name",
+            _ => "person, since/until, active or name",
+        };
+        let mut out = page.page(items, narrow)?;
         warn_labels(&mut out);
         // Only for the people on the page, and after the private items are
         // out: what is kept is decided from the source's own words.
@@ -1572,6 +1591,9 @@ impl MedrecTools {
         };
         for note in notes {
             out.warn(code, note);
+        }
+        for note in unborn {
+            out.warn("no-birth-date", note);
         }
         let lists = matches!(
             a.kind,

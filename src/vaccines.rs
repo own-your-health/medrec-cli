@@ -32,12 +32,41 @@ pub struct Codes {
     /// `<id> <SHA-256>` of both tables, as a view records them; none where
     /// either is not here.
     identity: Option<String>,
+    /// Where the tables are, for the schedules, which are read only when
+    /// first asked for: most callers need the codes alone.
+    dir: Option<std::path::PathBuf>,
+    schedules: std::sync::OnceLock<Kept>,
+}
+
+/// The schedules on this machine, each with its table, and `<id> <SHA-256>`
+/// of each schedule's table, comma-separated.
+#[derive(Debug, Clone, Default)]
+struct Kept {
     schedules: Vec<(
         &'static crate::tables::Table,
         Arc<crate::schedule::Schedules>,
     )>,
-    /// `<id> <SHA-256>` of each schedule's table, comma-separated.
-    schedule_identity: Option<String>,
+    identity: Option<String>,
+}
+
+impl Kept {
+    fn read(dir: &Path) -> Kept {
+        let mut schedules = Vec::new();
+        let mut kept = Vec::new();
+        for t in crate::schedule::SOURCES {
+            let Some(zip) = t.archive(dir) else {
+                continue;
+            };
+            if let Some(s) = crate::schedule::Schedules::read(&zip) {
+                schedules.push((*t, Arc::new(s)));
+                kept.push(format!("{} {}", t.id, crate::hash::sha256_hex(&zip)));
+            }
+        }
+        Kept {
+            schedules,
+            identity: (!kept.is_empty()).then(|| kept.join(", ")),
+        }
+    }
 }
 
 impl Codes {
@@ -67,29 +96,26 @@ impl Codes {
         // One table alone names no vaccine by a CPT code, so it is not a set a
         // pass makes views again by.
         let identity = (ids.len() == 2).then(|| ids.join(", "));
-        let mut schedules = Vec::new();
-        let mut kept = Vec::new();
-        for t in crate::schedule::SOURCES {
-            let read = t
-                .archive(dir)
-                .and_then(|z| crate::schedule::Schedules::read(&z));
-            if let (Some(s), Some(id)) = (read, t.identity(dir)) {
-                schedules.push((*t, Arc::new(s)));
-                kept.push(id);
-            }
-        }
         Codes {
             vaccine,
             of_cpt,
             identity,
-            schedules,
-            schedule_identity: (!kept.is_empty()).then(|| kept.join(", ")),
+            dir: Some(dir.to_path_buf()),
+            schedules: Default::default(),
         }
+    }
+
+    fn kept(&self) -> &Kept {
+        self.schedules.get_or_init(|| match &self.dir {
+            Some(dir) => Kept::read(dir),
+            None => Kept::default(),
+        })
     }
 
     /// The schedules on this machine, each with its table.
     pub fn schedules(&self) -> Vec<(&'static crate::tables::Table, &crate::schedule::Schedules)> {
-        self.schedules
+        self.kept()
+            .schedules
             .iter()
             .map(|(t, s)| (*t, s.as_ref()))
             .collect()
@@ -98,7 +124,7 @@ impl Codes {
     /// The tables the schedules are of, `<id> <SHA-256>` each,
     /// comma-separated; none without one.
     pub fn schedule_identity(&self) -> Option<&str> {
-        self.schedule_identity.as_deref()
+        self.kept().identity.as_deref()
     }
 
     /// The tables these codes are of, `<id> <SHA-256>` each, comma-separated;
@@ -107,22 +133,26 @@ impl Codes {
         self.identity.as_deref()
     }
 
-    /// Invented tables: each CVX code with whether it is a vaccine, and each
-    /// CPT code with its CVX codes.
-    #[cfg(test)]
     /// These codes with `schedules` beside them, as tests give them.
     #[cfg(test)]
     pub(crate) fn with_schedules(
         mut self,
         schedules: Vec<(&'static crate::tables::Table, crate::schedule::Schedules)>,
     ) -> Codes {
-        self.schedules = schedules
-            .into_iter()
-            .map(|(t, s)| (t, Arc::new(s)))
-            .collect();
+        let kept = Kept {
+            schedules: schedules
+                .into_iter()
+                .map(|(t, s)| (t, Arc::new(s)))
+                .collect(),
+            identity: None,
+        };
+        self.schedules = std::sync::OnceLock::from(kept);
         self
     }
 
+    /// Invented tables: each CVX code with whether it is a vaccine, and each
+    /// CPT code with its CVX codes.
+    #[cfg(test)]
     pub fn invented(vaccine: &[(&str, bool)], of_cpt: &[(&str, &[&str])]) -> Codes {
         Codes {
             vaccine: Some(
