@@ -75,13 +75,14 @@ impl Env {
         }
     }
 
-    /// The tools over this profile, in process.
+    /// The tools over this profile, in process, with this run's code tables
+    /// and never the machine's.
     fn tools(&self) -> MedrecTools {
         let file = find(&self.root.join("config"), "config.json").expect("a config file");
         let store = pk_cli_config::ConfigStore::new("medrec").with_override(Some(file));
         let mut cfg = medrec::config::Config::load(&store).unwrap();
         cfg.select(Some("home")).unwrap();
-        MedrecTools::new(cfg)
+        MedrecTools::new(cfg).with_tables(self.root.join("cache/medrec/tables"))
     }
 }
 
@@ -3295,8 +3296,7 @@ fn a_claims_vaccine_is_an_immunization_from_a_claim() {
         let each = items.iter().map(|i| i["id"].as_str().unwrap().to_string());
         each.collect()
     };
-    let tables = e.root.join("cache/medrec/tables");
-    let t = e.tools().with_tables(tables.clone());
+    let t = e.tools();
 
     // With no table, a line's own CVX code alone.
     assert_eq!(
