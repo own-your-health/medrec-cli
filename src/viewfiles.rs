@@ -44,9 +44,10 @@ const BUILD: &str = env!("BUILD_COMMIT");
 /// The oldest medrec whose contract a reader must follow to read these views
 /// (`views.json` `reader`). Raise it to the release's version, and say so in
 /// its notes, in the release that gives a view a field that changes what a
-/// reader must leave out or hold back: such a field cannot be ignored, yet it
-/// changes no layout. 0.9.10 gave `private.json` `heading`.
-pub const READER: &str = "0.9.10";
+/// reader must leave out or hold back, or must say of what it shows: such a
+/// field cannot be ignored, yet it changes no layout. 0.9.10 gave
+/// `private.json` `heading`; 0.9.11 a fill's `from_claim` in `standing.json`.
+pub const READER: &str = "0.9.11";
 
 /// The views every person has. A person whose `views.json` entry lacks
 /// one was written by an earlier build of the same version, before that

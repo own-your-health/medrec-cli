@@ -31,6 +31,9 @@ real record, document, study or provider response.
   portal renders on each export: `{{RENDERING}}` (its timestamp and document
   id) changes the bytes and not the text, and `{{FINDING}}` changes the
   text. `testdata::stream_with_summary` serves it as `doc-0001`'s Binary.
+- `fhir/pharmacy-eob-codings.json` is a pharmacy claim whose line gives a
+  code of the payer's own first, then an NDC and an RxNorm code, as invented
+  as the rest (labeler `00000`, `RX-6`); `fills/` has the medicine of it.
 - `fhir/medication-dispense.json` is a pharmacy fill (MedicationDispense),
   coded by NDC and RxNorm, and `fhir/pharmacy-eob.json` the pharmacy claim
   for it (an ExplanationOfBenefit with CARIN's days supply and refill

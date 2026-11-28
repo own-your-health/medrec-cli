@@ -11,7 +11,7 @@ use crate::events::SKIPPED_STATUS;
 use crate::intake::classify;
 use crate::model::{PersonIndex, Record};
 use crate::normalize::{NDC, RXNORM};
-use crate::standing::{is_fill, record_in_error, Filled};
+use crate::standing::{gave_fill, record_in_error, Filled};
 use crate::summary::{day, series_key};
 
 /// What a drug is told by.
@@ -104,13 +104,11 @@ fn paid_some(r: &Record) -> bool {
     r.fields.get("amounts").is_some_and(more) || lines.any(more)
 }
 
-/// The codes of the drug a claim is for.
+/// The codes of the drug a claim is for: each code of a line its totals
+/// count, first or not.
 fn of_claim(r: &Record) -> impl Iterator<Item = Drug> + '_ {
-    let service = counted(r).filter_map(|l| l.get("service"));
-    service.filter_map(|s| {
-        let text = |k: &str| s.get(k).and_then(Value::as_str);
-        coded(text("system"), text("code"))
-    })
+    let codes = counted(r).flat_map(crate::claims::service_codes);
+    codes.filter_map(|(system, code)| coded(Some(system), Some(code)))
 }
 
 /// The fills that claims tell of, by the line of the medicine (`series_key`)
@@ -126,7 +124,7 @@ pub fn of_claims(idx: &PersonIndex) -> BTreeMap<String, Vec<Filled>> {
         for drug in of_medicine(r) {
             lines.entry(drug).or_default().insert(line.clone());
         }
-        if let (true, Some(day)) = (is_fill(r), day(r.date.as_deref())) {
+        if let (true, Some(day)) = (gave_fill(r), day(r.date.as_deref())) {
             dispensed.insert((line, day));
         }
     }
@@ -166,6 +164,7 @@ pub fn of_claims(idx: &PersonIndex) -> BTreeMap<String, Vec<Filled>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::standing::is_fill;
 
     fn idx() -> PersonIndex {
         let text = include_str!("../tests/fixtures/fills/index.json");
@@ -204,8 +203,14 @@ mod tests {
             (line("RX-3"), of(&[("codefirst", "2024-05-09")])),
             (
                 line("RX-4"),
-                of(&[("partly", "2024-05-14"), ("deniedpaid", "2024-05-13")]),
+                of(&[
+                    ("partly", "2024-05-14"),
+                    ("deniedpaid", "2024-05-13"),
+                    ("claimpaid", "2024-05-12"),
+                    ("copayonly", "2024-05-11"),
+                ]),
             ),
+            (line("RX-5"), of(&[("notgiven", "2024-05-20")])),
             ("~sample syrup".into(), of(&[("uncoded", "2024-05-10")])),
         ]);
         assert_eq!(fills(&idx()), want);
@@ -215,13 +220,70 @@ mod tests {
     #[test]
     fn a_claim_yields_to_the_pharmacys_own_record_of_its_day() {
         let mut idx = idx();
-        let of = idx.records.iter_mut().find(|r| is_fill(r)).unwrap();
+        let mut of = idx.records.iter_mut();
+        let of = of
+            .find(|r| is_fill(r) && r.id.starts_with("r_capsulefill"))
+            .unwrap();
         of.status = Some("entered-in-error".into());
         let fills = fills(&idx);
         let of = &fills[&format!("{RXNORM}|RX-1")];
         assert!(of.iter().any(|f| f.0 == "dispensed"), "{of:?}");
         // Its package tells no medicine then.
         assert!(of.iter().all(|f| f.0 != "package"), "{of:?}");
+    }
+
+    /// A payer can give a drug's RxNorm code or NDC after a code of its own,
+    /// and normalizing keeps every one of them.
+    #[test]
+    fn each_code_of_a_line_tells_its_drug_whichever_is_first() {
+        use crate::model::{Provenance, ProvenanceSource};
+        let eob: Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/fhir/pharmacy-eob-codings.json"
+        ))
+        .unwrap();
+        let provenance = Provenance {
+            source: ProvenanceSource {
+                kind: "fhir".into(),
+                cli: Some("fakeprov".into()),
+                cli_version: None,
+                organization_id: None,
+                fhir_base: None,
+            },
+            method: "fhir-api".into(),
+            source_resource: None,
+            fetched_at: None,
+            filed_at: "2026-03-11T00:00:00Z".into(),
+            raw_path: None,
+            classified_by: None,
+            derived_from: None,
+            filed_by: crate::model::filed_by(),
+        };
+        let claim = crate::normalize::record(&eob, provenance).unwrap();
+        let line = &claim.fields["items"][0];
+        assert_eq!(
+            line["service"]["system"],
+            "http://example.invalid/pharmacy-item"
+        );
+        assert_eq!(line["codes"].as_array().unwrap().len(), 3, "{line}");
+        let codes: Vec<Drug> = of_claim(&claim).collect();
+        assert_eq!(
+            codes,
+            [Drug::Ndc("00000000601".into()), Drug::RxNorm("RX-6".into())]
+        );
+        // So it is a fill of the medicine of that code, under another name.
+        let mut idx = idx();
+        idx.records.push(claim);
+        let fills = fills(&idx);
+        let of = &fills[&format!("{RXNORM}|RX-6")];
+        assert_eq!(of.len(), 1, "{of:?}");
+        assert_eq!(of[0].1, "2026-03-10");
+        // A line of one coding has no `codes`.
+        let one = idx
+            .records
+            .iter()
+            .find(|r| r.id.starts_with("r_coded"))
+            .unwrap();
+        assert!(one.fields["items"][0].get("codes").is_none());
     }
 
     #[test]

@@ -781,8 +781,13 @@ its totals leave one out.
   (`{system, code, display}`), `revenue` (a facility line's revenue code,
   the same shape; 0.8.2 and later), `serviced` (a date or `{start, end}`),
   `quantity`, `net`, `adjudication` (`[{category, amount, reason}]` as the
-  payer wrote them), `payer_notes`, `counted` and `records`. `revenue`,
-  `payer_notes` and `counted` are present only when they say something.
+  payer wrote them), `payer_notes`, `counted`, `codes` and `records`.
+  `revenue`, `payer_notes` and `counted` are present only when they say
+  something. `codes` (0.9.11 and later) is every coding of the line's service,
+  `[{system, code}]` in the payer's order, where it has more than one:
+  `service` keeps the first, and a payer can give an RxNorm code, an NDC or a
+  CVX code after a code of its own. A claim filed before has it after `medrec
+  reindex`.
 - A line's `payer_notes` (0.8.2 and later): the texts of the
   `processNote` entries its `noteNumber` points at, in that order, as the
   payer wrote them (UHC's start with their code: `XX -- …`). The claim's
@@ -1912,13 +1917,16 @@ totals reads them as before, and one that sums or shows line amounts
 reads them with `counted` (Claims, above). medrec moves to a new number
 only in a release whose notes name the connector version that reads it.
 
-A field can change what a reader must leave out or hold back without
-changing the layout, such as `heading` in `private.json` (0.9.10): a reader
-that ignores it shows what it must not, or leaves out what it need not.
+A field can change what a reader must leave out or hold back, or what it must
+say of an item it shows, without changing the layout: `heading` in
+`private.json` (0.9.10), with which a reader that ignores it shows what it must
+not, or leaves out what it need not; and a fill's `from_claim` in
+`standing.json` (0.9.11), with which a reader that ignores it shows a payer's
+claim as the pharmacy's fill.
 `reader` (0.9.11 and later) is the oldest medrec version whose contract a
 reader must follow to read the views: medrec raises it, in the release that
 adds such a field, to that release's version, and its notes say so. It is
-`0.9.10` now. It is `MAJOR.MINOR.PATCH`, three decimal integers, compared as
+`0.9.11` now (`0.9.10` in 0.9.10's views). It is `MAJOR.MINOR.PATCH`, three decimal integers, compared as
 numbers part by part and never as text: `0.9.9` is older than `0.9.10`. Where
 `reader` is absent, a reader takes `medrec` (the version that wrote the views) in
 its place. A reader that follows an older version's contract than that, or that
@@ -2446,7 +2454,8 @@ word wins over another's. Every person has one.
   one too, with `from_claim: true` (0.9.11 and later; absent otherwise), and a
   reader says "from a claim" wherever it shows it. Its `record` is the claim, and
   what is private of the claim decides whether it is shown. It is a fill of each
-  medicine that an RxNorm code or an NDC of a line its totals count is equal to
+  medicine that an RxNorm code or an NDC of a line its totals count (any of the
+  line's `codes`, else its `service`'s) is equal to
   (the medicine's own, or the `ndc` of a fill of it; an NDC as eleven digits, five,
   four and two, where it has hyphens), else of each whose folded name is the
   drug's in its `display`. One that is cancelled (as a reversal is) or entered in
@@ -2454,7 +2463,9 @@ word wins over another's. Every person has one.
   nothing: each line its totals count has an adjudication of category
   `denialreason` or `rejectreason` (by code or name), and the member's share of
   the claim and of each such line is nothing or not given. Neither is one where a
-  fill of that medicine and day is filed. A claim makes no
+  fill of that medicine and day is filed that the pharmacy gave (`completed`,
+  `unknown` or no status, as above): one it cancelled, declined, stopped or is
+  still making is none, and the claim's is the fill. A claim makes no
   medicine, and says nothing of what is current.
 - **`differs`**: its words differ: some say another `is` than the rest (`visit`
   and `error` say nothing here), or give another `verification`.

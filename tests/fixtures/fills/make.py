@@ -60,12 +60,13 @@ def fill(name, day, display, code, **fields):
     return record("medication", name, day, display, code, "completed", source="dispense", **fields)
 
 
-def owed(amount):
-    return {"you_owe": {"amount": amount, "currency": "USD"}}
+def owed(amount, what="you_owe"):
+    return {what: {"amount": amount, "currency": "USD"}}
 
 
 def claim(
-    name, day, drug, *services, status="active", kind="pharmacy", uncounted=(), denied=(), owe=None
+    name, day, drug, *services, status="active", kind="pharmacy", uncounted=(), denied=(), owe=None,
+    copay=None, claim_owes=None,
 ):
     items = [
         {"sequence": n, "service": {"system": system, "code": value}}
@@ -77,10 +78,15 @@ def claim(
         items[n]["adjudication"] = [{"category": why, "amount": None, "reason": "Sample reason"}]
     if owe:
         items[0]["amounts"] = owed(owe)
+    if copay:
+        items[0]["amounts"] = owed(copay, "copay")
+    fields = {}
+    if claim_owes:
+        fields["amounts"] = owed(claim_owes)
     return record(
         "claim", name, day, f"{drug} · Example Pharmacy", None, status,
         provider="Example Pharmacy", insurer="Example Health Plan", type=kind, category=kind,
-        billable_period={"start": day, "end": day}, items=items,
+        billable_period={"start": day, "end": day}, items=items, **fields,
     )
 
 
@@ -127,6 +133,31 @@ RECORDS = [
         "deniedpaid", "2024-05-13", "SMPL LOTION", (RXNORM, "RX-4"),
         denied=[(0, "Denial Reason")], owe="12.00",
     ),
+    # The household's share given for the whole claim alone, or as a copay with
+    # nothing it owes; and a share of nothing, which gave nothing.
+    claim(
+        "claimpaid", "2024-05-12", "SMPL LOTION", (RXNORM, "RX-4"),
+        denied=[(0, "Denial Reason")], claim_owes="7.00",
+    ),
+    claim(
+        "copayonly", "2024-05-11", "SMPL LOTION", (RXNORM, "RX-4"),
+        denied=[(0, "Denial Reason")], copay="3.00",
+    ),
+    claim(
+        "zeroshare", "2024-05-16", "SMPL LOTION", (RXNORM, "RX-4"),
+        denied=[(0, "Denial Reason")], owe="0.00",
+    ),
+    # A fill the pharmacy cancelled on the claim's day gave nothing: the claim
+    # tells of the fill.
+    medicine("gel", "Sample gel", (RXNORM, "RX-5")),
+    record(
+        "medication", "gelcancelled", "2024-05-20", "Sample gel", (RXNORM, "RX-5"),
+        "cancelled", source="dispense",
+    ),
+    claim("notgiven", "2024-05-20", "SMPL GEL", (RXNORM, "RX-5")),
+    # Of which the claim in ../fhir/pharmacy-eob-codings.json is a fill, by its
+    # third code.
+    medicine("cream", "Sample cream", (RXNORM, "RX-6")),
     # A reversal (returned to stock) is a cancelled claim, as above.
 ]
 RECORDS.sort(key=lambda r: r["date"], reverse=True)

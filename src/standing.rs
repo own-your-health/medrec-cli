@@ -408,6 +408,12 @@ pub(crate) fn is_fill(r: &Record) -> bool {
     r.kind == "medication" && r.fields.get("source") == Some(&"dispense".into())
 }
 
+/// A fill the pharmacy says it gave: completed, or of no or an unknown status.
+/// One cancelled, declined, stopped or still being made gave nothing.
+pub(crate) fn gave_fill(r: &Record) -> bool {
+    is_fill(r) && matches!(r.status.as_deref(), None | Some("completed" | "unknown"))
+}
+
 /// Each word of a record with the provenance it is of, and the provenances it
 /// keeps none of. Its own status is the word of the one that wrote its fields
 /// or is its only one. With none of any, it is the word of one it does not
@@ -525,9 +531,8 @@ impl Standings {
             }
         }
         let mut fills = crate::fills::of_claims(idx);
-        for r in idx.records.iter().filter(|r| is_fill(r)) {
-            let given = matches!(r.status.as_deref(), None | Some("completed" | "unknown"));
-            if let (true, Some(date)) = (given, day(r.date.as_deref())) {
+        for r in idx.records.iter().filter(|r| gave_fill(r)) {
+            if let Some(date) = day(r.date.as_deref()) {
                 fills.entry(series_key(r)).or_default().push(Filled {
                     record: r.id.clone(),
                     date,
