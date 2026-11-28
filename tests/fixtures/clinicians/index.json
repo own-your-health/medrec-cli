@@ -576,6 +576,85 @@
      "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/procedure.json"
     }
    ]
+  },
+  {
+   "id": "r_readingaaaaaaaaaaaaa",
+   "kind": "result",
+   "key": "result|reading|2024-09-24",
+   "date": "2024-09-24",
+   "display": "Sample reading",
+   "status": "completed",
+   "fields": {
+    "performer": "PLACEHOLDER, KIM",
+    "value": "4"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.10",
+     "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/reading.json"
+    }
+   ]
+  },
+  {
+   "id": "r_summaryaaaaaaaaaaaaa",
+   "kind": "report",
+   "key": "report|summary|2024-09-24",
+   "date": "2024-09-24",
+   "display": "Sample summary",
+   "status": "completed",
+   "fields": {
+    "performer": "K. Placeholder"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.10",
+     "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/summary.json"
+    }
+   ]
+  },
+  {
+   "id": "r_vaccineaaaaaaaaaaaaa",
+   "kind": "immunization",
+   "key": "immunization|vaccine|2024-09-24",
+   "date": "2024-09-24",
+   "display": "Sample vaccine",
+   "status": "completed",
+   "fields": {
+    "performer": "K Placeholder"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.10",
+     "raw_path": "Robin Example/Records/north/ExplanationOfBenefit/vaccine.json"
+    }
+   ]
   }
  ],
  "studies": [],

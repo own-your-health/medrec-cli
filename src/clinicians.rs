@@ -80,7 +80,7 @@ pub(crate) fn printing(kind: &str) -> Option<&'static str> {
         "claim" => "provider",
         "encounter" => "practitioner",
         "medication" => "prescriber",
-        "procedure" | "result" | "report" => "performer",
+        "procedure" | "result" | "report" | "immunization" => "performer",
         _ => return None,
     })
 }
@@ -866,7 +866,7 @@ mod tests {
     /// Each kind that prints a clinician: a visit's and a prescriber need no
     /// initial, as a claim's does.
     #[test]
-    fn visits_prescriptions_procedures_and_results_print_one_too() {
+    fn visits_prescriptions_procedures_results_and_vaccines_print_one_too() {
         let mut idx = PersonIndex::new("p_test");
         idx.documents = vec![paper(Some(COUNSELING), "Visit with Kim Placeholder")];
         let clinicians = named(&idx);
@@ -885,8 +885,8 @@ mod tests {
         // A claim's provider and a performer can be a place's.
         assert_eq!(one("claim", "provider", "Kim Placeholder"), None);
         assert_eq!(one("procedure", "performer", "Kim Placeholder"), None);
-        // An immunization prints a performer, and is judged by no clinician.
-        assert_eq!(one("immunization", "performer", "K Placeholder"), None);
+        assert_eq!(one("immunization", "performer", "K Placeholder"), mind);
+        assert_eq!(one("immunization", "performer", "Kim Placeholder"), None);
         assert_eq!(one("encounter", "location", "K Placeholder"), None);
     }
 
