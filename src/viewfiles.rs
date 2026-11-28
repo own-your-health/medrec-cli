@@ -1515,6 +1515,13 @@ pub(crate) fn person(
             if let Value::Object(m) = &mut v {
                 // Read for what is private, and shown nowhere.
                 m.remove("given");
+                // Without a field private by what it says, which a reader of
+                // an older contract would not know to leave out.
+                let fields = d.fields.as_ref().map(|f| f.without(&held.places(&d.id)));
+                match fields.filter(|f| !f.is_empty()) {
+                    Some(f) => m.insert("fields".into(), crate::paper::shown(&f, &idx.records)),
+                    None => m.remove("fields"),
+                };
                 if let Some(at) = text_at.get(d.id.as_str()) {
                     m.insert("text_at".into(), serde_json::json!(at));
                 }

@@ -1042,6 +1042,9 @@ pub struct DocumentRow {
     /// The bill filed before that is the same statement.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub same_statement_as: Option<String>,
+    /// What its text says on the lines it labels ([`crate::paper::shown`]).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fields: Option<Value>,
     /// That its sources differ on whether it is entered in error, and what
     /// each says.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1097,6 +1100,7 @@ pub fn documents(
                 near_duplicates: d.near_duplicates.into_iter().map(|n| n.document).collect(),
                 statement: d.statement,
                 same_statement_as: d.same_statement_as,
+                fields: d.fields.map(|f| crate::paper::shown(&f, &idx.records)),
                 standing,
                 says,
             });

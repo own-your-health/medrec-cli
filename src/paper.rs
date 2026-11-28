@@ -47,6 +47,25 @@ impl Fields {
     pub fn is_empty(&self) -> bool {
         self.follow_up.is_empty() && self.drugs.is_empty()
     }
+
+    /// Without those on any of these lines.
+    pub fn without(&self, places: &[Place]) -> Fields {
+        let keep = |lines: &[Place]| !left_out(lines, places);
+        Fields {
+            follow_up: self
+                .follow_up
+                .iter()
+                .filter(|x| keep(&x.lines))
+                .cloned()
+                .collect(),
+            drugs: self
+                .drugs
+                .iter()
+                .filter(|x| keep(&x.lines))
+                .cloned()
+                .collect(),
+        }
+    }
 }
 
 /// How a follow-up's date was told.
@@ -584,6 +603,19 @@ pub fn medicine<'a>(drug: &Drug, records: &'a [Record]) -> Option<&'a Record> {
         })
 }
 
+/// A paper's fields as the views and `medrec documents` give them: each drug
+/// with the id of the person's medicine of an equal code (`medicine`).
+pub fn shown(f: &Fields, records: &[Record]) -> Value {
+    let mut v = serde_json::to_value(f).unwrap_or(Value::Null);
+    for (i, d) in f.drugs.iter().enumerate() {
+        let at = format!("/drugs/{i}");
+        if let (Some(r), Some(x)) = (medicine(d, records), v.pointer_mut(&at)) {
+            x["medicine"] = r.id.clone().into();
+        }
+    }
+    v
+}
+
 /// The diagnosis codes of an area a text prints, by ICD-10's shape.
 pub(crate) fn code_area(text: &str) -> Option<&'static str> {
     static ICD10: LazyLock<Regex> =
@@ -768,27 +800,27 @@ mod tests {
 
     #[test]
     fn a_drug_is_read_with_its_directions_and_codes() {
-        let text = "Prescription\nRx: Exampleprofen 200 mg tablet\nSig: 1 tab by mouth twice daily\nQty: 30\nNDC 00000-1234-01\nRefills: 0\n";
+        let text = "Prescription\nRx: Exampleprofen 200 mg tablet\nSig: 1 tab by mouth twice daily\nQty: 30\nNDC 00000-0001-01\nRefills: 0\n";
         let f = read(text, DATE);
         assert_eq!(f.drugs.len(), 1);
         let d = &f.drugs[0];
         assert_eq!(d.drug, "Exampleprofen 200 mg tablet");
         assert_eq!(d.directions.as_deref(), Some("1 tab by mouth twice daily"));
-        assert_eq!(d.ndc.as_deref(), Some("00000123401"));
+        assert_eq!(d.ndc.as_deref(), Some("00000000101"));
         assert_eq!(d.lines.len(), 3);
         let f = read(
-            "Medication: Sampleomycin 250 mg capsule (RxNorm 0012345)\nTake 1 capsule every 8 hours for 7 days\n",
+            "Medication: Sampleomycin 250 mg capsule (RxNorm 0000345)\nTake 1 capsule every 8 hours for 7 days\n",
             DATE,
         );
         let d = &f.drugs[0];
-        assert_eq!(d.rxnorm.as_deref(), Some("0012345"));
+        assert_eq!(d.rxnorm.as_deref(), Some("0000345"));
         assert_eq!(
             d.directions.as_deref(),
             Some("Take 1 capsule every 8 hours for 7 days")
         );
         // Directions alone, far from a drug, or a count after its label, are none.
         let f = read(
-            "Sig: 1 tab daily\nRx #: 0001234\nRx: none\nMedication:\n\nDirections: rest",
+            "Sig: 1 tab daily\nRx #: 0000234\nRx: none\nMedication:\n\nDirections: rest",
             DATE,
         );
         assert!(f.drugs.is_empty(), "{f:?}");
@@ -855,23 +887,23 @@ mod tests {
             lines: Vec::new(),
         };
         let rx = [med(
-            serde_json::json!({"system": RXNORM, "code": "0012345"}),
+            serde_json::json!({"system": RXNORM, "code": "0000345"}),
             serde_json::json!({}),
         )];
-        assert!(medicine(&drug(Some("0012345"), None), &rx).is_some());
-        assert!(medicine(&drug(Some("0099999"), None), &rx).is_none());
+        assert!(medicine(&drug(Some("0000345"), None), &rx).is_some());
+        assert!(medicine(&drug(Some("0000999"), None), &rx).is_none());
         // Its name alone is no tie.
         assert!(medicine(&drug(None, None), &rx).is_none());
         let by_ndc = [med(
-            serde_json::json!({"system": NDC, "code": "00000-1234-01"}),
+            serde_json::json!({"system": NDC, "code": "00000-0001-01"}),
             serde_json::json!({}),
         )];
-        assert!(medicine(&drug(None, Some("00000123401")), &by_ndc).is_some());
+        assert!(medicine(&drug(None, Some("00000000101")), &by_ndc).is_some());
         let package = [med(
             serde_json::json!(null),
-            serde_json::json!({"ndc": "0-1234-01"}),
+            serde_json::json!({"ndc": "0-0001-01"}),
         )];
-        assert!(medicine(&drug(None, Some("00000123401")), &package).is_some());
+        assert!(medicine(&drug(None, Some("00000000101")), &package).is_some());
     }
 
     #[test]

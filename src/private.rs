@@ -720,7 +720,11 @@ pub fn build(
     if !unreported.is_empty() {
         out["unreported_studies"] = unreported.into();
     }
-    let parts = parts_of(p, idx, &now_index, texts, built, marks, &out);
+    let of_fields = Judges {
+        clinicians: &clinicians,
+        corrections: &all_marks.providers,
+    };
+    let parts = parts_of(p, idx, &now_index, texts, built, marks, &out, &of_fields);
     out["parts"] = Value::Object(parts);
     let clear = clear_events(built, &out);
     if !clear.is_empty() {
@@ -746,9 +750,61 @@ fn clear_events(built: &Built, private: &Value) -> Vec<String> {
         .collect()
 }
 
+/// What judges a paper's fields on their own, beside the rules of words.
+struct Judges<'a> {
+    clinicians: &'a clinicians::Clinicians,
+    corrections: &'a [crate::corrections::Correction],
+}
+
+impl Judges<'_> {
+    /// The lines of a paper's fields that are private by what each says
+    /// ([`crate::paper`]): a drug of an area by its name, or as the person's
+    /// medicine by an equal code where that is private; a follow-up that names
+    /// a place or a clinician of one, by its name, the clinician rule or the
+    /// household's word on that name; and a diagnosis code of an area either
+    /// prints.
+    fn lines(
+        &self,
+        f: &crate::paper::Fields,
+        records: &[Record],
+        held: &dyn Fn(&str) -> bool,
+    ) -> Vec<parts::Place> {
+        let coded = |t: &str| crate::paper::code_area(t).is_some();
+        let named = |n: &String| {
+            place_area(n).is_some()
+                || self.clinicians.of_name(n).is_some()
+                || said_area(self.corrections, n).is_some()
+        };
+        let follow = f.follow_up.iter();
+        let follow = follow.filter(|x| x.with.iter().any(named) || coded(&x.words));
+        let drugs = f.drugs.iter().filter(|d| {
+            let said = [Some(d.drug.as_str()), d.directions.as_deref()];
+            medicine(&d.drug).is_some()
+                || said.into_iter().flatten().any(coded)
+                || crate::paper::medicine(d, records).is_some_and(|r| held(&r.id))
+        });
+        let follow = follow.flat_map(|x| x.lines.iter().copied());
+        follow
+            .chain(drugs.flat_map(|d| d.lines.iter().copied()))
+            .collect()
+    }
+}
+
+/// The private area the household's word on a printed name gives it, where
+/// that word is of every item that prints the name: the last such word.
+fn said_area(corrections: &[crate::corrections::Correction], name: &str) -> Option<&'static str> {
+    let mut of = corrections.iter().rev().filter(|c| c.item.is_none());
+    let last = of.find(|c| c.printed.iter().any(|p| p == name))?;
+    let set = last.set.as_ref().filter(|_| !last.wrong)?;
+    let named = [&set.name, &set.practice, &set.role].into_iter().flatten();
+    let role = set.role.as_deref().and_then(crate::roles::area_in);
+    role.or_else(|| named.into_iter().find_map(|t| place_area(t)))
+}
+
 /// What is left out of each open item that has a private part
 /// ([`crate::parts`]), of one the household marked not private nothing. An
 /// event is what its open items say.
+#[allow(clippy::too_many_arguments)]
 fn parts_of(
     p: &Person,
     idx: &PersonIndex,
@@ -757,6 +813,7 @@ fn parts_of(
     built: &Built,
     marks: &[Mark],
     private: &Value,
+    judges: &Judges,
 ) -> serde_json::Map<String, Value> {
     let mark_of: BTreeMap<&str, bool> =
         marks.iter().map(|m| (m.item.as_str(), m.private)).collect();
@@ -778,7 +835,15 @@ fn parts_of(
     }
     for d in idx.documents.iter().filter(|d| judged(&d.id)) {
         let text = texts.texts.get(&d.id);
-        let places = text.map(|t| parts::of_text(t)).unwrap_or_default();
+        let mut places = text.map(|t| parts::of_text(t)).unwrap_or_default();
+        if let (Some(text), Some(f)) = (text, &d.fields) {
+            // Only lines of its text: a reader leaves out a field by them.
+            let lines = parts::lines(text);
+            let of = judges.lines(f, &idx.records, &held);
+            places.extend(of.into_iter().filter(|l| lines.contains(l)));
+            places.sort_unstable();
+            places.dedup();
+        }
         if !places.is_empty() {
             out.insert(d.id.clone(), parts::text_json(&places));
         }
@@ -1528,6 +1593,82 @@ fn areas(v: &Value, kind: &str) -> serde_json::Map<String, Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Beside a name and a code that say an area, which `paper`'s tests and
+    /// the papers fixture have: the clinician rule, the household's word on a
+    /// printed name, and the person's medicine of an equal code where it is
+    /// private.
+    #[test]
+    fn a_papers_field_is_private_by_what_it_says() {
+        use crate::paper::{Drug, Fields, FollowUp};
+        let follow = |with: &str, at: usize| FollowUp {
+            words: format!("with {with}"),
+            date: None,
+            dated: None,
+            with: vec![with.into()],
+            lines: vec![[at, 1]],
+        };
+        let drug = |rxnorm: Option<&str>, at: usize| Drug {
+            drug: "Exampleprofen 200 mg tablet".into(),
+            directions: None,
+            rxnorm: rxnorm.map(str::to_string),
+            ndc: None,
+            lines: vec![[at, 1]],
+        };
+        let f = Fields {
+            follow_up: vec![
+                follow("Placeholder Counseling Center", 0),
+                follow("Kim Placeholder", 2),
+                follow("Pat Quill", 4),
+                follow("Sample Group", 6),
+            ],
+            drugs: vec![drug(Some("0000345"), 8), drug(None, 10)],
+        };
+        let mut idx = PersonIndex::new("p_test");
+        idx.documents = vec![
+            serde_json::from_value(json!({"id": "d_aaaaaaaaaaaaaaaaaaaa",
+            "path": "x.pdf", "sha256": "0", "md5": "0", "size": 1, "media_type": "application/pdf",
+            "title": "Bill", "organization": "Kim Placeholder, LCSW",
+            "filed_at": "2024-01-02T10:00:00Z", "origin": {"kind": "file", "action": "copied"},
+            "provenance": {"source": {"kind": "scan"}, "method": "file",
+                "filed_at": "2024-01-02T10:00:00Z", "filed_by": "medrec"}}))
+            .unwrap(),
+        ];
+        idx.records = vec![
+            serde_json::from_value(json!({"id": "r_heldaaaaaaaaaaaaaaaa",
+            "kind": "medication", "key": "m", "display": "Exampleprofen 200 mg tablet",
+            "code": {"system": crate::normalize::RXNORM, "code": "0000345"},
+            "fields": {}, "provenance": []}))
+            .unwrap(),
+        ];
+        let said: crate::corrections::Correction = serde_json::from_value(json!({
+            "id": "c_aaaaaaaaaaaaaaaaaaaa", "printed": ["Sample Group"],
+            "set": {"practice": "Sample Counseling Group"}, "at": "2024-01-02T10:00:00Z"}))
+        .unwrap();
+        let clinicians = clinicians::Clinicians::of(&idx, &[]);
+        let judges = Judges {
+            clinicians: &clinicians,
+            corrections: std::slice::from_ref(&said),
+        };
+        let held = |id: &str| id == "r_heldaaaaaaaaaaaaaaaa";
+        let lines = judges.lines(&f, &idx.records, &held);
+        assert_eq!(lines, vec![[0, 1], [2, 1], [6, 1], [8, 1]]);
+        // Open, the medicine holds nothing; and a word of one item is of it alone.
+        assert_eq!(
+            judges.lines(&f, &idx.records, &|_| false),
+            vec![[0, 1], [2, 1], [6, 1]]
+        );
+        let mut one = said.clone();
+        one.item = Some("r_otheraaaaaaaaaaaaaaa".into());
+        let judges = Judges {
+            clinicians: &clinicians,
+            corrections: std::slice::from_ref(&one),
+        };
+        assert_eq!(
+            judges.lines(&f, &idx.records, &|_| false),
+            vec![[0, 1], [2, 1]]
+        );
+    }
 
     #[test]
     fn icd10_codes_fall_in_their_areas() {

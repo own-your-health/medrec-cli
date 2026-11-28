@@ -134,6 +134,14 @@ pub struct Papers {
     pub filed_before: usize,
     /// Those of them another source of which was found.
     pub source_found: usize,
+    /// The follow-ups and drugs papers' texts give (0.9.12 and later), by
+    /// field: `follow_up`, `drugs`.
+    pub fields: Counts,
+    /// Of them, those of a private paper.
+    pub fields_private_by_paper: Counts,
+    /// Those of an open paper that are private by what they say: their lines
+    /// are among its private lines.
+    pub fields_private_by_content: Counts,
 }
 
 /// The first medrec that kept every source of a paper.
@@ -182,7 +190,7 @@ pub(crate) fn of(
             (text(n, &["event", "provider"]), amounts(n, &SHARE))
         }),
         about_another: about::counted(p, now),
-        papers: papers(was, now),
+        papers: papers(was, now, &after.private),
     }
 }
 
@@ -376,7 +384,7 @@ fn current(
         .collect()
 }
 
-fn papers(was: &PersonIndex, now: &PersonIndex) -> Papers {
+fn papers(was: &PersonIndex, now: &PersonIndex, private: &Value) -> Papers {
     let sources = |idx: &PersonIndex| -> BTreeMap<String, usize> {
         let of = idx.documents.iter();
         of.map(|d| (d.id.clone(), d.provenances().count()))
@@ -392,6 +400,36 @@ fn papers(was: &PersonIndex, now: &PersonIndex) -> Papers {
         out.filed_before += 1;
         let had = before.get(&d.id).copied().unwrap_or_default();
         out.source_found += usize::from(d.provenances().count() > had);
+    }
+    for d in &now.documents {
+        let Some(f) = &d.fields else { continue };
+        let by_paper = private["documents"].get(&d.id).is_some();
+        let places: Vec<crate::parts::Place> = private["parts"][&d.id]["text"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|p| serde_json::from_value(p.clone()).ok())
+            .collect();
+        let each = [
+            (
+                "follow_up",
+                f.follow_up.iter().map(|x| &x.lines).collect::<Vec<_>>(),
+            ),
+            ("drugs", f.drugs.iter().map(|x| &x.lines).collect()),
+        ];
+        for (field, lines) in each {
+            for lines in lines {
+                *out.fields.entry(field.into()).or_default() += 1;
+                let to = match by_paper {
+                    true => &mut out.fields_private_by_paper,
+                    false if crate::paper::left_out(lines, &places) => {
+                        &mut out.fields_private_by_content
+                    }
+                    false => continue,
+                };
+                *to.entry(field.into()).or_default() += 1;
+            }
+        }
     }
     out
 }
@@ -433,12 +471,25 @@ impl Changes {
                     .join(", "),
             );
         }
-        let papers = (papers.filed_before > 0).then(|| {
+        let filed_before = (papers.filed_before > 0).then(|| {
             format!(
                 "{}, and another source was found of {}",
                 papers.filed_before, papers.source_found
             )
         });
+        let fields = [
+            ("papers' fields read", &papers.fields),
+            (
+                "of them private by their paper",
+                &papers.fields_private_by_paper,
+            ),
+            (
+                "of them private by what they say",
+                &papers.fields_private_by_content,
+            ),
+        ];
+        let fields: Vec<(&str, Option<String>)> =
+            fields.into_iter().map(|(k, c)| (k, counts(c))).collect();
         let of_about = [
             some(about.said, "by what their source says"),
             some(about.by_age, "by the person's age"),
@@ -485,9 +536,10 @@ impl Changes {
             ),
             (
                 "papers filed before medrec kept every source of one",
-                papers,
+                filed_before,
             ),
         ]);
+        out.extend(fields);
         let each = out.into_iter();
         each.filter_map(|(what, n)| Some(format!("{what}: {}", n?)))
             .collect()
