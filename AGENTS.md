@@ -135,7 +135,8 @@ are built.
 - Mutations that discard something (`review drop`) need `--force` without a
   terminal, and exit 6 otherwise.
 - A view that gains a field a reader must not ignore (one that changes what
-  it leaves out or holds back) raises `viewfiles::READER` to the release's
+  it leaves out or holds back, or what it must say of an item it shows, as
+  "from a claim") raises `viewfiles::READER` to the release's
   version in the same release, and the notes say so; a change a reader of
   the layout would misread takes the next `schema` instead.
 

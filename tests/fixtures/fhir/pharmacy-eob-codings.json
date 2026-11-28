@@ -1,0 +1,39 @@
+{
+  "resourceType": "ExplanationOfBenefit",
+  "id": "eob-rx-0006",
+  "status": "active",
+  "use": "claim",
+  "outcome": "complete",
+  "type": {
+    "coding": [ { "system": "http://terminology.hl7.org/CodeSystem/claim-type", "code": "pharmacy", "display": "Pharmacy" } ]
+  },
+  "patient": { "reference": "Patient/pat-0001" },
+  "billablePeriod": { "start": "2026-03-10", "end": "2026-03-10" },
+  "created": "2026-03-11T00:00:00Z",
+  "insurer": { "display": "Example Pharmacy Benefit Plan" },
+  "provider": { "display": "Example Mail Pharmacy" },
+  "item": [
+    {
+      "sequence": 1,
+      "productOrService": {
+        "coding": [
+          { "system": "http://example.invalid/pharmacy-item", "code": "ITEM-6", "display": "SMPL CRM" },
+          { "system": "http://hl7.org/fhir/sid/ndc", "code": "00000-0006-01", "display": "Synthetic cream, tube of 30 g" },
+          { "system": "http://www.nlm.nih.gov/research/umls/rxnorm", "code": "RX-6", "display": "Synthetic cream" }
+        ],
+        "text": "SMPL CRM"
+      },
+      "servicedDate": "2026-03-10",
+      "quantity": { "value": 30, "unit": "G" },
+      "net": { "value": 18, "currency": "USD" },
+      "adjudication": [
+        { "category": { "coding": [ { "code": "paidtoprovider" } ] }, "amount": { "value": 13, "currency": "USD" } },
+        { "category": { "coding": [ { "code": "copay" } ] }, "amount": { "value": 5, "currency": "USD" } }
+      ]
+    }
+  ],
+  "total": [
+    { "category": { "coding": [ { "code": "submitted" } ] }, "amount": { "value": 18, "currency": "USD" } }
+  ],
+  "payment": { "amount": { "value": 13, "currency": "USD" } }
+}

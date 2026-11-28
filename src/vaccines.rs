@@ -71,29 +71,24 @@ impl Codes {
         }
     }
 
-    /// The CVX codes of the vaccines a claim line names, as written. Its own
-    /// CVX code is read with no table; a CPT code only with both, since only
-    /// the CVX table tells a vaccine from an immune globulin.
+    /// The CVX codes of the vaccines a claim line names, as written, by any
+    /// code of its service, first or not (`codes`). Its own CVX code is read
+    /// with no table; a CPT code only with both, since only the CVX table
+    /// tells a vaccine from an immune globulin.
     pub fn of_line(&self, line: &Value) -> Vec<String> {
-        let service = line.get("service");
-        let text = |k: &str| {
-            service
-                .and_then(|s| s.get(k))
-                .and_then(Value::as_str)
-                .map(str::trim)
-        };
-        let mut found: Vec<String> = Vec::new();
-        found.extend(
-            line.get("cvx")
-                .and_then(Value::as_str)
-                .map(|c| c.trim().to_string()),
-        );
-        if text("system") == Some(CVX_SYSTEM) {
-            found.extend(text("code").map(str::to_string));
-        }
-        if found.is_empty() && crate::plain::is_cpt(text("system")) && self.vaccine.is_some() {
-            let mapped = text("code").and_then(|c| self.of_cpt.as_ref()?.get(c));
-            found.extend(mapped.into_iter().flatten().cloned());
+        let codes = crate::claims::service_codes(line);
+        let codes: Vec<(&str, &str)> = codes.into_iter().map(|(s, c)| (s, c.trim())).collect();
+        let mut found: Vec<String> = codes
+            .iter()
+            .filter(|(system, code)| *system == CVX_SYSTEM && !code.is_empty())
+            .map(|(_, code)| code.to_string())
+            .collect();
+        if let (true, Some(_), Some(of_cpt)) = (found.is_empty(), &self.vaccine, &self.of_cpt) {
+            let cpt = codes
+                .iter()
+                .filter(|(system, _)| crate::plain::is_cpt(Some(system)));
+            let mapped = cpt.filter_map(|(_, code)| of_cpt.get(*code));
+            found.extend(mapped.flatten().cloned());
         }
         found.retain(|c| self.is_vaccine(c));
         found.sort_by_key(|c| number(c));
@@ -263,8 +258,14 @@ mod tests {
         assert!(t.of_line(&line(CPT, "00012")).is_empty());
         assert!(t.of_line(&line(CPT, "00014")).is_empty());
         assert_eq!(t.of_line(&line(CVX_SYSTEM, "0900")), ["0900"]);
-        let beside = json!({"service": {"system": CPT, "code": "00099"}, "cvx": "902"});
+        // A CVX code after a code of the payer's: its own, before any table's.
+        let beside = json!({"service": {"system": CPT, "code": "00011"}, "codes": [
+            {"system": CPT, "code": "00011"}, {"system": CVX_SYSTEM, "code": "902"}]});
         assert_eq!(t.of_line(&beside), ["902"]);
+        let after = json!({"service": {"system": "http://example.invalid/item", "code": "I-1"},
+            "codes": [{"system": "http://example.invalid/item", "code": "I-1"},
+            {"system": CPT, "code": "00013"}]});
+        assert_eq!(t.of_line(&after), ["900", "902"]);
         // With no tables, only a line's own CVX code, and never "unknown".
         let none = Codes::default();
         assert!(none.of_line(&line(CPT, "00011")).is_empty());

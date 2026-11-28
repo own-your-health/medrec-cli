@@ -75,7 +75,12 @@ RECORDS = [
     # An immune globulin, which CDC's CVX table says is no vaccine.
     claim("globulin", "2025-03-03", line("00012", "Sample globulin")),
     # A line's own CVX code, read with no table.
-    claim("cvxline", "2025-04-04", line("00099", "Sample vaccine B", cvx="902")),
+    claim(
+        "cvxline", "2025-04-04",
+        line("00099", "Sample vaccine B", codes=[
+            {"system": CPT, "code": "00099"}, {"system": CVX, "code": "902"},
+        ]),
+    ),
     # Denied, with nothing of it paid.
     claim(
         "denied", "2025-05-05",

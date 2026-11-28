@@ -3235,10 +3235,16 @@ fn a_pharmacy_claim_is_a_fill_of_a_medicine_ended_by_its_date() {
         let want = says(&format!(", filled {day} (from a claim)"));
         assert_eq!(ended(None, id), want, "{id}");
     }
-    // A claim the plan denied, of which the household paid nothing, is no fill.
+    // A claim the plan denied, of which the household paid nothing (05-15) or
+    // a share of nothing (05-16), is no fill.
     let lotion = "r_lotionaaaaaaaaaaaaaa";
     let want = says(", filled 2024-05-14 (from a claim)");
     assert_eq!(ended(Some("Alex"), lotion), want);
+    // A fill the pharmacy cancelled on the claim's day gave nothing; the
+    // claim's is the fill.
+    let gel = "r_gelaaaaaaaaaaaaaaaaa";
+    let want = says(", filled 2024-05-20 (from a claim)");
+    assert_eq!(ended(Some("Alex"), gel), want);
     // A claim of a drug there is no medicine of makes none.
     let v = call(
         &t,

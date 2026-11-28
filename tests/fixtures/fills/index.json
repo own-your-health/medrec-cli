@@ -223,6 +223,133 @@
    ]
   },
   {
+   "id": "r_gelcancelledaaaaaaaa",
+   "kind": "medication",
+   "key": "medication|gelcancelled|2024-05-20",
+   "date": "2024-05-20",
+   "display": "Sample gel",
+   "status": "cancelled",
+   "fields": {
+    "source": "dispense"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.11",
+     "raw_path": "Robin Example/Records/north/Any/gelcancelled.json"
+    }
+   ],
+   "code": {
+    "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
+    "code": "RX-5"
+   }
+  },
+  {
+   "id": "r_notgivenaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|notgiven|2024-05-20",
+   "date": "2024-05-20",
+   "display": "SMPL GEL · Example Pharmacy",
+   "status": "active",
+   "fields": {
+    "provider": "Example Pharmacy",
+    "insurer": "Example Health Plan",
+    "type": "pharmacy",
+    "category": "pharmacy",
+    "billable_period": {
+     "start": "2024-05-20",
+     "end": "2024-05-20"
+    },
+    "items": [
+     {
+      "sequence": 1,
+      "service": {
+       "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
+       "code": "RX-5"
+      }
+     }
+    ]
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.11",
+     "raw_path": "Robin Example/Records/north/Any/notgiven.json"
+    }
+   ]
+  },
+  {
+   "id": "r_zeroshareaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|zeroshare|2024-05-16",
+   "date": "2024-05-16",
+   "display": "SMPL LOTION · Example Pharmacy",
+   "status": "active",
+   "fields": {
+    "provider": "Example Pharmacy",
+    "insurer": "Example Health Plan",
+    "type": "pharmacy",
+    "category": "pharmacy",
+    "billable_period": {
+     "start": "2024-05-16",
+     "end": "2024-05-16"
+    },
+    "items": [
+     {
+      "sequence": 1,
+      "service": {
+       "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
+       "code": "RX-4"
+      },
+      "adjudication": [
+       {
+        "category": "Denial Reason",
+        "amount": null,
+        "reason": "Sample reason"
+       }
+      ],
+      "amounts": {
+       "you_owe": {
+        "amount": "0.00",
+        "currency": "USD"
+       }
+      }
+     }
+    ]
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.11",
+     "raw_path": "Robin Example/Records/north/Any/zeroshare.json"
+    }
+   ]
+  },
+  {
    "id": "r_deniedaaaaaaaaaaaaaa",
    "kind": "claim",
    "key": "claim|denied|2024-05-15",
@@ -383,6 +510,61 @@
    ]
   },
   {
+   "id": "r_claimpaidaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|claimpaid|2024-05-12",
+   "date": "2024-05-12",
+   "display": "SMPL LOTION · Example Pharmacy",
+   "status": "active",
+   "fields": {
+    "provider": "Example Pharmacy",
+    "insurer": "Example Health Plan",
+    "type": "pharmacy",
+    "category": "pharmacy",
+    "billable_period": {
+     "start": "2024-05-12",
+     "end": "2024-05-12"
+    },
+    "items": [
+     {
+      "sequence": 1,
+      "service": {
+       "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
+       "code": "RX-4"
+      },
+      "adjudication": [
+       {
+        "category": "Denial Reason",
+        "amount": null,
+        "reason": "Sample reason"
+       }
+      ]
+     }
+    ],
+    "amounts": {
+     "you_owe": {
+      "amount": "7.00",
+      "currency": "USD"
+     }
+    }
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.11",
+     "raw_path": "Robin Example/Records/north/Any/claimpaid.json"
+    }
+   ]
+  },
+  {
    "id": "r_nomedicineaaaaaaaaaa",
    "kind": "claim",
    "key": "claim|nomedicine|2024-05-11",
@@ -421,6 +603,61 @@
      "filed_at": "2024-12-04T10:00:00Z",
      "filed_by": "medrec 0.9.11",
      "raw_path": "Robin Example/Records/north/Any/nomedicine.json"
+    }
+   ]
+  },
+  {
+   "id": "r_copayonlyaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|copayonly|2024-05-11",
+   "date": "2024-05-11",
+   "display": "SMPL LOTION · Example Pharmacy",
+   "status": "active",
+   "fields": {
+    "provider": "Example Pharmacy",
+    "insurer": "Example Health Plan",
+    "type": "pharmacy",
+    "category": "pharmacy",
+    "billable_period": {
+     "start": "2024-05-11",
+     "end": "2024-05-11"
+    },
+    "items": [
+     {
+      "sequence": 1,
+      "service": {
+       "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
+       "code": "RX-4"
+      },
+      "adjudication": [
+       {
+        "category": "Denial Reason",
+        "amount": null,
+        "reason": "Sample reason"
+       }
+      ],
+      "amounts": {
+       "copay": {
+        "amount": "3.00",
+        "currency": "USD"
+       }
+      }
+     }
+    ]
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.11",
+     "raw_path": "Robin Example/Records/north/Any/copayonly.json"
     }
    ]
   },
@@ -895,6 +1132,70 @@
    "code": {
     "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
     "code": "RX-4"
+   }
+  },
+  {
+   "id": "r_gelaaaaaaaaaaaaaaaaa",
+   "kind": "medication",
+   "key": "medication|gel|2024-02-01",
+   "date": "2024-02-01",
+   "display": "Sample gel",
+   "status": "active",
+   "fields": {
+    "source": "request",
+    "end": "2024-03-31",
+    "end_of": "prescription"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.11",
+     "raw_path": "Robin Example/Records/north/Any/gel.json"
+    }
+   ],
+   "code": {
+    "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
+    "code": "RX-5"
+   }
+  },
+  {
+   "id": "r_creamaaaaaaaaaaaaaaa",
+   "kind": "medication",
+   "key": "medication|cream|2024-02-01",
+   "date": "2024-02-01",
+   "display": "Sample cream",
+   "status": "active",
+   "fields": {
+    "source": "request",
+    "end": "2024-03-31",
+    "end_of": "prescription"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.11",
+     "raw_path": "Robin Example/Records/north/Any/cream.json"
+    }
+   ],
+   "code": {
+    "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
+    "code": "RX-6"
    }
   }
  ]
