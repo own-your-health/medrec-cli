@@ -4354,6 +4354,7 @@ fn the_views_follow_every_write_and_only_files_that_change_are_written() {
     // Views another build of this version wrote are made again: a rule can
     // change between them.
     let mut other: Value = serde_json::from_slice(&current).unwrap();
+    assert_eq!(other["reader"], medrec::viewfiles::READER, "{other}");
     other["build"] = "0123456789abcdef0123456789abcdef01234567".into();
     std::fs::write(records.join("views/views.json"), other.to_string()).unwrap();
     let again = e.ok(&["views", "write"]);
