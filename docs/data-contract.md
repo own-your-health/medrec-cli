@@ -387,9 +387,7 @@ Results and reports filed before 0.9.11 have no `performer`, and are not held by
 it, until their source serves them again or `medrec reindex` reads it from their
 raw files, with their `providers`: run `medrec reindex` once after upgrading. An
 import by a medrec before 0.9.11 files them again without it, so run 0.9.11 or
-later on every machine that writes the folder. A performer that refers to a
-patient or a relative (a `Patient` or `RelatedPerson`, by its reference, its
-`type` or a contained resource) is none: the next one is read in its place.
+later on every machine that writes the folder.
 
 **Panels** (0.9.10 and later). `members` of a report, and of a result that is a
 panel, is the ids of the results it lists, in its order: those its own resource
@@ -649,7 +647,14 @@ of `{field, npi, state, city}`, with one entry for each field that has an
 `field` is the field that prints the provider: `practitioner`, `location`
 and `service_provider` of an encounter, `prescriber` and `pharmacy` of a
 medication, `performer` of an immunization, of a result and of a report
-(0.9.11 and later), `performer` and `location` of a procedure, `provider` and `facility` of a claim. `npi` is a National Provider
+(0.9.11 and later), `performer` and `location` of a procedure, `provider` and `facility` of a claim.
+(0.9.11 and later) In any field that prints a provider, a reference to a patient
+or a relative (a `Patient` or `RelatedPerson`, by its reference, its `type` or a
+contained resource) is none. Where the element is one of a list, the next one is
+read in its place; otherwise the field is absent, or comes from its fallback
+element (a MedicationRequest whose `requester` is the patient has no
+`prescriber`). Claims, results and reports filed before take this with `medrec
+reindex`; other records when their source serves them again. `npi` is a National Provider
 Identifier whose check digit holds, from the identifier of the reference
 that prints the field or from the resource it points at. `state` is two
 letters, from that resource's first address that gives one, and `city` (0.9.8
