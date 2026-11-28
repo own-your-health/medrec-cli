@@ -89,6 +89,15 @@ RECORDS = [
     ),
     # One CPT code of two vaccines; the test marks it private.
     claim("twovaccines", "2025-06-06", line("00013", "Sample vaccines A and B")),
+    # An open claim whose vaccine line is private by its payer's note: it
+    # tells of no vaccine where private.json leaves the line out.
+    claim(
+        "mixed", "2025-08-08",
+        line("00099", "Sample vaccine B", codes=[
+            {"system": CPT, "code": "00099"}, {"system": CVX, "code": "902"},
+        ], payer_notes=["Psychotherapy is paid apart"]),
+        {**line("00099", "Sample visit"), "sequence": 2},
+    ),
     claim("cancelled", "2025-07-07", line("00011"), status="cancelled"),
 ]
 

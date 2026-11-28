@@ -227,12 +227,13 @@ pub fn person(
     today: &str,
     limits: Limits,
     codes: &crate::vaccines::Codes,
+    held: &crate::parts::Parts,
 ) -> Result<Summary, CliError> {
     let idx = folder.index(p)?;
     let notes = folder.notes(p)?.len();
     let bills = crate::bills::of_person(folder, h, p)?;
     let settled = crate::bills::settled(&bills);
-    let mut out = of_index(h, p, &idx, notes, today, limits, &settled, codes);
+    let mut out = of_index(h, p, &idx, notes, today, limits, &settled, codes, held);
     let gone = crate::bills::in_error(&bills, &|_| true);
     out.notes.extend(gone.map(|n| ("bills", n)));
     Ok(out)
@@ -240,7 +241,7 @@ pub fn person(
 
 /// [`person`] from the person's index already read, with `notes` notes and
 /// the bills `bills.json` says are settled, and the vaccines claims tell of by
-/// `codes`.
+/// `codes`, of no line `held` leaves out of its claim.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn of_index(
     h: &Household,
@@ -251,6 +252,7 @@ pub(crate) fn of_index(
     limits: Limits,
     settled: &std::collections::BTreeSet<String>,
     codes: &crate::vaccines::Codes,
+    held: &crate::parts::Parts,
 ) -> Summary {
     let n = limits.per_list;
     let mut records: Vec<&Record> = idx.records.iter().collect();
@@ -329,7 +331,11 @@ pub(crate) fn of_index(
         allergies: current(&allergies.current),
         notes: said,
         immunizations: Listed::cut(
-            vaccines(from, &records, &crate::vaccines::of_claims(&records, codes)),
+            vaccines(
+                from,
+                &records,
+                &crate::vaccines::of_claims(&records, codes, held),
+            ),
             n,
         ),
         latest_results: Listed::cut(latest_results(from, &records), n),

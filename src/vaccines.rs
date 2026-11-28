@@ -10,6 +10,7 @@ use std::path::Path;
 use serde_json::{json, Map, Value};
 
 use crate::model::{Code, Record};
+use crate::parts::Parts;
 use crate::standing::record_in_error;
 use crate::summary::day;
 use crate::tables::{CPT_CVX, CVX};
@@ -17,7 +18,7 @@ use crate::tables::{CPT_CVX, CVX};
 pub use crate::normalize::CVX as CVX_SYSTEM;
 
 /// CVX codes that are no vaccine given ("no vaccine administered",
-/// "unknown"), for a machine without CDC's CVX table.
+/// "unknown"), with CDC's CVX table or without it.
 const NO_VACCINE: &[u32] = &[998, 999];
 
 /// What CDC's tables on this machine say of codes: of each CVX code whether it
@@ -26,6 +27,8 @@ const NO_VACCINE: &[u32] = &[998, 999];
 pub struct Codes {
     vaccine: Option<BTreeMap<u32, bool>>,
     of_cpt: Option<BTreeMap<String, Vec<String>>>,
+    /// `<id> <SHA-256>` of each table read, as a view records it.
+    identity: Option<String>,
 }
 
 impl Codes {
@@ -48,7 +51,22 @@ impl Codes {
             }
             m
         });
-        Codes { vaccine, of_cpt }
+        let ids: Vec<String> = [&CVX, &CPT_CVX]
+            .iter()
+            .filter_map(|t| t.identity(dir))
+            .collect();
+        let identity = (!ids.is_empty()).then(|| ids.join(", "));
+        Codes {
+            vaccine,
+            of_cpt,
+            identity,
+        }
+    }
+
+    /// The tables these codes are of, `<id> <SHA-256>` each, comma-separated;
+    /// none without either.
+    pub fn identity(&self) -> Option<&str> {
+        self.identity.as_deref()
     }
 
     /// Invented tables: each CVX code with whether it is a vaccine, and each
@@ -68,42 +86,45 @@ impl Codes {
                     .map(|(c, x)| (c.to_string(), x.iter().map(|x| x.to_string()).collect()))
                     .collect(),
             ),
+            identity: Some("invented".into()),
         }
     }
 
     /// The CVX codes of the vaccines a claim line names, as written, by any
     /// code of its service, first or not (`codes`). Its own CVX code is read
-    /// with no table; a CPT code only with both, since only the CVX table
-    /// tells a vaccine from an immune globulin.
+    /// with no table, and is none only where CDC's CVX table marks it no
+    /// vaccine. A CPT code is read only where the line has no CVX code, with
+    /// both tables, and only to a CVX code the CVX table lists as a vaccine,
+    /// since only it tells a vaccine from an immune globulin. 998 and 999 are
+    /// never one.
     pub fn of_line(&self, line: &Value) -> Vec<String> {
         let codes = crate::claims::service_codes(line);
         let codes: Vec<(&str, &str)> = codes.into_iter().map(|(s, c)| (s, c.trim())).collect();
-        let mut found: Vec<String> = codes
+        let own: Vec<String> = codes
             .iter()
             .filter(|(system, code)| *system == CVX_SYSTEM && !code.is_empty())
             .map(|(_, code)| code.to_string())
             .collect();
-        if let (true, Some(_), Some(of_cpt)) = (found.is_empty(), &self.vaccine, &self.of_cpt) {
-            let cpt = codes
-                .iter()
-                .filter(|(system, _)| crate::plain::is_cpt(Some(system)));
-            let mapped = cpt.filter_map(|(_, code)| of_cpt.get(*code));
-            found.extend(mapped.flatten().cloned());
-        }
-        found.retain(|c| self.is_vaccine(c));
+        let given = |c: &String| number(c).filter(|n| !NO_VACCINE.contains(n));
+        let table = self.vaccine.as_ref();
+        let mut found: Vec<String> = match (&own[..], table, &self.of_cpt) {
+            ([], Some(table), Some(of_cpt)) => {
+                let cpt = codes
+                    .iter()
+                    .filter(|(system, _)| crate::plain::is_cpt(Some(system)));
+                let mapped = cpt.filter_map(|(_, code)| of_cpt.get(*code)).flatten();
+                let listed = |c: &&String| given(c).is_some_and(|n| table.get(&n) == Some(&true));
+                mapped.filter(listed).cloned().collect()
+            }
+            _ => {
+                let marked = |n: u32| table.is_some_and(|t| t.get(&n) == Some(&false));
+                let is = |c: &String| given(c).is_some_and(|n| !marked(n));
+                own.into_iter().filter(is).collect()
+            }
+        };
         found.sort_by_key(|c| number(c));
         found.dedup_by_key(|c| number(c));
         found
-    }
-
-    fn is_vaccine(&self, cvx: &str) -> bool {
-        let Some(n) = number(cvx) else {
-            return false;
-        };
-        match &self.vaccine {
-            Some(table) => table.get(&n) == Some(&true),
-            None => !NO_VACCINE.contains(&n),
-        }
     }
 }
 
@@ -134,11 +155,15 @@ fn line_day(line: &Value, claim: &Record) -> Option<String> {
 /// its claim's id and provenance, `fields.from_claim` true and `fields.cvx`
 /// its CVX codes, and `code` the one of them where it has one. One is listed
 /// for each vaccine and day that no immunization of `records` has, by its CVX
-/// code, or by its kind of vaccine where that immunization has no CVX code.
-pub fn of_claims(records: &[&Record], codes: &Codes) -> Vec<Record> {
+/// code, or by its kind of vaccine where that immunization has no CVX code;
+/// one entered in error or not given (a refusal) is none. No line `held`
+/// leaves out of its claim (`private.json`'s `parts`) tells of one.
+pub fn of_claims(records: &[&Record], codes: &Codes, held: &Parts) -> Vec<Record> {
+    let given = |r: &&&Record| r.status.as_deref() != Some("not-done");
     let shots = records
         .iter()
-        .filter(|r| r.kind == "immunization" && !record_in_error(r));
+        .filter(|r| r.kind == "immunization" && !record_in_error(r))
+        .filter(given);
     let mut seen: BTreeSet<(String, u32)> = BTreeSet::new();
     let mut kinds: BTreeSet<(String, &str)> = BTreeSet::new();
     for r in shots {
@@ -161,7 +186,8 @@ pub fn of_claims(records: &[&Record], codes: &Codes) -> Vec<Record> {
         if !crate::fills::gave(r) {
             continue;
         }
-        for line in crate::fills::counted_lines(r) {
+        let lines = crate::fills::counted_lines(r);
+        for (_, line) in lines.filter(|(i, _)| !held.leaves_out(&r.id, "items", *i)) {
             let cvx = codes.of_line(line);
             let Some(d) = line_day(line, r).filter(|_| !cvx.is_empty()) else {
                 continue;
@@ -202,9 +228,9 @@ pub fn of_claims(records: &[&Record], codes: &Codes) -> Vec<Record> {
 }
 
 /// Of `records`, the vaccines their claims tell of, by CDC's tables on this
-/// machine.
+/// machine, for the person at its terminal: the whole of each claim.
 pub fn listed(records: &[&Record]) -> Vec<Record> {
-    of_claims(records, &Codes::here())
+    of_claims(records, &Codes::here(), &Parts::default())
 }
 
 #[cfg(test)]
@@ -245,6 +271,7 @@ mod tests {
                 ("00011", &["900"]),
                 ("00012", &["901"]),
                 ("00013", &["900", "902"]),
+                ("00015", &["950"]),
             ],
         )
     }
@@ -254,10 +281,26 @@ mod tests {
         let t = tables();
         assert_eq!(t.of_line(&line(CPT, "00011")), ["900"]);
         assert_eq!(t.of_line(&line(CPT, "00013")), ["900", "902"]);
-        // An immune globulin, and a code CDC does not list.
+        // An immune globulin, a code CDC does not list, and one it gives a
+        // CVX code its CVX table does not.
         assert!(t.of_line(&line(CPT, "00012")).is_empty());
         assert!(t.of_line(&line(CPT, "00014")).is_empty());
+        assert!(t.of_line(&line(CPT, "00015")).is_empty());
         assert_eq!(t.of_line(&line(CVX_SYSTEM, "0900")), ["0900"]);
+        // A line's own CVX code that the table does not list, newer than it,
+        // is still one; one it marks no vaccine is none, as 998 and 999 are
+        // whatever a table says of them.
+        assert_eq!(t.of_line(&line(CVX_SYSTEM, "950")), ["950"]);
+        assert!(t.of_line(&line(CVX_SYSTEM, "901")).is_empty());
+        let says = Codes::invented(&[("998", true), ("999", true)], &[("00016", &["998"])]);
+        for l in [
+            line(CVX_SYSTEM, "998"),
+            line(CVX_SYSTEM, "999"),
+            line(CPT, "00016"),
+        ] {
+            assert!(says.of_line(&l).is_empty(), "{l}");
+            assert!(t.of_line(&l).is_empty(), "{l}");
+        }
         // A CVX code after a code of the payer's: its own, before any table's.
         let beside = json!({"service": {"system": CPT, "code": "00011"}, "codes": [
             {"system": CPT, "code": "00011"}, {"system": CVX_SYSTEM, "code": "902"}]});
@@ -338,8 +381,26 @@ mod tests {
         ];
         let mut records: Vec<Record> = records.into_iter().collect();
         records[6].status = Some("cancelled".into());
+        // A refusal of that vaccine on a claim's day is no dose of it, nor is
+        // one entered in error.
+        let refused = |id: &str, day: &str, status: &str| {
+            let mut r = shot(id, day, Some("900"), "Sample vaccine");
+            r.status = Some(status.into());
+            r
+        };
+        records.push(claim(
+            "r_refusedaaaaaaaaaaaaa",
+            "2024-05-10",
+            json!([line(CPT, "00011")]),
+        ));
+        records.push(refused("r_notdoneaaaaaaaaaaaaa", "2024-05-10", "not-done"));
+        records.push(refused(
+            "r_wrongaaaaaaaaaaaaaaa",
+            "2024-05-10",
+            "entered-in-error",
+        ));
         let all: Vec<&Record> = records.iter().collect();
-        let listed = of_claims(&all, &t);
+        let listed = of_claims(&all, &t, &Parts::default());
         let got: Vec<(&str, Option<&str>, &str)> = listed
             .iter()
             .map(|v| (v.id.as_str(), v.date.as_deref(), v.display.as_str()))
@@ -357,6 +418,11 @@ mod tests {
                     Some("2024-05-09"),
                     "Example Clinic · Example Health Plan"
                 ),
+                (
+                    "r_refusedaaaaaaaaaaaaa",
+                    Some("2024-05-10"),
+                    "Sample vaccine"
+                ),
             ]
         );
         let v = &listed[0];
@@ -373,8 +439,34 @@ mod tests {
             "2024-06-01",
             json!([line(CPT, "00013")]),
         );
-        let listed = of_claims(&[&both], &t);
+        let listed = of_claims(&[&both], &t, &Parts::default());
         assert_eq!(listed[0].fields["cvx"], json!(["900", "902"]));
         assert!(listed[0].code.is_none());
+    }
+
+    /// A line `private.json` leaves out of its claim tells of no vaccine,
+    /// though its claim is open: the vaccine would show its name and day.
+    #[test]
+    fn a_private_line_of_an_open_claim_tells_of_no_vaccine() {
+        let t = tables();
+        let mixed = claim(
+            "r_mixedaaaaaaaaaaaaaaa",
+            "2024-07-01",
+            json!([
+                {"sequence": 1, "service": {"system": CPT, "code": "00011", "display": "Sample vaccine"}},
+                {"sequence": 2, "service": {"system": CVX_SYSTEM, "code": "902", "display": "Sample vaccine B"}}
+            ]),
+        );
+        let all = [&mixed];
+        assert_eq!(of_claims(&all, &t, &Parts::default()).len(), 2);
+        let private = json!({"parts": {"r_mixedaaaaaaaaaaaaaaa": {"lines": [1]}}});
+        let held = Parts::of(&private);
+        let listed = of_claims(&all, &t, &held);
+        let shown: Vec<&str> = listed.iter().map(|v| v.display.as_str()).collect();
+        assert_eq!(shown, ["Sample vaccine"]);
+        assert_eq!(listed[0].fields["cvx"], json!(["900"]));
+        // Another claim's parts leave none of its lines out.
+        let other = Parts::of(&json!({"parts": {"r_otheraaaaaaaaaaaaaaa": {"lines": [0, 1]}}}));
+        assert_eq!(of_claims(&all, &t, &other).len(), 2);
     }
 }

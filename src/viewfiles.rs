@@ -141,6 +141,12 @@ pub struct PersonViews {
     /// another table makes the views again.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code_table: Option<String>,
+    /// CDC's vaccine tables the vaccines from claims of these views were
+    /// read with (`cvx <SHA-256>, cpt-cvx <SHA-256>`), absent when the pass
+    /// that made them had neither (0.9.11 and later). A reader need not check
+    /// it: a pass on a machine with other tables makes the views again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vaccine_tables: Option<String>,
     /// The provider directory these views' labels were made with, absent as
     /// `code_table` is (0.9.7 and later). A reader need not check it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -267,16 +273,18 @@ pub fn sync(f: &Folder, all: bool) -> Result<Synced, CliError> {
         all,
         crate::code_names::titles(),
         crate::nppes::dir().as_deref(),
+        &crate::vaccines::Codes::here(),
     )
 }
 
-/// [`sync`] on a machine with these code titles, or none, and the provider
-/// directories in `directories`.
+/// [`sync`] on a machine with these code titles, or none, the provider
+/// directories in `directories`, and these of CDC's vaccine tables.
 pub(crate) fn sync_with(
     f: &Folder,
     all: bool,
     titles: Option<crate::tables::Titles>,
     directories: Option<&Path>,
+    codes: &crate::vaccines::Codes,
 ) -> Result<Synced, CliError> {
     let Made {
         h,
@@ -288,7 +296,7 @@ pub(crate) fn sync_with(
         files,
         states,
         made_from,
-    } = match make(f, all, titles, directories, &BTreeMap::new())? {
+    } = match make(f, all, titles, directories, codes, &BTreeMap::new())? {
         Pass::Made(made) => *made,
         Pass::Stands(people) => {
             return Ok(Synced {
@@ -425,6 +433,7 @@ fn make(
     all: bool,
     titles: Option<crate::tables::Titles>,
     directories: Option<&Path>,
+    codes: &crate::vaccines::Codes,
     indexes: &BTreeMap<String, PersonIndex>,
 ) -> Result<Pass, CliError> {
     let store = &f.store;
@@ -470,6 +479,7 @@ fn make(
     };
 
     let code_table = titles.as_ref().map(|_| crate::tables::Titles::identity());
+    let vaccine_tables = codes.identity().map(str::to_string);
     let directory = match directories
         .map(|d| crate::labels::Directory::open(&crate::nppes::path(d, &h.folder_id)))
     {
@@ -491,7 +501,9 @@ fn make(
     let mut kept: BTreeMap<String, PersonViews> = BTreeMap::new();
     for p in &h.people {
         if let Some(was) = current.and_then(|o| o.people.get(&p.id)) {
+            // A machine without a table leaves what one with it made.
             if (code_table.is_none() || was.code_table == code_table)
+                && (vaccine_tables.is_none() || was.vaccine_tables == vaccine_tables)
                 // An older directory's pass leaves what a newer one's made.
                 && was.directory >= directory_made
                 && EVERY_PERSON.iter().all(|f| was.files.contains_key(*f))
@@ -704,6 +716,7 @@ fn make(
             // Absent without the table: the names carried are not all a
             // table would give, so a machine with one makes them again.
             code_table: code_table.clone(),
+            vaccines: codes.clone(),
             overrides: otext.as_deref().map(|t| md5_hex(t.as_bytes())),
             marks: mtext.as_deref().map(|t| md5_hex(t.as_bytes())),
             linked: linked
@@ -761,7 +774,8 @@ pub(crate) fn preview(
 ) -> Result<Preview, CliError> {
     let titles = crate::code_names::titles();
     let directories = crate::nppes::dir();
-    match make(f, true, titles, directories.as_deref(), indexes)? {
+    let codes = crate::vaccines::Codes::here();
+    match make(f, true, titles, directories.as_deref(), &codes, indexes)? {
         Pass::Made(made) => Ok(Preview {
             h: made.h,
             files: made.files,
@@ -1247,6 +1261,8 @@ pub(crate) struct EventsFrom {
     /// on this machine it was made with.
     pub code_names: Option<Value>,
     pub code_table: Option<String>,
+    /// CDC's vaccine tables on this machine, for the vaccines claims tell of.
+    pub vaccines: crate::vaccines::Codes,
     /// `providers.json`, when any provider of theirs has a label, and the
     /// provider directory on this machine it was made with.
     pub providers: Option<Value>,
@@ -1287,6 +1303,10 @@ pub(crate) fn person(
         put(crate::labels::FILE, json(v));
     }
 
+    // A line private.json leaves out of an open claim tells of no vaccine in
+    // the views: a reader could not leave the vaccine out where it leaves the
+    // line out.
+    let held = Parts::of(&from.private);
     let s = summary::of_index(
         h,
         p,
@@ -1297,7 +1317,8 @@ pub(crate) fn person(
             per_list: crate::mcp::SUMMARY_LINES,
         },
         &Default::default(),
-        &crate::vaccines::Codes::here(),
+        &from.vaccines,
+        &held,
     );
     let sources = crate::sources::Sources::of(&h.sources, idx);
     let by_status = |kind: &str| summary::by_status(sources, idx, kind, crate::mcp::SUMMARY_LINES);
@@ -1330,7 +1351,7 @@ pub(crate) fn person(
     }
     // The vaccines claims tell of are immunizations too, by their claim's id.
     let all: Vec<&Record> = idx.records.iter().collect();
-    let claimed = crate::vaccines::listed(&all);
+    let claimed = crate::vaccines::of_claims(&all, &from.vaccines, &held);
     for r in &claimed {
         by_kind.entry("immunization").or_default().push(r);
     }
@@ -1518,7 +1539,7 @@ pub(crate) fn person(
     // Search items, numbered in the reverse of medrec's order for hits of
     // equal score (newest first, undated last, then as the files hold
     // them): the newest item has the highest number.
-    let listed = views::searchables(idx, texts, &[], true, &Parts::of(&from.private));
+    let listed = views::searchables(idx, texts, &[], true, &held);
     let mut order: Vec<usize> = (0..listed.len()).collect();
     order.sort_by(|&a, &b| listed[b].date.cmp(&listed[a].date));
     order.reverse();
@@ -1614,6 +1635,7 @@ pub(crate) fn person(
         marks: from.marks,
         linked: from.linked,
         code_table: from.code_table,
+        vaccine_tables: from.vaccines.identity().map(str::to_string),
         directory: from.directory,
         provider_state: from.provider_state,
         in_error: st.in_error,
@@ -1913,7 +1935,7 @@ pub(crate) mod tests {
             v["codes"].as_object().unwrap().keys().cloned().collect()
         };
         let rebuilt = |titles| {
-            sync_with(&folder(), false, titles, None)
+            sync_with(&folder(), false, titles, None, &Default::default())
                 .unwrap()
                 .people_rebuilt
         };
@@ -1946,10 +1968,89 @@ pub(crate) mod tests {
             b"{}",
         )
         .unwrap();
-        sync_with(&folder(), true, None, None).unwrap();
+        sync_with(&folder(), true, None, None, &Default::default()).unwrap();
         assert!(names().is_empty());
         assert_eq!(rebuilt(titles()), 1);
         assert_eq!(names(), ["icd10cm|J30.9", "icd10cm|R51"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The vaccines claims tell of by CDC's tables: a machine with other
+    /// tables makes the views again, and one without them leaves them.
+    #[test]
+    fn a_machine_with_the_vaccine_tables_makes_views_made_without_them_again() {
+        use crate::vaccines::Codes;
+
+        let root = std::env::temp_dir().join(format!("medrec-vf-vaccines-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let loc = crate::store::Location::Dir(root.clone());
+        let folder = || Folder::open_at(&loc, Access::Read, Duration::from_secs(60)).unwrap();
+        let put = |rel: &str, v: &Value| {
+            let p = root.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, serde_json::to_vec(v).unwrap()).unwrap();
+        };
+        const PID: &str = "p_exampleaaaaaaaaaaaaa";
+        let mut h = household();
+        h.folder_id = "f_exampleaaaaaaaaaaaaa".into();
+        h.people[0].id = PID.into();
+        put("household.json", &serde_json::to_value(&h).unwrap());
+        let claim: Record = serde_json::from_value(serde_json::json!({
+            "id": "r_claimaaaaaaaaaaaaaaa", "kind": "claim", "key": "claim|1",
+            "date": "2024-05-01", "display": "Example Clinic", "status": "active",
+            "fields": {"items": [{"sequence": 1, "service": {
+                "system": "http://www.ama-assn.org/go/cpt", "code": "00011",
+                "display": "Sample vaccine"}}]},
+            "provenance": []
+        }))
+        .unwrap();
+        let mut idx = PersonIndex::new(PID);
+        idx.records = vec![claim];
+        put(
+            "Robin Testperson/index.json",
+            &serde_json::to_value(idx).unwrap(),
+        );
+        let entry = || -> PersonViews {
+            let t = std::fs::read_to_string(root.join(INDEX)).unwrap();
+            serde_json::from_str::<ViewsIndex>(&t).unwrap().people[PID].clone()
+        };
+        fn from_claim(v: &Value) -> usize {
+            match v {
+                Value::Object(m) => {
+                    let own = usize::from(m.get("from_claim") == Some(&Value::Bool(true)));
+                    own + m.values().map(from_claim).sum::<usize>()
+                }
+                Value::Array(a) => a.iter().map(from_claim).sum(),
+                _ => 0,
+            }
+        }
+        // In the immunizations' views and in summary.json.
+        let shown = || -> usize {
+            let e = entry();
+            let named = |n: &str| n.starts_with("records-immunization") || n == "summary.json";
+            let files = e.files.iter().filter(|(n, _)| named(n));
+            files
+                .map(|(n, md5)| {
+                    let t = std::fs::read_to_string(root.join(stored_rel(PID, n, md5))).unwrap();
+                    from_claim(&serde_json::from_str(&t).unwrap())
+                })
+                .sum()
+        };
+        let tables = Codes::invented(&[("900", true)], &[("00011", &["900"])]);
+        let rebuilt = |codes: &Codes| {
+            sync_with(&folder(), false, None, None, codes)
+                .unwrap()
+                .people_rebuilt
+        };
+        assert_eq!(rebuilt(&Codes::default()), 1);
+        assert_eq!((shown(), entry().vaccine_tables), (0, None));
+        assert_eq!(rebuilt(&tables), 1);
+        assert_eq!(shown(), 2);
+        assert_eq!(entry().vaccine_tables.as_deref(), Some("invented"));
+        assert_eq!(rebuilt(&tables), 0);
+        assert_eq!(rebuilt(&Codes::default()), 0);
+        assert_eq!(shown(), 2);
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -2001,6 +2102,7 @@ pub(crate) mod tests {
                 linked: BTreeMap::new(),
                 code_names: None,
                 code_table: None,
+                vaccines: Default::default(),
                 providers: None,
                 provider_state: None,
                 directory: None,

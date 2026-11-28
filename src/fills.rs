@@ -113,9 +113,11 @@ pub(crate) fn gave(r: &Record) -> bool {
     !skipped && !record_in_error(r) && !(denied(r) && !paid_some(r))
 }
 
-/// The lines of a claim its totals count.
-pub(crate) fn counted_lines(r: &Record) -> impl Iterator<Item = &Value> + '_ {
-    counted(r)
+/// The lines of a claim its totals count, with their places in its `items`.
+pub(crate) fn counted_lines(r: &Record) -> impl Iterator<Item = (usize, &Value)> + '_ {
+    let lines = r.fields.get("items").and_then(Value::as_array);
+    let lines = lines.into_iter().flatten().enumerate();
+    lines.filter(|(_, l)| l.get("counted") != Some(&Value::Bool(false)))
 }
 
 /// The codes of the drug a claim is for: each code of a line its totals

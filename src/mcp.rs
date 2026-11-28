@@ -1054,6 +1054,8 @@ impl MedrecTools {
             None => None,
             Some(q) => {
                 let p = people::resolve(&h, q).map_err(person_error)?;
+                // An answer that names the person leaves nothing out of a
+                // claim (`Parts::named`), nor the vaccine a line tells of.
                 let s = summary::person(
                     &f,
                     &h,
@@ -1063,6 +1065,7 @@ impl MedrecTools {
                         per_list: SUMMARY_LINES,
                     },
                     &self.codes(),
+                    &crate::parts::Parts::default(),
                 )?;
                 let mut s = sections(s);
                 let private = PrivateItems::of(&f, &h, &[p])?;
@@ -1247,8 +1250,11 @@ impl MedrecTools {
                         // The vaccines claims tell of are immunizations too.
                         let claimed = match kind {
                             "immunization" => {
+                                // What an answer leaves out of a claim is out
+                                // of `idx` already.
                                 let all: Vec<&Record> = idx.records.iter().collect();
-                                crate::vaccines::of_claims(&all, &self.codes())
+                                let whole = crate::parts::Parts::default();
+                                crate::vaccines::of_claims(&all, &self.codes(), &whole)
                             }
                             _ => Vec::new(),
                         };

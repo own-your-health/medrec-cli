@@ -2052,6 +2052,7 @@ mod tests {
                 false,
                 None,
                 directory.then_some(d.as_path()),
+                &Default::default(),
             )
         }
 

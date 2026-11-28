@@ -112,7 +112,7 @@ enum Command {
     #[command(subcommand)]
     Providers(ProvidersCmd),
     /// Published code tables kept on this machine: the plain names of
-    /// diagnosis codes.
+    /// diagnosis codes, and which codes are vaccines.
     #[command(subcommand)]
     Tables(TablesCmd),
     /// Import each source set up for it: on a schedule (a LaunchAgent), on
@@ -361,9 +361,10 @@ enum TablesCmd {
     List,
     /// Download whole tables from their publishers (all the code tables, or
     /// those named), checked against the SHA-256 medrec records. CDC's
-    /// vaccine tables (`cvx`, `cpt-cvx`) have no version: one that is now
-    /// another file is refused (exit 6) with its SHA-256, and kept when the
-    /// command is run again with --accept and that hash. The provider
+    /// vaccine tables (`cvx`, `cpt-cvx`) have no version: one named is
+    /// downloaded again, and one that is now another file is refused (exit 6,
+    /// after every table is tried) with its SHA-256 and the command that
+    /// keeps it, with --accept and that hash. The provider
     /// directory, `nppes`, is fetched only when it is named: one file of over
     /// a gigabyte, whose size is stated first, read as it arrives for the
     /// providers the --profile folder's records need.
@@ -1178,7 +1179,10 @@ fn tables_cmd(cli: &Cli, cmd: &TablesCmd, store: &ConfigStore) -> Result<(), Cli
     match cmd {
         TablesCmd::List => {
             output::emit(json, "table-list", items(&tables::list()), |v| {
-                table(v, &["id", "version", "date", "state", "publisher"])
+                table(
+                    &accepted_said(v, "state"),
+                    &["id", "version", "date", "state", "publisher"],
+                )
             });
             Ok(())
         }
@@ -1229,24 +1233,47 @@ fn tables_cmd(cli: &Cli, cmd: &TablesCmd, store: &ConfigStore) -> Result<(), Cli
                 None
             };
             let mut rows = Vec::new();
+            let mut refusals = Vec::new();
             for t in wanted {
                 note(cli, &format!("{} {}", t.id, t.version));
-                rows.push(to_value(&tables::fetch(
-                    t,
-                    &dir,
-                    file.as_deref(),
-                    accept.as_deref(),
-                )?));
+                let named = !ids.is_empty();
+                let f = tables::fetch(t, &dir, file.as_deref(), accept.as_deref(), named)?;
+                refusals.extend(f.refusal.clone());
+                rows.push(to_value(&f));
             }
             if let Some(cfg) = cfg {
                 rows.push(to_value(&fetch_directory(cli, &cfg, &kept_in, *force)?));
             }
             output::emit(json, "table-fetch", items(&rows), |v| {
-                table(v, &["id", "version", "status", "bytes"])
+                table(
+                    &accepted_said(v, "status"),
+                    &["id", "version", "status", "bytes"],
+                )
             });
+            // Every table was tried and each has its row; one refused fails
+            // the run.
+            if !refusals.is_empty() {
+                for r in &refusals {
+                    eprintln!("{r}");
+                }
+                std::process::exit(6);
+            }
             Ok(())
         }
     }
+}
+
+/// Rows of `v` whose file is one the person accepted, with `field` saying so,
+/// for a table on a terminal.
+fn accepted_said(v: &Value, field: &str) -> Value {
+    let mut v = v.clone();
+    let rows = v["items"].as_array_mut().into_iter().flatten();
+    for r in rows.filter(|r| r["accepted"] == Value::Bool(true)) {
+        if let Some(s) = r[field].as_str() {
+            r[field] = Value::String(format!("{s} (accepted)"));
+        }
+    }
+    v
 }
 
 /// `tables fetch nppes`: the size is stated before the download, and the

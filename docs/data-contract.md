@@ -1820,8 +1820,10 @@ removes and no reader reads. It never writes over a later
   `text.json`, `overrides.json` and `marks.json` and their linked people's
   `index.json` and `text.json` have the MD5s `views.json` recorded, under the same `household.json`,
   medrec version and `build`, the code table on this machine, when there is one, is the
-  one they were made with (`code_table`), and the provider directory on it,
-  when there is one, is not newer (`directory`). Otherwise their views are made
+  one they were made with (`code_table`), CDC's vaccine tables on it, when
+  there are any, are those they were made with (`vaccine_tables`), and the
+  provider directory on it, when there is one, is not newer (`directory`).
+  Otherwise their views are made
   again, and only views the folder does not already hold under their
   stored names are uploaded. An unchanged view keeps its name and is not
   written again. A person whose views lack one every person has
@@ -1902,6 +1904,7 @@ A reader decides freshness by MD5, as Drive reports it (`md5Checksum`):
 | `people.<id>.marks` | The MD5 of the person's `marks.json` as read; `null` when there is none (0.9.1 and later). |
 | `people.<id>.linked` | For each person linked to this one (Events, below), the MD5s of their `index.json` and `text.json` as read, as `{"index", "text"}`, each `null` when the file is absent; `{}` when no one is linked (0.9.0 and later). |
 | `people.<id>.code_table` | The code table the person's names were made with (`icd10cm FY2027`); absent when the pass that made the views had none, whatever names it carried over (0.9.4 and later). A pass on a machine with another table makes the person's views again, which fills in the names; one on a machine with none leaves them. |
+| `people.<id>.vaccine_tables` | CDC's vaccine tables the person's vaccines from claims were read with, `<id> <SHA-256>` each (`cvx …, cpt-cvx …`); absent when the pass that made the views had neither (0.9.11 and later). A pass on a machine with other tables makes the person's views again; one on a machine with none leaves them, and when it makes them for another reason lists only the vaccines a line's own CVX code names. |
 | `people.<id>.directory` | Which provider directory the pass that made the views had: the last day it covers and when it was fetched, so that a newer one sorts after (0.9.7 and later). Absent when it had none. A pass on a machine with a newer one makes the person's views again; one with an older one or none leaves them. |
 | `people.<id>.provider_state` | The MD5 of the person's `provider-state.json`, absent when there is none (0.9.7 and later). Another one makes four of the person's views stale (above). |
 | `people.<id>.in_error` | `standing.json`'s `in_error`, as it is there: the ids of the person's records entered in error, by kind, and of their papers, `{"condition": ["r_…"], "document": ["d_…"]}`; absent when there is none (0.9.9 and later). |
@@ -1980,17 +1983,26 @@ and later). Each is listed as an immunization with its claim's `id`, `date` the
 line's day (`serviced`, else the claim's), `display` the line's service text,
 else the claim's, `status` `completed`, `provenance` the claim's, and `fields`
 `{from_claim: true, cvx: [codes]}`; `code` is the CVX code where there is one.
-It is no record, and what is private of the claim is private of it, by the id. A
-counted line of a claim that is not cancelled (as a reversal is), planned or
+It is no record, and what is private of the claim is private of it, by the id;
+the claim's entry in `private.json`'s `parts` is the claim's alone, and a
+reader applies none of it (its `display`, its `lines`) to such an immunization.
+A counted line of a claim that is not cancelled (as a reversal is), planned or
 entered in error, nor denied with nothing of it paid (Standing, `filled`),
-names a vaccine by its CVX code, any of its `codes` (else `service`) that is CVX's;
-or, with both of CDC's tables on the machine that writes the views (README,
-"Code tables"), its CPT code's CVX codes by `cpt-cvx`. A code `cvx` has as no
-vaccine (`nonvaccine`) is none, and without that table neither is 998 or 999.
-One is listed for each vaccine and day that no immunization of the person's has,
-by its CVX code, or by its kind of vaccine where that immunization has no CVX
-code, and once for two claims of it. A reader shows it as "from a claim", as
-`medrec mcp` does (its `detail`).
+names a vaccine by its CVX code, any of its `codes` (else `service`) that is
+CVX's; or, where it has none, with both of CDC's tables on the machine that
+writes the views (README, "Code tables"), its CPT code's CVX codes by
+`cpt-cvx` that `cvx` lists as vaccines. A line's own CVX code that `cvx` marks
+no vaccine (`nonvaccine`) is none, one it does not list is one, and 998 and 999
+never are. A line `private.json`'s `parts` leaves out of an open claim tells of
+none in the views, since a reader could not leave it out where it leaves the
+line out; `medrec mcp`'s answers that name the person, which leave nothing out
+of a claim, list it, and those that name no person do not. One is listed for
+each vaccine and day that no immunization of the person's has, by its CVX code,
+or by its kind of vaccine where that immunization has no CVX code, and once for
+two claims of it; an immunization entered in error, or not given (`not-done`, a
+refusal), has none. A reader shows it as "from a claim", as `medrec mcp` does
+(its `detail`). Which tables made the views is `vaccine_tables` in
+`views.json`.
 
 A record whose sources differ on whether it is entered in error, or that is, has
 `says` (0.9.9 and later), unless it is a condition, an allergy or a medicine

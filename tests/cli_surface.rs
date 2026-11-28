@@ -575,6 +575,59 @@ fn drive_profiles_are_medrecs_own_and_none_is_a_default() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("home-drive"));
 }
 
+/// A CDC file that is not the recorded one has its row, with its SHA-256 and
+/// the command that keeps it, and the run exits 6; kept, both the list and
+/// the fetch say on a terminal that it was accepted.
+#[test]
+fn a_refused_cdc_file_has_its_row_and_the_command_that_keeps_it() {
+    static SEQ: AtomicU32 = AtomicU32::new(0);
+    let dir = std::env::temp_dir().join(format!(
+        "medrec-surface-accept-{}-{}",
+        std::process::id(),
+        SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let run = |args: &[&str]| {
+        medrec()
+            .env("XDG_CACHE_HOME", dir.join("cache"))
+            .env("HOME", &dir)
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    let file =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/vaccines/cvx.txt");
+    let sha = medrec::hash::sha256_hex(&std::fs::read(&file).unwrap());
+    let path = file.to_str().unwrap();
+    let out = run(&["--json", "tables", "fetch", "cvx", "--file", path]);
+    assert_eq!(out.status.code(), Some(6));
+    let v = json_of(&out);
+    let row = &v["items"][0];
+    let keep = format!("medrec tables fetch cvx --accept {sha} --file {path}");
+    assert_eq!(
+        (
+            row["status"].as_str(),
+            row["sha256"].as_str(),
+            row["keep_with"].as_str()
+        ),
+        (Some("refused"), Some(sha.as_str()), Some(keep.as_str()))
+    );
+    assert!(String::from_utf8_lossy(&out.stderr).contains(&keep));
+    let list = json_of(&run(&["--json", "tables", "list"]));
+    assert_eq!(list["items"][1]["state"], "absent");
+
+    let out = run(&["tables", "fetch", "cvx", "--file", path, "--accept", &sha]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(String::from_utf8_lossy(&out.stdout).contains("copied (accepted)"));
+    let out = run(&["tables", "list"]);
+    assert!(String::from_utf8_lossy(&out.stdout).contains("ready (accepted)"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn the_code_tables_need_no_profile_and_start_absent() {
     let out = medrec()

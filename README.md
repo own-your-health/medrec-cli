@@ -744,22 +744,34 @@ medrec tables fetch cvx --accept SHA256 # keep CDC's file that is now another
 
 - **medrec includes no table.** It downloads the publisher's whole file, and
   keeps it only if its size, SHA-256 and row count are those recorded in
-  `src/tables.rs`. No code is ever looked up over the network, so no request
-  says which codes the records hold.
-- **CDC's files have no version.** CDC changes them in place, so one that is
-  not the recorded file is refused (exit 6) with its size and SHA-256. Run the
-  command again with `--accept` and that SHA-256 to keep it: medrec then uses it
-  as it would the recorded one, and `tables list` says `accepted`. Of `cpt.txt`
-  medrec reads the two code numbers of each row; its descriptions are never
-  read, stored or shown. Of `cvx.txt` it reads each code and whether it is a
-  vaccine (`nonvaccine`). Without `cvx`, only a claim line's own CVX code names
-  a vaccine, since only that table tells a vaccine from an immune globulin.
+  `src/tables.rs`, except a CDC file you accept by its SHA-256 (below). No code
+  is ever looked up over the network, so no request says which codes the
+  records hold.
+- **CDC's files have no version.** CDC changes them in place, so `tables fetch
+  cvx` (or `cpt-cvx`) downloads the file again even when one is kept, and
+  `tables fetch` with no name keeps what it has. A file that is not the
+  recorded one, nor the one kept, is refused with its size and SHA-256 and the
+  command that keeps it, which `--json` gives as `keep_with`; the file kept
+  before stays in use. Every table named is tried, each has its row, and the
+  run exits 6 when one was refused. Run that command (`--accept` and the
+  SHA-256, with `--file` when the file was one) to keep it: medrec then uses it
+  as it would the recorded one, and `tables list` says `ready (accepted)`
+  (`accepted` in `--json`). A file whose rows do not read, or that has none, is
+  never kept nor offered. Of `cpt.txt` medrec reads the two code numbers of
+  each row; its descriptions are never read, stored or shown. Of `cvx.txt` it
+  reads each code and whether it is a vaccine (`nonvaccine`). Without `cvx`,
+  only a claim line's own CVX code names a vaccine, since only that table
+  tells a vaccine from an immune globulin.
 - **No table, no new names.** Without the file, or with one that is not the
   recorded one, a pass keeps the names another machine wrote for codes still
   in use, and adds none. A code with no name shows the source's own words. A
   code the table lacks (another year's, withdrawn or invalid) has no name.
 - The files are in `~/.cache/medrec/tables`. After fetching them, run `medrec
-  views write` on each profile, or let the next write do it.
+  views write` on each profile, or let the next write do it: a person's views
+  made with another ICD-10 or vaccine table, or without one, are made again.
+  Fetch CDC's tables on every machine that writes the views, since one without
+  them lists only the vaccines a claim line's own CVX code names when it makes
+  a person's views again.
 - The names a person's records use are in `views/` as `code-names.json`
   (docs/data-contract.md). Like any view, they are on the Drive folder.
 
