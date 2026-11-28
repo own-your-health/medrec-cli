@@ -64,6 +64,21 @@ pub struct Said {
 pub struct Filled {
     pub record: String,
     pub date: String,
+    /// A payer's claim says so, and no record of the pharmacy's.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub from_claim: bool,
+}
+
+impl Filled {
+    /// The day, as a reader says it.
+    fn text(&self) -> String {
+        let from = if self.from_claim {
+            " (from a claim)"
+        } else {
+            ""
+        };
+        format!("{}{from}", self.date)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -389,8 +404,14 @@ pub fn paper_note(from: Sources, d: &Document) -> Option<String> {
     (!says.is_empty()).then(|| format!("Its sources differ ({says})."))
 }
 
-fn is_fill(r: &Record) -> bool {
+pub(crate) fn is_fill(r: &Record) -> bool {
     r.kind == "medication" && r.fields.get("source") == Some(&"dispense".into())
+}
+
+/// A fill the pharmacy says it gave: completed, or of no or an unknown status.
+/// One cancelled, declined, stopped or still being made gave nothing.
+pub(crate) fn gave_fill(r: &Record) -> bool {
+    is_fill(r) && matches!(r.status.as_deref(), None | Some("completed" | "unknown"))
 }
 
 /// Each word of a record with the provenance it is of, and the provenances it
@@ -509,13 +530,13 @@ impl Standings {
                 of.push(r.id.clone());
             }
         }
-        let mut fills: BTreeMap<String, Vec<Filled>> = BTreeMap::new();
-        for r in idx.records.iter().filter(|r| is_fill(r)) {
-            let given = matches!(r.status.as_deref(), None | Some("completed" | "unknown"));
-            if let (true, Some(date)) = (given, day(r.date.as_deref())) {
+        let mut fills = crate::fills::of_claims(idx);
+        for r in idx.records.iter().filter(|r| gave_fill(r)) {
+            if let Some(date) = day(r.date.as_deref()) {
                 fills.entry(series_key(r)).or_default().push(Filled {
                     record: r.id.clone(),
                     date,
+                    from_claim: false,
                 });
             }
         }
@@ -694,7 +715,7 @@ impl Standing {
                     of.map(|of| format!(" ({of})")).unwrap_or_default()
                 );
                 if let Some(f) = &line.filled {
-                    s.push_str(&format!(", filled {}", f.date));
+                    s.push_str(&format!(", filled {}", f.text()));
                 }
                 s
             }
@@ -875,8 +896,9 @@ impl Standings {
         asked: &dyn Fn(&Record) -> bool,
         shows: &dyn Fn(&Record) -> bool,
     ) -> List<'a> {
-        let of_kind = idx.records.iter().filter(|r| r.kind == kind);
-        let by: BTreeMap<&str, &'a Record> = of_kind.map(|r| (r.id.as_str(), r)).collect();
+        // Of every kind: a medicine's fill can be a claim.
+        let by: BTreeMap<&str, &'a Record> =
+            idx.records.iter().map(|r| (r.id.as_str(), r)).collect();
         let may_show = |id: &str| by.get(id).is_some_and(|r| shows(r));
         let errors: BTreeSet<&String> = self.in_error.get(kind).into_iter().flatten().collect();
         let row = |x: &'a Record, of: Option<&Line>, group: u8| {

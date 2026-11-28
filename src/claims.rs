@@ -252,6 +252,29 @@ fn add(a: &Value, b: &Value) -> Option<Value> {
 /// payer's `you_owe`, else `deductible` + `copay` + `coinsurance` +
 /// `not_covered` of those given (never `discount`), and whether it is that
 /// sum. Never written into `amounts`, where a missing name stays unknown.
+/// Every coding of a concept, `{system, code}`, in the order given.
+pub fn coding_pairs(concept: Option<&Value>) -> Vec<Value> {
+    codings(concept)
+        .filter_map(|c| {
+            let system = c.get("system")?.as_str()?;
+            let code = c.get("code")?.as_str()?;
+            Some(serde_json::json!({"system": system, "code": code}))
+        })
+        .collect()
+}
+
+/// The codes of a claim line's service, `(system, code)`: each of its `codes`
+/// (0.9.11 and later), else its `service`'s.
+pub fn service_codes(line: &Value) -> Vec<(&str, &str)> {
+    fn pair(c: &Value) -> Option<(&str, &str)> {
+        Some((c.get("system")?.as_str()?, c.get("code")?.as_str()?))
+    }
+    match line.get("codes").and_then(Value::as_array) {
+        Some(codes) => codes.iter().filter_map(pair).collect(),
+        None => line.get("service").and_then(pair).into_iter().collect(),
+    }
+}
+
 pub fn member_share(amounts: &Value) -> Option<(Value, bool)> {
     if let Some(v) = amounts.get("you_owe") {
         return Some((v.clone(), false));

@@ -80,6 +80,7 @@ quick-xml, lopdf), and so are local tools (poppler, tesseract, bsdtar).
 | `src/provider_labels.rs` | What an answer shows of `providers.json`: the labels of what an item prints, without what an answer about the whole household may not say (docs/data-contract.md, `provider_labels`) |
 | `src/corrections.rs` | What the household says of a provider its items print (a name, practice, role or phone; that two names are one provider or are not; that a label is wrong): checked, written and undone in `marks.json` for `medrec labels` and provider requests alike, and applied in `src/labels.rs` (docs/data-contract.md, "marks.json" and "Provider requests") |
 | `src/sources.rs` | Which of a person's sources a record or document came from, and the name and place it gives: only the person's own, told apart by patient, and none where several differ (docs/data-contract.md, "Which source") |
+| `src/fills.rs` | The fills that pharmacy claims tell of, by RxNorm, NDC or name, for `standing.json`'s `filled` |
 | `src/standing.rs` | `standing.json` (`medrec-standing/v1`): what is current among conditions, allergies and medicines by every source's word, and the lists a reader makes of it (docs/data-contract.md, "Standing") |
 | `src/given.rs` | What a source gave of an item that the item does not show, which the private rules read beside it (docs/data-contract.md, "What a source gave") |
 | `src/about.rs` | What a person's chart holds about somebody else, which no list, view or answer has (docs/data-contract.md, "About another person") |
@@ -133,7 +134,8 @@ are built.
 - Mutations that discard something (`review drop`) need `--force` without a
   terminal, and exit 6 otherwise.
 - A view that gains a field a reader must not ignore (one that changes what
-  it leaves out or holds back) raises `viewfiles::READER` to the release's
+  it leaves out or holds back, or what it must say of an item it shows, as
+  "from a claim") raises `viewfiles::READER` to the release's
   version in the same release, and the notes say so; a change a reader of
   the layout would misread takes the next `schema` instead.
 

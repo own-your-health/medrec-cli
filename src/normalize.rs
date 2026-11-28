@@ -1272,6 +1272,12 @@ fn eob_items(r: &Value, pharmacy: bool) -> Option<Value> {
             if marked_not_counted(it) {
                 line["counted"] = Value::Bool(false);
             }
+            // `service` keeps the first coding; a payer can give the drug's
+            // RxNorm code, its NDC or a vaccine's CVX code after another.
+            let codes = claims::coding_pairs(it.get("productOrService"));
+            if codes.len() > 1 {
+                line["codes"] = Value::Array(codes);
+            }
             let texts: Vec<Value> = note_numbers(it)
                 .into_iter()
                 .filter_map(|k| notes.iter().find(|(n, _)| *n == Some(k)))
