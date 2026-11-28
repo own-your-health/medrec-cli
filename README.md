@@ -196,6 +196,13 @@ register and a sign-in per Google account. It runs no rclone.
   a local directory (the inbox as Drive for desktop mounts it) for files
   that arrive that way, or sign in with `--scope full`. `drive` is a
   restricted scope: Google shows its "unverified app" warning at consent.
+- **Copies on this machine.** A command that reads a folder on Drive may
+  answer from copies this machine keeps (`~/.cache/medrec`), which a later
+  read brings up to date. `--fresh` reads Drive itself, and `--json` says which
+  it was: `reads` has `from` (`drive`, `cache` or `both`), how many reads each
+  answered, how many copies were `stale`, how many were read because Drive was
+  `unreachable`, and `oldest_seconds`. A command that writes, and `reindex
+  --dry-run`, always read Drive and have no `reads`.
 - **Moving a folder off rclone.** medrec no longer reads an rclone remote
   (`remote:path` is exit 2, naming the move). Under `drive.file` the old
   folder is not visible to the new sign-in, so the records are copied once

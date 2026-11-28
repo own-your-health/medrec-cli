@@ -2591,7 +2591,15 @@ readers ship with medrec:
 
 - **The commands** (`timeline`, `search`, `results`, `meds`, `documents
   list` and the rest) read `household.json`, each person's `index.json`,
-  `text.json` and `notes.md`.
+  `text.json` and `notes.md`. Of a folder on Drive, the `--json` answer of one
+  that may read this machine's copies has `reads` (0.9.11 and later): `from`
+  (`drive`, `cache` for this machine's copies, or `both`), how many reads each
+  answered (`drive`, `cache`), how many copies were past the time one is taken
+  as it is or of no known age (`stale`), how many were read because Drive could
+  not be reached (`unreachable`), and `oldest_seconds`, the age of the oldest,
+  absent where none was read or one's is not known. `--fresh` reads Drive alone.
+  A command that always does (one that writes, `reindex --dry-run`, `verify
+  --events`) has none, nor has one that reads a local folder.
 - **`medrec mcp`**, for Claude Desktop and Claude Code, reads the same files
   through the same views, per call, with no lock. It writes nothing,
   `_requests/` included. Its answers are computed, not stored:
