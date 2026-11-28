@@ -1848,6 +1848,12 @@ const CLINICAL: &[&str] = &[
     "prescription",
     "immunization_record",
 ];
+/// Whether a paper of this type can be of the only visit of its day (D3).
+pub(crate) fn of_the_days_visit(ty: &str) -> bool {
+    BILLING.contains(&ty)
+        || (CLINICAL.contains(&ty) && !matches!(ty, "prescription" | "immunization_record"))
+}
+
 static PORTAL_NOTE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)progress note|encounter summary|^note$|after visit|discharge|visit summary")
         .unwrap()
@@ -2115,9 +2121,7 @@ fn papers_into_events(
             // D3: a bill, receipt or report from a practice no claim names
             // joins the only visit that day: likely, or sure when the
             // amount due is the event's you_owe. N5 learns the alias.
-            let d3_types = BILLING.contains(&ty)
-                || (CLINICAL.contains(&ty)
-                    && !matches!(ty, "prescription" | "immunization_record"));
+            let d3_types = of_the_days_visit(ty);
             let pharmacy = org_tokens(org).iter().any(|t| t == "pharmacy")
                 || evs.iter().any(|ev| {
                     ev.kind == "fill" && event_names(ev, &p.idx).iter().any(|n| same_org(org, n))
@@ -3369,6 +3373,26 @@ pub fn both(
     h: &crate::model::Household,
     p: &Person,
 ) -> Result<Built, pk_cli_core::CliError> {
+    both_from(folder, h, p, None)
+}
+
+/// [`both`], of the person's index as it was read already: what is compared
+/// with the events is what they were made of.
+pub fn both_of(
+    folder: &crate::folder::Folder,
+    h: &crate::model::Household,
+    p: &Person,
+    idx: &PersonIndex,
+) -> Result<Built, pk_cli_core::CliError> {
+    both_from(folder, h, p, Some(idx))
+}
+
+fn both_from(
+    folder: &crate::folder::Folder,
+    h: &crate::model::Household,
+    p: &Person,
+    idx: Option<&PersonIndex>,
+) -> Result<Built, pk_cli_core::CliError> {
     // As the views do: a decisions file that does not parse is left out;
     // one the store cannot reach fails the call.
     let overrides = match folder.overrides(p) {
@@ -3376,7 +3400,7 @@ pub fn both(
         Err(pk_cli_core::CliError::Other(_)) => None,
         Err(e) => return Err(e),
     };
-    let mut v = both_by(folder, h, p, overrides.as_ref())?;
+    let mut v = both_by_index(folder, h, p, overrides.as_ref(), idx)?;
     if overrides.is_none() {
         v.events["overrides_unreadable"] = Value::Bool(true);
     }
@@ -3390,7 +3414,24 @@ pub fn both_by(
     p: &Person,
     overrides: Option<&Overrides>,
 ) -> Result<Built, pk_cli_core::CliError> {
-    let idx = folder.index(p)?;
+    both_by_index(folder, h, p, overrides, None)
+}
+
+fn both_by_index(
+    folder: &crate::folder::Folder,
+    h: &crate::model::Household,
+    p: &Person,
+    overrides: Option<&Overrides>,
+    idx: Option<&PersonIndex>,
+) -> Result<Built, pk_cli_core::CliError> {
+    let read;
+    let idx = match idx {
+        Some(idx) => idx,
+        None => {
+            read = folder.index(p)?;
+            &read
+        }
+    };
     let texts = folder.text(p)?;
     let linked_people = linked_people(h, p);
     let mut linked = Vec::new();
@@ -3399,7 +3440,7 @@ pub fn both_by(
     }
     Ok(build_both(&Input {
         person: p,
-        index: &idx,
+        index: idx,
         texts: &texts,
         sources: &h.sources,
         overrides,

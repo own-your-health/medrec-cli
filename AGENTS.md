@@ -65,7 +65,9 @@ quick-xml, lopdf), and so are local tools (poppler, tesseract, bsdtar).
 | `src/intake/` | Document intake: file types, text and OCR, detection with scores and evidence, duplicates |
 | `src/review.rs` | Filing what intake held back |
 | `src/import.rs`, `src/stream.rs`, `src/normalize.rs` | Provider import: the bounded subprocess, the `records-stream/v1` reader (medical-common's `pk-med-records`), FHIR to index records |
+| `src/against.rs` | `medrec verify --events`: what events and their records say, against the raw files as they are (not through what shaped them), in counts and ids |
 | `src/raw.rs` | `medrec records raw` and `records fields`: the raw files of records, the names of their elements with counts (no values but the codes of what a claim's amounts are), and what changed between the versions kept of each |
+| `src/served.rs` | What an import says of the records its source gave before: how many it does not give now, by kind, and the names of what changed in each it updated |
 | `src/changes.rs` | What a dry run of the reindex counts that the views would say otherwise, for each person (docs/data-contract.md, "A dry run") |
 | `src/claims.rs`, `src/reindex.rs` | Claim shaping (line and claim categories, amounts, titles, visit and result links) and `medrec reindex`, which shapes filed claims again, reads every record's providers, every condition's, allergy's and medicine's status and words, and every result's and report's fields, and what each lists, again from their raw files, links the records again, puts results about somebody else that were filed as the person's own in records of their own, and reads bills' and receipts' statements again |
 | `src/providers.rs` | Who a record's provider fields name, as its source identifies them: the NPI and the address (state and city) behind each reference (docs/data-contract.md, "Providers") |
@@ -83,10 +85,11 @@ quick-xml, lopdf), and so are local tools (poppler, tesseract, bsdtar).
 | `src/about.rs` | What a person's chart holds about somebody else, which no list, view or answer has (docs/data-contract.md, "About another person") |
 | `src/panels.rs` | What a panel or a report lists, as its source says it: `lists`, the `members` made of it on each write of the index, headings, what it listed before, and the questionnaires that list a result (`listed_by`) (docs/data-contract.md, "Panels") |
 | `src/questionnaires.rs` | Questionnaires about mental health and substance use, by our own names for them and by code: their area, and whether a child answers them of themself |
-| `src/services.rs` | Which private area a service is of (a claim's line, a procedure, a line of a bill's text), by its number, its revenue code and its words |
-| `src/parts.rs` | Private parts of open items (docs/data-contract.md, "Private parts"): a claim's lines, diagnoses and payer notes, the lines of a bill's text, what an event says by them, and how each is shown without them |
-| `src/private.rs` | Private items (`medrec-private/v1`): the records, documents, events and imaging studies about mental health, reproductive and sexual health or substance use, by source, ICD-10 code, provider, medicine and test, a document by the records that link it, a bill or receipt by its words and the papers tied to it, and a study by its report, the household's marks over them, `medrec private`, and whether a question names an item (docs/data-contract.md, "Private") |
-| `src/marks.rs` | `marks.json` (`medrec-marks/v1`): the household's payments, private marks and provider corrections, kept apart from `overrides.json` (docs/data-contract.md, "marks.json") |
+| `src/services.rs` | Which private area a service is of (a claim's line, a procedure, a line of a paper's text), by its number, its revenue code and its words |
+| `src/parts.rs` | Private parts of open items (docs/data-contract.md, "Private parts"): a claim's lines, diagnoses and payer notes, the lines of a paper's text, what an event says by them, and how each is shown without them |
+| `src/clinicians.rs` | The clinicians a person's papers name with a private area, the days of a private practice's papers and the clinicians linked to one, and the items that print a clinician by surname and first initial; the household's clinician marks (docs/data-contract.md, "Private", `clinician`) |
+| `src/private.rs` | Private items (`medrec-private/v1`): the records, documents, events and imaging studies about mental health, reproductive and sexual health or substance use, by source, ICD-10 code, provider, medicine and test, an item by the clinician it prints (`src/clinicians.rs`), a visit, a condition with no ICD-10 code, a report's conclusion and a result's text value by their own words, a document by the records that link it, a bill or receipt by its words and the papers tied to it, and a study by its report, the household's marks over them, `medrec private`, and whether a question names an item (docs/data-contract.md, "Private") |
+| `src/marks.rs` | `marks.json` (`medrec-marks/v1`): the household's payments, private marks, provider corrections and clinician marks, kept apart from `overrides.json` (docs/data-contract.md, "marks.json") |
 | `src/events.rs` | Events (`medrec-events/v1`): claims, portal records and papers grouped into one event per visit, stay, test or fill (rules C0-C6, E1-E5, D2-D6 with D3s, X1-X2, N3, N5), the household's `overrides.json` decisions, and what `medrec events` and `medrec_records` kind `events` list (docs/data-contract.md, "Events") |
 | `src/mcp.rs`, `src/summary.rs` | `medrec mcp`, the read-only MCP tools (pk-cli-mcp), and the per-person summary behind `medrec_summary` |
 | `src/refresh/` | `medrec refresh`: the pass, the `_status/` and `_requests/` shapes (`contract.rs`, docs/data-contract.md), request checks, provider sign-in reads, intervals, the LaunchAgent and this machine's refresh state |
@@ -138,8 +141,12 @@ make install     # signed release build into ~/.cargo/bin
 cargo test --test flow   # the end-to-end flow on synthetic data
 ```
 
-Tests never read the Keychain and never use the network. The black-box tests
-set `MEDREC_KEYCHAIN_SERVICE` to an empty service; the Drive tests sign in to
+Tests never read the Keychain, never use the network and never open a viewer.
+The black-box tests set `MEDREC_KEYCHAIN_SERVICE` to an empty service and
+`MEDREC_VIEWER` to `none`, and run with `testdata::no_viewer_path`: the first
+`open` and `xdg-open` on their `PATH` launch nothing. A test of a viewer checks
+the command it would run (`Viewer::command`), never runs it. Every harness that
+runs the binary sets both; the Drive tests sign in to
 cli-common's fake Drive server with keys in memory (`store::testing`).
 OCR and poppler assertions are skipped when those tools are missing.
 

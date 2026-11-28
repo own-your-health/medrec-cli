@@ -54,6 +54,7 @@ use crate::panels;
 use crate::people;
 use crate::proc::{which, Bounded};
 use crate::providers::Found;
+use crate::served;
 use crate::stream::{self, Header, Item, RawResource, RecordsReader, Skip};
 use crate::version::{self, Filing};
 
@@ -263,11 +264,21 @@ pub struct Request {
     pub from_profile: Option<ProfileName>,
     /// Downloaded files to read instead of a login, passed as `--files`.
     pub files: Option<PathBuf>,
+    /// The provider's [`Provider::records_files`].
+    pub reads_files: bool,
     pub patient: String,
     pub person: Option<String>,
     pub since: Option<String>,
     pub org: Option<String>,
     pub allow_birth_date_mismatch: bool,
+}
+
+impl Request {
+    /// Whether its export is of downloaded files. One of a provider that reads
+    /// them can be with neither source named, by its own environment.
+    fn of_files(&self) -> bool {
+        self.files.is_some() || (self.reads_files && self.from_profile.is_none())
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -300,6 +311,13 @@ pub struct Report {
     /// Versions of records older (`meta.lastUpdated`) than the ones filed,
     /// which stayed.
     pub records_older: usize,
+    /// Records the source gave before and not now, and how many of each kind
+    /// ([`served::not_served`]). `None` where that cannot be told, as of an
+    /// export of what changed since a day or of downloaded files.
+    pub records_not_served: Option<usize>,
+    pub not_served: Option<BTreeMap<String, usize>>,
+    /// The records updated, and the names of what changed in each.
+    pub updated: Vec<served::Updated>,
     pub documents_added: usize,
     pub documents_duplicate: usize,
     /// Documents the source served again with other bytes but the same text
@@ -776,6 +794,8 @@ fn file_streamed(
 
     let mut owners = Vec::new();
     let (mut added, mut updated, mut unchanged, mut older) = (0, 0, 0, 0);
+    let before = index.records.clone();
+    let mut updated_ids = HashSet::new();
     let mut idless = Idless {
         incoming: resources
             .iter()
@@ -836,9 +856,15 @@ fn file_streamed(
                 }
             }
             let found = crate::providers::of(&v, &rec.fields, &mut held)?;
+            let of = rec.provenance[0].clone();
             match merge(&mut index, rec, found, filing, &mut idless) {
                 Merge::Added => added += 1,
-                Merge::Updated => updated += 1,
+                Merge::Updated => {
+                    updated += 1;
+                    let mut records = index.records.iter();
+                    let has = |r: &&Record| r.provenance.iter().any(|p| one_resource(p, &of));
+                    updated_ids.extend(records.find(has).map(|r| r.id.clone()));
+                }
                 Merge::Unchanged => unchanged += 1,
                 Merge::Older => older += 1,
             }
@@ -887,6 +913,24 @@ fn file_streamed(
     let import_id = ids::new("i");
     let mut skipped = trailer.skipped.clone();
     skipped.extend(skipped_large);
+    let whole = req.since.is_none() && header.since.is_none() && !req.of_files();
+    let here = written
+        .paths
+        .values()
+        .map(|p| current_of(p).unwrap_or_else(|| p.clone()));
+    let here: HashSet<String> = here.collect();
+    let not_served = whole.then(|| {
+        let export = served::Export {
+            source_dir: &source_dir,
+            patient: &header.patient.id,
+            reads_files: req.reads_files,
+            served: &here,
+            skipped: &skipped,
+        };
+        served::not_served(&person, &index, &export)
+    });
+    let not_served = not_served.flatten();
+    let records_not_served = not_served.as_ref().map(|n| n.values().sum());
     index.imports.push(ImportRun {
         id: import_id.clone(),
         source_dir: source_dir.clone(),
@@ -897,6 +941,7 @@ fn file_streamed(
         organization: header.organization.id.clone(),
         patient_id: header.patient.id.clone(),
         pulled_at: header.pulled_at.clone(),
+        from_files: Some(req.of_files()),
         imported_at,
         counts: counts.clone(),
         skipped: skipped.clone(),
@@ -904,6 +949,7 @@ fn file_streamed(
         records_updated: updated,
         records_unchanged: unchanged,
         records_older: older,
+        records_not_served,
         resources_written: written.written,
         resources_unchanged: written.unchanged,
         documents_added: filed.added,
@@ -937,6 +983,9 @@ fn file_streamed(
         records_updated: updated,
         records_unchanged: unchanged,
         records_older: older,
+        records_not_served,
+        not_served,
+        updated: served::updated(&person, &before, &index, &updated_ids),
         documents_added: filed.added,
         documents_duplicate: filed.duplicate,
         documents_unchanged: filed.unchanged,
@@ -3251,7 +3300,10 @@ fn owners_in(folder: &Folder, source_dir: &str, tmp: &Path) -> Result<FiledOwner
     let mut out = FiledOwners::default();
     for kind in OwnerKind::ALL {
         let dir = format!("{source_dir}/{}", kind.as_str());
-        let to = tmp.join(&dir);
+        // A path no index can lead out of the copy by: nothing is filed there.
+        let Some(to) = crate::store::within(tmp, &dir) else {
+            continue;
+        };
         if !to.exists() && folder.store.exists(&dir)? {
             folder.store.fetch_tree(&dir, &to)?;
         }
@@ -4552,6 +4604,7 @@ mod tests {
             from: "mychart".into(),
             from_profile: None,
             files: None,
+            reads_files: false,
             patient: patient.into(),
             person: person.map(str::to_string),
             since: None,

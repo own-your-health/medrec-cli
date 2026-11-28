@@ -37,7 +37,7 @@ impl Env {
         let path = format!(
             "{}:{}",
             dir.display(),
-            std::env::var("PATH").unwrap_or_default()
+            medrec::testdata::no_viewer_path(&std::env::var("PATH").unwrap_or_default())
         );
         let e = Env { root, path };
         e.ok(&["profiles", "add", "home"]);
@@ -55,6 +55,7 @@ impl Env {
             .env("MEDREC_KEYCHAIN_SERVICE", "piekstra.medrec.hermetic-tests")
             .env("MEDREC_LAUNCH_AGENTS_DIR", self.root.join("LaunchAgents"))
             .env("MEDREC_LAUNCHCTL", self.root.join("launchctl"))
+            .env("MEDREC_VIEWER", "none")
             .env("MEDREC_TEST_AUTH_WAIT_SECS", "1")
             .env_remove("NO_COLOR")
             .env_remove("FAKEPROV_AUTH");
@@ -338,6 +339,7 @@ fn refresh_imports_on_request_and_never_waits_on_a_person() {
         "documents_unchanged",
         "papers_unread",
         "records_added",
+        "records_not_served",
         "records_older",
         "records_unchanged",
         "records_updated",
@@ -387,6 +389,12 @@ fn refresh_imports_on_request_and_never_waits_on_a_person() {
         b"{\"please\": true}",
     )
     .unwrap();
+    // A name with a backslash is answered as any other that is not a request's.
+    std::fs::write(
+        e.records().join("_requests/a\\note.json"),
+        b"{\"please\": true}",
+    )
+    .unwrap();
     let v = e.ok(&["refresh", "--scheduled"]);
     assert_eq!(v["attempts"][0]["trigger"], "request", "{v}");
     assert_eq!(v["attempts"][0]["outcome"], "ok", "{v}");
@@ -414,7 +422,7 @@ fn refresh_imports_on_request_and_never_waits_on_a_person() {
             invalid += 1;
         }
     });
-    assert_eq!(invalid, 1);
+    assert_eq!(invalid, 2);
 
     // A sign-in that waits on an approval nobody gives is stopped, and the
     // source needs a person, with the command to run.

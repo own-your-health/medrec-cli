@@ -3,11 +3,13 @@
 //! the tests can reach them.
 
 pub mod about;
+pub mod against;
 pub mod batch;
 pub mod bill;
 pub mod bills;
 pub mod changes;
 pub mod claims;
+pub mod clinicians;
 pub mod code_names;
 pub mod config;
 pub mod corrections;
@@ -45,6 +47,7 @@ pub mod refresh;
 pub mod reindex;
 pub mod review;
 pub mod roles;
+pub mod served;
 pub mod services;
 pub mod sources;
 pub mod standing;

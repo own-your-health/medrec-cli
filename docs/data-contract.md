@@ -24,7 +24,7 @@ views/                        each person's records cut into small files, for re
   index.json                  the person's index (documents, records, studies, imports)
   text.json                   extracted text per document
   overrides.json              the household's decisions on events (0.9.0 and later)
-  marks.json                  the household's payments, private marks and provider corrections (0.9.1 and later)
+  marks.json                  the household's payments, private marks, provider corrections and clinician marks (0.9.1 and later)
   provider-state.json         what a provider directory gave (0.9.7 and later)
   provider-state~unread-<8 hex>.json   one that did not read, kept (0.9.7 and later)
   Documents/<YYYY>/<YYYY-MM-DD>_<type>_<org>_<details>_<original name>
@@ -98,7 +98,35 @@ views/                        each person's records cut into small files, for re
    medrec that finds a larger number stops and says to update.
 5. **Rename or move files through medrec**, so the index stays right.
    `medrec verify` reports any file that is missing, changed (by MD5, or by
-   SHA-256 with `--deep`) or not in an index.
+   SHA-256 with `--deep`) or not in an index, and (0.9.11 and later) in
+   `index_unread` the ids of people whose index does not read, of whom
+   nothing more is checked; a sign-in or Drive that fails stops it. With
+   `--events` (0.9.11 and later)
+   it also reads the raw files of the records that events are made of, as they
+   are, and `people` has one entry for each person, with counts and ids alone:
+
+   | Field | What |
+   |---|---|
+   | `person` | the person's id |
+   | `not_compared` | `true` where their index or events could not be read, so nothing of theirs is compared and every list is empty; absent otherwise |
+   | `error_code` | with `not_compared`, the code of the error that stopped it: `auth`, `upstream`, `other` and the rest of the codes medrec's errors have |
+   | `events`, `records` | how many events were compared, and how many of the person's own records are in them |
+   | `places_of_others` | how many events have a place by a linked person's or a paper's word, which is not compared |
+   | `place_not_given` | ids of events whose place is in no raw file of their records and is no name of a source of theirs |
+   | `places_differ` | ids of records two of whose raw files give places of which none is the other's |
+   | `name_not_given`, `day_not_given` | ids of records whose name, or day, no raw file of theirs has |
+   | `source_not_its_own` | ids of records with a raw file in the folder of another source than they say they came from |
+   | `resource_not_its_own` | ids of records with a raw file of another resource type or id than they say |
+   | `unread` | ids of records with a raw file that is not there, does not read, is in a folder that could not be copied, or has a path that is not relative |
+   | `read_errors` | the codes of the errors that made records `unread`, where one did (a folder that could not be copied, a file the folder did not give); absent where none did |
+
+   What is not compared: the name of a claim, which is medrec's, and a name
+   that is medrec's default for the kind (such as "Visit"); the name and day of
+   a record with a raw file in `unread`, since that file may be the one that
+   says them; the place of an event with such a record; and as a place, a
+   records connection's name or one with no word but legal ones and numbers.
+   An empty list is of what was compared. Any id, `index_unread` or
+   `not_compared` is exit 1, after the whole report is printed.
 
 ## household.json (`medrec-household/v1`)
 
@@ -492,17 +520,23 @@ there.
 sources gave of it, then or now, that the rules of what is private read and
 that the record does not show: a list of `{raw_path, cli, display, code,
 fields, npis, lists}`, each with the parts that are other than those shown. `display`
-is a medication's, a result's, a report's, a procedure's or a claim's, and `code`
+is a medication's, a result's, a report's, a procedure's or a claim's, and (0.9.10
+and later) a visit's, or a condition's with no ICD-10 code, where it says an area, and `code`
 a condition's, a medication's, a result's, a report's or a procedure's; `fields`
 are a claim's `diagnoses`, its `payer_notes` and its `items` (of each line
 `service`, `revenue`, `payer_notes` and `counted`), a result's `about`, its
 `components` (0.9.10 and later: of each part its `code`, of those with no value
-too, and its `value` where that is a text that says an area), and the fields that print a provider (Providers, below); `npis` has the NPI of the provider a field prints,
+too, and its `value` where that is a text that says an area), and (0.9.10 and later)
+a result's `value`, a report's `conclusion` and a visit's `reason`, each a text that
+says one, and the fields that print a provider (Providers, below); `npis` has the NPI of the provider a field prints,
 by that field; `lists` (0.9.10 and later) is what a panel or a report listed
 otherwise, as its `lists` has it, each raw file's whole; `cli` is that of a source that no longer has the record.
 `raw_path` is the raw file of the current version of what gave it, absent
 where that is not known. A document's is `{raw_path, organization, title,
-name}`: `name` is the `original_name` of a copy that was folded into it.
+name}`: `name` is the `original_name` of a copy that was folded into it. A
+condition's entry with a `display` is judged with that entry's `code` alone, and
+as one with no code where it has none, whatever code the item shows now (0.9.10
+and later): a name that said an area while there was no ICD-10 code still says it.
 
 - It decides what is private and what is about another person (below), and
   nothing else: each rule and provider label reads it beside what the item
@@ -510,7 +544,10 @@ name}`: `name` is the `original_name` of a copy that was folded into it.
   shows, in every view and answer, is still of a source that stands. No view or
   answer has any of it, and a reader of `index.json` shows none of it: of it
   there is only `given: true` on an item of `private.json` and on its row of
-  `medrec private list`.
+  `medrec private list`, and, of a clinician the household opened whom only a
+  source gave (0.9.10 and later), `given: true` on the mark and on its
+  `clinicians_opened` row, with the mark's `people` (surnames and first
+  initials) in `marks.json`.
 - It is never dropped. So nothing that a source gave opens because a later
   version gives something else, a source says the item is entered in error,
   another source's values take its place, or the source takes its resource to
@@ -519,7 +556,10 @@ name}`: `name` is the `original_name` of a copy that was folded into it.
   it (`medrec private unmark`).
 - It is of the item itself. One that is private only with another (its event,
   its report, a record or a paper tied to it) follows that as it is, but a panel or
-  a report is judged by what it listed before too (0.9.10 and later). A newborn's
+  a report is judged by what it listed before too, and an item that prints a
+  clinician by what the papers that name them, and the papers and claims of a
+  day that tell of their practice, were given too (0.9.10 and later;
+  `clinician`, below). A newborn's
   event that takes its place from a parent's claim (X1) is judged by the places
   that claim was given too.
 - An import keeps what a version gives, an older one served late included, and
@@ -678,7 +718,7 @@ or id of an item, and names no kind of questionnaire that there is one of.
 
   | Field | Counts |
   |---|---|
-  | `private.added` | by kind, items that are private and were open, or were not there; `added_by`, by the rules that make them so (`from`); `questionnaires`, the questionnaires of them, by kind, where there are several of one; `questionnaires_one_of_a_kind`, how many kinds there is one of |
+  | `private.added` | by kind, items that are private and were open, or were not there; `added_by`, by the rules that make them so (`from`); `questionnaires`, the questionnaires of them, by kind, where there are several of one; `questionnaires_one_of_a_kind`, how many kinds there is one of; `clinician` (0.9.10 and later), by kind, those private by their clinician (`from: clinician`), and of them `clinician_day`, held by the day of a practice's paper alone, and `clinician_linked`, held through a clinician linked to a practice |
   | `private.opened` | by kind, items that were private and are open |
   | `private.gone` | by kind, items that were private and are not there: what is about somebody else, and an event that is another now |
   | `private.given` | by kind, items that are private only by what a source gave |
@@ -869,10 +909,12 @@ filed file's MD5 by its path in the study folder, for `verify`), `filed_at`,
 
 **ImportRun**, one `medrec import`: `id`, `source_dir`, `stream_sha256`,
 `stream_bytes`, `cli`, `cli_version`, `organization`, `patient_id`,
-`pulled_at`, `imported_at`, `counts`, `skipped`, and the counts the import
-report gives (below): `resources_written`, `resources_unchanged`,
+`pulled_at`, `from_files` (whether it was of downloaded files; 0.9.10 and later,
+absent in a run filed before), `imported_at`, `counts`, `skipped`, and the counts
+the import report gives (below): `resources_written`, `resources_unchanged`,
 `records_added`, `records_updated`, `records_unchanged`, `records_older`
-(0.2.7 and later; 0 in a run filed before), `documents_added`,
+(0.2.7 and later; 0 in a run filed before), `records_not_served` (0.9.10 and
+later; absent where it cannot be told), `documents_added`,
 `documents_duplicate` and `documents_unchanged`.
 
 **Provenance** (the `provenance/v1` fields of medical-common's
@@ -987,8 +1029,9 @@ which outrank the matching rules. It is absent until the first decision.
 
 What the household marked on a person's records that the rules do not
 decide: the bills they marked paid (`bills.json`, below), the items they
-marked private or not (`private.json`, below), and what they said of the
-providers the items print (`providers.json`, below). It is a file of its own
+marked private or not (`private.json`, below), what they said of the
+providers the items print (`providers.json`, below), and the clinicians they
+said are of no private area (`private.json`, below). It is a file of its own
 so that a medrec before 0.9.1, which rewrites `overrides.json` with only the
 fields it knows, never drops a mark. It is absent until the first mark.
 
@@ -1006,6 +1049,10 @@ fields it knows, never drops a mark. It is absent until the first mark.
  "providers": [
    {"id": "o_…", "printed": ["J SAMPLE"], "set": {"name": "Dr. Sample", "phone": "555-010-0123"},
     "at": "2026-11-24T12:00:00Z", "by": "Alex Testperson", "request": "x_…"}
+ ],
+ "clinicians": [
+   {"id": "o_…", "printed": "J SAMPLE", "people": [{"surname": "SAMPLE", "initial": "J"}],
+    "item": "r_…", "at": "2026-11-24T12:00:00Z"}
  ]}
 ```
 
@@ -1048,9 +1095,25 @@ fields it knows, never drops a mark. It is absent until the first mark.
 - `by` and `request` are as in `overrides.json`: who asked and the request
   it came from, `null` from a terminal, neither trusted.
 - medrec writes it (`medrec bills paid|undo`, `medrec private
-  mark|unmark|reset`, `medrec labels set|same|different|wrong|undo`, and paid,
+  mark|unmark|reset` (with `--clinician` too), `medrec labels set|same|different|wrong|undo`, and paid,
   unpaid, private and provider requests in `_requests/`, below). Readers read it only
   to judge the freshness of the views made from it (views, below).
+- A clinician mark (0.9.10 and later) is the household saying that a
+  clinician is of no private area: no item of this person's is private by the
+  `clinician` rule for them (`private.json`, below), whatever ties them.
+  `printed` is the clinician as the record (`item`) shows them. Where only a
+  source gave the record that clinician, `printed` is absent and `given` is
+  `true`, so that no name a source gave is shown. `people` is the surnames
+  (upper case) and first initials that name them: those that tie
+  the record by a paper or a link, and where a day holds it, the first way the
+  name reads (the last word the surname, or the words before a comma). A name
+  is matched to them as the rule matches it, a surname cut short included. It
+  is said at the Mac alone, of a record that the rule holds for a clinician it
+  prints (`medrec private unmark <id> --clinician`, one mark for each such
+  clinician), and `medrec private reset <id> --clinician` drops the marks of
+  every clinician the record prints. No request says it. `clinicians`
+  is absent until the first. Other rules still hold such an item, and a private
+  mark on it is kept.
 - A file that does not read as this person's `medrec-marks/v1` is left
   out: `bills.json` and `private.json` say `marks_unreadable`, `medrec
   bills list` and `medrec private list` say so,
@@ -1180,7 +1243,7 @@ the month (UTC) the attempt started.
 | `exit_code` | The import's exit code (Import, below); `null` for a skip, and for a `needs_person` found before the import ran. |
 | `error` | `null`, or `{"code", "message", "remedy"[, "provider_message"]}` from the failing command's `--json` error (the family's error shape). `message` is at most 300 characters. When the provider's export answered that its sign-in ended (exit 3), `code` is `needs_person`, `message` and `remedy` are medrec's own (the remedy runs `medrec refresh sign-in <source>`), and the provider's own words, which can name the provider's own sign-in command, are in `provider_message` (0.7.0 and later; before 0.9.9 after `<cli> needs a sign-in`, which was there where the provider gave no text). `provider_message` is present only then, always (an empty string when the provider gave no text), and is at most 300 characters too. Show `remedy` as the one thing to do, and `provider_message` at most as detail. A profile name in `message`, `remedy` or `provider_message` is replaced, a provider profile's by `<provider profile>` and a medrec profile's by `<profile>`, so the folder holds none. medrec's own codes are `timeout` (a call outlived its limit), `interrupted` (the pass running it stopped before it finished) and `needs_person`. |
 | `import` | The `ImportRun` id in the person's `index.json`, when `ok`. |
-| `counts` | When `ok`, the import report's counts: `records_added`, `records_updated`, `records_unchanged`, `records_older`, `resources_written`, `resources_unchanged`, `documents_added`, `documents_duplicate`, `documents_unchanged`, `documents_same_statement`, `papers_unread` (0.9.9 and later). A count the import report gains later is added here too. |
+| `counts` | When `ok`, the import report's counts: `records_added`, `records_updated`, `records_unchanged`, `records_older`, `resources_written`, `resources_unchanged`, `documents_added`, `documents_duplicate`, `documents_unchanged`, `documents_same_statement`, `papers_unread` (0.9.9 and later) and `records_not_served` (0.9.10 and later; absent where it cannot be told). A count the import report gains later is added here too. |
 
 A scheduled pass records nothing for a source that is not due. A skip is
 recorded only when a request or a terminal command asked for that source.
@@ -1733,8 +1796,8 @@ removes and no reader reads. It never writes over a later
   it writes any of them.
 - **Only what changed.** A person keeps their views when their `index.json`,
   `text.json`, `overrides.json` and `marks.json` and their linked people's
-  `index.json` and `text.json` have the MD5s `views.json` recorded, under the same `household.json` and
-  medrec version, the code table on this machine, when there is one, is the
+  `index.json` and `text.json` have the MD5s `views.json` recorded, under the same `household.json`,
+  medrec version and `build`, the code table on this machine, when there is one, is the
   one they were made with (`code_table`), and the provider directory on it,
   when there is one, is not newer (`directory`). Otherwise their views are made
   again, and only views the folder does not already hold under their
@@ -1742,8 +1805,8 @@ removes and no reader reads. It never writes over a later
   written again. A person whose views lack one every person has
   (`summary.json`, `tests.json`, `documents.json`, `events.json`,
   `bills.json`, `private.json`, `standing.json`, `search-parts.json`) gets them
-  made again: a build
-  of the same version wrote them before that view existed.
+  made again: a medrec that did not record its build, or did not know it, wrote
+  them before that view existed.
 - **`views.json` last.** It records the MD5 of every view, so a reader
   checks each view it reads and never mixes two passes, whatever order an
   uploader sends them in. Views that it no longer names, a person's who
@@ -1808,6 +1871,7 @@ A reader decides freshness by MD5, as Drive reports it (`md5Checksum`):
 | Field | What |
 |---|---|
 | `medrec` | The version that wrote them. Another version makes every view again. |
+| `build` | The commit that medrec was built from, where it is known (0.9.10 and later); absent where it is not. Views recorded with another commit, or with one where this medrec knows none (or the reverse), are all made again, as another version's are. Builds of one commit, or with none known, are not told apart, uncommitted changes included. |
 | `household` | The MD5 (hex) of `household.json` as the views were made from it. |
 | `label_salt` | What the ids of provider labels are salted with: random, made with the folder's first label and kept (0.9.7 and later). Absent before that. A reader does not use it. |
 | `people.<id>.index`, `.text` | The MD5s of the person's `index.json` and `text.json` as read; `null` when the file is absent. |
@@ -2435,13 +2499,14 @@ nothing is private.
   |---|---|
   | `source` | came from a portal whose records are all of one area: a behavioral health or a fertility clinic's record system |
   | `service` | is a claim each line of which that its totals count is of a service in an area (the first line's), or one with no such line whose own name says it; or a procedure that is one (0.9.9 and later; Services, below) |
-  | `code` | is a condition whose ICD-10 code is in an area, or a claim whose principal diagnosis (the lowest `sequence`) is: F10–F19 and Z71.4–Z71.5 substance use, and (0.9.9 and later) Z71.6, Z72.0, Z77.22, Z87.891 and O99.33; the other F codes mental health; Z30–Z32, Z33.2, O00–O08, N46 and N96–N98 reproductive; A50–A64, B20, Z21, Z11.3–Z11.4, Z20.2, Z20.6 and Z72.5 sexual health |
+  | `code` | is a condition whose ICD-10 code is in an area, or a claim whose principal diagnosis (the lowest `sequence`) is: F10–F19 and Z71.4–Z71.5 substance use, and (0.9.9 and later) Z71.6, Z72.0, Z77.22, Z87.891 and O99.33, and (0.9.10 and later) Z81.1–Z81.4, O99.31 and O99.32; the other F codes mental health, and (0.9.10 and later) Z13.3, R45.851, T14.91, Z91.5, Z86.5, the rest of Z81, and O99.34; Z30–Z32, Z33.2, O00–O08, N46 and N96–N98 reproductive, and (0.9.10 and later) Z79.3 and Z97.5; A50–A64, B20, Z21, Z11.3–Z11.4, Z20.2, Z20.6 and Z72.5 sexual health, and (0.9.10 and later) Z29.81. Each with the codes under it. Pregnancy itself is none |
   | `provider` | was made by a practice or clinician whose name or credential says its area: a claim's provider or facility, a visit's place, location or clinician, a medicine's prescriber, a result's performer, a document's organization; or is a record that prints a provider with a sure label (Provider labels, above) whose name, practice or role does, or a record, document or event that prints one the household calls so (0.9.7 and later) |
-  | `medicine` | is a medicine of an area by its name or code, or (0.9.9 and later) a pharmacy claim its `display` names as one: antidepressants, antipsychotics, anxiolytics, stimulants and lithium; fertility drugs and contraceptives; HIV medicines and those for erectile dysfunction; medicines for substance use and smoking |
-  | `test` | is a result or report of a test of an area: sexually transmitted infections, pregnancy and fertility, drug screens; or (0.9.9 and later) of a questionnaire of one, or of tobacco use (Questionnaires, below); by its own name and code or those of any of its parts, or by a text that is the value of a part (0.9.10 and later) |
+  | `clinician` | is an item (0.9.10 and later) that prints a clinician, by surname and first initial: a claim's `provider`, a visit's `practitioner`, a medicine's `prescriber`, or a procedure's, result's or report's `performer`. It is private where a paper of the person names that clinician: in its `organization`, where that says an area as `provider` has it, or in its `title`, where that or the organization does. A claim is private too where it prints a clinician and is of the day of a `bill`, `receipt`, `discharge_summary`, `visit_summary`, `imaging_report` or `lab_report` from a practice whose organization says an area, and is not a pharmacy's (with "pharmacy" in its name) nor a records connection's name (`learned: day`): every such claim of that day, however the events are grouped. A claim of that day that prints a place is not. And an item is private where it prints a clinician linked to such a practice (`learned: linked`): by two days or more of such papers of one area on each of which the clinician has a claim, or by one such day on which they are the only clinician with a claim: a claim of the day prints them as shown or as a source gave it, and no claim of it, each version of which prints a clinician, is of another. A day alone holds no claim of another day. A surname cut to 8 letters or more is the one it begins. A name with no initial, no degree and no comma can be a place's: a claim's provider or a performer that is one is looked for in an organization alone, and is linked by no day. An immunization is judged by no clinician. The papers and the items are each read as shown and as a source gave them, then or now, those entered in error too, and the links are made again on each run, so a later claim of another clinician on a day can end a link by that day but not one by two days. An item private only by what a source gave of any of them, and none shows, has `given`; what is entered in error does not by itself make it so. Only the person's own papers and items are read, never another person's. A likely match: it holds the item back, and names, joins, sets a status and settles nothing. The household opens one item at the Mac (`medrec private unmark <id>`), or every item that a clinician makes private (`medrec private unmark <id> --clinician`, marks.json's `clinicians`, above) |
+  | `medicine` | is a medicine of an area by its name, its brand (0.9.10 and later; Brands, below) or code, or (0.9.9 and later) a pharmacy claim its `display` names as one: antidepressants, antipsychotics, anxiolytics, stimulants and lithium; fertility drugs and contraceptives; HIV medicines and those for erectile dysfunction; medicines for substance use and smoking |
+  | `test` | is a result or report of a test of an area: sexually transmitted infections, pregnancy and fertility, drug screens; or (0.9.9 and later) of a questionnaire of one, or of tobacco use (Questionnaires, below); by its own name and code or those of any of its parts, or (0.9.10 and later) by a text that is its value or the value of a part, or a report's `conclusion`, as a line of a paper's text is (Private parts, below): by the words of a service, a medicine, a test or a questionnaire; or (0.9.10 and later) by its own name or a part's, as a visit's (`words`). A name that is "Gender identity" and no more is none |
   | `members` | is an event with a private claim or portal visit, or whose own members are all private, or (0.9.10 and later) a panel or a report all of what one source lists of which (Panels, above), now or before, is private, with what is entered in error or without it |
   | `event` | is a member of a private event |
-  | `words` | is a bill or receipt whose first page that has any text says an area, by a service, a medicine or a test, or any document whose title does (0.9.6 and later), or whose title is a questionnaire's, or with an `original_name` that says either (0.9.9 and later; `_`, `.` and `-` read as spaces) |
+  | `words` | is a bill or receipt whose first page that has any text says an area, by a service, a medicine or a test, or any document whose title does (0.9.6 and later), or whose title is a questionnaire's, or with an `original_name` that says either (0.9.9 and later; `_`, `.` and `-` read as spaces); or (0.9.10 and later) a condition with no ICD-10 code whose name, or its code's, is of a condition of an area, or a visit whose name or `reason` is, or says one as a paper's title does |
   | `record` | is a document that a private record links (`documents` in `records`), whatever else links it (0.9.5 and later) |
   | `report` | is an imaging study whose `report`, a document or record, is private (0.9.5 and later) |
   | `paper` | is a document tied to a private one, either way: its copy (`same_statement_as`, `near_duplicates`), the bill that supersedes it or one it supersedes (`superseded_by` in `bills.json`), or the receipt that pays it or the bill it pays (0.9.6 and later) |
@@ -2452,6 +2517,19 @@ nothing is private.
   the item, or of the one it is private with. Absent otherwise. A reader shows
   the area and no more of it. A row of `medrec private list` has it too (`yes`
   in its table's `given`).
+- **`learned`** (0.9.10 and later): of an item private by its clinician, what
+  ties them to the area where no paper names them: `day` (the item is of the day
+  of a practice's paper, and no more) or `linked` (the clinician is linked to
+  such a practice). Absent where a paper names them, and on every other item. A
+  row of `medrec private list` has it, and its table says it in `from`. The
+  list's `clinicians_opened` (absent when there are none) has the household's
+  clinician marks: `id`, `clinician` (the mark's `printed`: the clinician as the
+  record shows them, `null` where only a source gave them, or where the record
+  shows them no more or is entered in error), `given` (`true` where `clinician`
+  is `null`; absent otherwise), `item`, `at`, `person` and
+  `person_name`.
+- **`heading`** (0.9.10 and later): `true` on a private record that is a heading
+  (Panels, above): it has no entry in `tests.json`. Absent otherwise.
 - **What a source takes back still tells** (0.9.9 and later). Nothing opens
   because a record or a paper is entered in error, the person's or one of a
   person their events read (X1, X2): each rule is judged with what is and with
@@ -2459,6 +2537,11 @@ nothing is private.
   `events_in_error` can be here. A study with no report, with what is
   entered in error or without it, is in `unreported_studies`; so one whose only
   report is, which is in `studies` too when that report was private.
+- **Brands** (0.9.10 and later). Wherever a text is judged by a medicine's words,
+  its brands are among them: a bill's page, the lines of a paper, a service, a payer note, a
+  text value and a conclusion. A brand that is a person's name too, or a word
+  ("Camila", "Plan B"), is one only as a medicine's name or code, or in a pharmacy
+  claim's `display`, and in no other text.
 - **Questionnaires** (0.9.9 and later). A result or a report is a
   questionnaire's by the LOINC code it has, else by the words of its name or of
   its code's, and (0.9.10 and later) a result by the same of any of its parts, for
@@ -2483,7 +2566,7 @@ nothing is private.
   in ranges, are in medrec's `src/services.rs`; a code whose `system` is of
   medicines, results, findings or diagnoses (NDC, RxNorm, LOINC, SNOMED, ICD-10)
   is none. A claim's category, its amounts and its dates say nothing.
-- **Private parts** (0.9.9 and later). A claim of several services, a bill and an
+- **Private parts** (0.9.9 and later). A claim of several services, a paper and an
   event stay open when only a part of them is private. `parts` has what is
   private in each open item, by its id, and how the item is shown without it.
   Where a reader leaves private items out (a shared screen, an answer that names
@@ -2514,10 +2597,11 @@ nothing is private.
     in whose place any version of any of its sources gave one that is. `display`
     is its name by the lines that are left, `category` theirs where that is
     another (null where none is left), and `date` its date.
-  - **A bill, a receipt or an explanation of benefits** has `text`: the byte
-    offset and length in its text (`text.json`) of each line that says an area,
-    by words or by a service's number, without its line end (a line feed or a
-    form feed). Words that go over from one line to the next are in both.
+  - **A paper** (before 0.9.10 only a bill, a receipt or an explanation of
+    benefits) has `text`: the byte offset and length in its text (`text.json`) of
+    each line that says an area, by words or by a service's number, without its
+    line end (a line feed or a form feed). Words that go over from one line to
+    the next are in both.
   - **An event** has what of `kind`, `title`, `what`, `what_from`, `place`,
     `place_from`, `clinicians`, `money` and `differences` its members that are
     not private do not say as `events.json` has it: as they say it, null where
@@ -2598,8 +2682,8 @@ readers ship with medrec:
   as it is or of no known age (`stale`), how many were read because Drive could
   not be reached (`unreachable`), and `oldest_seconds`, the age of the oldest,
   absent where none was read or one's is not known. `--fresh` reads Drive alone.
-  A command that always does (one that writes, `reindex --dry-run`, `verify
-  --events`) has none, nor has one that reads a local folder.
+  A command that always does (one that writes, `reindex --dry-run`,
+  `verify`, with or without `--events`) has none, nor has one that reads a local folder.
 - **`medrec mcp`**, for Claude Desktop and Claude Code, reads the same files
   through the same views, per call, with no lock. It writes nothing,
   `_requests/` included. Its answers are computed, not stored:
@@ -2641,7 +2725,12 @@ readers ship with medrec:
       the bills on it, and `events` counts those in `events_in_error`; an event
       on it says how many of its own are, of those the answer may show, in its
       `detail` ("1 entered in error, not shown"), and has `in_error` and
-      `not_applied` in its `fields` when those are in the answer.
+      `not_applied` in its `fields` when those are in the answer, each absent
+      when nothing is left of it (0.9.10 and later; 0.9.9 could give an empty
+      list). So with an event asked for by its id in a call that names no person
+      (0.9.10 and later; 0.9.9 named them all). One that is private itself, asked
+      for by its id or named, has all of its own (one named, 0.9.10 and later;
+      0.9.9 left out what was held back).
     - any other item its sources differ on has `standing` `sources differ` and
       `says`, as `standing.json`'s words are said; the household's own file is
       `the household's own file`. It keeps its `status`.
@@ -2945,11 +3034,40 @@ characters and the invisible format characters that reorder or hide text
 | `records_updated` | records whose content or version changed |
 | `records_unchanged` | records the same as filed, a refresh included |
 | `records_older` | versions not later than the one filed, which stayed (0.2.7 and later) |
+| `records_not_served` | records this source gave before that this export does not have (0.9.10 and later), which are kept; `null` where that cannot be told |
 | `documents_added` | documents filed |
 | `documents_duplicate` | Binaries with the bytes of a document or rendering already filed |
 | `documents_unchanged` | renderings of a document already filed |
 | `documents_same_statement` | bills filed that are the same statement as a bill filed before (0.2.9 and later) |
 | `papers_unread` | raw files that describe papers, or are the bytes of one, and do not read (0.9.9 and later): the source's, where the stream says that something describing a paper is entered in error or carries an older version of it, and those of the person's other sources, where a paper is newly entered in error; otherwise 0 |
+
+`records_not_served` is of an export through a sign-in of all the source has: it is
+`null` with `--since`, where the export's header has `since`, with `--from-files`,
+with neither `--from-profile` nor `--from-files` for a provider that reads files
+(`records-files`), where the source's folder has imports of another patient, and
+where a skip names neither a type nor a search. A record is not counted while any of its resources
+from this source is in the export, or may be among those it left out (its type was
+withheld or cut short, it is itself among the skips, or it is a `MedicationRequest`
+and a `MedicationDispense` is), nor when it is about another person. Nor is it
+where the provenance of one of them is not from a sign-in's run (its `fetched_at`
+is that run's `pulled_at`): files can have what the source gives no sign-in. A
+sign-in that gives the same version again, no later, leaves the provenance as it
+was. A run says which it was (`from_files`); with neither `--from-profile` nor
+`--from-files`, a provider that reads files (`records-files`) may have read some,
+and the run is of files. One filed before 0.9.10 does not say, and is taken for a
+sign-in's where the provider reads no files, else for neither. A record that is
+counted stays in the count of each later import that can tell it. `not_served`
+(0.9.10 and later) has the count of each kind, `{<kind>: n}`, and is `null` when
+the count is.
+
+`updated` (0.9.10 and later) is a list of the records updated, `{id, kind,
+changed}`: `changed` has the names of what is other than it was, a member of the
+record (`status`, `code`, `display`, `date`, `words`, `errors`, `providers`,
+`lists`, `documents`) or a field as `fields.<name>`, and no value. It is empty for a
+version that differs in nothing medrec reads, or only in what no reader shows
+(`given`, `listed_by`). Several resources of one record make one entry. A
+record about another person has none, and neither does one that this same import
+first added, though `records_updated` counts a later resource that joins it.
 
 A field added to `import/v1` is additive: a script reads a missing one as
 absent, never as an error.

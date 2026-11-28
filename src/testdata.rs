@@ -42,6 +42,10 @@ pub const PROVIDER_INFO_FILES: &str =
 /// The same for a provider that needs no login.
 pub const PROVIDER_INFO_NO_LOGIN: &str =
     include_str!("../tests/fixtures/stream/fakeprov-info-no-login.json");
+
+/// The same of one that reads files and signs in nowhere.
+pub const PROVIDER_INFO_FILES_ONLY: &str =
+    include_str!("../tests/fixtures/stream/fakeprov-info-files-only.json");
 /// The fake provider's `profiles list --json`: `adult1` and `adult2`.
 pub const PROVIDER_PROFILES: &str = include_str!("../tests/fixtures/stream/fakeprov-profiles.json");
 /// A synthetic clinical summary with `{{RENDERING}}` (its timestamp and
@@ -261,8 +265,8 @@ pub fn write_dicom(dicom: &Path) {
 /// A fake `health-records/v1` provider, `fakeprov`, that prints `stream`
 /// for `records export`. Returns the directory to put on `PATH`.
 ///
-/// Its `info` is `FAKEPROV_INFO` (`unprofiled`, `no-login` or `files`, else
-/// the current one, which lists `login-profiles`). Its profiles are `adult1`
+/// Its `info` is `FAKEPROV_INFO` (`unprofiled`, `no-login`, `files` or
+/// `files-only`, else the current one, which lists `login-profiles`). Its profiles are `adult1`
 /// and `adult2`; an export that signs in without one of them is exit 2, as a
 /// provider's is, and `--files <DIR>` (with `files`) needs a directory and
 /// no `--profile`. It writes the export's arguments to `export-args`, and
@@ -292,6 +296,11 @@ pub fn write_provider(provider: &Path, stream: &str) -> PathBuf {
         PROVIDER_INFO_FILES,
     )
     .unwrap();
+    std::fs::write(
+        provider.join("fakeprov-info-files-only.json"),
+        PROVIDER_INFO_FILES_ONLY,
+    )
+    .unwrap();
     std::fs::write(provider.join("fakeprov-profiles.json"), PROVIDER_PROFILES).unwrap();
     let script = provider.join("fakeprov");
     write(
@@ -302,7 +311,7 @@ pub fn write_provider(provider: &Path, stream: &str) -> PathBuf {
 d='{0}'
 case "$1" in
   info) case "$FAKEPROV_INFO" in
-      unprofiled|no-login|files) cat "$d/fakeprov-info-$FAKEPROV_INFO.json" ;;
+      unprofiled|no-login|files|files-only) cat "$d/fakeprov-info-$FAKEPROV_INFO.json" ;;
       *) cat "$d/fakeprov-info.json" ;;
     esac ;;
   profiles) cat "$d/fakeprov-profiles.json" ;;
@@ -376,4 +385,38 @@ esac
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
     provider.to_path_buf()
+}
+
+/// `PATH` for a test's run of medrec: `path` after a folder whose `open` and
+/// `xdg-open` launch nothing and only add their arguments to its `launched`
+/// file, so that a viewer a test reaches never opens on the machine. The
+/// tests also set `MEDREC_VIEWER=none`, which launches nothing at all.
+pub fn no_viewer_path(path: &str) -> String {
+    format!("{}:{path}", no_viewer_dir().display())
+}
+
+/// The folder of that `open` and `xdg-open`, one for the test process: made
+/// new, under a name no one can foresee, for this user alone, and its files
+/// made new in it.
+pub fn no_viewer_dir() -> PathBuf {
+    static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        use std::io::Write;
+        use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+        let name = format!("medrec-no-viewer-{}", crate::ids::new("t"));
+        let dir = std::env::temp_dir().join(name);
+        std::fs::DirBuilder::new().mode(0o700).create(&dir).unwrap();
+        let script = "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$(dirname \"$0\")/launched\"\n";
+        for name in ["open", "xdg-open"] {
+            let mut f = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o700)
+                .open(dir.join(name))
+                .unwrap();
+            f.write_all(script.as_bytes()).unwrap();
+        }
+        dir
+    })
+    .clone()
 }

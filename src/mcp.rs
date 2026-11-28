@@ -511,7 +511,7 @@ impl Toolset for MedrecTools {
                  about mental health, reproductive or sexual health or substance use carry \
                  private, with its area: an answer about the whole household leaves them out \
                  and its warnings say how many, and leaves such lines out of a claim, an event \
-                 or a bill's text, which not_shown or hint says; they are in answers about that \
+                 or a paper's text, which not_shown or hint says; they are in answers about that \
                  person, or that name the item. Keep them out of anything shared. Give the date and \
                  source of each fact you use, and say when the records \
                  do not answer the question. Each result carries its lab's own reference range \
@@ -1486,8 +1486,11 @@ impl MedrecTools {
             if e["entered_in_error"] == true && id.is_none() {
                 private.errors.extend(e["id"].as_str().map(str::to_string));
             }
-            // What an answer could not show it does not count or name.
-            if person.or(id).is_none() {
+            // What an answer could not show it does not count or name. One that
+            // is private itself has all of its own.
+            let whole = e["id"].as_str();
+            let whole = whole.is_some_and(|id| private.areas.contains_key(id));
+            if person.is_none() && !whole {
                 let shown = |x: &Value| x.as_str().is_some_and(|x| !private.held_back(x));
                 if let Some(ids) = e["in_error"].as_array_mut() {
                     ids.retain(shown);
@@ -1497,6 +1500,11 @@ impl MedrecTools {
                         let members = d["members"].as_array().into_iter().flatten();
                         members.into_iter().all(shown)
                     });
+                }
+                for list in ["in_error", "not_applied"] {
+                    if e[list].as_array().is_some_and(Vec::is_empty) {
+                        e[list].take();
+                    }
                 }
             }
         }
