@@ -1,17 +1,20 @@
 BIN := medrec
 CARGO ?= cargo
+# Where cargo puts what it builds: CARGO_TARGET_DIR when it is set, so the
+# binary signed and smoke-tested is the one just built.
+TARGET_DIR := $(or $(CARGO_TARGET_DIR),target)
 
 .PHONY: build release test lint fmt fmt-check clean install deps smoke verify dev
 
 # Every target that produces a binary signs it (family-cli: an ad-hoc
 # signature is a new code identity on every build). medrec reads no
 # Keychain item, but the family keeps one rule.
-build: SIGN_TARGET = target/debug/$(BIN)
+build: SIGN_TARGET = $(TARGET_DIR)/debug/$(BIN)
 build:
 	$(CARGO) build
 	@$(SIGN)
 
-release: SIGN_TARGET = target/release/$(BIN)
+release: SIGN_TARGET = $(TARGET_DIR)/release/$(BIN)
 release:
 	$(CARGO) build --release
 	@$(SIGN)
@@ -40,19 +43,20 @@ install:
 	$(CARGO) install --path . --locked --force
 	@$(SIGN)
 
-dev: SIGN_TARGET = target/debug/$(BIN)
+dev: SIGN_TARGET = $(TARGET_DIR)/debug/$(BIN)
 dev:
 	$(CARGO) build
 	@$(SIGN)
 
 # Offline smoke test: no network, no Keychain, no records folder.
-SMOKE_HELP := init drive people intake review import providers timeline search results meds \
-	conditions allergies immunizations documents note images doctor verify backup cache config auth
+SMOKE_HELP := profiles init people intake review import providers tables refresh timeline search \
+	results meds conditions allergies immunizations records documents events bills private labels \
+	note images doctor verify reindex views backup drive config auth self-update mcp cache
 smoke: build
-	@./target/debug/$(BIN) --version >/dev/null
-	@./target/debug/$(BIN) info --json >/dev/null
-	@./target/debug/$(BIN) completions bash >/dev/null
-	@for c in $(SMOKE_HELP); do ./target/debug/$(BIN) $$c --help >/dev/null || exit 1; done
+	@$(TARGET_DIR)/debug/$(BIN) --version >/dev/null
+	@$(TARGET_DIR)/debug/$(BIN) info --json >/dev/null
+	@$(TARGET_DIR)/debug/$(BIN) completions bash >/dev/null
+	@for c in $(SMOKE_HELP); do $(TARGET_DIR)/debug/$(BIN) $$c --help >/dev/null || exit 1; done
 	@echo "smoke ok"
 
 verify: fmt-check lint test smoke
