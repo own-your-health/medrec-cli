@@ -59,7 +59,7 @@ PAPERS = [
     # its directions and the NDC of the person's medicine.
     (
         paper("visit", "2025-03-10", "visit_summary"),
-        "Visit summary\nExample Family Clinic\nFollow up in 2 weeks with Dr. Pat Quill.\n"
+        "Visit summary\nExample Family Clinic\nFollow up in 2 weeks with Dr. Pat Sample.\n"
         "Rx: Exampleprofen 200 mg tablet\nSig: 1 tablet by mouth twice daily\nNDC 00000-0001-01\n",
     ),
     # A day with no year, before a condition; and words with no day.

@@ -42,6 +42,8 @@ pub(crate) const SUMMARY_LINES: usize = 25;
 /// Characters of a document's text one call returns at most, before JSON
 /// escaping; the part is cut further if escaping takes it over budget.
 const TEXT_CHUNK: usize = 16_000;
+/// The most labeled lines a document answer gives.
+const LABELED: usize = 20;
 /// Characters of compact JSON a document answer stays under.
 const DOCUMENT_BUDGET: usize = 30_000;
 /// The longest note text a list carries.
@@ -508,9 +510,10 @@ pub struct DocumentOut {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub provider_labels: Vec<Map<String, Value>>,
     // What its text says on the lines it labels, a line each: a bill's
-    // amount due, follow-ups and drugs (`fields_of`).
+    // amount due, follow-ups and drugs, at most `LABELED` and a line that
+    // says how many more. Not `fields`, which is an object elsewhere.
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub fields: Vec<String>,
+    pub labeled: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hint: Option<String>,
 }
@@ -614,8 +617,8 @@ impl Toolset for MedrecTools {
             ToolDef::read(
                 DOCUMENT,
                 "Read a document",
-                "A filed document's text. A visit summary, lab report, letter or bill. Long text \
-                 comes in parts: pass next_offset as offset.",
+                "A filed document's text and labeled lines. A visit summary, lab report, letter \
+                 or bill. Long text comes in parts: pass next_offset.",
             )
             .input::<DocumentArgs>()
             .output::<DocumentOut>(),
@@ -1745,17 +1748,23 @@ impl MedrecTools {
         let places = private.parts.places(&d.id);
         let shown = |lines: &[crate::parts::Place]| !crate::paper::left_out(lines, &places);
         let due = s.and_then(|s| s.amount_due.as_ref()).map(money);
-        out.fields
+        out.labeled
             .extend(due_line(due, s.and_then(|s| s.due_date.as_deref())));
         if let Some(fields) = &d.fields {
             let follow = fields.follow_up.iter().filter(|x| shown(&x.lines));
-            out.fields.extend(follow.map(follow_up_line));
+            out.labeled.extend(follow.map(follow_up_line));
             let drugs = fields.drugs.iter().filter(|x| shown(&x.lines));
-            out.fields.extend(drugs.map(|x| {
+            out.labeled.extend(drugs.map(|x| {
                 let medicine = crate::paper::medicine(x, &idx.records);
                 let medicine = medicine.filter(|r| !whole || !private.held_back(&r.id));
                 drug_line(x, medicine.map(|r| r.id.as_str()))
             }));
+        }
+        if out.labeled.len() > LABELED {
+            let more = out.labeled.len() - LABELED;
+            out.labeled.truncate(LABELED);
+            out.labeled
+                .push(format!("{more} more on labeled lines: the text has them"));
         }
         if chars.is_empty() {
             out.hint = hint(Some(

@@ -229,8 +229,8 @@ it says nothing of them.
 
 ```json
 {"fields": {
-  "follow_up": [{"words": "in 2 weeks with Dr. Pat Quill.", "date": "2025-03-24",
-                 "dated": "relative", "with": ["Dr. Pat Quill"], "lines": [[36, 40]]}],
+  "follow_up": [{"words": "in 2 weeks with Dr. Pat Sample.", "date": "2025-03-24",
+                 "dated": "relative", "with": ["Dr. Pat Sample"], "lines": [[36, 41]]}],
   "drugs": [{"drug": "Exampleprofen 200 mg tablet",
              "directions": "1 tablet by mouth twice daily", "ndc": "00000000101",
              "lines": [[77, 31], [109, 34], [144, 17]]}]}}
@@ -241,22 +241,31 @@ it says nothing of them.
   never read, and nothing is joined across one: directions after it are no
   drug's. A label alone on its line heads its value on the next line.
 - `follow_up`: one for each line that starts "Follow up" (also "Follow-up",
-  "F/U"), "Next appointment" or "Next visit", or "Return" where the words after
-  it say when or why ("in", "on", "at", "to clinic", "if", ...) and not a return
-  to work or school. `words` are the line's words after the label, as printed,
-  up to 200 characters.
-  - `date` is the first day the words tell before any condition ("if", "as
-    needed", "PRN", "unless", "should"); a day after one is the condition's, so
-    "as needed" or "if symptoms persist" keeps the words with no `date`.
+  "F/U"), "Next appointment" or "Next visit", or "Return" where it is "Return
+  visit" or "Return appointment", is followed by a colon or a dash, or the words
+  after it say when or why ("in", "on", "at", "to clinic", "if", ...). A return
+  to work, school, daycare, sports or one's activities is never one, marked or
+  not. `words` are the line's words after the label, as printed, up to 200
+  characters.
+  - `date` is the day the words tell before any condition ("if", "as needed",
+    "PRN", "unless", "should"); a day after one is the condition's, so "as
+    needed" or "if symptoms persist" keeps the words with no `date`. A day
+    printed whole is the one told, wherever it stands; else the first told.
     `dated` says how: `printed`, a day printed whole; `relative`, a time after
-    the paper's own `date` ("in 2 weeks", "in a month"; of a range, "2 to 3
-    weeks", its earliest day; a month later than a day the month has not is
-    its last day); `resolved`, a day printed without a year, its first
+    the paper's own `date`, where the words start with it or "in", "within" or
+    "after" comes before it ("2 weeks", "in a month", "within 3 days"; of a
+    range, "2 to 3 weeks", its earliest day; a month later than a day the
+    month has not is its last day), and not where it is what something lasts
+    or an age ("after 10 days of antibiotics", "6 month well-child check", "2
+    days before"); `resolved`, a day printed without a year, its first
     occurrence on or after the paper's date. Without a paper `date` only a
     printed day is told.
   - `with` is each place or clinician the words name after "with", "see" or
     "at", as printed: words that start with a capital, up to a word of when or
-    why. "Your doctor" is none.
+    why or a comma, after which another may start ("with Dr. Pat Sample,
+    Placeholder Counseling Center" is two). An initial ("A.") is a name's,
+    never an article; a credential after a comma ("NP", "LCSW") is no name.
+    "Your doctor" is none.
 - `drugs`: one for each line that starts "Rx", "Medication", "Medicine",
   "Drug", "Prescribed" or "Prescription" with a colon ("Rx" with none too)
   and words after it that name one: not a number, a count or a word that there
@@ -2760,14 +2769,19 @@ nothing is private.
     each line that says an area, by words or by a service's number, without its
     line end (a line feed or a form feed). Words that go over from one line to
     the next are in both. From 0.9.12 it has the lines of each of its `fields`
-    (Fields of a paper, above) that is private by what it says, too: a drug of an
-    area by its name or brand (Private's `medicine`), or one that is the person's
-    medicine by an equal code where that medicine is private; a follow-up whose
-    `with` names a place of an area (by the words of Private's `provider`), a clinician the
-    `clinician` rule ties to one (by a paper that names them or a link to a
-    practice's, not by a day), or a name the household's provider word, of every
+    (Fields of a paper, above) that is private by what it says, too: a drug whose
+    name or directions name a medicine of an area or its brand (Private's
+    `medicine`), or that is the person's medicine by an equal code where any
+    medicine of that code is private; a follow-up whose words name a place of an
+    area (by the words of Private's `provider`), or that names, in `with` or as
+    any run of words that start with a capital wherever they stand, a clinician
+    the `clinician` rule ties to one (by a paper that names them or a link to a
+    practice's, not by a day) or a name the household's provider word, of every
     item that prints it, gives an area (`medrec providers`); and a field that
-    prints an ICD-10 code of an area. `documents.json` has no field any of whose
+    prints an ICD-10 code of an area. These are read from the paper's text as
+    the views are written, never from its `fields` in `index.json`, which a
+    medrec older than 0.9.12 drops: what is held back is the same before a
+    `medrec reindex` as after it. `documents.json` has no field any of whose
     `lines` are among these places; `index.json` keeps it.
   - **An event** has what of `kind`, `title`, `what`, `what_from`, `place`,
     `place_from`, `clinicians`, `money` and `differences` its members that are
@@ -2981,8 +2995,9 @@ readers ship with medrec:
     for all of it.", with its person's name; `text_chars` and the pages are those of what it gives. With
     `person` (a usage error where the document is not that person's) it gives all
     of it, with its records and labels as an answer about them has them.
-    Its `fields` (0.9.12 and later; before, `amount_due` and `due_date`) are a
-    line each: "Amount due: $90.00, by 2024-10-29" of a bill's statement,
+    Its `labeled` lines (0.9.12 and later; before, `amount_due` and `due_date`)
+    are a line each, at most 20 and then one that says how many more the text
+    has: "Amount due: $90.00, by 2024-10-29" of a bill's statement,
     "Follow-up: <words> (<date>, <how>)" of each follow-up, `how` being "as
     printed", "from the paper's date" or "printed with no year", and "Drug, from
     a paper: <drug>: <directions> (RxNorm …; NDC …; the person's medicine <id>)"

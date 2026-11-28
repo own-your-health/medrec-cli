@@ -319,7 +319,7 @@ medrec note add Robin "Ask about the recheck" --tag question --about <record id>
 
 medrec verify                                   # every indexed file against the index
 medrec verify --events                          # and each event's place, and its records' names, days and sources, against their raw files: counts and ids
-medrec reindex                                  # claims shaped again, providers, statuses, what each source gave and what else served a paper read again from the raw files, results' parts, categories and performers too, reports' performers, what panels and reports list, the records' links made again, results about somebody else put in a record of their own, and bills and receipts read again, after an upgrade
+medrec reindex                                  # claims shaped again, providers, statuses, what each source gave and what else served a paper read again from the raw files, results' parts, categories and performers too, reports' performers, what panels and reports list, the records' links made again, results about somebody else put in a record of their own, and bills and receipts read again, and other papers' follow-ups and drugs, after an upgrade
 medrec backup --to "/Volumes/Backup/Medical Records"
 ```
 
@@ -932,15 +932,15 @@ supported.
 | `medrec_summary` | The household's people. With `person`: their current medicines (and those on hold or ended by their date), conditions and allergies, immunizations, the latest result of each test with the lab's range and flag, recent visits, and bills with an amount due |
 | `medrec_search` | Documents, records, imaging studies and notes holding every word of a query; a query naming lab tests (`blood tests`, `labs`) also finds every lab result, report and lab claim |
 | `medrec_records` | One kind, newest first: `medications`, `conditions`, `allergies`, `immunizations`, `visits`, `procedures`, `results` (with `name`, one test over time), `tests` (the latest result of each), `reports`, `claims`, `coverage`, `bills`, `documents`, `notes`, `timeline` or `events` (what happened: one per visit, ER trip, stay, test or fill, with `you_owe`; `id` gives one with its money and members); `active` keeps current ones (not for `events`, whose `status` says which are still waiting), and conditions, allergies and medicines say what each source says of them ("What is current") |
-| `medrec_document` | A filed document's extracted text, in parts of up to 16,000 characters, with page breaks marked, and its `fields`, a line each: a bill's amount due, and (0.9.12 and later) the follow-ups and drugs its labeled lines give, a drug "from a paper" |
+| `medrec_document` | A filed document's extracted text, in parts of up to 16,000 characters, with page breaks marked, and its `labeled` lines, a line each and at most 20: a bill's amount due, and (0.9.12 and later) the follow-ups and drugs its labeled lines give, a drug "from a paper" |
 
 Private items (above) are left out of an answer about the whole household,
 whose warnings say how many. An answer about one person includes them, and
 so does one that names the item ("sertraline", not "tablets"), each marked
 `private` with its area. The private part of an open item is left out too, and
 `not_shown` says how much; `medrec_document` gives a paper's text without its
-private lines, and its `fields` without a follow-up or drug private by what it
-says, unless `person` names its person.
+private lines, and its `labeled` lines without a follow-up or drug private by
+what it says, unless `person` names its person.
 
 Claims, events, documents and bills carry `provider_labels` beside the source's
 words: who a printed provider is (Provider labels, above), how sure that is and

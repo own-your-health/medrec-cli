@@ -758,11 +758,12 @@ struct Judges<'a> {
 
 impl Judges<'_> {
     /// The lines of a paper's fields that are private by what each says
-    /// ([`crate::paper`]): a drug of an area by its name, or as the person's
-    /// medicine by an equal code where that is private; a follow-up that names
-    /// a place or a clinician of one, by its name, the clinician rule or the
-    /// household's word on that name; and a diagnosis code of an area either
-    /// prints.
+    /// ([`crate::paper`]): a drug whose name or directions name a medicine of
+    /// an area, or that is the person's medicine by an equal code where any
+    /// such medicine is private; a follow-up whose words name a place of an
+    /// area, or name a clinician or place, wherever in them, that the
+    /// clinician rule or the household's word on that name gives one; and a
+    /// diagnosis code of an area either prints.
     fn lines(
         &self,
         f: &crate::paper::Fields,
@@ -775,13 +776,18 @@ impl Judges<'_> {
                 || self.clinicians.of_name(n).is_some()
                 || said_area(self.corrections, n).is_some()
         };
-        let follow = f.follow_up.iter();
-        let follow = follow.filter(|x| x.with.iter().any(named) || coded(&x.words));
+        let follow = f.follow_up.iter().filter(|x| {
+            let spans = crate::paper::spans(&x.words);
+            place_area(&x.words).is_some()
+                || x.with.iter().chain(&spans).any(named)
+                || coded(&x.words)
+        });
         let drugs = f.drugs.iter().filter(|d| {
             let said = [Some(d.drug.as_str()), d.directions.as_deref()];
-            medicine(&d.drug).is_some()
-                || said.into_iter().flatten().any(coded)
-                || crate::paper::medicine(d, records).is_some_and(|r| held(&r.id))
+            let said = || said.into_iter().flatten();
+            said().any(|t| medicine(t).is_some())
+                || said().any(coded)
+                || crate::paper::medicines(d, records).any(|r| held(&r.id))
         });
         let follow = follow.flat_map(|x| x.lines.iter().copied());
         follow
@@ -836,7 +842,10 @@ fn parts_of(
     for d in idx.documents.iter().filter(|d| judged(&d.id)) {
         let text = texts.texts.get(&d.id);
         let mut places = text.map(|t| parts::of_text(t)).unwrap_or_default();
-        if let (Some(text), Some(f)) = (text, &d.fields) {
+        // Read from the stored text, not the index's fields, which an older
+        // medrec drops: what is held back never rests on them.
+        let fields = text.and_then(|t| crate::paper::of(d, Some(t)));
+        if let (Some(text), Some(f)) = (text, &fields) {
             // Only lines of its text: a reader leaves out a field by them.
             let lines = parts::lines(text);
             let of = judges.lines(f, &idx.records, &held);
@@ -1615,14 +1624,29 @@ mod tests {
             ndc: None,
             lines: vec![[at, 1]],
         };
+        // Words that name a place or a clinician with no "with" before it.
+        let unnamed = |words: &str, at: usize| FollowUp {
+            words: words.into(),
+            with: Vec::new(),
+            ..follow("", at)
+        };
         let f = Fields {
             follow_up: vec![
                 follow("Placeholder Counseling Center", 0),
                 follow("Kim Placeholder", 2),
-                follow("Pat Quill", 4),
+                follow("Pat Sample", 4),
                 follow("Sample Group", 6),
+                unnamed("Placeholder Counseling Center, 3/4/2027", 12),
+                unnamed("in 2 weeks: Sample Group", 14),
             ],
-            drugs: vec![drug(Some("0000345"), 8), drug(None, 10)],
+            drugs: vec![
+                drug(Some("0000345"), 8),
+                drug(None, 10),
+                Drug {
+                    directions: Some("Stop Camila before starting".into()),
+                    ..drug(None, 16)
+                },
+            ],
         };
         let mut idx = PersonIndex::new("p_test");
         idx.documents = vec![
@@ -1634,12 +1658,17 @@ mod tests {
                 "filed_at": "2024-01-02T10:00:00Z", "filed_by": "medrec"}}))
             .unwrap(),
         ];
-        idx.records = vec![
-            serde_json::from_value(json!({"id": "r_heldaaaaaaaaaaaaaaaa",
+        // An open medicine of the same code first: the private one holds it.
+        let medication = |id: &str| -> Record {
+            serde_json::from_value(json!({"id": id,
             "kind": "medication", "key": "m", "display": "Exampleprofen 200 mg tablet",
             "code": {"system": crate::normalize::RXNORM, "code": "0000345"},
             "fields": {}, "provenance": []}))
-            .unwrap(),
+            .unwrap()
+        };
+        idx.records = vec![
+            medication("r_openaaaaaaaaaaaaaaaa"),
+            medication("r_heldaaaaaaaaaaaaaaaa"),
         ];
         let said: crate::corrections::Correction = serde_json::from_value(json!({
             "id": "c_aaaaaaaaaaaaaaaaaaaa", "printed": ["Sample Group"],
@@ -1652,11 +1681,14 @@ mod tests {
         };
         let held = |id: &str| id == "r_heldaaaaaaaaaaaaaaaa";
         let lines = judges.lines(&f, &idx.records, &held);
-        assert_eq!(lines, vec![[0, 1], [2, 1], [6, 1], [8, 1]]);
+        assert_eq!(
+            lines,
+            vec![[0, 1], [2, 1], [6, 1], [12, 1], [14, 1], [8, 1], [16, 1]]
+        );
         // Open, the medicine holds nothing; and a word of one item is of it alone.
         assert_eq!(
             judges.lines(&f, &idx.records, &|_| false),
-            vec![[0, 1], [2, 1], [6, 1]]
+            vec![[0, 1], [2, 1], [6, 1], [12, 1], [14, 1], [16, 1]]
         );
         let mut one = said.clone();
         one.item = Some("r_otheraaaaaaaaaaaaaaa".into());
@@ -1666,7 +1698,7 @@ mod tests {
         };
         assert_eq!(
             judges.lines(&f, &idx.records, &|_| false),
-            vec![[0, 1], [2, 1]]
+            vec![[0, 1], [2, 1], [12, 1], [16, 1]]
         );
     }
 

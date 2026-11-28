@@ -5167,17 +5167,21 @@ fn a_papers_follow_ups_and_drugs_are_read_and_held_by_what_they_say() {
         papers["fields_private_by_content"],
         json!({"follow_up": 2, "drugs": 1})
     );
+    // What is held back never rests on the index's fields, which an older
+    // medrec drops: the views of papers it filed hold the same lines.
+    let (unread, _) = views_of(&e, &alex);
     let r = e.ok(&["reindex"]);
     assert_eq!(r["paper_fields"], 4, "{r}");
 
     let (files, _) = views_of(&e, &alex);
+    assert_eq!(unread["private"]["parts"], files["private"]["parts"]);
     let docs = files["documents"].as_array().unwrap().clone();
     let doc = |n: &str| docs.iter().find(|d| d["id"] == id(n)).unwrap().clone();
     let visit = doc("visit")["fields"].clone();
     assert_eq!(
         visit["follow_up"][0],
-        json!({"words": "in 2 weeks with Dr. Pat Quill.", "date": "2025-03-24",
-            "dated": "relative", "with": ["Dr. Pat Quill"], "lines": [[36, 40]]})
+        json!({"words": "in 2 weeks with Dr. Pat Sample.", "date": "2025-03-24",
+            "dated": "relative", "with": ["Dr. Pat Sample"], "lines": [[36, 41]]})
     );
     let drug = &visit["drugs"][0];
     assert_eq!(drug["drug"], "Exampleprofen 200 mg tablet");
@@ -5230,7 +5234,7 @@ fn a_papers_follow_ups_and_drugs_are_read_and_held_by_what_they_say() {
             args["person"] = p.into();
         }
         let r = call(&t, DOCUMENT, args);
-        assert_fits(&t, DOCUMENT, &r)["fields"].clone()
+        assert_fits(&t, DOCUMENT, &r)["labeled"].clone()
     };
     assert_eq!(
         fields("counsel", None),
@@ -5244,7 +5248,7 @@ fn a_papers_follow_ups_and_drugs_are_read_and_held_by_what_they_say() {
     assert_eq!(
         fields("visit", None),
         json!([
-            "Follow-up: in 2 weeks with Dr. Pat Quill. (2025-03-24, from the paper's date)",
+            "Follow-up: in 2 weeks with Dr. Pat Sample. (2025-03-24, from the paper's date)",
             format!("Drug, from a paper: Exampleprofen 200 mg tablet: 1 tablet by mouth twice daily (NDC 00000000101; the person's medicine {medicine})"),
         ])
     );

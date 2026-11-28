@@ -175,8 +175,9 @@ enum Command {
     /// values and categories too) and what each lists again, from the filed raw
     /// resources, put each result about somebody else that was filed as the
     /// person's own in a record of its own, link the records again, and read
-    /// bills' and receipts' statements again, as this medrec's import does: once
-    /// after an upgrade that changes them.
+    /// bills' and receipts' statements and other papers' follow-ups and drugs
+    /// again, as this medrec's import does: once after an upgrade that changes
+    /// them.
     Reindex(ReindexArgs),
     /// The views: each person's records cut into small files under views/,
     /// for readers that cannot parse a whole index at once. medrec brings

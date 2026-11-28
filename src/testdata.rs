@@ -181,6 +181,7 @@ pub fn write_scans(scans: &Path) {
             "Date of service: 02/10/2026",
             "Amount billed $150.00  Plan paid $110.00  You owe $40.00",
             "This is not a bill.",
+            "Follow up with your plan in 30 days.",
         ]),
     );
     write(
@@ -191,6 +192,7 @@ pub fn write_scans(scans: &Path) {
             "Alex Testperson",
             "Robin Testperson",
             "Please sign and return.",
+            "Follow up in 2 weeks.",
         ]),
     );
     // A raster "scan" for the OCR path.

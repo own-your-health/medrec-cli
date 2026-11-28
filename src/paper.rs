@@ -127,7 +127,8 @@ pub fn annotate(doc: &mut Document, text: &str) {
     doc.fields = of(doc, Some(text));
 }
 
-fn of(doc: &Document, text: Option<&str>) -> Option<Fields> {
+/// What a paper's text says, where its type is read.
+pub(crate) fn of(doc: &Document, text: Option<&str>) -> Option<Fields> {
     let text = text.filter(|_| reads(doc.doc_type.as_deref()))?;
     Some(read(text, doc.date.as_deref())).filter(|f| !f.is_empty())
 }
@@ -247,8 +248,9 @@ fn labelled(line: &str) -> bool {
 }
 
 /// The rest of a follow-up's line: after "Follow up", "Return" or "Next
-/// appointment". A "Return" is one where the words after it tell when or why,
-/// and not a return to work or school.
+/// appointment". A "Return" is one marked as a visit, by "visit",
+/// "appointment", a colon or a dash, or where the words after it tell when or
+/// why; never a return to work, school or what one does.
 fn follow_up_label(line: &str) -> Option<&str> {
     static FOLLOW: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r"(?i)^(?:follow[ -]*up|f/u|next (?:appointment|appt\.?|visit))(?: (?:appointment|appt\.?|visit|care|instructions?))?(?:\s*[:–—-]|\s+|$)").unwrap()
@@ -259,11 +261,18 @@ fn follow_up_label(line: &str) -> Option<&str> {
     static WHEN: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r"(?i)^(?:to (?:clinic|the clinic|office|the office|see|this)|in|on|at|for|if|as|within|after|precautions|when|sooner|prn)\b").unwrap()
     });
+    static ACTIVITY: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)^(?:to\s+)?(?:work|school|class|duty|sports?|play|daycare|day care|normal|full|usual|regular|(?:all\s+)?activit)").unwrap()
+    });
     if let Some(m) = FOLLOW.find(line) {
         return Some(&line[m.end()..]);
     }
     let c = RETURN.captures(line)?;
     let rest = &line[c.get(0)?.end()..];
+    let said = rest.trim_start_matches(|c: char| c.is_whitespace() || ":-–—".contains(c));
+    if ACTIVITY.is_match(said) {
+        return None;
+    }
     let marked = c.get(1).is_some()
         || line[..c.get(0)?.end()]
             .trim_end()
@@ -431,8 +440,14 @@ fn day_in(head: &str, paper: Option<Civil>) -> Option<(String, Dated)> {
     static DAY_MONTH: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(&format!(r"(?i)\b([0-9]{{1,2}})(?:st|nd|rd|th)?\s+(?:of\s+)?({MONTHS})\b\.?(?:,?\s*([0-9]{{4}})\b)?")).unwrap()
     });
+    // A time from the paper's date only where it is one: at the start of
+    // the words or after "in", "within" or "after", and not a time something
+    // lasts or an age ("after 10 days of antibiotics", "6 month well visit").
     static AFTER: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(&format!(r"(?i)\b(?:in\s+(a|an)\s+|({COUNTS})(?:\s*(?:-|–|to|or)\s*(?:{COUNTS}))?\s*)(days?|wks?|weeks?|mos?|months?|yrs?|years?)\b")).unwrap()
+        Regex::new(&format!(r"(?i)(?:^|\b(?:in|within|after)\s+)(?:(a|an)\s+|({COUNTS})(?:\s*(?:-|–|to|or)\s*(?:{COUNTS}))?\s*)(days?|wks?|weeks?|mos?|months?|yrs?|years?)\b")).unwrap()
+    });
+    static LASTS: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)^[\s-]*(?:of|old|before|ago|prior|earlier|well|check|visit|exam|physical|course|supply|post|from now on)\b").unwrap()
     });
     // Each day told, by where it starts.
     let mut told: Vec<(usize, Option<(String, Dated)>)> = Vec::new();
@@ -466,6 +481,9 @@ fn day_in(head: &str, paper: Option<Civil>) -> Option<(String, Dated)> {
     }
     for c in AFTER.captures_iter(head) {
         let at = c.get(0)?.start();
+        if LASTS.is_match(&head[c.get(0)?.end()..]) {
+            continue;
+        }
         let n = match (c.get(1), c.get(2)) {
             (Some(_), _) => Some(1),
             (None, Some(n)) => count(n.as_str()),
@@ -484,8 +502,12 @@ fn day_in(head: &str, paper: Option<Civil>) -> Option<(String, Dated)> {
         })();
         told.push((at, day));
     }
+    // A day printed whole is what the paper says; else the first told.
     told.sort_by_key(|(at, _)| *at);
-    told.into_iter().find_map(|(_, day)| day)
+    let printed = told
+        .iter()
+        .find_map(|(_, d)| d.clone().filter(|(_, how)| *how == Dated::Printed));
+    printed.or_else(|| told.into_iter().find_map(|(_, day)| day))
 }
 
 fn add_days(p: Civil, n: i64) -> Option<Civil> {
@@ -500,14 +522,50 @@ fn add_months((y, m, d): Civil, n: i64) -> Option<Civil> {
 }
 
 /// The places and clinicians words name after "with", "see" or "at", as
-/// printed: words that start with a capital, up to a word of when or why.
+/// printed: words that start with a capital, up to a word of when or why. A
+/// comma ends one and may start another ("with Dr. Pat Sample, Placeholder
+/// Clinic"); a credential after it is no name ("Kim Placeholder, LCSW").
 fn names(words: &str) -> Vec<String> {
-    static AFTER: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"\b(?i:with|see|at)\s+((?:[A-Z][\w'’.&-]*|&|and|of|the)(?:\s+(?:[A-Z][\w'’.&-]*|&|and|of|the))*)").unwrap()
-    });
+    static AFTER: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(&format!(r"\b(?i:with|see|at)\s+({RUN})")).unwrap());
+    let mut out = Vec::new();
+    for c in AFTER.captures_iter(words) {
+        if let Some(m) = c.get(1) {
+            run_names(m.as_str(), &mut out);
+        }
+    }
+    out
+}
+
+/// Every run of words that start with a capital, as `names` cuts them, after
+/// any word: what a paper's follow-up may name a place or a clinician by.
+pub(crate) fn spans(words: &str) -> Vec<String> {
+    static RUNS: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(&format!(r"(?:^|\s)({RUN})")).unwrap());
+    let mut out = Vec::new();
+    for c in RUNS.captures_iter(words) {
+        if let Some(m) = c.get(1) {
+            run_names(m.as_str(), &mut out);
+        }
+    }
+    out
+}
+
+/// Words that start with a capital, with the joins between them, and a comma
+/// between two.
+const RUN: &str = r"(?:[A-Z][\w'’.&-]*,?|&|and|of|the)(?:\s+(?:[A-Z][\w'’.&-]*,?|&|and|of|the))*";
+
+/// The names in a run of words, into `out`: each to the first word of when or
+/// why, or to a comma.
+fn run_names(run: &str, out: &mut Vec<String>) {
     static WORD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\S+").unwrap());
     static MONTH: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(&format!(r"(?i)^(?:{MONTHS})$")).unwrap());
+    static INITIAL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[A-Z]\.,?$").unwrap());
+    static CREDENTIAL: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"^(?:[A-Z]{2,5}(?:-[A-Z]{1,2})?|Ph\.?D\.?|M\.D\.|D\.O\.|Psy\.?D\.?)[,;:.]?$")
+            .unwrap()
+    });
     const STOP: &[&str] = &[
         "in",
         "on",
@@ -543,22 +601,28 @@ fn names(words: &str) -> Vec<String> {
         w.trim_matches(|c: char| !c.is_alphanumeric() && c != '&')
             .to_ascii_lowercase()
     };
-    let mut out = Vec::new();
-    for c in AFTER.captures_iter(words) {
-        let Some(m) = c.get(1) else { continue };
-        // Its words, to the first of when or why, without the joins at its ends.
-        let mut kept: Vec<regex::Match> = Vec::new();
-        for w in WORD.find_iter(m.as_str()) {
-            let b = bare(w.as_str());
-            if STOP.contains(&b.as_str()) || MONTH.is_match(&b) {
-                break;
-            }
-            kept.push(w);
-            if w.as_str().ends_with([',', ';', ':']) {
-                break;
-            }
+    let mut names: Vec<Vec<regex::Match>> = vec![Vec::new()];
+    for w in WORD.find_iter(run) {
+        let raw = w.as_str();
+        let b = bare(raw);
+        // An initial is never the article it spells.
+        if !INITIAL.is_match(raw) && (STOP.contains(&b.as_str()) || MONTH.is_match(&b)) {
+            break;
         }
-        let joins = |w: &regex::Match| JOIN.contains(&bare(w.as_str()).as_str());
+        // A credential after a comma is the name's before it, and no name.
+        let after_comma = names.len() > 1 && names.last().is_some_and(Vec::is_empty);
+        if after_comma && CREDENTIAL.is_match(raw) {
+            continue;
+        }
+        if let Some(last) = names.last_mut() {
+            last.push(w);
+        }
+        if raw.ends_with([',', ';', ':']) {
+            names.push(Vec::new());
+        }
+    }
+    let joins = |w: &regex::Match| JOIN.contains(&bare(w.as_str()).as_str());
+    for mut kept in names {
         while kept.first().is_some_and(joins) {
             kept.remove(0);
         }
@@ -568,7 +632,7 @@ fn names(words: &str) -> Vec<String> {
         let (Some(first), Some(last)) = (kept.first(), kept.last()) else {
             continue;
         };
-        let mut name = m.as_str()[first.start()..last.end()].trim_end_matches([',', ';', ':']);
+        let mut name = run[first.start()..last.end()].trim_end_matches([',', ';', ':']);
         // A full stop ends a sentence, not an initial or a title.
         if name.ends_with('.') && last.as_str().trim_end_matches('.').chars().count() > 3 {
             name = &name[..name.len() - 1];
@@ -579,7 +643,6 @@ fn names(words: &str) -> Vec<String> {
             out.push(name);
         }
     }
-    out
 }
 
 // ---------------------------------------------------------------- medicines
@@ -587,11 +650,20 @@ fn names(words: &str) -> Vec<String> {
 /// The person's medicine a paper's drug is, by an equal RxNorm code or NDC:
 /// never by its name. One entered in error is none.
 pub fn medicine<'a>(drug: &Drug, records: &'a [Record]) -> Option<&'a Record> {
+    medicines(drug, records).next()
+}
+
+/// Every medicine of the person's a paper's drug is, as `medicine`.
+pub fn medicines<'a>(drug: &Drug, records: &'a [Record]) -> impl Iterator<Item = &'a Record> {
     let ndc = |s: Option<&str>| s.and_then(crate::fills::ndc);
+    let drug = Drug {
+        lines: Vec::new(),
+        ..drug.clone()
+    };
     records
         .iter()
         .filter(|r| r.kind == "medication" && !crate::standing::record_in_error(r))
-        .find(|r| {
+        .filter(move |r| {
             let code = r.code.as_ref();
             let system = code.and_then(|c| c.system.as_deref());
             let c = code.and_then(|c| c.code.as_deref()).map(str::trim);
@@ -669,6 +741,10 @@ mod tests {
         }
         for text in [
             "Return to work in 2 weeks",
+            "Return: to work on 3/4/2027",
+            "Return - to school Monday",
+            "Return visit: to daycare in 2 days",
+            "Return to normal activities in 1 week",
             "Return this part with your payment",
             "Please follow the plan",
             "We will follow up",
@@ -680,11 +756,11 @@ mod tests {
 
     #[test]
     fn a_label_alone_heads_the_words_on_the_next_line() {
-        let f = one("Follow-up instructions:\nSee Dr. Pat Quill in 3 days\n");
-        assert_eq!(f.words, "See Dr. Pat Quill in 3 days");
+        let f = one("Follow-up instructions:\nSee Dr. Pat Sample in 3 days\n");
+        assert_eq!(f.words, "See Dr. Pat Sample in 3 days");
         assert_eq!(f.lines.len(), 2);
         assert_eq!(f.date.as_deref(), Some("2027-01-13"));
-        assert_eq!(f.with, vec!["Dr. Pat Quill"]);
+        assert_eq!(f.with, vec!["Dr. Pat Sample"]);
     }
 
     #[test]
@@ -732,11 +808,41 @@ mod tests {
         );
         assert_eq!(day("Return in 6 months"), on("2027-07-10", Dated::Relative));
         assert_eq!(day("Return in 1 year"), on("2028-01-10", Dated::Relative));
-        // The first day the words tell.
+        // The first day the words tell; a day printed whole before any other.
         assert_eq!(
             day("Follow up 2/3/2027 or in 6 weeks"),
             on("2027-02-03", Dated::Printed)
         );
+        assert_eq!(
+            day("Follow up after 10 days of antibiotics, on 3/4/2027"),
+            on("2027-03-04", Dated::Printed)
+        );
+        assert_eq!(
+            day("Next visit: 6 month well-child check on 3/4/2027"),
+            on("2027-03-04", Dated::Printed)
+        );
+        assert_eq!(
+            day("Follow up within 3 days"),
+            on("2027-01-13", Dated::Relative)
+        );
+        assert_eq!(
+            day("Follow up after 1 week"),
+            on("2027-01-17", Dated::Relative)
+        );
+    }
+
+    #[test]
+    fn a_time_something_lasts_or_an_age_is_no_day() {
+        for text in [
+            "Follow up for 3 days of fever",
+            "Next appointment: 12 year well visit",
+            "Follow up 2 days before your procedure",
+            "Follow up after 10 days of antibiotics",
+            "Next visit: 6 month check",
+            "Follow up for your 2 month shots",
+        ] {
+            assert_eq!(day(text), (None, None), "{text}");
+        }
     }
 
     #[test]
@@ -781,8 +887,8 @@ mod tests {
     fn the_places_and_clinicians_a_follow_up_names_are_kept_as_printed() {
         let with = |t: &str| one(t).with;
         assert_eq!(
-            with("Follow up with Dr. Pat Quill in 2 weeks"),
-            vec!["Dr. Pat Quill"]
+            with("Follow up with Dr. Pat Sample in 2 weeks"),
+            vec!["Dr. Pat Sample"]
         );
         assert_eq!(with("FOLLOW UP WITH DR QUILL IN 2 WEEKS"), vec!["DR QUILL"]);
         assert_eq!(
@@ -793,9 +899,40 @@ mod tests {
             with("Follow up with Placeholder Pines Clinic."),
             vec!["Placeholder Pines Clinic"]
         );
+        // An initial is never an article; a comma starts another name, and a
+        // credential after one is none.
+        assert_eq!(
+            with("Follow up with Dr. A. Sample in 2 weeks"),
+            vec!["Dr. A. Sample"]
+        );
+        assert_eq!(
+            with("Follow up with Pat A. Sample in 2 weeks"),
+            vec!["Pat A. Sample"]
+        );
+        assert_eq!(
+            with("Follow up with Dr. Pat Sample, Placeholder Counseling Center"),
+            vec!["Dr. Pat Sample", "Placeholder Counseling Center"]
+        );
+        assert_eq!(
+            with("Follow up with Kim Placeholder, PA-C, in 2 weeks"),
+            vec!["Kim Placeholder"]
+        );
         assert!(with("Follow up with your doctor in 1 week").is_empty());
         assert!(with("Return at 10:30 AM on Feb 3").is_empty());
         assert!(with("Follow up with Dr. in 2 weeks").is_empty());
+    }
+
+    #[test]
+    fn every_name_a_follow_up_prints_is_a_span_wherever_it_stands() {
+        assert_eq!(
+            spans("Placeholder Counseling Center, 3/4/2027"),
+            vec!["Placeholder Counseling Center"]
+        );
+        assert_eq!(
+            spans("in 2 weeks: Kim Placeholder, LCSW"),
+            vec!["Kim Placeholder"]
+        );
+        assert!(spans("in 2 weeks as needed").is_empty());
     }
 
     #[test]
