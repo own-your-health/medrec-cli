@@ -1821,7 +1821,7 @@ removes and no reader reads. It never writes over a later
   `index.json` and `text.json` have the MD5s `views.json` recorded, under the same `household.json`,
   medrec version and `build`, the code table on this machine, when there is one, is the
   one they were made with (`code_table`), CDC's vaccine tables on it, when
-  there are any, are those they were made with (`vaccine_tables`), and the
+  there are both, are those they were made with (`vaccine_tables`), and the
   provider directory on it, when there is one, is not newer (`directory`).
   Otherwise their views are made
   again, and only views the folder does not already hold under their
@@ -1904,7 +1904,7 @@ A reader decides freshness by MD5, as Drive reports it (`md5Checksum`):
 | `people.<id>.marks` | The MD5 of the person's `marks.json` as read; `null` when there is none (0.9.1 and later). |
 | `people.<id>.linked` | For each person linked to this one (Events, below), the MD5s of their `index.json` and `text.json` as read, as `{"index", "text"}`, each `null` when the file is absent; `{}` when no one is linked (0.9.0 and later). |
 | `people.<id>.code_table` | The code table the person's names were made with (`icd10cm FY2027`); absent when the pass that made the views had none, whatever names it carried over (0.9.4 and later). A pass on a machine with another table makes the person's views again, which fills in the names; one on a machine with none leaves them. |
-| `people.<id>.vaccine_tables` | CDC's vaccine tables the person's vaccines from claims were read with, `<id> <SHA-256>` each (`cvx …, cpt-cvx …`); absent when the pass that made the views had neither (0.9.11 and later). A pass on a machine with other tables makes the person's views again; one on a machine with none leaves them, and when it makes them for another reason lists only the vaccines a line's own CVX code names. |
+| `people.<id>.vaccine_tables` | CDC's vaccine tables the person's vaccines from claims were read with, `<id> <SHA-256>` each (`cvx …, cpt-cvx …`); absent when the pass that made the views had not both, since one alone names no vaccine by a CPT code (0.9.11 and later). A pass on a machine with both, and other ones, makes the person's views again; one on a machine without both leaves them, and when it makes them for another reason lists only the vaccines its tables name. |
 | `people.<id>.directory` | Which provider directory the pass that made the views had: the last day it covers and when it was fetched, so that a newer one sorts after (0.9.7 and later). Absent when it had none. A pass on a machine with a newer one makes the person's views again; one with an older one or none leaves them. |
 | `people.<id>.provider_state` | The MD5 of the person's `provider-state.json`, absent when there is none (0.9.7 and later). Another one makes four of the person's views stale (above). |
 | `people.<id>.in_error` | `standing.json`'s `in_error`, as it is there: the ids of the person's records entered in error, by kind, and of their papers, `{"condition": ["r_…"], "document": ["d_…"]}`; absent when there is none (0.9.9 and later). |
@@ -2057,7 +2057,10 @@ medicine, condition, allergy and visit carries its record's `id`, a
 vaccine its last dose's and a latest result its own (0.9.1 and later), so
 a reader finds them in `private.json`. A vaccine a claim tells of (Records,
 above; 0.9.11 and later) is a line of its own with `from_claim: true`, one dose
-and the claim's `id`, so that a private claim's dose never adds to a line shown. A condition whose code can have a
+and the claim's `id`, so that a private claim's dose never adds to a line shown;
+`medrec mcp`'s summary says "from a claim" of it in place of its doses. Where its
+line has no name of its own it has its claim's, as the claim is shown without
+its private parts, never with them. A condition whose code can have a
 name carries `name_key`, its key in `code-names.json` (0.9.4 and later).
 
 `medications`, `conditions` and `allergies` are 0.9.8's lists, by each record's

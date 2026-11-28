@@ -143,8 +143,9 @@ pub struct PersonViews {
     pub code_table: Option<String>,
     /// CDC's vaccine tables the vaccines from claims of these views were
     /// read with (`cvx <SHA-256>, cpt-cvx <SHA-256>`), absent when the pass
-    /// that made them had neither (0.9.11 and later). A reader need not check
-    /// it: a pass on a machine with other tables makes the views again.
+    /// that made them had not both (0.9.11 and later). A reader need not check
+    /// it: a pass on a machine with both, and other ones, makes the views
+    /// again.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vaccine_tables: Option<String>,
     /// The provider directory these views' labels were made with, absent as

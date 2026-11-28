@@ -3309,7 +3309,7 @@ fn a_claims_vaccine_is_an_immunization_from_a_claim() {
     // private line.
     assert_eq!(
         ids(&shots(&t, Some("Alex"))),
-        [id("mixed"), id("cvxline"), id("flushot")]
+        [id("untitled"), id("mixed"), id("cvxline"), id("flushot")]
     );
 
     // CDC's files have no version: one that is not the recorded file is
@@ -3340,30 +3340,31 @@ fn a_claims_vaccine_is_an_immunization_from_a_claim() {
     let items = shots(&t, Some("Alex"));
     let want = [
         id("pharmacyflu"),
+        id("untitled"),
         id("mixed"),
         id("twovaccines"),
         id("cvxline"),
         id("flushot"),
     ];
     assert_eq!(ids(&items), want);
-    for i in &items[..4] {
+    for i in &items[..5] {
         assert_eq!(i["kind"], "immunization", "{i}");
         assert_eq!(i["detail"], "from a claim", "{i}");
     }
-    assert!(items[4].get("detail").is_none(), "{}", items[4]);
+    assert!(items[5].get("detail").is_none(), "{}", items[5]);
     assert_eq!(items[0]["title"], "SAMPLE VACCINE A");
     assert_eq!(
         (items[0]["date"].clone(), items[0]["code"].clone()),
         (json!("2025-10-02"), json!("900"))
     );
-    assert!(items[2].get("code").is_none(), "{}", items[2]);
+    assert!(items[3].get("code").is_none(), "{}", items[3]);
     let detailed = call(
         &t,
         RECORDS,
         json!({"kind": "immunizations", "person": "Alex", "response_format": "detailed", "limit": 50}),
     );
     let detailed = assert_fits(&t, RECORDS, &detailed).clone();
-    assert_eq!(detailed["items"][2]["fields"]["cvx"], json!(["900", "902"]));
+    assert_eq!(detailed["items"][3]["fields"]["cvx"], json!(["900", "902"]));
 
     // The summary: each on a line of its own.
     let s = call(&t, SUMMARY, json!({"person": "Alex"}));
@@ -3373,7 +3374,14 @@ fn a_claims_vaccine_is_an_immunization_from_a_claim() {
         .iter()
         .find(|x| x["section"] == "immunizations")
         .unwrap();
-    assert_eq!(ids(shots_line["items"].as_array().unwrap()), want);
+    let lines = shots_line["items"].as_array().unwrap();
+    assert_eq!(ids(lines), want);
+    let details: Vec<&str> = lines
+        .iter()
+        .map(|l| l["detail"].as_str().unwrap())
+        .collect();
+    assert_eq!(&details[..5], ["from a claim"; 5]);
+    assert_eq!(details[5], "1 dose on file");
 
     // The views, as a machine with the tables writes them: with no vaccine of
     // a line private.json leaves out, which a reader could not leave out on a
@@ -3386,21 +3394,26 @@ fn a_claims_vaccine_is_an_immunization_from_a_claim() {
         .iter()
         .map(|v| v["from_claim"] == true)
         .collect();
-    assert_eq!(from, [true, true, true, false]);
+    assert_eq!(from, [true, true, true, true, false]);
     let shards: Vec<&Value> = files
         .iter()
         .filter(|(k, _)| k.starts_with("records-immunization-"))
         .flat_map(|(_, v)| v.as_array().unwrap())
         .collect();
-    assert_eq!(shards.len(), 4);
+    assert_eq!(shards.len(), 5);
     assert!(shards.iter().all(|v| v["id"] != id("mixed").as_str()));
+    // `untitled`'s vaccine is named as its claim is shown without its private
+    // line, in both views.
+    for v in shards.iter().copied().chain(summary.as_array().unwrap()) {
+        assert!(!v.to_string().contains("counseling"), "{v}");
+    }
     assert_eq!(files["private"]["parts"][id("mixed")]["lines"], json!([0]));
     assert_eq!(
         shards
             .iter()
             .filter(|v| v["fields"]["from_claim"] == true)
             .count(),
-        3
+        4
     );
     // The command lists them too.
     let cli = e.ok(&["immunizations", "--person", "Alex"]);

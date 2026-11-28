@@ -372,6 +372,59 @@
    ]
   },
   {
+   "id": "r_untitledaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|untitled|2025-09-09",
+   "date": "2025-09-09",
+   "display": "Sample counseling · Example Clinic",
+   "status": "active",
+   "fields": {
+    "provider": "Example Clinic",
+    "insurer": "Example Health Plan",
+    "type": "professional",
+    "category": "professional",
+    "billable_period": {
+     "start": "2025-09-09",
+     "end": "2025-09-09"
+    },
+    "items": [
+     {
+      "sequence": 1,
+      "service": {
+       "system": "http://www.ama-assn.org/go/cpt",
+       "code": "00099",
+       "display": "Sample counseling"
+      },
+      "payer_notes": [
+       "Psychotherapy is paid apart"
+      ]
+     },
+     {
+      "sequence": 2,
+      "service": {
+       "system": "http://hl7.org/fhir/sid/cvx",
+       "code": "900"
+      }
+     }
+    ]
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2025-12-02T10:00:00Z",
+     "filed_at": "2025-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.11",
+     "raw_path": "Robin Example/Records/north/Any/untitled.json"
+    }
+   ]
+  },
+  {
    "id": "r_cancelledaaaaaaaaaaa",
    "kind": "claim",
    "key": "claim|cancelled|2025-07-07",

@@ -769,9 +769,10 @@ medrec tables fetch cvx --accept SHA256 # keep CDC's file that is now another
 - The files are in `~/.cache/medrec/tables`. After fetching them, run `medrec
   views write` on each profile, or let the next write do it: a person's views
   made with another ICD-10 or vaccine table, or without one, are made again.
-  Fetch CDC's tables on every machine that writes the views, since one without
-  them lists only the vaccines a claim line's own CVX code names when it makes
-  a person's views again.
+  Fetch both of CDC's tables, the same files, on every machine that writes the
+  views: one without both lists only the vaccines a claim line's own CVX code
+  names when it makes a person's views again, and two with different files
+  make each other's views again on every pass.
 - The names a person's records use are in `views/` as `code-names.json`
   (docs/data-contract.md). Like any view, they are on the Drive folder.
 

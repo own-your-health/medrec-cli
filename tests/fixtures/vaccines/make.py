@@ -58,9 +58,10 @@ def line(code, display=None, **more):
     return {"sequence": 1, "service": service, **more}
 
 
-def claim(name, day, *lines, kind="professional", status="active"):
+def claim(name, day, *lines, kind="professional", status="active",
+          display="Example Clinic · Example Health Plan"):
     return record(
-        "claim", name, day, "Example Clinic · Example Health Plan", None, status,
+        "claim", name, day, display, None, status,
         provider="Example Clinic", insurer="Example Health Plan", type=kind, category=kind,
         billable_period={"start": day, "end": day}, items=list(lines),
     )
@@ -97,6 +98,14 @@ RECORDS = [
             {"system": CPT, "code": "00099"}, {"system": CVX, "code": "902"},
         ], payer_notes=["Psychotherapy is paid apart"]),
         {**line("00099", "Sample visit"), "sequence": 2},
+    ),
+    # An open claim named by its private line, whose vaccine line has no name
+    # of its own: the vaccine takes the claim's, as shown without that line.
+    claim(
+        "untitled", "2025-09-09",
+        line("00099", "Sample counseling", payer_notes=["Psychotherapy is paid apart"]),
+        {"sequence": 2, "service": {"system": CVX, "code": "900"}},
+        display="Sample counseling · Example Clinic",
     ),
     claim("cancelled", "2025-07-07", line("00011"), status="cancelled"),
 ]

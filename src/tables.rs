@@ -481,8 +481,9 @@ pub fn fetch(
         None => (download(t)?, "downloaded"),
     };
     let sha = sha256_hex(&bytes);
+    // The file kept, downloaded or given again: nothing changes.
     let same = k.bytes.as_deref().map(sha256_hex);
-    if from.is_none() && ready && same.as_deref() == Some(sha.as_str()) {
+    if ready && same.as_deref() == Some(sha.as_str()) {
         return Ok(unchanged());
     }
     let recorded = bytes.len() as u64 == t.bytes && sha == t.sha256;
@@ -1072,9 +1073,11 @@ mod tests {
         let codes = t.columns(&local, &[0, 5]).unwrap();
         assert_eq!(codes, [["900", "False"], ["902", "False"]]);
         assert_eq!(t.identity(&local), Some(format!("cvx {sha}")));
-        // Not named, it is not downloaded again.
+        // Not named, it is not downloaded again; given again, it is unchanged.
         let again = fetch(&t, &local, None, None, false).unwrap();
         assert_eq!((again.status, again.accepted), ("unchanged", true));
+        let given = fetch(&t, &local, Some(&src), None, true).unwrap();
+        assert_eq!((given.status, given.accepted), ("unchanged", true));
 
         // Named, it is: the file kept is unchanged, another is refused and the
         // one kept still used, and the recorded file replaces it with no word.

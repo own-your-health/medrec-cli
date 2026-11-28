@@ -27,7 +27,8 @@ const NO_VACCINE: &[u32] = &[998, 999];
 pub struct Codes {
     vaccine: Option<BTreeMap<u32, bool>>,
     of_cpt: Option<BTreeMap<String, Vec<String>>>,
-    /// `<id> <SHA-256>` of each table read, as a view records it.
+    /// `<id> <SHA-256>` of both tables, as a view records them; none where
+    /// either is not here.
     identity: Option<String>,
 }
 
@@ -55,7 +56,9 @@ impl Codes {
             .iter()
             .filter_map(|t| t.identity(dir))
             .collect();
-        let identity = (!ids.is_empty()).then(|| ids.join(", "));
+        // One table alone names no vaccine by a CPT code, so it is not a set a
+        // pass makes views again by.
+        let identity = (ids.len() == 2).then(|| ids.join(", "));
         Codes {
             vaccine,
             of_cpt,
@@ -64,7 +67,7 @@ impl Codes {
     }
 
     /// The tables these codes are of, `<id> <SHA-256>` each, comma-separated;
-    /// none without either.
+    /// none without both.
     pub fn identity(&self) -> Option<&str> {
         self.identity.as_deref()
     }
@@ -186,6 +189,8 @@ pub fn of_claims(records: &[&Record], codes: &Codes, held: &Parts) -> Vec<Record
         if !crate::fills::gave(r) {
             continue;
         }
+        // Its name where a line has none, as it is shown without what is held.
+        let shown = held.record(r);
         let lines = crate::fills::counted_lines(r);
         for (_, line) in lines.filter(|(i, _)| !held.leaves_out(&r.id, "items", *i)) {
             let cvx = codes.of_line(line);
@@ -197,7 +202,7 @@ pub fn of_claims(records: &[&Record], codes: &Codes, held: &Parts) -> Vec<Record
             let text = text
                 .map(str::trim)
                 .filter(|t| !t.is_empty())
-                .unwrap_or(&r.display);
+                .unwrap_or(&shown.display);
             let filed = numbers.iter().any(|n| seen.contains(&(d.clone(), *n)))
                 || crate::events::vaccine_family(text)
                     .is_some_and(|k| kinds.contains(&(d.clone(), k)));
@@ -468,5 +473,54 @@ mod tests {
         // Another claim's parts leave none of its lines out.
         let other = Parts::of(&json!({"parts": {"r_otheraaaaaaaaaaaaaaa": {"lines": [0, 1]}}}));
         assert_eq!(of_claims(&all, &t, &other).len(), 2);
+
+        // A vaccine line with no name of its own takes the claim's as it is
+        // shown without the private line, never the name that line gave it.
+        let mut untitled = claim(
+            "r_untitledaaaaaaaaaaaa",
+            "2024-07-02",
+            json!([
+                {"sequence": 1, "service": {"system": CPT, "code": "00099", "display": "Sample counseling"},
+                 "payer_notes": ["Psychotherapy is paid apart"]},
+                {"sequence": 2, "service": {"system": CVX_SYSTEM, "code": "900"}}
+            ]),
+        );
+        untitled.display = "Sample counseling · Example Clinic".into();
+        let private = json!({"parts": {"r_untitledaaaaaaaaaaaa": {"lines": [0]}}});
+        let held = Parts::of(&private);
+        let listed = of_claims(&[&untitled], &t, &held);
+        assert_eq!(listed.len(), 1);
+        assert!(
+            !listed[0].display.contains("counseling"),
+            "{}",
+            listed[0].display
+        );
+        assert_eq!(listed[0].display, held.record(&untitled).display);
+        let whole = of_claims(&[&untitled], &t, &Parts::default());
+        assert_eq!(whole[0].display, untitled.display);
+    }
+
+    /// Views record the tables only as a pair: one alone names no vaccine by
+    /// a CPT code.
+    #[test]
+    fn one_table_alone_is_no_set_of_tables() {
+        let dir = std::env::temp_dir().join(format!("medrec-vaccine-set-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/vaccines");
+        let keep = |t: &crate::tables::Table, file: &str| {
+            let path = fixtures.join(file);
+            let sha = crate::hash::sha256_hex(&std::fs::read(&path).unwrap());
+            crate::tables::fetch(t, &dir, Some(&path), Some(&sha), true).unwrap();
+            sha
+        };
+        assert_eq!(Codes::load(&dir).identity(), None);
+        let cvx = keep(&CVX, "cvx.txt");
+        let alone = Codes::load(&dir);
+        assert!(alone.vaccine.is_some());
+        assert_eq!(alone.identity(), None);
+        let cpt = keep(&CPT_CVX, "cpt.txt");
+        let both = format!("cvx {cvx}, cpt-cvx {cpt}");
+        assert_eq!(Codes::load(&dir).identity(), Some(both.as_str()));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

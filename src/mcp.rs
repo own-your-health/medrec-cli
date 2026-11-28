@@ -1766,11 +1766,14 @@ fn sections(s: summary::Summary) -> PersonSummary {
             .map(|v| Line {
                 name: v.vaccine,
                 date: v.last_date,
-                detail: Some(format!(
-                    "{} dose{} on file",
-                    v.doses,
-                    if v.doses == 1 { "" } else { "s" }
-                )),
+                detail: Some(match v.from_claim {
+                    true => "from a claim".into(),
+                    false => format!(
+                        "{} dose{} on file",
+                        v.doses,
+                        if v.doses == 1 { "" } else { "s" }
+                    ),
+                }),
                 source: v.source,
                 id: v.id,
                 ..Line::default()
