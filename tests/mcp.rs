@@ -4605,6 +4605,7 @@ fn a_dry_run_counts_what_would_be_private() {
         "clinician": {},
         "clinician_day": 0,
         "clinician_linked": 0,
+        "clinician_performer": 0,
         "parts": {},
     });
     assert_eq!(v["private"], want);
