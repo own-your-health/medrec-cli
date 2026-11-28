@@ -1421,6 +1421,119 @@ mod tests {
         assert_eq!(super::rows(&v)[0].title, "On file, in no group");
     }
 
+    /// A skip's conditions and their logic, read as CDC's antigen files write
+    /// them.
+    #[test]
+    fn a_skips_conditions_and_logic_are_read_as_cdc_writes_them() {
+        let read = |x: &str| condition(&xml::read(x).unwrap());
+        let interval = read(
+            "<condition><conditionID>1</conditionID><conditionType>Interval</conditionType>\
+             <interval>4 weeks</interval><beginAge></beginAge><endAge></endAge></condition>",
+        );
+        assert!(
+            matches!(interval, Some(Condition::Interval(a)) if a == Age::parse("4 weeks").unwrap())
+        );
+        let age = read(
+            "<condition><conditionType>Age</conditionType><beginAge>4 years - 4 days</beginAge>\
+             <endAge>7 years</endAge></condition>",
+        );
+        assert!(matches!(
+            age,
+            Some(Condition::Age { begin: Some(b), end: Some(e) })
+                if b == Age::parse("4 years - 4 days").unwrap() && e == Age::parse("7 years").unwrap()
+        ));
+        let count = |logic: &str| {
+            read(&format!(
+                "<condition><conditionType>Vaccine Count by Age</conditionType>\
+                 <beginAge></beginAge><endAge>12 months</endAge><startDate></startDate>\
+                 <endDate>20991231</endDate><doseCount>2</doseCount>\
+                 <doseType>Total</doseType><doseCountLogic>{logic}</doseCountLogic>\
+                 <vaccineTypes>951;952</vaccineTypes></condition>"
+            ))
+        };
+        for (logic, want) in [
+            ("greater than", Ordering::Greater),
+            ("Less than", Ordering::Less),
+            ("equal to", Ordering::Equal),
+        ] {
+            match count(logic) {
+                Some(Condition::Count {
+                    types,
+                    end,
+                    end_date,
+                    count,
+                    logic,
+                    ..
+                }) => {
+                    assert_eq!(logic, want, "{logic:?}");
+                    assert_eq!(types, ["951", "952"]);
+                    assert_eq!((count, end_date), (2, Some(d("2099-12-31"))));
+                    assert_eq!(end, Some(Age::parse("12 months").unwrap()));
+                }
+                other => panic!("{logic}: {other:?}"),
+            }
+        }
+        // A logic or a condition medrec does not read keeps the dose.
+        assert!(matches!(count("at least"), Some(Condition::Other)));
+        let other = read("<condition><conditionType>Completed Series</conditionType></condition>");
+        assert!(matches!(other, Some(Condition::Other)));
+        // A date that does not read is a file that does not.
+        assert!(read(
+            "<condition><conditionType>Vaccine Count by Date</conditionType>\
+             <startDate>2099-01-01</startDate><doseCount>1</doseCount>\
+             <doseCountLogic>greater than</doseCountLogic></condition>"
+        )
+        .is_none());
+
+        // A dose's skips: of a forecast or both, with their sets' and
+        // conditions' logic.
+        let skip = |context: &str, set_logic: &str| {
+            format!(
+                "<conditionalSkip><context>{context}</context><setLogic>{set_logic}</setLogic>\
+                 <set><setID>1</setID><conditionLogic>OR</conditionLogic>\
+                 <condition><conditionType>Age</conditionType><beginAge>4 years</beginAge></condition>\
+                 <condition><conditionType>Interval</conditionType><interval>6 months</interval></condition>\
+                 </set><set><setID>2</setID><conditionLogic>AND</conditionLogic>\
+                 <effectiveDate>20200101</effectiveDate><cessationDate>20991231</cessationDate>\
+                 <condition><conditionType>Age</conditionType><beginAge>7 years</beginAge></condition>\
+                 </set></conditionalSkip>"
+            )
+        };
+        let dose_of = |skips: &str| {
+            dose(
+                &xml::read(&format!(
+                    "<seriesDose><doseNumber>Dose 2</doseNumber><age><earliestRecAge>4 months\
+                     </earliestRecAge></age>{skips}</seriesDose>"
+                ))
+                .unwrap(),
+            )
+            .unwrap()
+        };
+        let read_skips = dose_of(&format!(
+            "{}{}{}",
+            skip("Forecast", "AND"),
+            skip("Both", "OR"),
+            skip("Evaluation", "n/a")
+        ));
+        assert_eq!(read_skips.skips.len(), 2);
+        let first = &read_skips.skips[0];
+        assert!(first.all);
+        assert!(!read_skips.skips[1].all);
+        assert_eq!(first.sets.len(), 2);
+        assert!(!first.sets[0].all);
+        assert!(first.sets[1].all);
+        assert_eq!(first.sets[0].conditions.len(), 2);
+        assert!(matches!(
+            first.sets[0].conditions[1],
+            Condition::Interval(_)
+        ));
+        assert_eq!(
+            (first.sets[1].from, first.sets[1].until),
+            (Some(d("2020-01-01")), Some(d("2099-12-31")))
+        );
+        assert!(!dose_of(&skip("Forecast", "n/a")).skips[0].all);
+    }
+
     /// CDC's conditions of a skip, each met and not at its edge, and how sets
     /// and skips join them (Tables 6-6 to 6-11).
     #[test]

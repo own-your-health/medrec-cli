@@ -2716,11 +2716,10 @@ schedule, and no word says one is due, overdue or missed.
   item per group, in the document's order (by the date of its first dose,
   not newest first): its heading as `title` ("Samplepox (Samplepox A,
   Samplepox B)"), its lines as the text gives them joined by "; " as
-  `detail`, no `date` of its own (each dose's is in `detail`), and the ids
-  of the doses on file it prints as `members`; then "On file, in no group"
-  with `not_placed`. `name` keeps the items whose heading has it. It is an
-  answer about one person, so its private doses are in it, and an item that
-  prints one carries `private` with its area, by its `members`, as every
+  `detail`, and no `date` of its own (each dose's is in `detail`); then "On
+  file, in no group" with `not_placed`. `name` keeps the items whose heading
+  has it. It is an answer about one person, so its private doses are in it,
+  and an item that prints one carries `private` with its area, as every
   answer's private items do. Without a schedule table it has no item and a
   `no-schedule` warning; for a person with no birth date, a `no-birth-date`
   warning.
