@@ -6,6 +6,8 @@
 //! cache; `medrec drive`), or a local directory (a test folder, a disk).
 //! medrec runs no rclone.
 
+use std::cell::RefCell;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use pk_cli_auth::vault::{KeyStore, Vault};
@@ -355,10 +357,63 @@ pub enum Reads {
     Fresh,
 }
 
+/// Whether every read is of Drive itself (`--fresh`).
+static FRESH: AtomicBool = AtomicBool::new(false);
+
+/// Read every records folder from Drive from now on, and not from this
+/// machine's copies.
+pub fn read_fresh() {
+    FRESH.store(true, Ordering::Relaxed);
+}
+
+fn fresh() -> bool {
+    #[cfg(test)]
+    if testing::fresh() {
+        return true;
+    }
+    reads_fresh()
+}
+
+/// Whether `--fresh` has every store of this run read Drive itself.
+pub fn reads_fresh() -> bool {
+    FRESH.load(Ordering::Relaxed)
+}
+
+/// Where what a command read of a records folder on Drive came from.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct ReadFrom {
+    /// `drive`, `cache`, or `both`.
+    pub from: &'static str,
+    /// Reads that Drive answered.
+    pub drive: usize,
+    /// Reads of this machine's copies.
+    pub cache: usize,
+    /// Of those, past the time a copy is taken as it is, or of no known age.
+    pub stale: usize,
+    /// Of those, the ones made because Drive could not be reached.
+    pub unreachable: usize,
+    /// The age of the oldest copy; `None` where none was read or one's is not
+    /// known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oldest_seconds: Option<u64>,
+}
+
+thread_local! {
+    static READ: RefCell<Option<ReadFrom>> = const { RefCell::new(None) };
+}
+
+/// Where what this thread read came from, of the folders on Drive it opened to
+/// read. `None` where it opened none.
+pub fn read_from() -> Option<ReadFrom> {
+    READ.with(|r| r.borrow().clone())
+}
+
 pub struct Store {
     backend: Backend,
     location: Location,
     budget: Duration,
+    /// What is counted of it already, of a folder on Drive opened to read.
+    counted: Option<Mutex<pk_cli_drive::Reads>>,
 }
 
 /// The store budget for one command: every Drive request it makes is
@@ -378,7 +433,7 @@ impl Store {
                     None => Backend::Drive(remote),
                     Some(dir) => {
                         let mut policy = CachePolicy::from_env(BIN);
-                        policy.bypass_reads |= reads == Reads::Fresh;
+                        policy.bypass_reads |= reads == Reads::Fresh || fresh();
                         let mut cached = CachedRemote::new(remote, dir, policy);
                         if let Some(r) = cache::background_revalidator(
                             &policy,
@@ -392,11 +447,52 @@ impl Store {
                 }
             }
         };
+        let counts = matches!(location, Location::Drive(_)) && reads == Reads::Cached;
+        if counts {
+            READ.with(|r| {
+                r.borrow_mut().get_or_insert_with(|| ReadFrom {
+                    from: "drive",
+                    ..ReadFrom::default()
+                });
+            });
+        }
         Ok(Store {
             backend,
             location: location.clone(),
             budget,
+            counted: counts.then(Mutex::default),
         })
+    }
+
+    /// Count a read of this store, and give what it gave. `past` is one that
+    /// the read cache has no part in.
+    fn read<T>(&self, past: bool, gave: Result<T, CliError>) -> Result<T, CliError> {
+        let Some(counted) = &self.counted else {
+            return gave;
+        };
+        let mut had = counted.lock().unwrap_or_else(|p| p.into_inner());
+        let now = self.backend.reads();
+        let direct = gave.is_ok() && (past || now.is_none());
+        let now = now.unwrap_or_default();
+        READ.with(|r| {
+            let mut r = r.borrow_mut();
+            let r = r.get_or_insert_with(ReadFrom::default);
+            let known = r.cache == 0 || r.oldest_seconds.is_some();
+            r.drive += usize::from(direct) + now.remote - had.remote;
+            r.cache += now.cache - had.cache;
+            r.stale += now.stale - had.stale;
+            r.unreachable += now.unreachable - had.unreachable;
+            let its = now.oldest.map(|age| age.as_secs());
+            let all = known && (now.cache == 0 || its.is_some());
+            r.oldest_seconds = r.oldest_seconds.max(its).filter(|_| all);
+            r.from = match (r.cache, r.drive) {
+                (0, _) => "drive",
+                (_, 0) => "cache",
+                _ => "both",
+            };
+        });
+        *had = now;
+        gave
     }
 
     /// The Drive store under a Drive location, uncached: listings with
@@ -419,7 +515,7 @@ impl Store {
 
     pub fn read_text(&self, rel: &str) -> Result<Option<String>, CliError> {
         inside(rel)?;
-        self.backend.read_file(rel)
+        self.read(false, self.backend.read_file(rel))
     }
 
     /// The same, never from the read cache.
@@ -427,7 +523,7 @@ impl Store {
         inside(rel)?;
         match &self.location {
             Location::Dir(_) => self.read_text(rel),
-            Location::Drive(_) => self.remote().cat(rel),
+            Location::Drive(_) => self.read(true, self.remote().cat(rel)),
         }
     }
 
@@ -503,7 +599,7 @@ impl Store {
     /// download into an owner-only temp dir otherwise).
     pub fn fetch(&self, rel: &str) -> Result<LocalCopy, CliError> {
         inside(rel)?;
-        self.backend.local_copy(rel)
+        self.read(false, self.backend.local_copy(rel))
     }
 
     pub fn read_bytes(&self, rel: &str) -> Result<Vec<u8>, CliError> {
@@ -540,13 +636,13 @@ impl Store {
 
     pub fn exists(&self, rel: &str) -> Result<bool, CliError> {
         inside(rel)?;
-        self.backend.exists(rel)
+        self.read(false, self.backend.exists(rel))
     }
 
     /// Every file under `rel`, recursively, with sizes.
     pub fn list(&self, rel: &str) -> Result<Vec<FileEntry>, CliError> {
         inside(rel)?;
-        self.backend.list_entries(rel)
+        self.read(false, self.backend.list_entries(rel))
     }
 
     /// Delete one file. `Ok(false)` when it was not there. pk-cli-drive
@@ -614,8 +710,7 @@ impl Store {
                 Ok(out)
             }
             Location::Drive(_) => Ok(self
-                .remote()
-                .hashes(rel)?
+                .read(true, self.remote().hashes(rel))?
                 .into_iter()
                 .map(|h| Hashed {
                     rel: h.rel,
@@ -672,7 +767,7 @@ impl Store {
                 out.sort_by(|a, b| a.rel.cmp(&b.rel));
                 Ok(out)
             }
-            Location::Drive(_) => self.remote().list_here(rel),
+            Location::Drive(_) => self.read(true, self.remote().list_here(rel)),
         }
     }
 
@@ -702,7 +797,7 @@ impl Store {
                 }
                 md5_file(&p).map(Some)
             }
-            Location::Drive(_) => self.remote().md5(rel),
+            Location::Drive(_) => self.read(true, self.remote().md5(rel)),
         }
     }
 
@@ -739,7 +834,7 @@ impl Store {
         inside(rel)?;
         match &self.location {
             Location::Dir(root) => copy_tree(&root.join(rel), local, Existing::Replace),
-            Location::Drive(_) => self.remote().fetch_tree(rel, local).map(|_| ()),
+            Location::Drive(_) => self.read(true, self.remote().fetch_tree(rel, local).map(|_| ())),
         }
     }
 
@@ -996,7 +1091,7 @@ fn create_parent(path: &Path) -> Result<(), CliError> {
 /// Drive server, set for the test's thread. No keychain, no network.
 #[cfg(test)]
 pub mod testing {
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
     use std::path::PathBuf;
     use std::rc::Rc;
 
@@ -1022,6 +1117,21 @@ pub mod testing {
         fn drop(&mut self) {
             DRIVE.with(|d| *d.borrow_mut() = None);
         }
+    }
+
+    thread_local! {
+        static FRESH: Cell<bool> = const { Cell::new(false) };
+    }
+
+    /// Whether this thread's stores read from Drive itself, as `--fresh` has
+    /// every thread's do. What this thread read so far is not counted.
+    pub fn read_fresh(fresh: bool) {
+        FRESH.with(|f| f.set(fresh));
+        super::READ.with(|r| *r.borrow_mut() = None);
+    }
+
+    pub(super) fn fresh() -> bool {
+        FRESH.with(Cell::get)
     }
 
     pub(super) fn cli() -> Option<DriveCli> {
