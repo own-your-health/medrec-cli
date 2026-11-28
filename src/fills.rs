@@ -25,7 +25,7 @@ enum Drug {
 
 /// An NDC as eleven digits: five of the labeler, four of the product and two
 /// of the package. Ten with no hyphens can be one of three, and are as they are.
-fn ndc(text: &str) -> Option<String> {
+pub(crate) fn ndc(text: &str) -> Option<String> {
     let digits = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit());
     let parts: Vec<&str> = text.trim().split('-').collect();
     if !parts.iter().all(|p| digits(p)) {

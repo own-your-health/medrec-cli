@@ -3065,6 +3065,7 @@ fn file_binaries(
             renderings: Vec::new(),
             statement: None,
             same_statement_as: None,
+            fields: None,
             classification: None,
             provenance: prov,
             also_from: Vec::new(),
@@ -3073,6 +3074,7 @@ fn file_binaries(
             given: Vec::new(),
         };
         crate::bill::annotate(&mut doc, &extracted.text, index, texts);
+        crate::paper::annotate(&mut doc, &extracted.text);
         if doc.same_statement_as.is_some() {
             filed.same_statement += 1;
         }

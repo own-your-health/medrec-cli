@@ -103,7 +103,11 @@ struct Printed {
 impl Printed {
     fn of(r: &Record) -> Option<Printed> {
         let field = printing(&r.kind)?;
-        let text = r.fields.get(field).and_then(Value::as_str)?;
+        Printed::read(field, r.fields.get(field).and_then(Value::as_str)?)
+    }
+
+    /// A text as an item prints it in `field`.
+    fn read(field: &str, text: &str) -> Option<Printed> {
         let people = nppes::people(text);
         if events::says_organization(text) || people.is_empty() {
             return None;
@@ -442,6 +446,14 @@ impl Clinicians {
         });
         let all: Vec<Named> = by.chain(self.of_day(r, gave)).collect();
         all.into_iter().min_by_key(|n| n.learned)
+    }
+
+    /// The area of a clinician a paper's line names, as a visit prints its
+    /// clinician: by a paper that names them, or a link to the practice of a
+    /// paper of a day. A day holds no name on a paper.
+    pub(crate) fn of_name(&self, text: &str) -> Option<Named> {
+        let printed = Printed::read("practitioner", text)?.but(&self.opened)?;
+        self.by(&printed, false)
     }
 
     /// The area alone.

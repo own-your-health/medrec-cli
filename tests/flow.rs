@@ -207,6 +207,23 @@ fn scans_file_duplicates_are_caught_and_review_finishes_the_rest() {
     );
     // Named files are copied, never moved, unless --move.
     assert!(scans.join("lab_robin.pdf").exists());
+    // A paper's fields are read as it is filed; never a bill's.
+    let filed_doc = |person: &str, name: &str| -> Value {
+        let index = e.records().join(person).join("index.json");
+        let v: Value = serde_json::from_slice(&std::fs::read(index).unwrap()).unwrap();
+        let docs = v["documents"].as_array().unwrap();
+        let of = |d: &&Value| d["path"].as_str().is_some_and(|p| p.ends_with(name));
+        docs.iter().find(of).unwrap().clone()
+    };
+    let visit = filed_doc("Alex Testperson", "visit_alex.pdf");
+    assert_eq!(
+        visit["fields"]["follow_up"][0]["words"], "in one year.",
+        "{visit}"
+    );
+    assert_eq!(visit["fields"]["follow_up"][0]["date"], "2027-02-10");
+    let eob = filed_doc("Alex Testperson", "eob_alex.pdf");
+    assert_eq!(eob["doc_type"], "eob");
+    assert!(eob.get("fields").is_none(), "{eob}");
 
     // The ambiguous page: review it, then file it by hand.
     let q = ids_of(&e.ok(&["review", "list"]));
@@ -226,6 +243,11 @@ fn scans_file_duplicates_are_caught_and_review_finishes_the_rest() {
     assert_eq!(filed["status"], "filed");
     assert!(e.records().join(filed["path"].as_str().unwrap()).exists());
     assert!(ids_of(&e.ok(&["review", "list"])).is_empty());
+    let letter = filed_doc("Alex Testperson", "ambiguous.pdf");
+    assert_eq!(
+        letter["fields"]["follow_up"][0]["date"], "2026-02-03",
+        "{letter}"
+    );
 
     // organize-scans hands over values medrec disagrees with: held.
     let variant = e.root.join("variant.pdf");
@@ -2372,6 +2394,32 @@ fn a_document_rendered_again_on_a_later_export_is_not_filed_twice() {
         out
     };
     assert_eq!(import(true), (2, 0, 0));
+    // A paper's fields are read as it is imported.
+    let follow = || {
+        let mut out = Vec::new();
+        for entry in std::fs::read_dir(e.records()).unwrap() {
+            let index = entry.unwrap().path().join("index.json");
+            if let Ok(t) = std::fs::read_to_string(&index) {
+                let v: Value = serde_json::from_str(&t).unwrap();
+                for d in v["documents"].as_array().unwrap() {
+                    out.extend(
+                        d["fields"]["follow_up"]
+                            .as_array()
+                            .cloned()
+                            .unwrap_or_default(),
+                    );
+                }
+            }
+        }
+        out
+    };
+    let read = follow();
+    assert_eq!(read.len(), 1, "{read:?}");
+    assert!(read[0]["words"]
+        .as_str()
+        .unwrap()
+        .starts_with("in twelve months"));
+    assert_eq!(read[0]["dated"], "relative");
 
     // The next export renders the summary again: a new timestamp and id,
     // other bytes, the same text. The copy filed before stays the only one,

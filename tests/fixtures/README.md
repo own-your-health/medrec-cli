@@ -103,6 +103,11 @@ real record, document, study or provider response.
   part. `make.py` writes `index.json` and `text.json`; `parts.json` is what
   `private.json` says of the parts, an event's under a claim in it. Its sources
   are those of `standing/household.json`.
+- `papers/` is an invented person's papers whose texts label follow-ups and
+  drugs, as a medrec that did not read them filed them: one for each rule of the
+  contract's "Fields of a paper", with a medicine one drug prints the NDC of.
+  `make.py` writes `index.json` and `text.json`. Its sources are those of
+  `standing/household.json`.
 - `words/` is an invented person's records, one for each rule of the contract's
   "Private" by a record's own words and codes. `make.py` writes `index.json`. Its
   sources are those of `standing/household.json`.
