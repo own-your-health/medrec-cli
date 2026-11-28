@@ -1871,6 +1871,7 @@ A reader decides freshness by MD5, as Drive reports it (`md5Checksum`):
 | Field | What |
 |---|---|
 | `medrec` | The version that wrote them. Another version makes every view again. |
+| `reader` | The oldest medrec version whose contract a reader must follow to read these views (0.9.11 and later; below). Absent from views an earlier medrec wrote. |
 | `build` | The commit that medrec was built from, where it is known (0.9.10 and later); absent where it is not. Views recorded with another commit, or with one where this medrec knows none (or the reverse), are all made again, as another version's are. Builds of one commit, or with none known, are not told apart, uncommitted changes included. |
 | `household` | The MD5 (hex) of `household.json` as the views were made from it. |
 | `label_salt` | What the ids of provider labels are salted with: random, made with the folder's first label and kept (0.9.7 and later). Absent before that. A reader does not use it. |
@@ -1895,7 +1896,18 @@ field readers may ignore does not, such as a claim line's `counted` and
 `payer_notes` (0.8.2): a reader that lists records or sums a claim's
 totals reads them as before, and one that sums or shows line amounts
 reads them with `counted` (Claims, above). medrec moves to a new number
-only in a release whose notes name the connector version that reads it. medrec has
+only in a release whose notes name the connector version that reads it.
+
+A field can change what a reader must leave out or hold back without
+changing the layout, such as `heading` in `private.json` (0.9.10): a reader
+that ignores it shows what it must not, or leaves out what it need not.
+`reader` (0.9.11 and later) is the oldest medrec version whose contract a
+reader must follow to read the views: medrec raises it, in the release that
+adds such a field, to that release's version, and its notes say so. It is
+`0.9.10` now. A reader that follows an older version's contract reads nothing
+of the views and says, as for a newer layout, that it must be updated. Where
+`reader` is absent, the views ask no more than the contract of the medrec that
+wrote them. medrec has
 written v2 from its first views. v1, the same layout with plain names and
 one search text file, was only ever written by the connector's own `npm run
 views`. medrec removes a v1 `views.json`'s views by the names in its
