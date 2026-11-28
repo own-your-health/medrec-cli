@@ -244,16 +244,19 @@ it says nothing of them.
   "F/U"), "Next appointment" or "Next visit", or "Return" where it is "Return
   visit" or "Return appointment", is followed by a colon or a dash, or the words
   after it say when or why ("in", "on", "at", "to clinic", "if", ...). A return
-  to work, school, daycare, sports or one's activities is never one, marked or
-  not. `words` are the line's words after the label, as printed, up to 200
+  to work, school, daycare, sports, full duty or one's activities is never one,
+  marked or not; "Return visit: school physical" or "regular checkup" is. `words` are the line's words after the label, as printed, up to 200
   characters.
   - `date` is the day the words tell before any condition ("if", "as needed",
     "PRN", "unless", "should"); a day after one is the condition's, so "as
     needed" or "if symptoms persist" keeps the words with no `date`. A day
-    printed whole is the one told, wherever it stands; else the first told.
+    printed whole on or after the paper's `date` is the one told, wherever it
+    stands; else the first told ("in 2 weeks to review labs from 1/5" is two
+    weeks after the paper).
     `dated` says how: `printed`, a day printed whole; `relative`, a time after
     the paper's own `date`, where the words start with it or "in", "within" or
-    "after" comes before it ("2 weeks", "in a month", "within 3 days"; of a
+    "after" comes before it, with "about" or "approximately" between or not
+    ("2 weeks", "in a month", "within 3 days", "in about 2 weeks"; of a
     range, "2 to 3 weeks", its earliest day; a month later than a day the
     month has not is its last day), and not where it is what something lasts
     or an age ("after 10 days of antibiotics", "6 month well-child check", "2
@@ -2772,13 +2775,14 @@ nothing is private.
     (Fields of a paper, above) that is private by what it says, too: a drug whose
     name or directions name a medicine of an area or its brand (Private's
     `medicine`), or that is the person's medicine by an equal code where any
-    medicine of that code is private; a follow-up whose words name a place of an
-    area (by the words of Private's `provider`), or that names, in `with` or as
-    any run of words that start with a capital wherever they stand, a clinician
-    the `clinician` rule ties to one (by a paper that names them or a link to a
-    practice's, not by a day) or a name the household's provider word, of every
-    item that prints it, gives an area (`medrec providers`); and a field that
-    prints an ICD-10 code of an area. These are read from the paper's text as
+    medicine of that code is private; a follow-up whose words, or a drug whose
+    name or directions, name a place of an area (by the words of Private's
+    `provider`), or name, in `with` or as any run of words that start with a
+    capital wherever it stands or any part of one, a clinician the `clinician`
+    rule ties to one (by a paper that names them or a link to a practice's, not
+    by a day) or a name the household's provider word, of every item that
+    prints it, gives an area (`medrec providers`), whatever its case and
+    punctuation; and a field that prints an ICD-10 code of an area. These are read from the paper's text as
     the views are written, never from its `fields` in `index.json`, which a
     medrec older than 0.9.12 drops: what is held back is the same before a
     `medrec reindex` as after it. `documents.json` has no field any of whose

@@ -1088,6 +1088,15 @@ fn event_item(e: &Value, detailed: bool) -> Item {
     }
 }
 
+/// At most `LABELED` lines, then one that says how many more there are.
+fn capped(lines: &mut Vec<String>) {
+    if lines.len() > LABELED {
+        let more = lines.len() - LABELED;
+        lines.truncate(LABELED);
+        lines.push(format!("{more} more on labeled lines: the text has them"));
+    }
+}
+
 fn money(m: &crate::model::Amount) -> String {
     format!("{} {}", m.amount, m.currency)
 }
@@ -1760,12 +1769,7 @@ impl MedrecTools {
                 drug_line(x, medicine.map(|r| r.id.as_str()))
             }));
         }
-        if out.labeled.len() > LABELED {
-            let more = out.labeled.len() - LABELED;
-            out.labeled.truncate(LABELED);
-            out.labeled
-                .push(format!("{more} more on labeled lines: the text has them"));
-        }
+        capped(&mut out.labeled);
         if chars.is_empty() {
             out.hint = hint(Some(
                 "No text was extracted from this document: an image without OCR, or a file \
@@ -2101,6 +2105,23 @@ mod tests {
             marked(&text, 1),
             "one\n--- page 2 ---\ntwo two\n--- page 3 ---\nthree"
         );
+    }
+
+    #[test]
+    fn a_document_gives_twenty_labeled_lines_and_counts_the_rest() {
+        let lines = |n: usize| {
+            (1..=n)
+                .map(|i| format!("Follow-up: {i}"))
+                .collect::<Vec<_>>()
+        };
+        let mut twenty = lines(LABELED);
+        capped(&mut twenty);
+        assert_eq!(twenty, lines(20));
+        let mut more = lines(LABELED + 3);
+        capped(&mut more);
+        assert_eq!(more.len(), 21);
+        assert_eq!(more[19], "Follow-up: 20");
+        assert_eq!(more[20], "3 more on labeled lines: the text has them");
     }
 
     #[test]

@@ -760,10 +760,10 @@ impl Judges<'_> {
     /// The lines of a paper's fields that are private by what each says
     /// ([`crate::paper`]): a drug whose name or directions name a medicine of
     /// an area, or that is the person's medicine by an equal code where any
-    /// such medicine is private; a follow-up whose words name a place of an
-    /// area, or name a clinician or place, wherever in them, that the
-    /// clinician rule or the household's word on that name gives one; and a
-    /// diagnosis code of an area either prints.
+    /// such medicine is private; a field whose words name a place of an area,
+    /// or name a clinician or place, wherever in them, that the clinician rule
+    /// or the household's word on that name gives one; and a diagnosis code of
+    /// an area either prints.
     fn lines(
         &self,
         f: &crate::paper::Fields,
@@ -776,17 +776,18 @@ impl Judges<'_> {
                 || self.clinicians.of_name(n).is_some()
                 || said_area(self.corrections, n).is_some()
         };
-        let follow = f.follow_up.iter().filter(|x| {
-            let spans = crate::paper::spans(&x.words);
-            place_area(&x.words).is_some()
-                || x.with.iter().chain(&spans).any(named)
-                || coded(&x.words)
-        });
+        // Words that name a place or a clinician of an area, wherever.
+        let names = |t: &str| {
+            place_area(t).is_some() || crate::paper::spans(t).iter().any(named) || coded(t)
+        };
+        let follow = f
+            .follow_up
+            .iter()
+            .filter(|x| names(&x.words) || x.with.iter().any(named));
         let drugs = f.drugs.iter().filter(|d| {
             let said = [Some(d.drug.as_str()), d.directions.as_deref()];
             let said = || said.into_iter().flatten();
-            said().any(|t| medicine(t).is_some())
-                || said().any(coded)
+            said().any(|t| medicine(t).is_some() || names(t))
                 || crate::paper::medicines(d, records).any(|r| held(&r.id))
         });
         let follow = follow.flat_map(|x| x.lines.iter().copied());
@@ -798,9 +799,24 @@ impl Judges<'_> {
 
 /// The private area the household's word on a printed name gives it, where
 /// that word is of every item that prints the name: the last such word.
+/// A name is the one printed whatever its case and punctuation.
 fn said_area(corrections: &[crate::corrections::Correction], name: &str) -> Option<&'static str> {
+    let plain = |s: &str| -> String {
+        let s: String = s
+            .chars()
+            .map(|c| {
+                if c.is_alphanumeric() {
+                    c.to_ascii_lowercase()
+                } else {
+                    ' '
+                }
+            })
+            .collect();
+        s.split_whitespace().collect::<Vec<_>>().join(" ")
+    };
+    let name = plain(name);
     let mut of = corrections.iter().rev().filter(|c| c.item.is_none());
-    let last = of.find(|c| c.printed.iter().any(|p| p == name))?;
+    let last = of.find(|c| c.printed.iter().any(|p| plain(p) == name))?;
     let set = last.set.as_ref().filter(|_| !last.wrong)?;
     let named = [&set.name, &set.practice, &set.role].into_iter().flatten();
     let role = set.role.as_deref().and_then(crate::roles::area_in);
@@ -1637,7 +1653,8 @@ mod tests {
                 follow("Pat Sample", 4),
                 follow("Sample Group", 6),
                 unnamed("Placeholder Counseling Center, 3/4/2027", 12),
-                unnamed("in 2 weeks: Sample Group", 14),
+                unnamed("in 2 weeks: Call Sample Group", 14),
+                unnamed("TO SAMPLE GROUP, TUESDAY", 18),
             ],
             drugs: vec![
                 drug(Some("0000345"), 8),
@@ -1645,6 +1662,10 @@ mod tests {
                 Drug {
                     directions: Some("Stop Camila before starting".into()),
                     ..drug(None, 16)
+                },
+                Drug {
+                    directions: Some("As directed by Placeholder Counseling Center".into()),
+                    ..drug(None, 20)
                 },
             ],
         };
@@ -1683,12 +1704,31 @@ mod tests {
         let lines = judges.lines(&f, &idx.records, &held);
         assert_eq!(
             lines,
-            vec![[0, 1], [2, 1], [6, 1], [12, 1], [14, 1], [8, 1], [16, 1]]
+            vec![
+                [0, 1],
+                [2, 1],
+                [6, 1],
+                [12, 1],
+                [14, 1],
+                [18, 1],
+                [8, 1],
+                [16, 1],
+                [20, 1]
+            ]
         );
         // Open, the medicine holds nothing; and a word of one item is of it alone.
         assert_eq!(
             judges.lines(&f, &idx.records, &|_| false),
-            vec![[0, 1], [2, 1], [6, 1], [12, 1], [14, 1], [16, 1]]
+            vec![
+                [0, 1],
+                [2, 1],
+                [6, 1],
+                [12, 1],
+                [14, 1],
+                [18, 1],
+                [16, 1],
+                [20, 1]
+            ]
         );
         let mut one = said.clone();
         one.item = Some("r_otheraaaaaaaaaaaaaaa".into());
@@ -1698,7 +1738,7 @@ mod tests {
         };
         assert_eq!(
             judges.lines(&f, &idx.records, &|_| false),
-            vec![[0, 1], [2, 1], [12, 1], [16, 1]]
+            vec![[0, 1], [2, 1], [12, 1], [16, 1], [20, 1]]
         );
     }
 
