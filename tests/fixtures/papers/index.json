@@ -1,0 +1,233 @@
+{
+ "schema": "medrec-index/v1",
+ "person": "p_robinaaaaaaaaaaaaaaa",
+ "rev": 1,
+ "studies": [],
+ "imports": [],
+ "records": [
+  {
+   "id": "r_exampleprofenaaaaaaa",
+   "kind": "medication",
+   "key": "medication|exampleprofen",
+   "date": "2025-03-10",
+   "display": "Exampleprofen 200 mg tablet",
+   "status": "active",
+   "code": {
+    "system": "http://hl7.org/fhir/sid/ndc",
+    "code": "00000-0001-01",
+    "display": "Exampleprofen 200 mg tablet"
+   },
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2025-06-02T10:00:00Z",
+     "filed_at": "2025-06-04T10:00:00Z",
+     "filed_by": "medrec 0.9.11",
+     "raw_path": "Robin Example/Records/north/MedicationRequest/exampleprofen.json"
+    }
+   ]
+  }
+ ],
+ "documents": [
+  {
+   "id": "d_visitaaaaaaaaaaaaaaa",
+   "path": "Robin Example/Papers/2025/visit.pdf",
+   "sha256": "visit",
+   "md5": "visit",
+   "size": 10,
+   "media_type": "application/pdf",
+   "doc_type": "visit_summary",
+   "date": "2025-03-10",
+   "organization": "Example Family Clinic",
+   "text": {
+    "chars": 10
+   },
+   "filed_at": "2025-06-04T10:00:00Z",
+   "origin": {
+    "kind": "file",
+    "action": "copied"
+   },
+   "provenance": {
+    "source": {
+     "kind": "fhir",
+     "cli": "fakeprov",
+     "organization_id": "north",
+     "fhir_base": "https://north.example.test/fhir"
+    },
+    "method": "fhir-api",
+    "fetched_at": "2025-06-02T10:00:00Z",
+    "filed_at": "2025-06-04T10:00:00Z",
+    "filed_by": "medrec 0.9.11",
+    "raw_path": "Robin Example/Records/north/DocumentReference/visit.json"
+   }
+  },
+  {
+   "id": "d_dischargeaaaaaaaaaaa",
+   "path": "Robin Example/Papers/2025/discharge.pdf",
+   "sha256": "discharge",
+   "md5": "discharge",
+   "size": 10,
+   "media_type": "application/pdf",
+   "doc_type": "discharge_summary",
+   "date": "2025-04-02",
+   "organization": "Example Family Clinic",
+   "text": {
+    "chars": 10
+   },
+   "filed_at": "2025-06-04T10:00:00Z",
+   "origin": {
+    "kind": "file",
+    "action": "copied"
+   },
+   "provenance": {
+    "source": {
+     "kind": "fhir",
+     "cli": "fakeprov",
+     "organization_id": "north",
+     "fhir_base": "https://north.example.test/fhir"
+    },
+    "method": "fhir-api",
+    "fetched_at": "2025-06-02T10:00:00Z",
+    "filed_at": "2025-06-04T10:00:00Z",
+    "filed_by": "medrec 0.9.11",
+    "raw_path": "Robin Example/Records/north/DocumentReference/discharge.json"
+   }
+  },
+  {
+   "id": "d_counselaaaaaaaaaaaaa",
+   "path": "Robin Example/Papers/2025/counsel.pdf",
+   "sha256": "counsel",
+   "md5": "counsel",
+   "size": 10,
+   "media_type": "application/pdf",
+   "doc_type": "visit_summary",
+   "date": "2025-05-05",
+   "organization": "Example Family Clinic",
+   "text": {
+    "chars": 10
+   },
+   "filed_at": "2025-06-04T10:00:00Z",
+   "origin": {
+    "kind": "file",
+    "action": "copied"
+   },
+   "provenance": {
+    "source": {
+     "kind": "fhir",
+     "cli": "fakeprov",
+     "organization_id": "north",
+     "fhir_base": "https://north.example.test/fhir"
+    },
+    "method": "fhir-api",
+    "fetched_at": "2025-06-02T10:00:00Z",
+    "filed_at": "2025-06-04T10:00:00Z",
+    "filed_by": "medrec 0.9.11",
+    "raw_path": "Robin Example/Records/north/DocumentReference/counsel.json"
+   }
+  },
+  {
+   "id": "d_privateaaaaaaaaaaaaa",
+   "path": "Robin Example/Papers/2025/private.pdf",
+   "sha256": "private",
+   "md5": "private",
+   "size": 10,
+   "media_type": "application/pdf",
+   "doc_type": "visit_summary",
+   "date": "2025-05-12",
+   "organization": "Example Family Clinic",
+   "text": {
+    "chars": 10
+   },
+   "filed_at": "2025-06-04T10:00:00Z",
+   "origin": {
+    "kind": "file",
+    "action": "copied"
+   },
+   "provenance": {
+    "source": {
+     "kind": "fhir",
+     "cli": "fakeprov",
+     "organization_id": "north",
+     "fhir_base": "https://north.example.test/fhir"
+    },
+    "method": "fhir-api",
+    "fetched_at": "2025-06-02T10:00:00Z",
+    "filed_at": "2025-06-04T10:00:00Z",
+    "filed_by": "medrec 0.9.11",
+    "raw_path": "Robin Example/Records/north/DocumentReference/private.json"
+   },
+   "title": "Psychiatry visit"
+  },
+  {
+   "id": "d_heldaaaaaaaaaaaaaaaa",
+   "path": "Robin Example/Papers/2025/held.pdf",
+   "sha256": "held",
+   "md5": "held",
+   "size": 10,
+   "media_type": "application/pdf",
+   "doc_type": "visit_summary",
+   "date": "2025-05-20",
+   "organization": "Example Family Clinic",
+   "text": {
+    "chars": 10
+   },
+   "filed_at": "2025-06-04T10:00:00Z",
+   "origin": {
+    "kind": "file",
+    "action": "copied"
+   },
+   "provenance": {
+    "source": {
+     "kind": "fhir",
+     "cli": "fakeprov",
+     "organization_id": "north",
+     "fhir_base": "https://north.example.test/fhir"
+    },
+    "method": "fhir-api",
+    "fetched_at": "2025-06-02T10:00:00Z",
+    "filed_at": "2025-06-04T10:00:00Z",
+    "filed_by": "medrec 0.9.11",
+    "raw_path": "Robin Example/Records/north/DocumentReference/held.json"
+   }
+  },
+  {
+   "id": "d_billaaaaaaaaaaaaaaaa",
+   "path": "Robin Example/Papers/2025/bill.pdf",
+   "sha256": "bill",
+   "md5": "bill",
+   "size": 10,
+   "media_type": "application/pdf",
+   "doc_type": "bill",
+   "date": "2025-05-25",
+   "organization": "Example Family Clinic",
+   "text": {
+    "chars": 10
+   },
+   "filed_at": "2025-06-04T10:00:00Z",
+   "origin": {
+    "kind": "file",
+    "action": "copied"
+   },
+   "provenance": {
+    "source": {
+     "kind": "fhir",
+     "cli": "fakeprov",
+     "organization_id": "north",
+     "fhir_base": "https://north.example.test/fhir"
+    },
+    "method": "fhir-api",
+    "fetched_at": "2025-06-02T10:00:00Z",
+    "filed_at": "2025-06-04T10:00:00Z",
+    "filed_by": "medrec 0.9.11",
+    "raw_path": "Robin Example/Records/north/DocumentReference/bill.json"
+   }
+  }
+ ]
+}

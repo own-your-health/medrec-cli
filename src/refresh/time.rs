@@ -77,7 +77,7 @@ fn n_frac(s: &str) -> usize {
     }
 }
 
-fn days_in(y: i64, m: i64) -> i64 {
+pub(crate) fn days_in(y: i64, m: i64) -> i64 {
     match m {
         4 | 6 | 9 | 11 => 30,
         2 if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 => 29,

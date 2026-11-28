@@ -5133,7 +5133,10 @@ fn a_dry_run_counts_papers_and_private_parts() {
     }
     std::fs::write(&path, serde_json::to_vec(&v).unwrap()).unwrap();
     let v = changes_of(&e, &alex);
-    assert_eq!(v["papers"], json!({"filed_before": 2, "source_found": 0}));
+    let none = json!({});
+    let want = json!({"filed_before": 2, "source_found": 0, "fields": none,
+        "fields_private_by_paper": none, "fields_private_by_content": none});
+    assert_eq!(v["papers"], want);
     let want = json!({"claim": 9, "document": 3, "event": 9});
     assert_eq!(v["private"]["parts"], want);
     let _ = std::fs::remove_dir_all(&e.root);
@@ -5258,4 +5261,142 @@ fn a_schedule_is_the_routine_doses_by_age_beside_those_on_file() {
     ] {
         assert!(call(&t, RECORDS, args).is_error());
     }
+}
+
+/// A paper's follow-ups and drugs are read from its labeled lines, a run
+/// gives them to papers filed before, and each is private by its paper or by
+/// what it says: held in every answer that names no person, and named in one
+/// that does.
+#[test]
+fn a_papers_follow_ups_and_drugs_are_read_and_held_by_what_they_say() {
+    let e = Env::new("papers");
+    let dir = fixture_household(&e, "papers", &["index.json", "text.json"]);
+    let alex = h_id(&e, "Alex Testperson");
+    let id = |n: &str| format!("d_{n}{}", "a".repeat(20))[..22].to_string();
+    let medicine = "r_exampleprofenaaaaaaa";
+
+    // Filed by a medrec that did not read them: a dry run counts what a run
+    // would, by field, by its paper and by what each says.
+    let papers = changes_of(&e, &alex)["papers"].clone();
+    assert_eq!(
+        papers["fields"],
+        json!({"follow_up": 7, "drugs": 2}),
+        "{papers}"
+    );
+    assert_eq!(papers["fields_private_by_paper"], json!({"follow_up": 1}));
+    assert_eq!(
+        papers["fields_private_by_content"],
+        json!({"follow_up": 2, "drugs": 1})
+    );
+    // What is held back never rests on the index's fields, which an older
+    // medrec drops: the views of papers it filed hold the same lines.
+    let (unread, _) = views_of(&e, &alex);
+    let r = e.ok(&["reindex"]);
+    assert_eq!(r["paper_fields"], 4, "{r}");
+
+    let (files, _) = views_of(&e, &alex);
+    assert_eq!(unread["private"]["parts"], files["private"]["parts"]);
+    let docs = files["documents"].as_array().unwrap().clone();
+    let doc = |n: &str| docs.iter().find(|d| d["id"] == id(n)).unwrap().clone();
+    let visit = doc("visit")["fields"].clone();
+    assert_eq!(
+        visit["follow_up"][0],
+        json!({"words": "in 2 weeks with Dr. Pat Sample.", "date": "2025-03-24",
+            "dated": "relative", "with": ["Dr. Pat Sample"], "lines": [[36, 41]]})
+    );
+    let drug = &visit["drugs"][0];
+    assert_eq!(drug["drug"], "Exampleprofen 200 mg tablet");
+    assert_eq!(drug["directions"], "1 tablet by mouth twice daily");
+    assert_eq!(drug["ndc"], "00000000101");
+    assert_eq!(drug["medicine"], medicine);
+    let discharge = doc("discharge")["fields"]["follow_up"].clone();
+    assert_eq!(discharge[0]["date"], "2025-04-20");
+    assert_eq!(discharge[0]["dated"], "resolved");
+    assert_eq!(discharge[1]["words"], "as needed.");
+    assert!(discharge[1].get("date").is_none(), "{discharge}");
+    for n in ["held", "bill"] {
+        assert!(doc(n).get("fields").is_none(), "{n}");
+    }
+
+    // An open paper's fields that are private by what they say: their lines
+    // are among its private lines, and the one that says nothing is not. The
+    // views have that one alone, so that no reader of an older contract shows
+    // the others; the index has them all.
+    let private = &files["private"];
+    assert!(private["documents"].get(id("counsel")).is_none());
+    assert!(private["documents"].get(id("private")).is_some());
+    let places = private["parts"][id("counsel")]["text"]
+        .as_array()
+        .unwrap()
+        .clone();
+    let index: Value =
+        serde_json::from_slice(&std::fs::read(dir.join("index.json")).unwrap()).unwrap();
+    let mut filed = index["documents"].as_array().unwrap().iter();
+    let counsel = filed.find(|d| d["id"] == id("counsel")).unwrap()["fields"].clone();
+    let open = counsel["follow_up"][2].clone();
+    assert_eq!(doc("counsel")["fields"], json!({"follow_up": [open]}));
+    let held = |x: &Value| {
+        let lines = x["lines"].as_array().unwrap();
+        lines.iter().all(|l| places.contains(l))
+    };
+    for x in [
+        &counsel["follow_up"][0],
+        &counsel["follow_up"][1],
+        &counsel["drugs"][0],
+    ] {
+        assert!(held(x), "{x}");
+    }
+    assert!(!held(&counsel["follow_up"][2]));
+
+    let t = e.tools();
+    let fields = |n: &str, person: Option<&str>| {
+        let mut args = json!({"id": id(n)});
+        if let Some(p) = person {
+            args["person"] = p.into();
+        }
+        let r = call(&t, DOCUMENT, args);
+        assert_fits(&t, DOCUMENT, &r)["labeled"].clone()
+    };
+    assert_eq!(
+        fields("counsel", None),
+        json!(["Follow-up: in 3 months (2025-08-05, from the paper's date)"])
+    );
+    let named = fields("counsel", Some("Alex"));
+    assert_eq!(named.as_array().unwrap().len(), 4, "{named}");
+    assert!(named
+        .to_string()
+        .contains("Drug, from a paper: Camila 0.35 mg tablet: 1 tablet daily"));
+    assert_eq!(
+        fields("visit", None),
+        json!([
+            "Follow-up: in 2 weeks with Dr. Pat Sample. (2025-03-24, from the paper's date)",
+            format!("Drug, from a paper: Exampleprofen 200 mg tablet: 1 tablet by mouth twice daily (NDC 00000000101; the person's medicine {medicine})"),
+        ])
+    );
+    assert_eq!(
+        fields("discharge", None),
+        json!([
+            "Follow-up: on Apr 20, sooner if fever. (2025-04-20, printed with no year)",
+            "Follow-up: as needed.",
+        ])
+    );
+    for v in every_answer(&t, None).into_values() {
+        let v = v.to_string();
+        for words in ["Placeholder Counseling", "F41.1", "Camila"] {
+            assert!(!v.contains(words), "{words}");
+        }
+    }
+
+    // `medrec documents` lists the whole, and no list of medicines has a drug
+    // from a paper.
+    let rows = e.ok(&["documents", "list"]);
+    let rows = rows["items"].as_array().unwrap();
+    let row = rows.iter().find(|r| r["id"] == id("counsel")).unwrap();
+    assert_eq!(row["fields"]["drugs"][0]["drug"], "Camila 0.35 mg tablet");
+    let row = rows.iter().find(|r| r["id"] == id("visit")).unwrap();
+    assert_eq!(row["fields"]["drugs"][0]["medicine"], medicine);
+    let summary = call(&t, SUMMARY, json!({"person": "Alex"}));
+    let summary = assert_fits(&t, SUMMARY, &summary).to_string();
+    assert!(summary.contains("Exampleprofen"), "{summary}");
+    assert!(!summary.contains("Camila"), "{summary}");
 }

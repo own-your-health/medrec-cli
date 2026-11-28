@@ -33,6 +33,7 @@ pub mod normalize;
 pub mod notes;
 pub mod nppes;
 pub mod panels;
+pub mod paper;
 pub mod parts;
 pub mod pdfgen;
 pub mod people;

@@ -42,6 +42,8 @@ pub(crate) const SUMMARY_LINES: usize = 25;
 /// Characters of a document's text one call returns at most, before JSON
 /// escaping; the part is cut further if escaping takes it over budget.
 const TEXT_CHUNK: usize = 16_000;
+/// The most labeled lines a document answer gives.
+const LABELED: usize = 20;
 /// Characters of compact JSON a document answer stays under.
 const DOCUMENT_BUDGET: usize = 30_000;
 /// The longest note text a list carries.
@@ -491,10 +493,6 @@ pub struct DocumentOut {
     pub doc_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub organization: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub amount_due: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub due_date: Option<String>,
     // The definitions have a budget: these schemas say no minimum.
     #[schemars(with = "i64")]
     pub text_chars: usize,
@@ -516,8 +514,56 @@ pub struct DocumentOut {
     pub private: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub provider_labels: Vec<Map<String, Value>>,
+    // What its text says on the lines it labels, a line each: a bill's
+    // amount due, follow-ups and drugs, at most `LABELED` and a line that
+    // says how many more. Not `fields`, which is an object elsewhere.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub labeled: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hint: Option<String>,
+}
+
+/// A bill's amount due and its due date as a line.
+fn due_line(amount: Option<String>, due: Option<&str>) -> Option<String> {
+    match (amount, due) {
+        (Some(a), Some(d)) => Some(format!("Amount due: {a}, by {d}")),
+        (Some(a), None) => Some(format!("Amount due: {a}")),
+        (None, Some(d)) => Some(format!("Due by {d}")),
+        (None, None) => None,
+    }
+}
+
+/// A follow-up as a line: its words, and the day they tell and how.
+fn follow_up_line(f: &crate::paper::FollowUp) -> String {
+    use crate::paper::Dated;
+    let how = |d: Dated| match d {
+        Dated::Printed => "as printed",
+        Dated::Relative => "from the paper's date",
+        Dated::Resolved => "printed with no year",
+    };
+    match (&f.date, f.dated) {
+        (Some(day), Some(d)) => format!("Follow-up: {} ({day}, {})", f.words, how(d)),
+        _ => format!("Follow-up: {}", f.words),
+    }
+}
+
+/// A drug as a line: as printed, its directions, its codes and the person's
+/// medicine of an equal code.
+fn drug_line(d: &crate::paper::Drug, medicine: Option<&str>) -> String {
+    let mut out = format!("Drug, from a paper: {}", d.drug);
+    if let Some(how) = &d.directions {
+        out.push_str(&format!(": {how}"));
+    }
+    let codes = [("RxNorm", &d.rxnorm), ("NDC", &d.ndc)];
+    let codes = codes
+        .iter()
+        .filter_map(|(k, v)| Some(format!("{k} {}", v.as_ref()?)));
+    let mut said: Vec<String> = codes.collect();
+    said.extend(medicine.map(|id| format!("the person's medicine {id}")));
+    if !said.is_empty() {
+        out.push_str(&format!(" ({})", said.join("; ")));
+    }
+    out
 }
 
 impl Toolset for MedrecTools {
@@ -575,8 +621,8 @@ impl Toolset for MedrecTools {
             ToolDef::read(
                 DOCUMENT,
                 "Read a document",
-                "A filed document's text. A visit summary, lab report, letter or bill. Long text \
-                 comes in parts: pass next_offset as offset.",
+                "A filed document's text and labeled lines. A visit summary, lab report, letter \
+                 or bill. Long text comes in parts: pass next_offset.",
             )
             .input::<DocumentArgs>()
             .output::<DocumentOut>(),
@@ -1043,6 +1089,15 @@ fn event_item(e: &Value, detailed: bool) -> Item {
         person_id: s("person").unwrap_or_default(),
         printed: Printed::of_event(e, detailed),
         ..Default::default()
+    }
+}
+
+/// At most `LABELED` lines, then one that says how many more there are.
+fn capped(lines: &mut Vec<String>) {
+    if lines.len() > LABELED {
+        let more = lines.len() - LABELED;
+        lines.truncate(LABELED);
+        lines.push(format!("{more} more on labeled lines: the text has them"));
     }
 }
 
@@ -1702,8 +1757,8 @@ impl MedrecTools {
         // Asked for by id: a private document is the person's, named. Its
         // labels, and a private record's name, are in no answer that names no
         // person.
-        let records: Vec<String> = f
-            .index(&p)?
+        let idx = f.index(&p)?;
+        let records: Vec<String> = idx
             .records
             .iter()
             .filter(|r| r.documents.contains(&d.id) && !private.errors.contains(&r.id))
@@ -1732,8 +1787,6 @@ impl MedrecTools {
             date: d.date.clone(),
             doc_type: d.doc_type.clone(),
             organization: d.organization.clone(),
-            amount_due: s.and_then(|s| s.amount_due.as_ref()).map(money),
-            due_date: s.and_then(|s| s.due_date.clone()),
             text_chars: chars.len(),
             offset: start,
             first_page: 1,
@@ -1744,6 +1797,23 @@ impl MedrecTools {
             provider_labels,
             ..Default::default()
         };
+        // A field on a line left out is left out with it.
+        let places = private.parts.places(&d.id);
+        let shown = |lines: &[crate::parts::Place]| !crate::paper::left_out(lines, &places);
+        let due = s.and_then(|s| s.amount_due.as_ref()).map(money);
+        out.labeled
+            .extend(due_line(due, s.and_then(|s| s.due_date.as_deref())));
+        if let Some(fields) = &d.fields {
+            let follow = fields.follow_up.iter().filter(|x| shown(&x.lines));
+            out.labeled.extend(follow.map(follow_up_line));
+            let drugs = fields.drugs.iter().filter(|x| shown(&x.lines));
+            out.labeled.extend(drugs.map(|x| {
+                let medicine = crate::paper::medicine(x, &idx.records);
+                let medicine = medicine.filter(|r| !whole || !private.held_back(&r.id));
+                drug_line(x, medicine.map(|r| r.id.as_str()))
+            }));
+        }
+        capped(&mut out.labeled);
         if chars.is_empty() {
             out.hint = hint(Some(
                 "No text was extracted from this document: an image without OCR, or a file \
@@ -2079,6 +2149,23 @@ mod tests {
             marked(&text, 1),
             "one\n--- page 2 ---\ntwo two\n--- page 3 ---\nthree"
         );
+    }
+
+    #[test]
+    fn a_document_gives_twenty_labeled_lines_and_counts_the_rest() {
+        let lines = |n: usize| {
+            (1..=n)
+                .map(|i| format!("Follow-up: {i}"))
+                .collect::<Vec<_>>()
+        };
+        let mut twenty = lines(LABELED);
+        capped(&mut twenty);
+        assert_eq!(twenty, lines(20));
+        let mut more = lines(LABELED + 3);
+        capped(&mut more);
+        assert_eq!(more.len(), 21);
+        assert_eq!(more[19], "Follow-up: 20");
+        assert_eq!(more[20], "3 more on labeled lines: the text has them");
     }
 
     #[test]

@@ -320,7 +320,7 @@ medrec note add Robin "Ask about the recheck" --tag question --about <record id>
 
 medrec verify                                   # every indexed file against the index
 medrec verify --events                          # and each event's place, and its records' names, days and sources, against their raw files: counts and ids
-medrec reindex                                  # claims shaped again, providers, statuses, what each source gave and what else served a paper read again from the raw files, results' parts, categories and performers too, reports' performers, what panels and reports list, the records' links made again, results about somebody else put in a record of their own, and bills and receipts read again, after an upgrade
+medrec reindex                                  # claims shaped again, providers, statuses, what each source gave and what else served a paper read again from the raw files, results' parts, categories and performers too, reports' performers, what panels and reports list, the records' links made again, results about somebody else put in a record of their own, and bills and receipts read again, and other papers' follow-ups and drugs, after an upgrade
 medrec backup --to "/Volumes/Backup/Medical Records"
 ```
 
@@ -921,6 +921,20 @@ due), so the later one points at the first (`same_statement_as`). A
 payment receipt is its own type, `receipt`, filed beside bills under
 `Claims/`.
 
+Any other paper keeps what the lines its text labels say (0.9.12 and later),
+read by rules alone: each follow-up ("Follow up", "Return", "Next
+appointment"), with its words, the day they tell before any condition, and
+the places and clinicians they name; and each drug ("Rx", "Medication"), as
+printed, with its directions ("Sig", "Directions", "Take") and any RxNorm
+code or NDC printed with it. "In 2 weeks" is counted from the paper's date,
+and a day without a year is its first on or after that date. A drug from a
+paper is in no list of medicines and sets no status; it is the person's
+medicine only by an equal code. A line of a paper's text that says a private
+area is never read, and a follow-up or drug that says one itself (a private
+medicine, a private practice or clinician, a diagnosis code) is held back as
+the line is. `medrec reindex` reads the papers filed before. `medrec documents
+list --json` and `medrec_document` give them.
+
 ### Imaging
 
 A study's DICOM files are kept byte for byte. A study is identified by its
@@ -943,14 +957,15 @@ supported.
 | `medrec_summary` | The household's people. With `person`: their current medicines (and those on hold or ended by their date), conditions and allergies, immunizations, the latest result of each test with the lab's range and flag, recent visits, and bills with an amount due |
 | `medrec_search` | Documents, records, imaging studies and notes holding every word of a query; a query naming lab tests (`blood tests`, `labs`) also finds every lab result, report and lab claim |
 | `medrec_records` | One kind, newest first: `medications`, `conditions`, `allergies`, `immunizations`, `visits`, `procedures`, `results` (with `name`, one test over time), `tests` (the latest result of each), `reports`, `claims`, `coverage`, `bills`, `documents`, `notes`, `timeline`, `events` (what happened: one per visit, ER trip, stay, test or fill, with `you_owe`; `id` gives one with its money and members) or `schedule` (with `person`, 0.9.12 and later: of each vaccine group, the doses CDC's schedule recommends by age on the dates they fall on, beside the doses on file, each with the table's version and date; never what is due); `active` keeps current ones (not for `events`, whose `status` says which are still waiting), and conditions, allergies and medicines say what each source says of them ("What is current") |
-| `medrec_document` | A filed document's extracted text, in parts of up to 16,000 characters, with page breaks marked |
+| `medrec_document` | A filed document's extracted text, in parts of up to 16,000 characters, with page breaks marked, and its `labeled` lines, a line each and at most 20: a bill's amount due, and (0.9.12 and later) the follow-ups and drugs its labeled lines give, a drug "from a paper" |
 
 Private items (above) are left out of an answer about the whole household,
 whose warnings say how many. An answer about one person includes them, and
 so does one that names the item ("sertraline", not "tablets"), each marked
 `private` with its area. The private part of an open item is left out too, and
 `not_shown` says how much; `medrec_document` gives a paper's text without its
-private lines unless `person` names its person.
+private lines, and its `labeled` lines without a follow-up or drug private by
+what it says, unless `person` names its person.
 
 Claims, events, documents and bills carry `provider_labels` beside the source's
 words: who a printed provider is (Provider labels, above), how sure that is and

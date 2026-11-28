@@ -1,0 +1,12 @@
+{
+ "schema": "medrec-text/v1",
+ "person": "p_robinaaaaaaaaaaaaaaa",
+ "texts": {
+  "d_visitaaaaaaaaaaaaaaa": "Visit summary\nExample Family Clinic\nFollow up in 2 weeks with Dr. Pat Sample.\nRx: Exampleprofen 200 mg tablet\nSig: 1 tablet by mouth twice daily\nNDC 00000-0001-01\n",
+  "d_dischargeaaaaaaaaaaa": "Discharge instructions\nReturn on Apr 20, sooner if fever.\nFollow up as needed.\n",
+  "d_counselaaaaaaaaaaaaa": "Visit summary\nFollow up at Placeholder Counseling Center in 1 month\nFollow up for F41.1 in 6 weeks\nRx: Camila 0.35 mg tablet\nSig: 1 tablet daily\nFollow up in 3 months\n",
+  "d_privateaaaaaaaaaaaaa": "Psychiatry visit\nFollow up in 2 weeks\n",
+  "d_heldaaaaaaaaaaaaaaaa": "Visit summary\nFollow up in 2 weeks for HIV test results\n",
+  "d_billaaaaaaaaaaaaaaaa": "Statement\nReturn this portion with your payment\nFollow up in 2 weeks\n"
+ }
+}

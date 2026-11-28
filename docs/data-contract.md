@@ -222,6 +222,81 @@ payment's. A bill or receipt filed before 0.9.1 gains the fields its
 stored text gives and its statement lacks, keeping those it has, the next
 time a bill or receipt is filed for that person, or at `medrec reindex`.
 
+**Fields of a paper** (0.9.12 and later). A paper of any type but `bill`,
+`receipt`, `eob` and `insurance_card`, or of none, carries `fields`: what its
+text says on the lines that label it, read by rules alone, and absent where
+it says nothing of them.
+
+```json
+{"fields": {
+  "follow_up": [{"words": "in 2 weeks with Dr. Pat Sample.", "date": "2025-03-24",
+                 "dated": "relative", "with": ["Dr. Pat Sample"], "lines": [[36, 41]]}],
+  "drugs": [{"drug": "Exampleprofen 200 mg tablet",
+             "directions": "1 tablet by mouth twice daily", "ndc": "00000000101",
+             "lines": [[77, 31], [109, 34], [144, 17]]}]}}
+```
+
+- A line is read only where it starts with its label, after any bullet or
+  list number. A line of the text that says an area (Private parts, below) is
+  never read, and nothing is joined across one: directions after it are no
+  drug's. A label alone on its line heads its value on the next line.
+- `follow_up`: one for each line that starts "Follow up" (also "Follow-up",
+  "F/U"), "Next appointment" or "Next visit", or "Return" where it is "Return
+  visit" or "Return appointment", is followed by a colon or a dash, or the words
+  after it say when or why ("in", "on", "at", "to clinic", "if", ...). A return
+  to work, school, daycare, sports, full duty or one's activities is never one,
+  marked or not; "Return visit: school physical" or "regular checkup" is. `words` are the line's words after the label, as printed, up to 200
+  characters.
+  - `date` is the day the words tell before any condition ("if", "as needed",
+    "PRN", "unless", "should"); a day after one is the condition's, so "as
+    needed" or "if symptoms persist" keeps the words with no `date`. A day
+    printed whole on or after the paper's `date` is the one told, wherever it
+    stands; else the first other day told. A day printed whole before the
+    paper's `date` is the one told only where the words tell no other ("in 2
+    weeks to review labs from 1/5/2027", and "to review 1/5/2027 labs in 2
+    weeks", are two weeks after a paper of 2027-01-10; "on 1/5/2027" alone is
+    that day).
+    `dated` says how: `printed`, a day printed whole; `relative`, a time after
+    the paper's own `date`, where the words start with it or "in", "within" or
+    "after" comes before it, with "about" or "approximately" between or not
+    ("2 weeks", "in a month", "within 3 days", "in about 2 weeks"; of a
+    range, "2 to 3 weeks", its earliest day; a month later than a day the
+    month has not is its last day), and not where it is what something lasts
+    or an age ("after 10 days of antibiotics", "6 month well-child check", "2
+    days before"); `resolved`, a day printed without a year, its first
+    occurrence on or after the paper's date. Without a paper `date` only a
+    printed day is told.
+  - `with` is each place or clinician the words name after "with", "see" or
+    "at", as printed: words that start with a capital, up to a word of when or
+    why or a comma, after which another may start ("with Dr. Pat Sample,
+    Placeholder Counseling Center" is two). An initial ("A.") is a name's,
+    never an article; a credential after a comma ("NP", "LCSW") is no name.
+    "Your doctor" is none.
+- `drugs`: one for each line that starts "Rx", "Medication", "Medicine",
+  "Drug", "Prescribed" or "Prescription" with a colon ("Rx" with none too)
+  and words after it that name one: not a number, a count or a word that there
+  is none. `drug` is as printed, up to 120 characters. `directions` are the
+  words after "Sig" or "Directions:", or a line that starts "Take", within
+  three lines after the drug's. `rxnorm` and `ndc` are an RxNorm code ("RxNorm",
+  "RXCUI") or an NDC ("NDC") printed on the drug's lines or on a line of its
+  own within three lines after them, an NDC as eleven digits where its hyphens
+  tell them.
+- `lines` are the places of a field's lines in the paper's text, `[byte
+  offset, byte length]` without the line end, as `private.json`'s parts have
+  them. A field private by what it says has its lines among an open paper's
+  private places (Private parts, below): `documents.json` leaves it out, and so
+  does an answer that names no person.
+- A drug is listed under its paper alone, "from a paper": never in a list of
+  medicines, a current list, standing or the summary, and it sets no status. It
+  is the person's medicine only where both have an equal RxNorm code or NDC,
+  never by its name; `documents.json` and `medrec documents list` then give that
+  medicine's id as the drug's `medicine`.
+
+Intake, `review file` and an import read them as they file a paper. `medrec
+reindex` reads every paper again from its stored text (`paper_fields`, the
+papers whose fields changed), so one filed before 0.9.12, or saved since by an
+older medrec, which drops `fields`, gets them there.
+
 A DocumentReference names a house type with a `type.coding` in the system
 `urn:pk-med:doc-type` (code `bill`, `receipt`, or any type above). With no
 such coding and no LOINC code, a `type.text` of `bill` or `receipt` (any
@@ -699,7 +774,8 @@ under the source, filed by an earlier import). A pharmacy `claim`
 `dry_run: true` and what is in "A dry run", below):
 `claims` (how many there are), `reshaped`, `unchanged` and `without_raw`
 (claims with no raw file), `statements` (bills and receipts whose statement
-gained fields), `providers_updated` (0.9.6 and later: records whose
+gained fields), `paper_fields` (0.9.12 and later: papers whose `fields`
+changed), `providers_updated` (0.9.6 and later: records whose
 `providers` changed), `statuses_updated` (0.9.9 and later: records whose
 `words` or `errors` changed, or whose values another source's took the place
 of, and conditions, allergies and medicines whose `status` or `fields`
@@ -744,7 +820,7 @@ or id of an item, and names no kind of questionnaire that there is one of.
   | `events` | `added`, `removed`, and `changed`, those with other money |
   | `bills`, `worth_a_call`, `not_billed` | of the lists of `bills.json`, `added`, `removed`, and `changed`, those with other amounts |
   | `about_another` | what is about somebody else: results and reports by what their source says (`said`), by the person's age (`by_age`) and by what they list alone (`listing`, 0.9.10 and later), and `documents` |
-  | `papers` | `filed_before`, papers filed by a medrec that did not keep every source of one, and `source_found`, those of them another source of which the raw files tell |
+  | `papers` | `filed_before`, papers filed by a medrec that did not keep every source of one, and `source_found`, those of them another source of which the raw files tell; and (0.9.12 and later) `fields`, the follow-ups and drugs papers' texts give, by field (`follow_up`, `drugs`), `fields_private_by_paper`, those of a private paper, and `fields_private_by_content`, those of an open paper private by what they say (Private parts) |
 
 A `claim` (an ExplanationOfBenefit) is shaped for costs (0.5.0 and later).
 An earlier import's claims take this shape when their source serves them
@@ -2089,6 +2165,11 @@ fields added:
 - `says`: of a paper that a source says is entered in error, what each of its
   provenances says, as a record's (Records, above; 0.9.9 and later). Absent of
   any other.
+- `fields` (0.9.12 and later): `index.json`'s without any field whose lines
+  are among the paper's private places (Private parts, below), so that a reader
+  of an older contract shows none of them; absent where none is left. Each drug
+  has `medicine`, the id of the person's medicine of an equal code, where there
+  is one (Fields of a paper, above).
 
 `text-<n>.bin` holds the documents' texts, UTF-8, one after another in
 document order. A pack closes before a text would take it past 1,000,000
@@ -2755,7 +2836,26 @@ nothing is private.
     benefits) has `text`: the byte offset and length in its text (`text.json`) of
     each line that says an area, by words or by a service's number, without its
     line end (a line feed or a form feed). Words that go over from one line to
-    the next are in both.
+    the next are in both. From 0.9.12 it has the lines of each of its `fields`
+    (Fields of a paper, above) that is private by what it says, too: a drug whose
+    name or directions name a medicine of an area or its brand (Private's
+    `medicine`), or that is the person's medicine by an equal code where any
+    medicine of that code is private; a follow-up whose words, or a drug whose
+    name or directions, name a place of an area (by the words of Private's
+    `provider`), or name, in `with` or as any run of words that start with a
+    capital wherever it stands or any part of one, a clinician the `clinician`
+    rule ties to one (by a paper that names them or a link to a practice's, not
+    by a day; a run keeps the small words, months and commas inside a name,
+    so "June Placeholder" and "Center for Placeholder Health" are whole); a
+    follow-up whose words, or a drug whose name or directions, print anywhere,
+    whole and on word boundaries, a name the household's provider word, of
+    every item that prints it, gives an area (`medrec providers`), whatever
+    its case and punctuation, the last word on each name deciding; and a field
+    that prints an ICD-10 code of an area. These are read from the paper's text as
+    the views are written, never from its `fields` in `index.json`, which a
+    medrec older than 0.9.12 drops: what is held back is the same before a
+    `medrec reindex` as after it. `documents.json` has no field any of whose
+    `lines` are among these places; `index.json` keeps it.
   - **An event** has what of `kind`, `title`, `what`, `what_from`, `place`,
     `place_from`, `clinicians`, `money` and `differences` its members that are
     not private do not say as `events.json` has it: as they say it, null where
@@ -2968,6 +3068,14 @@ readers ship with medrec:
     for all of it.", with its person's name; `text_chars` and the pages are those of what it gives. With
     `person` (a usage error where the document is not that person's) it gives all
     of it, with its records and labels as an answer about them has them.
+    Its `labeled` lines (0.9.12 and later; before, `amount_due` and `due_date`)
+    are a line each, at most 20 and then one that says how many more the text
+    has: "Amount due: $90.00, by 2024-10-29" of a bill's statement,
+    "Follow-up: <words> (<date>, <how>)" of each follow-up, `how` being "as
+    printed", "from the paper's date" or "printed with no year", and "Drug, from
+    a paper: <drug>: <directions> (RxNorm …; NDC …; the person's medicine <id>)"
+    of each drug (Fields of a paper, above), leaving out, without `person`, each
+    whose lines are private places, and a private medicine's id.
   - private items (`private.json`, 0.9.1 and later) are left out of an
     answer about the whole household. Each page says how many it left out
     in a `private-left-out` warning (0.9.2 and later; 0.9.1 gives the whole

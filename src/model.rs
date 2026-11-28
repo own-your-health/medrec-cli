@@ -338,6 +338,10 @@ pub struct Document {
     /// portal's PDF of one bill), by [`crate::bill::same_statement`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub same_statement_as: Option<String>,
+    /// What its text says on the lines it labels: follow-ups, and drugs with
+    /// their directions ([`crate::paper`], 0.9.12 and later).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fields: Option<crate::paper::Fields>,
     pub provenance: Provenance,
     /// Where else the same bytes came from: another Binary of its source's or
     /// of another's, and the household (0.9.9 and later).

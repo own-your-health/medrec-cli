@@ -770,7 +770,9 @@ fn a_binary_that_does_not_read_is_counted() {
     let papers = e.index().documents.len();
     let r = e.ok(&["reindex", "--dry-run"]);
     let counted = &r["people"][0]["views"]["papers"];
-    let want = serde_json::json!({"filed_before": papers, "source_found": 1});
+    let none = serde_json::json!({});
+    let want = serde_json::json!({"filed_before": papers, "source_found": 1, "fields": none,
+        "fields_private_by_paper": none, "fields_private_by_content": none});
     assert_eq!((counted, r["fresh"].as_bool()), (&want, Some(true)), "{r}");
     let r = e.ok(&["reindex"]);
     assert!(r.get("fresh").is_none() && r["people"][0].get("views").is_none());

@@ -1054,6 +1054,7 @@ fn file_document(
         .ok_or_else(|| CliError::Other(format!("no index loaded for {}", person.id)))?;
     let person_texts = texts.get(&person.id).expect("loaded above");
     crate::bill::annotate(&mut doc, &prepared.extracted.text, index, person_texts);
+    crate::paper::annotate(&mut doc, &prepared.extracted.text);
     let same_statement_as = doc.same_statement_as.clone();
     index.documents.push(doc);
     Ok(Filed {
@@ -1110,6 +1111,7 @@ pub fn document_for(
         renderings: Vec::new(),
         statement: None,
         same_statement_as: None,
+        fields: None,
         classification: serde_json::to_value(class).ok(),
         provenance: Provenance {
             source: ProvenanceSource {
