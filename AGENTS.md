@@ -58,7 +58,7 @@ quick-xml, lopdf), and so are local tools (poppler, tesseract, bsdtar).
 |---|---|
 | `src/main.rs` | The clap tree, output and exit codes, and the `profiles` commands |
 | `src/config.rs` | This machine's settings, and the profiles that hold each records folder's (cli-common's `pk_cli_config::profile`) |
-| `src/store.rs` | The records folder's backend: a Google Drive folder through cli-common's Drive API store, behind the read cache, or a local directory; `drive_cli()` is medrec's Drive sign-ins (`medrec drive`, `--drive-profile`) |
+| `src/store.rs` | The records folder's backend: a Google Drive folder through cli-common's Drive API store, behind the read cache, or a local directory, and where a command's reads came from (`reads`, `--fresh`); `drive_cli()` is medrec's Drive sign-ins (`medrec drive`, `--drive-profile`) |
 | `src/drive_tests.rs` | The store, `init` and `backup` on Drive, against cli-common's fake Drive server |
 | `src/folder.rs` | The folder layout, file naming, read-back writes, the lock and `rev` checks |
 | `src/model.rs` | Every JSON format in the folder |

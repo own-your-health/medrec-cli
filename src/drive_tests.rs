@@ -509,3 +509,168 @@ fn an_index_drive_refuses_stops_verify() {
     let err = maint::verify(&f, false).unwrap_err();
     assert_eq!(err.code(), "auth", "{err}");
 }
+
+/// A command that reads a folder on Drive says whether Drive or this machine's
+/// copies answered; one that is told to reads Drive alone.
+#[test]
+fn reads_say_whether_drive_or_a_copy_answered() {
+    let h = Harness::new(true);
+    h.sign_in();
+    let records = h.fake.add_folder(ROOT_ID, "Medical Records");
+    let loc = h.location(&records);
+    maint::init(&mut Config::default(), &loc, false, BUDGET).unwrap();
+    h.fake.add_file(&records, "one.json", b"{}");
+    store::testing::read_fresh(false);
+    // What is opened to write is not a reader's, and neither is a local folder.
+    let st = Store::open(&loc, Reads::Fresh, BUDGET).unwrap();
+    st.read_text("household.json").unwrap().unwrap();
+    let dir = Location::Dir(h.dir.join("here"));
+    std::fs::create_dir_all(h.dir.join("here")).unwrap();
+    let here = Store::open(&dir, Reads::Cached, BUDGET).unwrap();
+    assert_eq!(here.read_text("one.json").unwrap(), None);
+    assert_eq!(store::read_from(), None);
+
+    let read = |what: &[&str]| {
+        store::testing::read_fresh(false);
+        let st = Store::open(&loc, Reads::Cached, BUDGET).unwrap();
+        for rel in what {
+            assert_eq!(st.read_text(rel).unwrap().as_deref(), Some("{}"));
+        }
+        store::read_from().unwrap()
+    };
+    let first = read(&["one.json"]);
+    assert_eq!((first.from, first.drive, first.cache), ("drive", 1, 0));
+    assert_eq!(first.oldest_seconds, None);
+    let again = read(&["one.json", "one.json"]);
+    assert_eq!((again.from, again.drive, again.cache), ("cache", 0, 2));
+    assert_eq!((again.stale, again.unreachable), (0, 0));
+    assert!(again.oldest_seconds.unwrap() < 60);
+    h.fake.add_file(&records, "two.json", b"{}");
+    let both = read(&["one.json", "two.json"]);
+    assert_eq!((both.from, both.drive, both.cache), ("both", 1, 1));
+    // What the cache has no part in is Drive's.
+    store::testing::read_fresh(false);
+    let st = Store::open(&loc, Reads::Cached, BUDGET).unwrap();
+    st.md5("one.json").unwrap().unwrap();
+    st.read_text_fresh("one.json").unwrap().unwrap();
+    let direct = store::read_from().unwrap();
+    assert_eq!((direct.from, direct.drive, direct.cache), ("drive", 2, 0));
+
+    // Fresh: what Drive has now, whatever the copies say.
+    store::testing::read_fresh(true);
+    let st = Store::open(&loc, Reads::Cached, BUDGET).unwrap();
+    h.fake.clear_requests();
+    for rel in ["one.json", "two.json"] {
+        st.read_text(rel).unwrap().unwrap();
+    }
+    let fresh = store::read_from().unwrap();
+    assert_eq!((fresh.from, fresh.drive, fresh.cache), ("drive", 2, 0));
+    assert!(h.fake.requests().len() >= 2);
+    store::testing::read_fresh(false);
+}
+
+/// A copy read because Drive refused it is `unreachable`, and one past its
+/// time `stale`. Once any copy's age is unknown, no oldest age is given, in
+/// that store and in the stores opened after it.
+#[test]
+fn reads_say_how_old_their_copies_are() {
+    use pk_cli_drive::google::fake::When;
+    use std::time::{Duration, SystemTime};
+    let h = Harness::new(true);
+    h.sign_in();
+    let records = h.fake.add_folder(ROOT_ID, "Medical Records");
+    let loc = h.location(&records);
+    maint::init(&mut Config::default(), &loc, false, BUDGET).unwrap();
+    for rel in ["one.json", "two.json"] {
+        h.fake.add_file(&records, rel, b"{}");
+    }
+    store::testing::read_fresh(false);
+    let st = Store::open(&loc, Reads::Cached, BUDGET).unwrap();
+    for rel in ["one.json", "two.json"] {
+        st.read_text(rel).unwrap().unwrap();
+    }
+    // This machine's copy of a file: the only file of that name under the
+    // cache, beside the listings and markers.
+    let copy = |name: &str| -> std::path::PathBuf {
+        let mut found = vec![];
+        let mut dirs = vec![h.dir.join("cache")];
+        while let Some(d) = dirs.pop() {
+            for e in std::fs::read_dir(&d).unwrap().flatten() {
+                let p = e.path();
+                let skip = p
+                    .file_name()
+                    .is_some_and(|n| n.to_string_lossy().starts_with('.'));
+                match (p.is_dir(), skip) {
+                    (true, false) => dirs.push(p),
+                    (false, _) if p.file_name() == Some(name.as_ref()) => found.push(p),
+                    _ => {}
+                }
+            }
+        }
+        assert_eq!(found.len(), 1, "{name}: {found:?}");
+        found.remove(0)
+    };
+    let dated = |name: &str, when: SystemTime| {
+        let f = std::fs::File::options()
+            .write(true)
+            .open(copy(name))
+            .unwrap();
+        f.set_modified(when).unwrap();
+    };
+    let refuse = |rel: &str| {
+        let file = h.fake.find(&format!("Medical Records/{rel}")).unwrap();
+        h.fake
+            .fail_next(&file, 403, "forbidden", 1000, When::Before);
+    };
+    const DAY: u64 = 86_400;
+    // Two days old, past the time a copy is served at all: Drive is asked, and
+    // refuses, so the copy stands in.
+    dated("one.json", SystemTime::now() - Duration::from_secs(2 * DAY));
+    refuse("one.json");
+    store::testing::read_fresh(false);
+    let st = Store::open(&loc, Reads::Cached, BUDGET).unwrap();
+    assert_eq!(st.read_text("one.json").unwrap().as_deref(), Some("{}"));
+    let old = store::read_from().unwrap();
+    assert_eq!((old.from, old.drive, old.cache), ("cache", 0, 1));
+    assert_eq!((old.stale, old.unreachable), (1, 1));
+    let age = old.oldest_seconds.unwrap();
+    assert!((2 * DAY..2 * DAY + 600).contains(&age), "{age}");
+
+    // A copy dated in the future has no known age: none is given, though the
+    // other's is known, whichever was read first.
+    dated(
+        "two.json",
+        SystemTime::now() + Duration::from_secs(2 * 3600),
+    );
+    refuse("two.json");
+    for order in [["two.json", "one.json"], ["one.json", "two.json"]] {
+        store::testing::read_fresh(false);
+        let st = Store::open(&loc, Reads::Cached, BUDGET).unwrap();
+        for rel in order {
+            assert_eq!(st.read_text(rel).unwrap().as_deref(), Some("{}"));
+        }
+        let r = store::read_from().unwrap();
+        assert_eq!(
+            (r.from, r.cache, r.stale, r.unreachable),
+            ("cache", 2, 2, 2),
+            "{order:?}"
+        );
+        assert_eq!(r.oldest_seconds, None, "{order:?}");
+    }
+    // Nor in the stores opened after it, of copies whose age is known.
+    store::testing::read_fresh(false);
+    let first = Store::open(&loc, Reads::Cached, BUDGET).unwrap();
+    first.read_text("two.json").unwrap().unwrap();
+    let then = Store::open(&loc, Reads::Cached, BUDGET).unwrap();
+    then.read_text("one.json").unwrap().unwrap();
+    let r = store::read_from().unwrap();
+    assert_eq!((r.cache, r.unreachable, r.oldest_seconds), (2, 2, None));
+    // And a store that knows every age it read, after one that does not.
+    store::testing::read_fresh(false);
+    let known = Store::open(&loc, Reads::Cached, BUDGET).unwrap();
+    known.read_text("one.json").unwrap().unwrap();
+    assert!(store::read_from().unwrap().oldest_seconds.is_some());
+    let unknown = Store::open(&loc, Reads::Cached, BUDGET).unwrap();
+    unknown.read_text("two.json").unwrap().unwrap();
+    assert_eq!(store::read_from().unwrap().oldest_seconds, None);
+}

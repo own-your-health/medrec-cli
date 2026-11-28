@@ -337,7 +337,7 @@ fn mount_check(cfg: &Config, mount: &str) -> Check {
     let remote = cfg
         .folder_location()
         .ok()
-        .and_then(|l| Store::open(&l, Reads::Cached, cfg.store_budget()).ok())
+        .and_then(|l| Store::open(&l, Reads::Fresh, cfg.store_budget()).ok())
         .and_then(|s| folder::read_household(&s).ok().flatten());
     match (mounted, remote) {
         (Some(m), Some(r)) if m.folder_id == r.folder_id => check(
