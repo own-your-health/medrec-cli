@@ -12,7 +12,7 @@ use pk_cli_auth::{AuthStatus, KeyArgs};
 use pk_cli_config::profile::ProfileName;
 use pk_cli_config::ConfigStore;
 use pk_cli_core::info::{AuthInfo, CliInfo};
-use pk_cli_core::{confirm, output, CliError, CommonArgs};
+use pk_cli_core::{confirm, CliError, CommonArgs};
 use pk_cli_drive::google::{DriveCommand, StatusArgs};
 use pk_cli_selfupdate::{SelfUpdateArgs, Updater};
 use serde::Serialize;
@@ -41,8 +41,43 @@ struct Cli {
     /// by every command that reaches a records folder; there is no default.
     #[arg(long, global = true, value_name = "NAME", value_parser = profile_name_text)]
     profile: Option<String>,
+    /// Read a records folder on Google Drive from Drive itself, and not from
+    /// this machine's copies, which can be up to a day old.
+    #[arg(long, global = true)]
+    fresh: bool,
     #[command(subcommand)]
     command: Command,
+}
+
+/// cli-common's output, with where what a command read came from.
+mod output {
+    use serde_json::{json, Value};
+
+    pub use pk_cli_core::output::*;
+
+    /// The JSON answer of a command that read a records folder on Drive says so
+    /// (`reads`).
+    fn with_reads(json_mode: bool, mut payload: Value) -> Value {
+        if let (true, Some(from)) = (json_mode, medrec::store::read_from()) {
+            if let Some(o) = payload.as_object_mut() {
+                o.insert("reads".into(), json!(from));
+            }
+        }
+        payload
+    }
+
+    pub fn emit(json_mode: bool, schema: &str, payload: Value, text: impl FnOnce(&Value)) {
+        let payload = with_reads(json_mode, payload);
+        pk_cli_core::output::emit(json_mode, schema, payload, text);
+    }
+
+    pub fn emit_one(json_mode: bool, schema: &str, payload: Value) {
+        pk_cli_core::output::emit_one(json_mode, schema, with_reads(json_mode, payload));
+    }
+
+    pub fn json(payload: &Value) {
+        pk_cli_core::output::json(&with_reads(true, payload.clone()));
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -1033,6 +1068,9 @@ enum CacheCmd {
 fn main() {
     let cli = Cli::parse();
     let json = cli.common.json;
+    if cli.fresh {
+        store::read_fresh();
+    }
     if let Err(e) = run(&cli) {
         std::process::exit(output::fail(&e, json));
     }

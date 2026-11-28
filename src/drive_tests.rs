@@ -362,3 +362,62 @@ fn the_elements_of_raw_files_on_drive_are_counted() {
         ("fakeprov", 2)
     );
 }
+
+/// A command that reads a folder on Drive says whether Drive or this machine's
+/// copies answered; one that is told to reads Drive alone.
+#[test]
+fn reads_say_whether_drive_or_a_copy_answered() {
+    let h = Harness::new(true);
+    h.sign_in();
+    let records = h.fake.add_folder(ROOT_ID, "Medical Records");
+    let loc = h.location(&records);
+    maint::init(&mut Config::default(), &loc, false, BUDGET).unwrap();
+    h.fake.add_file(&records, "one.json", b"{}");
+    store::testing::read_fresh(false);
+    // What is opened to write is not a reader's, and neither is a local folder.
+    let st = Store::open(&loc, Reads::Fresh, BUDGET).unwrap();
+    st.read_text("household.json").unwrap().unwrap();
+    let dir = Location::Dir(h.dir.join("here"));
+    std::fs::create_dir_all(h.dir.join("here")).unwrap();
+    let here = Store::open(&dir, Reads::Cached, BUDGET).unwrap();
+    assert_eq!(here.read_text("one.json").unwrap(), None);
+    assert_eq!(store::read_from(), None);
+
+    let read = |what: &[&str]| {
+        store::testing::read_fresh(false);
+        let st = Store::open(&loc, Reads::Cached, BUDGET).unwrap();
+        for rel in what {
+            assert_eq!(st.read_text(rel).unwrap().as_deref(), Some("{}"));
+        }
+        store::read_from().unwrap()
+    };
+    let first = read(&["one.json"]);
+    assert_eq!((first.from, first.drive, first.cache), ("drive", 1, 0));
+    assert_eq!(first.oldest_seconds, None);
+    let again = read(&["one.json", "one.json"]);
+    assert_eq!((again.from, again.drive, again.cache), ("cache", 0, 2));
+    assert_eq!((again.stale, again.unreachable), (0, 0));
+    assert!(again.oldest_seconds.unwrap() < 60);
+    h.fake.add_file(&records, "two.json", b"{}");
+    let both = read(&["one.json", "two.json"]);
+    assert_eq!((both.from, both.drive, both.cache), ("both", 1, 1));
+    // What the cache has no part in is Drive's.
+    store::testing::read_fresh(false);
+    let st = Store::open(&loc, Reads::Cached, BUDGET).unwrap();
+    st.md5("one.json").unwrap().unwrap();
+    st.read_text_fresh("one.json").unwrap().unwrap();
+    let direct = store::read_from().unwrap();
+    assert_eq!((direct.from, direct.drive, direct.cache), ("drive", 2, 0));
+
+    // Fresh: what Drive has now, whatever the copies say.
+    store::testing::read_fresh(true);
+    let st = Store::open(&loc, Reads::Cached, BUDGET).unwrap();
+    h.fake.clear_requests();
+    for rel in ["one.json", "two.json"] {
+        st.read_text(rel).unwrap().unwrap();
+    }
+    let fresh = store::read_from().unwrap();
+    assert_eq!((fresh.from, fresh.drive, fresh.cache), ("drive", 2, 0));
+    assert!(h.fake.requests().len() >= 2);
+    store::testing::read_fresh(false);
+}
