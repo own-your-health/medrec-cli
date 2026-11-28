@@ -179,15 +179,21 @@ fn name(r: &mut Record) {
 /// A place of a text: where it starts and how long it is, in bytes.
 pub type Place = [usize; 2];
 
-/// Where a text's private lines are, without their ends. Words that go over
-/// from one line to the next are in both.
-pub fn of_text(text: &str) -> Vec<Place> {
+/// Where a text's lines are, without their ends: a page break ends one too.
+pub fn lines(text: &str) -> Vec<Place> {
     let mut lines: Vec<Place> = Vec::new();
     let mut at = 0;
     for line in text.split(['\n', '\u{c}']) {
         lines.push([at, line.len()]);
         at += line.len() + 1;
     }
+    lines
+}
+
+/// Where a text's private lines are. Words that go over from one line to the
+/// next are in both.
+pub fn of_text(text: &str) -> Vec<Place> {
+    let lines = lines(text);
     let of = |[start, len]: Place| &text[start..start + len];
     let mut held: BTreeSet<usize> = BTreeSet::new();
     let said: Vec<Option<&str>> = lines.iter().map(|l| services::text(of(*l))).collect();

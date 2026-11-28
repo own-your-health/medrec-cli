@@ -128,7 +128,7 @@ pub(crate) fn day(s: &str) -> Option<Day> {
     crate::refresh::time::parse(&format!("{d}T00:00:00Z")).map(|t| t.div_euclid(86_400))
 }
 
-fn iso(d: Day) -> String {
+pub(crate) fn iso(d: Day) -> String {
     crate::refresh::time::fmt(d * 86_400)[..10].to_string()
 }
 

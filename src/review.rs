@@ -249,6 +249,7 @@ pub fn file(folder: &Folder, req: &FileRequest) -> Result<Filed, CliError> {
         renderings: Vec::new(),
         statement: None,
         same_statement_as: None,
+        fields: None,
         classification: serde_json::to_value(&class).ok(),
         provenance: Provenance {
             source: ProvenanceSource {
@@ -290,6 +291,7 @@ pub fn file(folder: &Folder, req: &FileRequest) -> Result<Filed, CliError> {
     };
     let mut texts = folder.text(&person)?;
     crate::bill::annotate(&mut doc, &item.text, &mut index, &texts);
+    crate::paper::annotate(&mut doc, &item.text);
     index.documents.push(doc);
     crate::imaging::link_reports(&mut index);
     if !item.text.is_empty() {

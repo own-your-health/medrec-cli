@@ -50,6 +50,9 @@ pub struct Reindexed {
     pub without_raw: usize,
     /// Bills and receipts whose statement gained fields from their text.
     pub statements: usize,
+    /// Papers whose follow-ups or drugs, read from their text, changed
+    /// (0.9.12 and later).
+    pub paper_fields: usize,
     /// Records whose providers' NPI or address changed.
     pub providers_updated: usize,
     /// Records whose fields by another source, or what a source says of them,
@@ -80,6 +83,7 @@ pub struct PersonReindexed {
     pub unchanged: usize,
     pub without_raw: usize,
     pub statements: usize,
+    pub paper_fields: usize,
     pub providers_updated: usize,
     pub statuses_updated: usize,
     pub given_updated: usize,
@@ -230,7 +234,9 @@ pub fn claims(
         let papers = import::papers_again(folder, h, p, &mut idx, tmp.path())?;
         row.papers_updated = papers.changed;
         row.papers_unread = papers.unread;
-        row.statements = crate::bill::backfill(&mut idx, &folder.text(p)?);
+        let texts = folder.text(p)?;
+        row.statements = crate::bill::backfill(&mut idx, &texts);
+        row.paper_fields = crate::paper::backfill(&mut idx, &texts);
         // As a saved index is: this medrec's rules can link it otherwise.
         crate::claims::link(&mut idx.records);
         crate::panels::link(&mut idx.records);
@@ -239,6 +245,7 @@ pub fn claims(
         let changed = [
             row.reshaped,
             row.statements,
+            row.paper_fields,
             row.providers_updated,
             row.statuses_updated,
             row.given_updated,
@@ -254,6 +261,7 @@ pub fn claims(
             would_be.insert(p.id.clone(), idx);
         }
         out.statements += row.statements;
+        out.paper_fields += row.paper_fields;
         out.providers_updated += row.providers_updated;
         out.statuses_updated += row.statuses_updated;
         out.given_updated += row.given_updated;
