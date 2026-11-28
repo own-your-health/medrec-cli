@@ -2712,9 +2712,12 @@ readers ship with medrec:
   answered (`drive`, `cache`), how many copies were past the time one is taken
   as it is or of no known age (`stale`), how many were read because Drive could
   not be reached (`unreachable`), and `oldest_seconds`, the age of the oldest,
-  absent where none was read or one's is not known. `--fresh` reads Drive alone.
-  A command that always does (one that writes, `reindex --dry-run`,
-  `verify`, with or without `--events`) has none, nor has one that reads a local folder.
+  absent where none was read or one's is not known. `--fresh` (`--no-cache`,
+  `MEDREC_NO_CACHE=1`) reads Drive alone, and keeps nothing it reads: the copies
+  stay as they were, so a later read without it can answer from one older than
+  what it showed. A command that always reads Drive (one that changes the
+  folder, `backup`, `doctor`, `reindex --dry-run`, `verify`, with or without
+  `--events`) has none, nor has one that reads a local folder.
 - **`medrec mcp`**, for Claude Desktop and Claude Code, reads the same files
   through the same views, per call, with no lock. It writes nothing,
   `_requests/` included. Its answers are computed, not stored:

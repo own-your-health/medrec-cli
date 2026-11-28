@@ -42,8 +42,9 @@ struct Cli {
     #[arg(long, global = true, value_name = "NAME", value_parser = profile_name_text)]
     profile: Option<String>,
     /// Read a records folder on Google Drive from Drive itself, and not from
-    /// this machine's copies, which can be up to a day old.
-    #[arg(long, global = true)]
+    /// this machine's copies, which can be up to a day old. What it reads is
+    /// not kept: the copies stay as they are (env MEDREC_NO_CACHE).
+    #[arg(long, global = true, visible_alias = "no-cache")]
     fresh: bool,
     #[command(subcommand)]
     command: Command,
@@ -57,8 +58,16 @@ mod output {
 
     /// The JSON answer of a command that read a records folder on Drive says so
     /// (`reads`).
-    fn with_reads(json_mode: bool, mut payload: Value) -> Value {
-        if let (true, Some(from)) = (json_mode, medrec::store::read_from()) {
+    fn with_reads(json_mode: bool, payload: Value) -> Value {
+        with(json_mode, medrec::store::read_from(), payload)
+    }
+
+    pub(super) fn with(
+        json_mode: bool,
+        from: Option<medrec::store::ReadFrom>,
+        mut payload: Value,
+    ) -> Value {
+        if let (true, Some(from)) = (json_mode, from) {
             if let Some(o) = payload.as_object_mut() {
                 o.insert("reads".into(), json!(from));
             }
@@ -1082,12 +1091,17 @@ enum CacheCmd {
     },
 }
 
-fn main() {
-    let cli = Cli::parse();
-    let json = cli.common.json;
+/// What the global flags set for the whole run.
+fn globals(cli: &Cli) {
     if cli.fresh {
         store::read_fresh();
     }
+}
+
+fn main() {
+    let cli = Cli::parse();
+    let json = cli.common.json;
+    globals(&cli);
     if let Err(e) = run(&cli) {
         std::process::exit(output::fail(&e, json));
     }
@@ -1495,7 +1509,8 @@ fn run(cli: &Cli) -> Result<(), CliError> {
         }
         Command::Backup(a) => {
             let cfg = load(&store, cli)?;
-            let f = Folder::open(&cfg, Access::Read)?;
+            // A backup is of what Drive holds, never of this machine's copies.
+            let f = Folder::open(&cfg, Access::Fresh)?;
             let r = maint::backup(&f, &Location::parse(&a.to)?, cfg.store_budget())?;
             let clean = r.mismatched.is_empty();
             output::emit(json, "backup", to_value(&r), |_| {
@@ -4073,4 +4088,49 @@ fn profiles_cmd(cli: &Cli, cmd: &ProfilesCmd, store: &ConfigStore) -> Result<(),
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `--fresh` and `--no-cache` have every store of the run read Drive
+    /// itself. This binary's tests are a process of their own, and none of the
+    /// others opens a store, so the flag set here reaches no other test.
+    #[test]
+    fn fresh_has_the_whole_run_read_drive() {
+        assert!(!store::reads_fresh());
+        for flag in ["--fresh", "--no-cache"] {
+            let cli = Cli::try_parse_from(["medrec", flag, "doctor"]).unwrap();
+            assert!(cli.fresh, "{flag}");
+        }
+        globals(&Cli::try_parse_from(["medrec", "doctor"]).unwrap());
+        assert!(!store::reads_fresh());
+        globals(&Cli::try_parse_from(["medrec", "doctor", "--fresh"]).unwrap());
+        assert!(store::reads_fresh());
+    }
+
+    /// Only a JSON answer, of an object, says where its reads came from.
+    #[test]
+    fn a_json_answer_says_where_its_reads_came_from() {
+        let from = store::ReadFrom {
+            from: "both",
+            drive: 1,
+            cache: 2,
+            stale: 1,
+            unreachable: 0,
+            oldest_seconds: Some(40),
+        };
+        let v = output::with(true, Some(from.clone()), serde_json::json!({"items": []}));
+        assert_eq!(
+            v["reads"],
+            serde_json::json!({"from": "both", "drive": 1, "cache": 2, "stale": 1,
+                "unreachable": 0, "oldest_seconds": 40})
+        );
+        let none = serde_json::json!({"items": []});
+        assert_eq!(output::with(false, Some(from.clone()), none.clone()), none);
+        assert_eq!(output::with(true, None, none.clone()), none);
+        let list = serde_json::json!([1]);
+        assert_eq!(output::with(true, Some(from), list.clone()), list);
+    }
 }

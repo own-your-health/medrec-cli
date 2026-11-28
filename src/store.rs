@@ -371,6 +371,11 @@ fn fresh() -> bool {
     if testing::fresh() {
         return true;
     }
+    reads_fresh()
+}
+
+/// Whether `--fresh` has every store of this run read Drive itself.
+pub fn reads_fresh() -> bool {
     FRESH.load(Ordering::Relaxed)
 }
 
