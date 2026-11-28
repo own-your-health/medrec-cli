@@ -24,7 +24,7 @@ impl Env {
         let root = std::env::temp_dir().join(format!("medrec-mcp-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
-        let path = std::env::var("PATH").unwrap_or_default();
+        let path = medrec::testdata::no_viewer_path(&std::env::var("PATH").unwrap_or_default());
         let e = Env { root, path };
         e.ok(&["profiles", "add", "home"]);
         e
@@ -39,6 +39,7 @@ impl Env {
             .env("PATH", &self.path)
             .env("MEDREC_PROFILE", "home")
             .env("MEDREC_KEYCHAIN_SERVICE", "piekstra.medrec.hermetic-tests")
+            .env("MEDREC_VIEWER", "none")
             .env_remove("MEDREC_DRIVE_PROFILE")
             .env_remove("NO_COLOR");
         c
@@ -2384,6 +2385,7 @@ fn the_binary_serves_over_stdio_and_writes_nothing() {
         .env("PATH", &e.path)
         .env("MEDREC_PROFILE", "home")
         .env("MEDREC_KEYCHAIN_SERVICE", "piekstra.medrec.hermetic-tests")
+        .env("MEDREC_VIEWER", "none")
         .env_remove("MEDREC_DRIVE_PROFILE")
         .arg("mcp")
         .stdin(Stdio::piped())
@@ -2464,6 +2466,7 @@ fn call_summary(e: &Env, env: &[(&str, &str)], calls: usize) -> Vec<(Value, std:
         .env("PATH", &e.path)
         .env("MEDREC_PROFILE", "home")
         .env("MEDREC_KEYCHAIN_SERVICE", "piekstra.medrec.hermetic-tests")
+        .env("MEDREC_VIEWER", "none")
         .env_remove("MEDREC_DRIVE_PROFILE");
     for (k, v) in env {
         cmd.env(k, v);
@@ -3084,7 +3087,7 @@ fn what_a_questionnaire_asks_is_private_everywhere() {
 
 /// Each open item of the parts fixture with a private part, and what is said of
 /// it in its place.
-const PARTS: [(&str, &str); 9] = [
+const PARTS: [(&str, &str); 10] = [
     ("r_mixedaaaaaaaaaaaaaaa", "1 service not shown"),
     ("r_checksaaaaaaaaaaaaaa", "1 service not shown"),
     ("r_notedaaaaaaaaaaaaaaa", "1 service not shown"),
@@ -3097,9 +3100,12 @@ const PARTS: [(&str, &str); 9] = [
     ("r_beforeaaaaaaaaaaaaaa", "1 service not shown"),
     (ACCOUNT, "3 lines not shown"),
     (EXPLAINED, "3 lines not shown"),
+    (AFTERWARD, "1 line not shown"),
 ];
 const ACCOUNT: &str = "d_accountaaaaaaaaaaaaa";
 const EXPLAINED: &str = "d_explainedaaaaaaaaaaa";
+/// A paper that charges for nothing.
+const AFTERWARD: &str = "d_afterwardaaaaaaaaaaa";
 /// The words of them, each of which is in an answer about the person.
 const PRIVATE_WORDS: [&str; 9] = [
     "Quick feelings form",
@@ -3262,6 +3268,451 @@ fn a_pharmacy_claim_is_a_fill_of_a_medicine_ended_by_its_date() {
     let _ = std::fs::remove_dir_all(&e.root);
 }
 
+/// An item that prints a clinician is private where a paper of the person's
+/// names them beside a practice or a credential of an area, or where they are
+/// of the day of such a practice's paper, or linked to it by such days, in every
+/// answer and view; only the household opens it, item by item or the clinician.
+#[test]
+fn a_clinician_a_paper_names_makes_claims_private_everywhere() {
+    // Each held item, and what ties its clinician.
+    const HELD: [(&str, Option<&str>); 9] = [
+        ("r_byorgaaaaaaaaaaaaaaa", None),
+        ("r_bytitleaaaaaaaaaaaaa", None),
+        ("r_billedaaaaaaaaaaaaaa", Some("linked")),
+        ("r_lateraaaaaaaaaaaaaaa", Some("linked")),
+        ("r_sharedaaaaaaaaaaaaaa", Some("day")),
+        ("r_sharedbaaaaaaaaaaaaa", Some("day")),
+        ("r_visitaaaaaaaaaaaaaaa", None),
+        ("r_refillaaaaaaaaaaaaaa", None),
+        ("r_procedureaaaaaaaaaaa", None),
+    ];
+    const CLAIMS: usize = 6;
+    let e = Env::new("clinicians");
+    let dir = fixture_household(&e, "clinicians", &["index.json"]);
+    raw_folders(&e, &dir);
+    let alex = h_id(&e, "Alex Testperson");
+    let t = e.tools();
+    let names = [
+        "K PLACEHOLDER",
+        "EXAMPLETON",
+        "Kim Placeholder",
+        "Exampleton",
+        "SAMPLETON",
+        "R SPECIMEN",
+        "T FILLER",
+        "PLACEHOLDER, KIM",
+        "K Placeholder",
+    ];
+    let shared = || -> Vec<String> {
+        let each = every_answer(&t, None).into_values();
+        each.map(|v| v.to_string()).collect()
+    };
+    let (files, _) = views_of(&e, &alex);
+    let why = |learned: Option<&str>| {
+        let mut why = json!({"area": "mental_health", "from": "clinician"});
+        if let Some(l) = learned {
+            why["learned"] = l.into();
+        }
+        why
+    };
+    let events = |files: &BTreeMap<String, Value>, id: &str| -> Value {
+        let events = files["events"]["events"].as_array().unwrap().clone();
+        let mut of = events.iter();
+        let event = of.find(|x| x["members"].to_string().contains(id)).unwrap();
+        files["private"]["events"][event["id"].as_str().unwrap()].clone()
+    };
+    let own = every_answer(&t, Some("Alex"));
+    for (id, learned) in HELD {
+        assert_eq!(files["private"]["records"][id], why(learned), "{id}");
+        assert!(!shared().iter().any(|v| v.contains(id)), "{id}");
+    }
+    for (id, _) in &HELD[..CLAIMS] {
+        assert_eq!(events(&files, id)["from"], "members", "{id}");
+        let row = row_of(&own["timeline, detailed"], id);
+        assert_eq!(row["private"], "mental_health", "{id}: {row}");
+    }
+    for name in names {
+        assert!(!shared().iter().any(|v| v.contains(name)), "{name}");
+    }
+    // Another initial is another clinician's, and one of a shared day is held
+    // on that day alone: both are the household's to see.
+    for open in ["r_anotheraaaaaaaaaaaaa", "r_specimenaaaaaaaaaaaa"] {
+        assert!(files["private"]["records"].get(open).is_none(), "{open}");
+        assert!(shared().iter().any(|v| v.contains(open)), "{open}");
+    }
+
+    // A dry run counts them apart.
+    e.ok(&["views", "write"]);
+    view_before(&e, &alex, "private.json", |v| {
+        for list in ["records", "events"] {
+            let map = v[list].as_object_mut().unwrap();
+            let by = ["clinician", "members"];
+            map.retain(|_, why| by.iter().all(|from| why["from"] != *from));
+        }
+        true
+    });
+    let private = changes_of(&e, &alex)["private"].clone();
+    let kinds = json!({"claim": 6, "encounter": 1, "medication": 1, "procedure": 1});
+    assert_eq!(private["clinician"], kinds, "{private}");
+    assert_eq!(private["added_by"]["clinician"], 9, "{private}");
+    assert_eq!(private["clinician_day"], 2);
+    assert_eq!(private["clinician_linked"], 2);
+
+    // Only the household opens it: one item,
+    let first = HELD[0].0;
+    e.ok(&["private", "unmark", first]);
+    let (files, _) = views_of(&e, &alex);
+    assert!(files["private"]["records"].get(first).is_none());
+    assert!(events(&files, first).is_null());
+    assert!(shared().iter().any(|v| v.contains(first)));
+    for (id, _) in &HELD[1..] {
+        assert!(!shared().iter().any(|v| v.contains(id)), "{id}");
+    }
+    // or a clinician, whatever ties them, and only at the Mac.
+    let (billed, later) = (HELD[2].0, HELD[3].0);
+    let did = e.ok(&["private", "unmark", later, "--clinician"]);
+    assert_eq!(did["status"], "recorded", "{did}");
+    assert_eq!(
+        (did["opened"].clone(), did["held"].clone()),
+        (json!(4), json!(0))
+    );
+    let (files, _) = views_of(&e, &alex);
+    for id in [billed, later] {
+        assert!(files["private"]["records"].get(id).is_none(), "{id}");
+        assert!(shared().iter().any(|v| v.contains(id)), "{id}");
+    }
+    let marks = std::fs::read_to_string(dir.join("marks.json")).unwrap();
+    let marks: Value = serde_json::from_str(&marks).unwrap();
+    let people = json!([{"surname": "SAMPLETON", "initial": "E"}]);
+    assert_eq!(marks["clinicians"].as_array().unwrap().len(), 1);
+    assert_eq!(marks["clinicians"][0]["printed"], "SAMPLETON, ED");
+    assert_eq!(marks["clinicians"][0]["people"], people);
+    assert_eq!(marks["clinicians"][0]["item"], later);
+    let list = e.ok(&["private", "list"]);
+    assert_eq!(list["clinicians_opened"][0]["clinician"], "SAMPLETON, ED");
+    assert_eq!(list["clinicians_opened"][0]["item"], later);
+    let row = |id: &str| {
+        list["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|i| i["id"] == id)
+            .cloned()
+    };
+    assert_eq!(row(HELD[4].0).unwrap()["learned"], "day");
+    // A record that shows its clinician no more, or is entered in error, shows
+    // the mark's name no more.
+    let path = dir.join("index.json");
+    let was = std::fs::read(&path).unwrap();
+    for change in ["provider", "error"] {
+        let mut v: Value = serde_json::from_slice(&was).unwrap();
+        let list = v["records"].as_array_mut().unwrap();
+        let r = list.iter_mut().find(|x| x["id"] == later).unwrap();
+        if change == "provider" {
+            r["fields"]["provider"] = "Example Walk-in".into();
+            r["display"] = "Sample visit \u{b7} Example Walk-in".into();
+        } else {
+            let of = r["provenance"][0]["raw_path"].clone();
+            r["words"] = json!([{"raw_path": of, "status": "entered-in-error"}]);
+        }
+        std::fs::write(&path, serde_json::to_vec(&v).unwrap()).unwrap();
+        let list = e.ok(&["private", "list"]);
+        let row = &list["clinicians_opened"][0];
+        assert_eq!(
+            (&row["clinician"], &row["given"]),
+            (&Value::Null, &json!(true)),
+            "{change}"
+        );
+        assert!(
+            !list["clinicians_opened"].to_string().contains("SAMPLETON"),
+            "{change}"
+        );
+    }
+    std::fs::write(&path, &was).unwrap();
+    let again = e.ok(&["private", "unmark", later, "--clinician"]);
+    assert_eq!(again["status"], "unchanged");
+    let back = e.ok(&["private", "reset", billed, "--clinician"]);
+    assert_eq!(
+        (back["opened"].clone(), back["held"].clone()),
+        (json!(0), json!(4))
+    );
+    let (files, _) = views_of(&e, &alex);
+    for (id, learned) in &HELD[2..4] {
+        assert_eq!(files["private"]["records"][id], why(*learned), "{id}");
+    }
+    // Of an item no clinician holds, or one that prints none, it is refused.
+    for (id, code) in [
+        ("r_anotheraaaaaaaaaaaaa", 2),
+        ("d_billaaaaaaaaaaaaaaaa", 2),
+        ("r_nosuchrecordaaaaaaaa", 4),
+    ] {
+        let out = e.run(&["--json", "private", "unmark", id, "--clinician"]);
+        assert_eq!(out.status.code(), Some(code), "{id}");
+    }
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
+/// The practice of a bill of the only clinician of its day holds their other
+/// claims, whatever its source makes of the bill, or of the claim, after. A
+/// second clinician's claim of that day ends that, and a second day that both
+/// the bill's practice and the clinician have restores it.
+#[test]
+fn a_practice_a_bill_told_of_holds_claims_whatever_becomes_of_it() {
+    let e = Env::new("clinician-bill");
+    let dir = fixture_household(&e, "clinicians", &["index.json"]);
+    let alex = h_id(&e, "Alex Testperson");
+    let t = e.tools();
+    let path = dir.join("index.json");
+    let was = std::fs::read(&path).unwrap();
+    let later = "r_lateraaaaaaaaaaaaaaa";
+    // With the bill and its claim as `change` has them, and the claims and
+    // papers `more`; `held` is whether the later claim is.
+    let after_with =
+        |change: &dyn Fn(&mut Value, &mut Value), more: &[Value], held: bool| -> Value {
+            let mut v: Value = serde_json::from_slice(&was).unwrap();
+            for x in more {
+                let list = if x["id"].as_str().unwrap().starts_with("d_") {
+                    "documents"
+                } else {
+                    "records"
+                };
+                v[list].as_array_mut().unwrap().push(x.clone());
+            }
+            let (mut bill, mut claim) = (Value::Null, Value::Null);
+            for (list, id, out) in [
+                ("documents", "d_billaaaaaaaaaaaaaaaa", &mut bill),
+                ("records", "r_billedaaaaaaaaaaaaaa", &mut claim),
+            ] {
+                let list = v[list].as_array_mut().unwrap();
+                let at = list.iter().position(|x| x["id"] == id).unwrap();
+                *out = list.remove(at);
+            }
+            change(&mut bill, &mut claim);
+            v["documents"].as_array_mut().unwrap().push(bill);
+            v["records"].as_array_mut().unwrap().push(claim);
+            std::fs::write(&path, serde_json::to_vec(&v).unwrap()).unwrap();
+            let answers = every_answer(&t, None);
+            if held {
+                for (name, v) in &answers {
+                    assert!(!v.to_string().contains(later), "{name}: {v}");
+                    assert!(!v.to_string().contains("SAMPLETON"), "{name}: {v}");
+                }
+            } else {
+                assert!(answers.values().any(|v| v.to_string().contains(later)));
+            }
+            views_of(&e, &alex).0["private"]["records"][later].clone()
+        };
+    let after = |change: &dyn Fn(&mut Value, &mut Value)| after_with(change, &[], true);
+    let why = |given: bool| {
+        let mut why = json!({"area": "mental_health", "from": "clinician", "learned": "linked"});
+        if given {
+            why["given"] = true.into();
+        }
+        why
+    };
+    assert_eq!(after(&|_, _| {}), why(false));
+    // Either is entered in error.
+    let error = |x: &mut Value| {
+        let of = x["provenance"]["raw_path"].as_str();
+        let of = of.or(x["provenance"][0]["raw_path"].as_str()).unwrap();
+        x["words"] = json!([{"raw_path": of, "status": "entered-in-error"}]);
+    };
+    assert_eq!(after(&|bill, _| error(bill)), why(false));
+    assert_eq!(after(&|_, claim| error(claim)), why(false));
+    // Either is given otherwise, or both.
+    let counseling = json!([{"organization": "Example Counseling"}]);
+    let sampleton = json!([{"fields": {"provider": "E SAMPLETON"}}]);
+    let bill_is = |bill: &mut Value| {
+        bill["organization"] = "Example Health Group".into();
+        bill["given"] = counseling.clone();
+    };
+    let claim_is = |claim: &mut Value| {
+        claim["display"] = "Sample visit \u{b7} Example Walk-in".into();
+        claim["fields"]["provider"] = "Example Walk-in".into();
+        claim["given"] = sampleton.clone();
+    };
+    assert_eq!(after(&|bill, _| bill_is(bill)), why(true));
+    assert_eq!(after(&|_, claim| claim_is(claim)), why(true));
+    // A clinician only a source gave is opened by no name the list shows.
+    let billed = "r_billedaaaaaaaaaaaaaa";
+    e.ok(&["private", "unmark", billed, "--clinician"]);
+    let marks = std::fs::read_to_string(dir.join("marks.json")).unwrap();
+    let marks: Value = serde_json::from_str(&marks).unwrap();
+    let mark = &marks["clinicians"][0];
+    assert!(mark.get("printed").is_none(), "{mark}");
+    assert_eq!(mark["given"], true, "{mark}");
+    let list = e.ok(&["private", "list"]);
+    let row = &list["clinicians_opened"][0];
+    assert_eq!(
+        (&row["clinician"], &row["given"]),
+        (&Value::Null, &json!(true))
+    );
+    assert!(!list["clinicians_opened"].to_string().contains("SAMPLETON"));
+    let text = || {
+        let out = e.run(&["private", "list"]);
+        assert!(out.status.success(), "{out:?}");
+        String::from_utf8_lossy(&out.stdout).to_string()
+    };
+    let listed = text();
+    assert!(!listed.contains("E SAMPLETON"), "{listed}");
+    assert!(listed.contains("CLINICIAN"), "{listed}");
+    let line = listed.lines().find(|l| l.contains("o_")).unwrap();
+    assert!(line.contains("yes"), "{line}");
+    e.ok(&["private", "reset", billed, "--clinician"]);
+    let marks = std::fs::read_to_string(dir.join("marks.json")).unwrap();
+    assert!(!marks.contains("SAMPLETON"), "{marks}");
+    // With no clinician marks, the list has no table of them.
+    assert!(!text().contains("CLINICIAN"));
+    let both = |bill: &mut Value, claim: &mut Value| {
+        bill_is(bill);
+        claim_is(claim);
+    };
+    assert_eq!(after(&both), why(true));
+    // A source names both by one organization, so that its event joins them by
+    // it: the day holds as it did.
+    let one_organization = |bill: &mut Value, claim: &mut Value| {
+        claim_is(claim);
+        bill["organization"] = "Example Walk-in".into();
+        bill["given"] = counseling.clone();
+    };
+    assert_eq!(after(&one_organization), why(true));
+    // The bill now names the claim's practice, as a source has both now.
+    let walk_in = |bill: &mut Value, claim: &mut Value| {
+        both(bill, claim);
+        bill["organization"] = "Example Walk-in".into();
+    };
+    assert_eq!(after(&walk_in), why(true));
+    // Another clinician's visit of the same day: the bill's day holds both of
+    // that day, and links neither.
+    let v: Value = serde_json::from_slice(&was).unwrap();
+    let of = |list: &str, id: &str| {
+        let all = v[list].as_array().unwrap();
+        all.iter().find(|x| x["id"] == id).unwrap().clone()
+    };
+    let claim = |id: &str, day: &str, who: &str| {
+        let mut c = of("records", "r_billedaaaaaaaaaaaaaa");
+        c["id"] = id.into();
+        c["key"] = format!("claim|{id}|{day}").into();
+        c["date"] = day.into();
+        c["fields"]["billable_period"] = json!({"start": day, "end": day});
+        c["fields"]["provider"] = who.into();
+        c["display"] = format!("Sample visit \u{b7} {who}").into();
+        c
+    };
+    let second = claim("r_secondaaaaaaaaaaaaaa", "2024-10-01", "J SAMPLE");
+    assert_eq!(
+        after_with(&|_, _| {}, std::slice::from_ref(&second), false),
+        Value::Null
+    );
+    let (files, _) = views_of(&e, &alex);
+    let day = json!({"area": "mental_health", "from": "clinician", "learned": "day"});
+    assert_eq!(files["private"]["records"]["r_billedaaaaaaaaaaaaaa"], day);
+    assert_eq!(files["private"]["records"]["r_secondaaaaaaaaaaaaaa"], day);
+    // A second day of the practice's that the clinician has links them.
+    let mut receipt = of("documents", "d_billaaaaaaaaaaaaaaaa");
+    receipt["id"] = "d_receiptaaaaaaaaaaaaa".into();
+    receipt["date"] = "2024-11-12".into();
+    let more = [
+        second,
+        claim("r_thirdaaaaaaaaaaaaaaa", "2024-11-12", "E SAMPLETON"),
+        claim("r_fourthaaaaaaaaaaaaaa", "2024-11-12", "J PLACEHOLDER"),
+        receipt,
+    ];
+    assert_eq!(after_with(&|_, _| {}, &more, true), why(false));
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
+/// A visit is private by its name and its reason, a condition with no ICD-10
+/// code by its name, a medicine and its fill by a brand, a report by its
+/// conclusion, a result by a value that is a text, and a condition by the codes
+/// that say an area, in every answer and view.
+#[test]
+fn what_a_record_says_in_its_own_words_is_private_everywhere() {
+    const HELD: [(&str, &str, &str); 9] = [
+        ("r_reasonedaaaaaaaaaaaa", "mental_health", "words"),
+        ("r_namedvisitaaaaaaaaaa", "mental_health", "words"),
+        ("r_uncodedaaaaaaaaaaaaa", "mental_health", "words"),
+        ("r_othercodeaaaaaaaaaaa", "substance_use", "words"),
+        ("r_familyaaaaaaaaaaaaaa", "substance_use", "code"),
+        ("r_brandaaaaaaaaaaaaaaa", "mental_health", "medicine"),
+        ("r_brandfillaaaaaaaaaaa", "mental_health", "medicine"),
+        ("r_toldaaaaaaaaaaaaaaaa", "sexual_health", "test"),
+        ("r_textvalueaaaaaaaaaaa", "sexual_health", "test"),
+    ];
+    const OPEN: [&str; 6] = [
+        "r_earvisitaaaaaaaaaaaa",
+        "r_heartaaaaaaaaaaaaaaa",
+        "r_noseaaaaaaaaaaaaaaaa",
+        "r_nosefillaaaaaaaaaaaa",
+        "r_eartoldaaaaaaaaaaaaa",
+        "r_earvalueaaaaaaaaaaaa",
+    ];
+    const WORDS: [&str; 9] = [
+        "Anxiety",
+        "anxiety",
+        "Behavioral",
+        "Tobacco",
+        "Sample habit",
+        "Zoloft",
+        "Lexapro",
+        "HIV",
+        "Chlamydia",
+    ];
+    let e = Env::new("words");
+    let dir = fixture_household(&e, "words", &["index.json"]);
+    raw_folders(&e, &dir);
+    let alex = h_id(&e, "Alex Testperson");
+    let t = e.tools();
+    let answers = |person: Option<&str>| -> Vec<Value> {
+        let mut all: Vec<Value> = every_answer(&t, person).into_values().collect();
+        for form in ["concise", "detailed"] {
+            let mut args = json!({"kind": "medications", "response_format": form});
+            if let Some(p) = person {
+                args["person"] = p.into();
+            }
+            let r = call(&t, RECORDS, args);
+            all.push(assert_fits(&t, RECORDS, &r).clone());
+        }
+        // Words that name no title here: what is named is shown.
+        for word in ["follow", "seen", "loratadine", "ear"] {
+            let mut args = json!({"query": word});
+            if let Some(p) = person {
+                args["person"] = p.into();
+            }
+            let r = call(&t, SEARCH, args);
+            let v = assert_fits(&t, SEARCH, &r).clone();
+            all.push(v["items"].clone());
+        }
+        all
+    };
+    let (files, _) = views_of(&e, &alex);
+    let (shared, own) = (answers(None), answers(Some("Alex")));
+    for (id, area, from) in HELD {
+        let why = &files["private"]["records"][id];
+        assert_eq!(*why, json!({"area": area, "from": from}), "{id}");
+        for v in &shared {
+            assert!(!v.to_string().contains(id), "{id}: {v}");
+        }
+        assert!(own.iter().any(|v| v.to_string().contains(id)), "{id}");
+    }
+    for word in WORDS {
+        for v in &shared {
+            assert!(!v.to_string().contains(word), "{word}: {v}");
+        }
+    }
+    for id in OPEN {
+        assert!(files["private"]["records"].get(id).is_none(), "{id}");
+        assert!(shared.iter().any(|v| v.to_string().contains(id)), "{id}");
+    }
+    // Of the views an app shows the household, what search finds is marked.
+    let own = row_of(
+        &every_answer(&t, Some("Alex"))["timeline, detailed"],
+        HELD[0].0,
+    );
+    assert_eq!(own["private"], "mental_health");
+    let _ = std::fs::remove_dir_all(&e.root);
+}
+
 /// The words, number and name of a private line, diagnosis or payer note of an
 /// open item are in no answer that names no person: not in its title, its
 /// event, a search, or what an answer counts. Its amounts are, and what is left
@@ -3284,12 +3735,11 @@ fn a_private_part_of_an_open_item_is_in_no_answer_about_the_household() {
     }
     for word in PRIVATE_WORDS {
         for (name, v) in &shared {
-            // A search that names what is all private finds it, marked; and the
-            // words of a paper that charges for nothing are all there.
+            // A search that names what is all private finds it, marked.
             let all = [v.clone()];
             let items = v["items"].as_array().map_or(&all[..], Vec::as_slice);
             let open = items.iter().filter(|i| i.get("private").is_none());
-            for i in open.filter(|i| i["id"] != "d_afterwardaaaaaaaaaaa") {
+            for i in open {
                 assert!(!i.to_string().contains(word), "{name}: {word}: {i}");
             }
         }
@@ -3419,7 +3869,7 @@ fn a_private_part_of_an_open_item_is_in_no_answer_about_the_household() {
 /// Of a bill's, a receipt's or an explanation's text, the lines that say an
 /// area are read only where the person is named.
 #[test]
-fn a_bills_private_lines_are_read_only_where_its_person_is_named() {
+fn a_papers_private_lines_are_read_only_where_its_person_is_named() {
     let (e, alex) = parts_household("lines");
     let t = e.tools();
     let read = |args: Value| assert_fits(&t, DOCUMENT, &call(&t, DOCUMENT, args)).clone();
@@ -3437,10 +3887,16 @@ fn a_bills_private_lines_are_read_only_where_its_person_is_named() {
              This is not a bill",
             ["96127", "Behavioral", "health hour"],
         ),
+        (
+            AFTERWARD,
+            "Sample visit\n(1 line not shown)\n",
+            ["Depression", "screening", "done"],
+        ),
     ] {
         let v = read(json!({"id": id}));
         assert_eq!(v["text"], text);
-        let hint = "3 lines not shown: pass Alex Testperson as person for all of it.";
+        let of = PARTS.iter().find(|(p, _)| *p == id).unwrap().1;
+        let hint = format!("{of}: pass Alex Testperson as person for all of it.");
         assert_eq!(v["hint"], hint);
         let whole = read(json!({"id": id, "person": "Alex"}));
         assert!(whole.get("hint").is_none(), "{whole}");
@@ -3450,12 +3906,11 @@ fn a_bills_private_lines_are_read_only_where_its_person_is_named() {
         }
         assert_eq!(whole["text_chars"], files_text(&e, id).chars().count());
     }
-    // One with none, and a paper of no charge.
-    for id in ["d_paidslipaaaaaaaaaaaa", "d_afterwardaaaaaaaaaaa"] {
-        let v = read(json!({"id": id}));
-        assert!(v.get("hint").is_none(), "{v}");
-        assert_eq!(v["text"], files_text(&e, id));
-    }
+    // One with none.
+    let id = "d_paidslipaaaaaaaaaaaa";
+    let v = read(json!({"id": id}));
+    assert!(v.get("hint").is_none(), "{v}");
+    assert_eq!(v["text"], files_text(&e, id));
     let r = call(&t, DOCUMENT, json!({"id": ACCOUNT, "person": "Sam"}));
     assert!(r.is_error(), "{}", r.text());
     // A private record that tells of an open paper is named with its person.
@@ -4211,6 +4666,9 @@ fn a_dry_run_counts_what_would_be_private() {
         "opened": {"result": 1},
         "gone": {"event": 1, "record": 1},
         "given": {},
+        "clinician": {},
+        "clinician_day": 0,
+        "clinician_linked": 0,
         "parts": {},
     });
     assert_eq!(v["private"], want);
@@ -4486,7 +4944,7 @@ fn a_dry_run_counts_papers_and_private_parts() {
     std::fs::write(&path, serde_json::to_vec(&v).unwrap()).unwrap();
     let v = changes_of(&e, &alex);
     assert_eq!(v["papers"], json!({"filed_before": 2, "source_found": 0}));
-    let want = json!({"claim": 9, "document": 2, "event": 9});
+    let want = json!({"claim": 9, "document": 3, "event": 9});
     assert_eq!(v["private"]["parts"], want);
     let _ = std::fs::remove_dir_all(&e.root);
 }

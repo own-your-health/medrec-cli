@@ -39,6 +39,8 @@ pub const SCHEMA: &str = "medrec-views/v2";
 /// connector's own `npm run views`: its plain-named files are removed.
 const SCHEMA_V1: &str = "medrec-views/v1";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// The commit this medrec was built from, empty where it is not known.
+const BUILD: &str = env!("BUILD_COMMIT");
 
 /// The views every person has. A person whose `views.json` entry lacks
 /// one was written by an earlier build of the same version, before that
@@ -87,6 +89,11 @@ pub struct ViewsIndex {
     pub schema: String,
     /// The medrec that wrote them.
     pub medrec: String,
+    /// The commit it was built from, where known (0.9.10 and later): views of
+    /// another build are made again, as of another version, since a rule can
+    /// change between builds of one version.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub build: String,
     /// The MD5 (hex) of `household.json` as the views were made from it.
     pub household: String,
     /// What the ids of provider labels are salted with: random, made once
@@ -428,9 +435,10 @@ fn make(
     let old: Option<ViewsIndex> = old_text
         .as_deref()
         .and_then(|t| serde_json::from_str(t).ok());
-    let current = old
-        .as_ref()
-        .filter(|o| !all && o.schema == SCHEMA && o.medrec == VERSION && o.household == household);
+    let current = old.as_ref().filter(|o| {
+        let ours = o.medrec == VERSION && o.build == BUILD;
+        !all && o.schema == SCHEMA && ours && o.household == household
+    });
     // The folder's, for as long as its views are.
     let salt: OnceCell<String> = OnceCell::new();
     if let Some(s) = old
@@ -443,6 +451,7 @@ fn make(
     let fresh = |people: BTreeMap<String, PersonViews>| ViewsIndex {
         schema: SCHEMA.into(),
         medrec: VERSION.into(),
+        build: BUILD.into(),
         household: household.clone(),
         label_salt: salt.get().cloned(),
         people,
@@ -592,17 +601,14 @@ fn make(
                 .filter(|m| m.person == p.id && m.schema == crate::marks::SCHEMA)
                 .ok_or(())
         });
-        let payments = marks
+        let none = crate::marks::Marks::new(&p.id);
+        let read = marks
             .as_ref()
             .and_then(|m| m.as_ref().ok())
-            .map(|m| m.payments.as_slice())
-            .unwrap_or_default();
+            .unwrap_or(&none);
+        let payments = read.payments.as_slice();
         let mut bills = crate::bills::build(p, &me.idx, &me.texts, &events.events, payments);
-        let private_marks = marks
-            .as_ref()
-            .and_then(|m| m.as_ref().ok())
-            .map(|m| m.private.as_slice())
-            .unwrap_or_default();
+        let private_marks = read.private.as_slice();
         let last = old
             .as_ref()
             .filter(|o| o.schema == SCHEMA)
@@ -630,15 +636,11 @@ fn make(
                 text,
             });
         }
-        let corrections = marks
-            .as_ref()
-            .and_then(|m| m.as_ref().ok())
-            .map(|m| m.providers.as_slice())
-            .unwrap_or_default();
+        let corrections = read.providers.as_slice();
         let mut private = {
             let (idx, texts) = (&me.idx, &me.texts);
             let labelled = crate::labels::areas(idx, &events, &state, corrections);
-            crate::private::build(p, idx, texts, &events, private_marks, &labelled)
+            crate::private::build(p, idx, texts, &events, read, &labelled)
         };
         if state.lost() {
             private["labels_unreadable"] = Value::Bool(true);

@@ -827,7 +827,7 @@ fn ends<const N: usize>(fields: &mut Map<String, Value>, of: [(Option<&str>, &st
     }
 }
 
-fn default_display(kind: &str) -> &'static str {
+pub(crate) fn default_display(kind: &str) -> &'static str {
     match kind {
         "encounter" => "Visit",
         "result" => "Result",

@@ -1,7 +1,8 @@
 //! A person's `marks.json` (`medrec-marks/v1`): what the household marked on
 //! their papers and records that no rule decides. Bills marked paid
-//! (`crate::bills`), items marked private or not (`crate::private`) and what
-//! they say of a provider (`crate::corrections`). It is a file of its own so
+//! (`crate::bills`), items marked private or not (`crate::private`), what
+//! they say of a provider (`crate::corrections`) and the clinicians they say
+//! are of no private area (`crate::clinicians`). It is a file of its own so
 //! that a medrec before 0.9.1, which rewrites `overrides.json` with only the
 //! fields it knows, never drops a mark.
 
@@ -36,6 +37,9 @@ pub struct Marks {
     /// What they took back of it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub providers_undone: Vec<crate::corrections::Undone>,
+    /// Clinicians they said are of no private area (0.9.10 and later).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub clinicians: Vec<crate::clinicians::Opened>,
     /// What a later medrec writes here, kept as it is.
     #[serde(flatten)]
     pub other: Map<String, Value>,
@@ -51,6 +55,7 @@ impl Marks {
             private: Vec::new(),
             providers: Vec::new(),
             providers_undone: Vec::new(),
+            clinicians: Vec::new(),
             other: Map::new(),
         }
     }

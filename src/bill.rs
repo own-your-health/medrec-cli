@@ -27,11 +27,6 @@ enum Field {
     Phone,
 }
 
-/// Whether a document says what was charged for.
-pub(crate) fn charges(d: &Document) -> bool {
-    matches!(d.doc_type.as_deref(), Some("bill" | "receipt" | "eob"))
-}
-
 /// A bill's or a receipt's first page with any text, its spaces single.
 pub(crate) fn first_page(d: &Document, text: &str) -> Option<String> {
     if !matches!(d.doc_type.as_deref(), Some("bill" | "receipt")) {

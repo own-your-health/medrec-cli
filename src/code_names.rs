@@ -267,7 +267,10 @@ mod tests {
             &idx,
             &crate::model::PersonText::new("p_test"),
             &events,
-            marks,
+            &crate::marks::Marks {
+                private: marks.to_vec(),
+                ..crate::marks::Marks::new("p_test")
+            },
             &BTreeMap::new(),
         );
         if unreadable {

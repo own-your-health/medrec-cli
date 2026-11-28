@@ -1,0 +1,413 @@
+{
+ "schema": "medrec-index/v1",
+ "person": "p_robinaaaaaaaaaaaaaaa",
+ "rev": 1,
+ "records": [
+  {
+   "id": "r_reasonedaaaaaaaaaaaa",
+   "kind": "encounter",
+   "key": "encounter|reasoned|2024-03-05",
+   "date": "2024-03-05",
+   "display": "Sample visit",
+   "fields": {
+    "reason": "Anxiety follow up"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.10",
+     "raw_path": "Robin Example/Records/north/Any/reasoned.json"
+    }
+   ]
+  },
+  {
+   "id": "r_namedvisitaaaaaaaaaa",
+   "kind": "encounter",
+   "key": "encounter|namedvisit|2024-03-12",
+   "date": "2024-03-12",
+   "display": "Behavioral health hour",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.10",
+     "raw_path": "Robin Example/Records/north/Any/namedvisit.json"
+    }
+   ]
+  },
+  {
+   "id": "r_earvisitaaaaaaaaaaaa",
+   "kind": "encounter",
+   "key": "encounter|earvisit|2024-03-19",
+   "date": "2024-03-19",
+   "display": "Sample visit",
+   "fields": {
+    "reason": "Ear pain"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.10",
+     "raw_path": "Robin Example/Records/north/Any/earvisit.json"
+    }
+   ]
+  },
+  {
+   "id": "r_uncodedaaaaaaaaaaaaa",
+   "kind": "condition",
+   "key": "condition|uncoded|2024-04-02",
+   "date": "2024-04-02",
+   "display": "Generalized anxiety",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.10",
+     "raw_path": "Robin Example/Records/north/Any/uncoded.json"
+    }
+   ],
+   "status": "active"
+  },
+  {
+   "id": "r_othercodeaaaaaaaaaaa",
+   "kind": "condition",
+   "key": "condition|othercode|2024-04-03",
+   "date": "2024-04-03",
+   "display": "Sample habit",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.10",
+     "raw_path": "Robin Example/Records/north/Any/othercode.json"
+    }
+   ],
+   "code": {
+    "system": "http://snomed.info/sct",
+    "code": "1",
+    "display": "Tobacco use"
+   },
+   "status": "active"
+  },
+  {
+   "id": "r_familyaaaaaaaaaaaaaa",
+   "kind": "condition",
+   "key": "condition|family|2024-04-04",
+   "date": "2024-04-04",
+   "display": "Sample history",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.10",
+     "raw_path": "Robin Example/Records/north/Any/family.json"
+    }
+   ],
+   "code": {
+    "system": "http://hl7.org/fhir/sid/icd-10-cm",
+    "code": "Z81.1",
+    "display": "Sample history"
+   },
+   "status": "active"
+  },
+  {
+   "id": "r_heartaaaaaaaaaaaaaaa",
+   "kind": "condition",
+   "key": "condition|heart|2024-04-05",
+   "date": "2024-04-05",
+   "display": "ST segment depression",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.10",
+     "raw_path": "Robin Example/Records/north/Any/heart.json"
+    }
+   ],
+   "status": "active"
+  },
+  {
+   "id": "r_brandaaaaaaaaaaaaaaa",
+   "kind": "medication",
+   "key": "medication|brand|2024-05-06",
+   "date": "2024-05-06",
+   "display": "Zoloft 50 MG",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.10",
+     "raw_path": "Robin Example/Records/north/Any/brand.json"
+    }
+   ],
+   "status": "active"
+  },
+  {
+   "id": "r_noseaaaaaaaaaaaaaaaa",
+   "kind": "medication",
+   "key": "medication|nose|2024-05-07",
+   "date": "2024-05-07",
+   "display": "Loratadine 10 MG",
+   "fields": {},
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.10",
+     "raw_path": "Robin Example/Records/north/Any/nose.json"
+    }
+   ],
+   "status": "active"
+  },
+  {
+   "id": "r_brandfillaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|brandfill|2024-05-08",
+   "date": "2024-05-08",
+   "display": "Lexapro 10 MG \u00b7 Example Pharmacy",
+   "fields": {
+    "provider": "Example Pharmacy",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2024-05-08",
+     "end": "2024-05-08"
+    },
+    "type": "pharmacy",
+    "category": "pharmacy",
+    "amounts": {
+     "billed": {
+      "amount": "9.00",
+      "currency": "USD"
+     }
+    }
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.10",
+     "raw_path": "Robin Example/Records/north/Any/brandfill.json"
+    }
+   ]
+  },
+  {
+   "id": "r_nosefillaaaaaaaaaaaa",
+   "kind": "claim",
+   "key": "claim|nosefill|2024-05-09",
+   "date": "2024-05-09",
+   "display": "Loratadine 10 MG \u00b7 Example Pharmacy",
+   "fields": {
+    "provider": "Example Pharmacy",
+    "insurer": "Example Health Plan",
+    "billable_period": {
+     "start": "2024-05-09",
+     "end": "2024-05-09"
+    },
+    "type": "pharmacy",
+    "category": "pharmacy",
+    "amounts": {
+     "billed": {
+      "amount": "9.00",
+      "currency": "USD"
+     }
+    }
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.10",
+     "raw_path": "Robin Example/Records/north/Any/nosefill.json"
+    }
+   ]
+  },
+  {
+   "id": "r_toldaaaaaaaaaaaaaaaa",
+   "kind": "report",
+   "key": "report|told|2024-06-03",
+   "date": "2024-06-03",
+   "display": "Example report",
+   "fields": {
+    "conclusion": "HIV antibody not seen"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.10",
+     "raw_path": "Robin Example/Records/north/Any/told.json"
+    }
+   ]
+  },
+  {
+   "id": "r_eartoldaaaaaaaaaaaaa",
+   "kind": "report",
+   "key": "report|eartold|2024-06-04",
+   "date": "2024-06-04",
+   "display": "Example ear report",
+   "fields": {
+    "conclusion": "Clear"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.10",
+     "raw_path": "Robin Example/Records/north/Any/eartold.json"
+    }
+   ]
+  },
+  {
+   "id": "r_textvalueaaaaaaaaaaa",
+   "kind": "result",
+   "key": "result|textvalue|2024-06-05",
+   "date": "2024-06-05",
+   "display": "Example smear",
+   "fields": {
+    "value": "Chlamydia not seen"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.10",
+     "raw_path": "Robin Example/Records/north/Any/textvalue.json"
+    }
+   ]
+  },
+  {
+   "id": "r_earvalueaaaaaaaaaaaa",
+   "kind": "result",
+   "key": "result|earvalue|2024-06-06",
+   "date": "2024-06-06",
+   "display": "Example ear swab",
+   "fields": {
+    "value": "Not seen"
+   },
+   "provenance": [
+    {
+     "source": {
+      "kind": "fhir",
+      "cli": "fakeprov",
+      "organization_id": "north",
+      "fhir_base": "https://north.example.test/fhir"
+     },
+     "method": "fhir-api",
+     "fetched_at": "2024-12-02T10:00:00Z",
+     "filed_at": "2024-12-04T10:00:00Z",
+     "filed_by": "medrec 0.9.10",
+     "raw_path": "Robin Example/Records/north/Any/earvalue.json"
+    }
+   ]
+  }
+ ],
+ "studies": [],
+ "imports": [],
+ "documents": []
+}

@@ -20,10 +20,17 @@ fn medrec() -> Command {
         .env("XDG_CACHE_HOME", dir.join("cache"))
         .env("HOME", &dir)
         .env("MEDREC_KEYCHAIN_SERVICE", "piekstra.medrec.hermetic-tests")
+        .env("MEDREC_VIEWER", "none")
+        .env("PATH", no_viewer())
         .env_remove("MEDREC_DRIVE_PROFILE")
         .env_remove("MEDREC_PROFILE")
         .env_remove("NO_COLOR");
     c
+}
+
+/// `PATH` with an `open` and an `xdg-open` that launch nothing.
+fn no_viewer() -> String {
+    medrec::testdata::no_viewer_path(&std::env::var("PATH").unwrap_or_default())
 }
 
 /// A run with its own config holding one profile, `home`, and no records
@@ -44,6 +51,8 @@ fn with_profile() -> impl Fn(&[&str]) -> std::process::Output {
             .env("XDG_CACHE_HOME", dir.join("cache"))
             .env("HOME", &dir)
             .env("MEDREC_KEYCHAIN_SERVICE", "piekstra.medrec.hermetic-tests")
+            .env("MEDREC_VIEWER", "none")
+            .env("PATH", no_viewer())
             .env_remove("MEDREC_DRIVE_PROFILE")
             .env_remove("MEDREC_PROFILE")
             .env_remove("NO_COLOR");
@@ -426,6 +435,8 @@ fn config_round_trips() {
             .env("TZ", "America/New_York")
             .env("XDG_CACHE_HOME", dir.join("cache"))
             .env("MEDREC_KEYCHAIN_SERVICE", "piekstra.medrec.hermetic-tests")
+            .env("MEDREC_VIEWER", "none")
+            .env("PATH", no_viewer())
             .env_remove("MEDREC_PROFILE");
         c.args(args).output().unwrap()
     };

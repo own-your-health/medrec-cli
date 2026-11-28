@@ -15,6 +15,7 @@ use crate::import;
 use crate::model::{Household, Person, Record};
 use crate::normalize;
 use crate::people;
+use crate::store;
 
 /// The elements whose codes are words of the format and not a finding: what an
 /// amount of a claim is.
@@ -235,7 +236,6 @@ pub fn fields(
     person: Option<&str>,
     kinds: &[String],
 ) -> Result<Fields, CliError> {
-    let tmp = pk_cli_drive::private_temp_dir("medrec-fields")?;
     let mut count = Count::default();
     // One that matches no one person names the people it can be.
     let of = people::selected(h, person).map_err(|e| {
@@ -250,28 +250,78 @@ pub fn fields(
         let idx = folder.index(p).map_err(unnamed)?;
         let of = |r: &&Record| kinds.is_empty() || kinds.contains(&r.kind);
         let chosen: Vec<&Record> = idx.records.iter().filter(of).collect();
-        if folder.store.is_local() {
-            for r in chosen {
-                count.record(r, &mut |rel| bytes(folder, rel).map_err(unnamed))?;
-            }
-            continue;
-        }
-        // One copy per folder of raw files, not one call per file.
-        let paths = chosen.iter().flat_map(|r| currents(r));
-        let dirs: BTreeSet<String> = paths
-            .filter_map(|(rel, _)| rel.rsplit_once('/').map(|(d, _)| d.to_string()))
-            .collect();
-        for d in &dirs {
-            if folder.store.exists(d).map_err(unnamed)? {
-                let to = tmp.path().join(d);
-                folder.store.fetch_tree(d, &to).map_err(unnamed)?;
-            }
-        }
+        let files = Files::of(folder, chosen.iter().copied())?;
         for r in chosen {
-            count.record(r, &mut |rel| copy(tmp.path(), rel))?;
+            count.record(r, &mut |rel| files.bytes(rel))?;
         }
     }
     Ok(count.done())
+}
+
+/// The current raw files of records, read in place, or of a Drive folder from a
+/// copy: one per folder of them, not one call per file. No error names a file.
+pub(crate) enum Files<'a> {
+    There(&'a Folder),
+    /// The copies, and the folders that could not be copied, with the error
+    /// each gave, naming no file.
+    Copied(pk_cli_drive::TempDir, BTreeMap<String, CliError>),
+}
+
+impl<'a> Files<'a> {
+    pub fn of<'r>(
+        folder: &'a Folder,
+        records: impl Iterator<Item = &'r Record>,
+    ) -> Result<Files<'a>, CliError> {
+        if folder.store.is_local() {
+            return Ok(Files::There(folder));
+        }
+        let tmp = pk_cli_drive::private_temp_dir("medrec-raw")?;
+        let dirs: BTreeSet<String> = records
+            .flat_map(currents)
+            .filter_map(|(rel, _)| rel.rsplit_once('/').map(|(d, _)| d.to_string()))
+            .collect();
+        let mut failed = BTreeMap::new();
+        for d in &dirs {
+            // A path no index can lead out of the copy by: its files are not there.
+            let Some(to) = store::within(tmp.path(), d) else {
+                continue;
+            };
+            let copied = match folder.store.exists(d) {
+                Ok(true) => folder.store.fetch_tree(d, &to),
+                Ok(false) => Ok(()),
+                Err(e) => Err(e),
+            };
+            if let Err(e) = copied {
+                failed.insert(d.clone(), unnamed(e));
+            }
+        }
+        Ok(Files::Copied(tmp, failed))
+    }
+
+    /// A file's bytes; `None` where it is not there, and an error where its
+    /// folder could not be copied.
+    pub fn bytes(&self, rel: &str) -> Read {
+        if !store::plain_rel(rel) {
+            return Ok(None);
+        }
+        match self {
+            Files::There(folder) => bytes(folder, rel).map_err(unnamed),
+            Files::Copied(tmp, failed) => {
+                let dir = rel.rsplit_once('/').map(|(d, _)| d);
+                // Its folder's error, of the kind it was: a sign-in, Drive, or a file.
+                match dir.and_then(|d| failed.get(d)) {
+                    Some(e) => Err(e.clone()),
+                    None => copy(tmp.path(), rel),
+                }
+            }
+        }
+    }
+
+    /// A file's resource; `None` where it is not there or does not read.
+    pub fn read(&self, rel: &str) -> Result<Option<Value>, CliError> {
+        let of = |b: Vec<u8>| serde_json::from_slice(&b).ok().filter(Value::is_object);
+        Ok(self.bytes(rel)?.and_then(of))
+    }
 }
 
 /// The kinds of record.
@@ -289,7 +339,10 @@ fn bytes(folder: &Folder, rel: &str) -> Read {
 
 /// The same of the copies in `tmp`.
 fn copy(tmp: &Path, rel: &str) -> Read {
-    match std::fs::read(tmp.join(rel)) {
+    let Some(at) = store::within(tmp, rel) else {
+        return Ok(None);
+    };
+    match std::fs::read(at) {
         Ok(b) => Ok(Some(b)),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(unnamed(CliError::Other(e.to_string()))),

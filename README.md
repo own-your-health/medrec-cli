@@ -62,7 +62,9 @@ brew install poppler tesseract        # text extraction and OCR
 
 Weasis (https://weasis.org) is the default DICOM viewer. Another viewer is
 set with `medrec config set viewer <app or executable>`, or `none` to only
-copy a study.
+copy a study. `MEDREC_VIEWER` sets it for one run, over `config viewer`. Papers
+open in the system's viewer whatever is set, and `MEDREC_VIEWER=none` opens
+nothing, a paper or a study, and prints the copy's path.
 
 ## Quick start
 
@@ -307,6 +309,7 @@ medrec meds --active
 medrec note add Robin "Ask about the recheck" --tag question --about <record id>
 
 medrec verify                                   # every indexed file against the index
+medrec verify --events                          # and each event's place, and its records' names, days and sources, against their raw files: counts and ids
 medrec reindex                                  # claims shaped again, providers, statuses, what each source gave and what else served a paper read again from the raw files, results' parts and categories too, what panels and reports list, the records' links made again, results about somebody else put in a record of their own, and bills and receipts read again, after an upgrade
 medrec backup --to "/Volumes/Backup/Medical Records"
 ```
@@ -586,10 +589,20 @@ medicines tied to them, are private: the app keeps them off shared screens (Home
 Everyone calendar, a doctor sheet for someone else) and shows them on that
 person's own pages, and Claude leaves them out of answers about the whole
 household. medrec finds them by their codes, medicines, tests, services and the
-practice that made them, a document by its title, the name its file came with or
+practice that made them, a visit by its name and reason, a condition with no
+ICD-10 code by what it is called, a report by its conclusion and a result by a
+value that is a text, a document by its title, the name its file came with or
 any private record that links it, a bill or receipt by its own words, with its
 copies and the statements and payments before and after it, and a study by its
-report. A study with no report is left out of answers
+report. A claim, a visit, a prescription, a procedure, a result or a report is
+private too where the clinician it prints, by surname and first initial, is one
+whom a paper of the person's ties to what they treat, even when it spells out
+more of the name. So is a claim that prints a clinician and is of the day of a
+bill, a receipt or a visit's paper from such a practice (not a pharmacy), and
+an item of a clinician linked to one: by two such days of theirs, or by one on
+which theirs is the only clinician's claim. Each is a likely match: `medrec
+private unmark <id>` opens one item, and `--clinician` every item that is
+private only because of that clinician; other rules still hold theirs. A study with no report is left out of answers
 about the whole household too. An item stays private by what any of its sources
 gave of it, then or now, whatever it shows: the list says `given` of one that is
 private only by that. The household has the last word.
@@ -599,11 +612,13 @@ medrec private list --person Robin          # each private item, its area and wh
 medrec private mark <record, document or event id>     # private, whatever the rules say
 medrec private unmark <id>                  # not private, whatever the rules say
 medrec private reset <id>                   # back to the rules
+medrec private unmark <record id> --clinician   # its clinician is of no private area
+medrec private reset <record id> --clinician    # back to the rules for them
 ```
 
-A claim of several services, a bill and an event stay open when only a part of
+A claim of several services, a paper and an event stay open when only a part of
 them is private. That part (a claim's line, its diagnosis or its payer's note, a
-line of a bill's text, what an event says by them) is left out where private
+line of a paper's text, what an event says by them) is left out where private
 items are, with a count such as "1 service not shown", and the amounts stay.
 `medrec private list` lists the items with one, and `medrec private unmark` shows
 all of one.
@@ -791,7 +806,7 @@ this machine's:
 | `mount` | where Drive for desktop mounts the folder, for `doctor` to compare | none |
 | `inbox` | the inbox `--inbox` drains: a Drive spec or a local directory | `inbox/` in the folder |
 | `me` | the person id who writes notes on this machine | none |
-| `viewer` | the DICOM viewer, or `none` | Weasis |
+| `viewer` | the DICOM viewer, or `none` (`MEDREC_VIEWER` is over it for one run) | Weasis |
 | `ocr_languages`, `ocr_max_pages` | tesseract languages, and pages read per document | `eng`, 20 |
 | `max_file_mb` | the largest file intake or import keeps, MiB | 200 |
 | `import_max_mb` | the largest records stream one import reads, MiB; an import holds it until the trailer | 4096 |
@@ -872,7 +887,7 @@ Private items (above) are left out of an answer about the whole household,
 whose warnings say how many. An answer about one person includes them, and
 so does one that names the item ("sertraline", not "tablets"), each marked
 `private` with its area. The private part of an open item is left out too, and
-`not_shown` says how much; `medrec_document` gives a bill's text without its
+`not_shown` says how much; `medrec_document` gives a paper's text without its
 private lines unless `person` names its person.
 
 Claims, events, documents and bills carry `provider_labels` beside the source's

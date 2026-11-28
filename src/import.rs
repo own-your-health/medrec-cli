@@ -3300,7 +3300,10 @@ fn owners_in(folder: &Folder, source_dir: &str, tmp: &Path) -> Result<FiledOwner
     let mut out = FiledOwners::default();
     for kind in OwnerKind::ALL {
         let dir = format!("{source_dir}/{}", kind.as_str());
-        let to = tmp.join(&dir);
+        // A path no index can lead out of the copy by: nothing is filed there.
+        let Some(to) = crate::store::within(tmp, &dir) else {
+            continue;
+        };
         if !to.exists() && folder.store.exists(&dir)? {
             folder.store.fetch_tree(&dir, &to)?;
         }
