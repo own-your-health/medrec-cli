@@ -64,14 +64,49 @@ fn of_medicine(r: &Record) -> impl Iterator<Item = Drug> + '_ {
     code.into_iter().chain(package).chain(named(&r.display))
 }
 
-/// The codes of the drug a claim is for.
-fn of_claim(r: &Record) -> impl Iterator<Item = Drug> + '_ {
+/// The lines a claim's totals count.
+fn counted(r: &Record) -> impl Iterator<Item = &Value> + '_ {
     let lines = r.fields.get("items").and_then(Value::as_array);
-    let counted = lines
+    lines
         .into_iter()
         .flatten()
-        .filter(|l| l.get("counted") != Some(&Value::Bool(false)));
-    let service = counted.filter_map(|l| l.get("service"));
+        .filter(|l| l.get("counted") != Some(&Value::Bool(false)))
+}
+
+/// A claim the plan denied: each line its totals count gives a reason it was
+/// denied, or a pharmacy's that it was rejected (CARIN's `denialreason` and
+/// `rejectreason`, by their code or their name).
+fn denied(r: &Record) -> bool {
+    let says = |l: &Value| {
+        let of = l.get("adjudication").and_then(Value::as_array);
+        let categories = of
+            .into_iter()
+            .flatten()
+            .filter_map(|a| a["category"].as_str());
+        categories.map(classify::fold).any(|c| {
+            let c = c.replace(' ', "");
+            c == "denialreason" || c == "rejectreason"
+        })
+    };
+    let mut lines = counted(r).peekable();
+    lines.peek().is_some() && lines.all(says)
+}
+
+/// Whether the household paid any of a claim: the member's share of it, or
+/// of a line its totals count, is more than nothing.
+fn paid_some(r: &Record) -> bool {
+    let more = |a: &Value| {
+        let share = crate::claims::member_share(a);
+        let units = share.and_then(|(v, _)| crate::claims::units(v["amount"].as_str()?));
+        units.is_some_and(|u| u > 0)
+    };
+    let mut lines = counted(r).filter_map(|l| l.get("amounts"));
+    r.fields.get("amounts").is_some_and(more) || lines.any(more)
+}
+
+/// The codes of the drug a claim is for.
+fn of_claim(r: &Record) -> impl Iterator<Item = Drug> + '_ {
+    let service = counted(r).filter_map(|l| l.get("service"));
     service.filter_map(|s| {
         let text = |k: &str| s.get(k).and_then(Value::as_str);
         coded(text("system"), text("code"))
@@ -102,7 +137,9 @@ pub fn of_claims(idx: &PersonIndex) -> BTreeMap<String, Vec<Filled>> {
         let (Some(name), Some(day)) = (crate::private::dispensed(r), day(r.date.as_deref())) else {
             continue;
         };
-        if skipped || record_in_error(r) {
+        // A reversal is cancelled; a denial the household paid none of gave
+        // nothing.
+        if skipped || record_in_error(r) || (denied(r) && !paid_some(r)) {
             continue;
         }
         let mut of: BTreeSet<&String> = of_claim(r)
@@ -165,6 +202,10 @@ mod tests {
             ),
             (line("RX-2"), of(&[("named", "2024-05-07")])),
             (line("RX-3"), of(&[("codefirst", "2024-05-09")])),
+            (
+                line("RX-4"),
+                of(&[("partly", "2024-05-14"), ("deniedpaid", "2024-05-13")]),
+            ),
             ("~sample syrup".into(), of(&[("uncoded", "2024-05-10")])),
         ]);
         assert_eq!(fills(&idx()), want);

@@ -2419,8 +2419,12 @@ word wins over another's. Every person has one.
   medicine that an RxNorm code or an NDC of a line its totals count is equal to
   (the medicine's own, or the `ndc` of a fill of it; an NDC as eleven digits, five,
   four and two, where it has hyphens), else of each whose folded name is the
-  drug's in its `display`. One that is cancelled or entered in error is none, and
-  neither is one where a fill of that medicine and day is filed. A claim makes no
+  drug's in its `display`. One that is cancelled (as a reversal is) or entered in
+  error is none, and neither is one the plan denied of which the household paid
+  nothing: each line its totals count has an adjudication of category
+  `denialreason` or `rejectreason` (by code or name), and the member's share of
+  the claim and of each such line is nothing or not given. Neither is one where a
+  fill of that medicine and day is filed. A claim makes no
   medicine, and says nothing of what is current.
 - **`differs`**: its words differ: some say another `is` than the rest (`visit`
   and `error` say nothing here), or give another `verification`.

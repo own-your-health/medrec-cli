@@ -60,13 +60,23 @@ def fill(name, day, display, code, **fields):
     return record("medication", name, day, display, code, "completed", source="dispense", **fields)
 
 
-def claim(name, day, drug, *services, status="active", kind="pharmacy", uncounted=()):
+def owed(amount):
+    return {"you_owe": {"amount": amount, "currency": "USD"}}
+
+
+def claim(
+    name, day, drug, *services, status="active", kind="pharmacy", uncounted=(), denied=(), owe=None
+):
     items = [
         {"sequence": n, "service": {"system": system, "code": value}}
         for n, (system, value) in enumerate(services, 1)
     ]
     for n in uncounted:
         items[n]["counted"] = False
+    for n, why in denied:
+        items[n]["adjudication"] = [{"category": why, "amount": None, "reason": "Sample reason"}]
+    if owe:
+        items[0]["amounts"] = owed(owe)
     return record(
         "claim", name, day, f"{drug} · Example Pharmacy", None, status,
         provider="Example Pharmacy", insurer="Example Health Plan", type=kind, category=kind,
@@ -105,6 +115,19 @@ RECORDS = [
     claim("uncoded", "2024-05-10", "Sample  Syrup"),
     # A drug of which there is no medicine.
     claim("nomedicine", "2024-05-11", "Example ointment", (RXNORM, "RX-8")),
+    # The plan denied it, and the household paid nothing of it; paid some of it;
+    # and denied one line of two.
+    medicine("lotion", "Sample lotion", (RXNORM, "RX-4")),
+    claim("denied", "2024-05-15", "SMPL LOTION", (RXNORM, "RX-4"), denied=[(0, "Reject Reason")]),
+    claim(
+        "partly", "2024-05-14", "SMPL LOTION", (RXNORM, "RX-4"), (RXNORM, "RX-4"),
+        denied=[(0, "denialreason")],
+    ),
+    claim(
+        "deniedpaid", "2024-05-13", "SMPL LOTION", (RXNORM, "RX-4"),
+        denied=[(0, "Denial Reason")], owe="12.00",
+    ),
+    # A reversal (returned to stock) is a cancelled claim, as above.
 ]
 RECORDS.sort(key=lambda r: r["date"], reverse=True)
 
